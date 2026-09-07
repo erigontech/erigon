@@ -772,8 +772,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						BeaconBlockRoot:       beaconBlockRoot,
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
-					// Cache envelope by slot so the VC can retrieve it via
-					// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}
 					a.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: targetSlot, BeaconBlockRoot: beaconBlockRoot}, envelope)
 					// SSZ encoding only serializes Data, not Extra — only include
 					// the envelope in JSON responses to keep the header truthful.
@@ -945,12 +943,7 @@ func (a *ApiHandler) produceBlock(
 		Cfg:           a.beaconChainCfg,
 	}
 	if builderHeader == nil || !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		// directly return the block if:
-		// 1. builder is not enabled
-		// 2. failed to get builder payload
-		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
-
-		// GLOAS: check p2p and configured Builder API bids against the local value.
+		// Gloas compares P2P and configured builder bids against the local value.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			selfBid := beaconBody.SignedExecutionPayloadBid.Message
 			options := gloasBlockOptionsFromContext(ctx)
@@ -2138,8 +2131,8 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 	if err != nil {
 		return
 	}
-	trustedRoute := a.builderRoutes.Claim(root, builderURL)
-	if !trustedRoute && !a.builderRoutes.ClaimOrAdd(root, builderURL) {
+	claimID, trustedRoute, claimed := a.builderRoutes.ClaimOrAdd(root, builderURL)
+	if !claimed {
 		return
 	}
 	go func() {
@@ -2151,14 +2144,14 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 				err = a.builderClient.SubmitSignedBeaconBlockPublic(context.Background(), builderURL, block)
 			}
 			if err == nil {
-				a.builderRoutes.Complete(root, builderURL, true)
+				a.builderRoutes.Complete(root, builderURL, claimID, true)
 				return
 			}
 		}
 		if trustedRoute {
-			a.builderRoutes.Complete(root, builderURL, false)
+			a.builderRoutes.Complete(root, builderURL, claimID, false)
 		} else {
-			a.builderRoutes.Discard(root, builderURL)
+			a.builderRoutes.Complete(root, builderURL, claimID, true)
 		}
 		a.logger.Warn("Failed to forward signed block to builder", "err", err)
 	}()

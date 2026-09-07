@@ -453,6 +453,16 @@ func TestEpbsPoolRetainsLiveEntriesBeyondFormerCapacity(t *testing.T) {
 	require.True(t, bidFound)
 }
 
+func TestEpbsPoolRemoveHighestBidRemovesSlotIndexEntry(t *testing.T) {
+	pool := NewEpbsPool()
+	key := HighestBidKey{Slot: 100, ParentBlockRoot: common.Hash{1}}
+	bid := &cltypes.SignedExecutionPayloadBid{}
+	pool.StoreHighestBid(key, bid)
+
+	require.True(t, pool.RemoveHighestBid(key, bid))
+	require.Empty(t, pool.HighestBids.ValuesForSlot(key.Slot))
+}
+
 func TestEpbsPoolPrunesEntriesBeforeSlot(t *testing.T) {
 	p := NewEpbsPool()
 	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 99}, &cltypes.SignedProposerPreferences{})

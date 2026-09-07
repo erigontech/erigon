@@ -187,7 +187,6 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	if !f.retainedBlock(blockRoot) {
 		return false
 	}
-	// Fast path: check in-memory cache
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
 	}
@@ -202,7 +201,6 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	if _, ok := f.envelopeMissing.Load(blockRoot); ok {
 		return false
 	}
-	// Slow path: fall back to disk and populate cache on hit
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
 	if err == nil && exists {
 		f.envelopeExists.Store(blockRoot, struct{}{})

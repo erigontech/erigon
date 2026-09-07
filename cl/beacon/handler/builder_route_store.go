@@ -34,7 +34,7 @@ type builderRouteState uint8
 const (
 	builderRouteIdle builderRouteState = iota
 	builderRouteInFlight
-	builderRouteDelivered
+	builderRouteSpent
 )
 
 type builderRouteKey struct {
@@ -45,15 +45,18 @@ type builderRouteKey struct {
 type builderRoute struct {
 	state     builderRouteState
 	expiresAt time.Time
+	claimID   uint64
+	trusted   bool
 }
 
 type builderRouteStore struct {
-	mu       sync.Mutex
-	routes   map[builderRouteKey]*builderRoute
-	capacity int
-	reserved int
-	ttl      time.Duration
-	now      func() time.Time
+	mu          sync.Mutex
+	routes      map[builderRouteKey]*builderRoute
+	capacity    int
+	reserved    int
+	lastClaimID uint64
+	ttl         time.Duration
+	now         func() time.Time
 }
 
 func newBuilderRouteStore(capacity int, ttl time.Duration, now func() time.Time) *builderRouteStore {
@@ -72,16 +75,21 @@ func (s *builderRouteStore) Add(root common.Hash, url string) bool {
 	s.pruneExpired(now)
 	key := builderRouteKey{root: root, url: url}
 	if route, ok := s.routes[key]; ok {
+		if !route.trusted {
+			route.claimID = 0
+			route.state = builderRouteIdle
+			route.trusted = true
+		}
 		route.expiresAt = now.Add(s.ttl)
 		return true
 	}
 	if len(s.routes)+s.reserved >= s.capacity {
-		s.evictOldestDelivered()
+		s.evictOldestSpent()
 		if len(s.routes)+s.reserved >= s.capacity {
 			return false
 		}
 	}
-	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
+	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl), trusted: true}
 	return true
 }
 
@@ -90,7 +98,7 @@ func (s *builderRouteStore) Reserve() bool {
 	defer s.mu.Unlock()
 	s.pruneExpired(s.now())
 	if len(s.routes)+s.reserved >= s.capacity {
-		s.evictOldestDelivered()
+		s.evictOldestSpent()
 		if len(s.routes)+s.reserved >= s.capacity {
 			return false
 		}
@@ -110,10 +118,15 @@ func (s *builderRouteStore) CommitReservation(root common.Hash, url string) bool
 	s.pruneExpired(now)
 	key := builderRouteKey{root: root, url: url}
 	if route, ok := s.routes[key]; ok {
+		if !route.trusted {
+			route.claimID = 0
+			route.state = builderRouteIdle
+			route.trusted = true
+		}
 		route.expiresAt = now.Add(s.ttl)
 		return true
 	}
-	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
+	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl), trusted: true}
 	return true
 }
 
@@ -132,20 +145,21 @@ func builderRouteKeyLess(left, right builderRouteKey) bool {
 	return left.url < right.url
 }
 
-func (s *builderRouteStore) Claim(root common.Hash, url string) bool {
+func (s *builderRouteStore) Claim(root common.Hash, url string) (uint64, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
 	s.pruneExpired(now)
 	route, ok := s.routes[builderRouteKey{root: root, url: url}]
-	if !ok || route.state != builderRouteIdle {
-		return false
+	if !ok || !route.trusted || route.state != builderRouteIdle {
+		return 0, false
 	}
+	route.claimID = s.newClaimID()
 	route.state = builderRouteInFlight
-	return true
+	return route.claimID, true
 }
 
-func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) bool {
+func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) (uint64, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
@@ -154,27 +168,35 @@ func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) bool {
 	route, ok := s.routes[key]
 	if !ok {
 		if len(s.routes)+s.reserved >= s.capacity {
-			s.evictOldestDelivered()
-			if len(s.routes)+s.reserved >= s.capacity {
-				return false
-			}
+			return 0, false, false
 		}
 		route = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
 		s.routes[key] = route
 	}
 	if route.state != builderRouteIdle {
-		return false
+		return 0, route.trusted, false
 	}
+	route.claimID = s.newClaimID()
 	route.state = builderRouteInFlight
-	route.expiresAt = now.Add(s.ttl)
-	return true
+	if !route.trusted {
+		route.expiresAt = now.Add(s.ttl)
+	}
+	return route.claimID, route.trusted, true
 }
 
-func (s *builderRouteStore) evictOldestDelivered() bool {
+func (s *builderRouteStore) newClaimID() uint64 {
+	s.lastClaimID++
+	if s.lastClaimID == 0 {
+		s.lastClaimID++
+	}
+	return s.lastClaimID
+}
+
+func (s *builderRouteStore) evictOldestSpent() bool {
 	var oldestKey builderRouteKey
 	var oldestRoute *builderRoute
 	for key, route := range s.routes {
-		if route.state == builderRouteDelivered && (oldestRoute == nil || route.expiresAt.Before(oldestRoute.expiresAt) ||
+		if route.state == builderRouteSpent && (oldestRoute == nil || route.expiresAt.Before(oldestRoute.expiresAt) ||
 			route.expiresAt.Equal(oldestRoute.expiresAt) && builderRouteKeyLess(key, oldestKey)) {
 			oldestKey = key
 			oldestRoute = route
@@ -186,26 +208,17 @@ func (s *builderRouteStore) evictOldestDelivered() bool {
 	delete(s.routes, oldestKey)
 	return true
 }
-func (s *builderRouteStore) Complete(root common.Hash, url string, delivered bool) {
+func (s *builderRouteStore) Complete(root common.Hash, url string, claimID uint64, spent bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	route, ok := s.routes[builderRouteKey{root: root, url: url}]
-	if !ok || route.state != builderRouteInFlight {
+	if !ok || route.state != builderRouteInFlight || route.claimID != claimID {
 		return
 	}
-	if delivered {
-		route.state = builderRouteDelivered
+	if spent {
+		route.state = builderRouteSpent
 	} else {
 		route.state = builderRouteIdle
-	}
-}
-
-func (s *builderRouteStore) Discard(root common.Hash, url string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := builderRouteKey{root: root, url: url}
-	if route, ok := s.routes[key]; ok && route.state == builderRouteInFlight {
-		delete(s.routes, key)
 	}
 }
 

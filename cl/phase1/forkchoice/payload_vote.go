@@ -434,18 +434,12 @@ func (f *ForkChoiceStore) isPayloadLocallyAvailable(root common.Hash) bool {
 	return f.HasEnvelope(root) && !f.forkGraph.IsBlockInvalid(root) && !f.forkGraph.IsPayloadUnavailable(root)
 }
 
-// validateParentPayloadPath validates that the block builds on the correct parent payload path.
-// If parent is FULL, the parent must have an execution payload state.
-// If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
-// Also validates that the parent execution payload is not invalidated.
-// [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, requireEngineAcceptance bool) error {
 	currentBid := block.Body.GetSignedExecutionPayloadBid()
 	if currentBid == nil || currentBid.Message == nil {
 		return errors.New("current block missing execution payload bid")
 	}
 
-	// Check if parent execution payload has been invalidated
 	parentBlockHash := currentBid.Message.ParentBlockHash
 	if status, ok := f.executionPayloadStatus.Get(parentBlockHash); ok {
 		if status == execution_client.PayloadStatusInvalidated {
@@ -454,11 +448,7 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, 
 	}
 
 	if f.isParentNodeFull(block) {
-		// Parent is FULL - verify the execution payload is locally available.
-		// Return ErrParentEnvelopePending (not a hard error) when the envelope is
-		// missing.  During forward sync the envelope may not yet be persisted (it
-		// arrives in the same batch or in a later batch), so a hard error would
-		// permanently reject the block and ban the peer.
+		// Missing local data is retryable because sync may persist the envelope later.
 		if !f.isPayloadLocallyAvailable(block.ParentRoot) || requireEngineAcceptance && !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}

@@ -68,6 +68,11 @@ func (m *slotMap[K, V]) Remove(key K) bool {
 		return false
 	}
 	delete(m.values, key)
+	slot := m.slotFor(key)
+	delete(m.bySlot[slot], key)
+	if len(m.bySlot[slot]) == 0 {
+		delete(m.bySlot, slot)
+	}
 	return true
 }
 

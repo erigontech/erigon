@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1203,6 +1204,49 @@ func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
 	close(release)
 }
 
+func TestForwardPublishedBlockTrustedReservationSupersedesUnboundClaim(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	require.True(t, handler.builderRoutes.Reserve())
+	unboundClaimID, _, claimed := handler.builderRoutes.ClaimOrAdd(blockRoot, builderURL)
+	require.True(t, claimed)
+	require.True(t, handler.builderRoutes.CommitReservation(blockRoot, builderURL))
+
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	forwarded := make(chan struct{})
+	release := make(chan struct{})
+	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwarded)
+			<-release
+			return nil
+		},
+	)
+	handler.builderClient = builderClient
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-forwarded:
+	case <-time.After(time.Second):
+		t.Fatal("trusted route was not forwarded")
+	}
+	handler.builderRoutes.Complete(blockRoot, builderURL, unboundClaimID, true)
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	close(release)
+	require.Eventually(t, func() bool {
+		handler.builderRoutes.mu.Lock()
+		defer handler.builderRoutes.mu.Unlock()
+		route := handler.builderRoutes.routes[builderRouteKey{root: blockRoot, url: builderURL}]
+		return route != nil && route.state == builderRouteSpent
+	}, time.Second, time.Millisecond)
+}
+
 func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
@@ -1214,7 +1258,8 @@ func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T)
 
 	handler.forwardPublishedBlockToBuilder(builderURL, block)
 
-	require.True(t, handler.builderRoutes.Claim(blockRoot, builderURL))
+	_, claimed := handler.builderRoutes.Claim(blockRoot, builderURL)
+	require.True(t, claimed)
 }
 
 func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
@@ -1266,57 +1311,56 @@ func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
 	}
 }
 
-func TestForwardPublishedBlockUnboundRetryRemainsPublicOnly(t *testing.T) {
+type publicBuilderSubmitter struct {
+	builder.BuilderClient
+	submit func(context.Context, string, *cltypes.SignedBeaconBlock) error
+}
+
+func (c *publicBuilderSubmitter) SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	return c.submit(ctx, builderURL, block)
+}
+
+func TestForwardPublishedBlockUnboundFailuresConsumeRouteBudget(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	handler.builderRoutes = newBuilderRouteStore(1, time.Minute, time.Now)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	builderURL := "https://builder.example"
-	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
-	failedAttempts := make(chan struct{})
-	succeeded := make(chan struct{})
-	gomock.InOrder(
-		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).Return(errors.New("unavailable")),
-		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
-			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
-				close(failedAttempts)
-				return errors.New("unavailable")
-			},
-		),
-		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
-			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
-				close(succeeded)
-				return nil
-			},
-		),
-	)
-	handler.builderClient = client
+	firstURL := "https://one.example"
+	secondURL := "https://two.example"
+	firstDone := make(chan struct{})
+	secondStarted := make(chan struct{})
+	var firstCalls atomic.Int32
+	handler.builderClient = &publicBuilderSubmitter{submit: func(_ context.Context, builderURL string, _ *cltypes.SignedBeaconBlock) error {
+		if builderURL == firstURL {
+			if firstCalls.Add(1) == 2 {
+				close(firstDone)
+			}
+			return errors.New("unavailable")
+		}
+		close(secondStarted)
+		return nil
+	}}
 
-	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	handler.forwardPublishedBlockToBuilder(firstURL, block)
 	select {
-	case <-failedAttempts:
+	case <-firstDone:
 	case <-time.After(time.Second):
-		t.Fatal("unbound route attempts did not fail")
+		t.Fatal("unbound route attempts did not finish")
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
+	require.Eventually(t, func() bool {
 		handler.builderRoutes.mu.Lock()
-		_, exists := handler.builderRoutes.routes[builderRouteKey{root: root, url: builderURL}]
-		handler.builderRoutes.mu.Unlock()
-		if !exists {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("unbound route was not discarded after failure")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	handler.forwardPublishedBlockToBuilder(builderURL, block)
+		defer handler.builderRoutes.mu.Unlock()
+		route := handler.builderRoutes.routes[builderRouteKey{root: root, url: firstURL}]
+		return route != nil && route.state == builderRouteSpent
+	}, time.Second, time.Millisecond)
+	handler.forwardPublishedBlockToBuilder(secondURL, block)
 	select {
-	case <-succeeded:
-	case <-time.After(time.Second):
-		t.Fatal("unbound public retry did not succeed")
+	case <-secondStarted:
+		t.Fatal("failed unbound forwarding did not consume the route budget")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
