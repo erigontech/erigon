@@ -639,7 +639,7 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 	block.Slot = signedBid.Message.Slot
 	block.ParentRoot = signedBid.Message.ParentBlockRoot
 	block.Body.SignedExecutionPayloadBid = signedBid
-	if _, err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
+	if err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
 		if expectedError {
 			return nil
 		}

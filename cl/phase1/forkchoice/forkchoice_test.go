@@ -49,6 +49,21 @@ type embeddedPtcVoteForkGraph struct {
 	envelopes map[common.Hash]bool
 }
 
+func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	root, err := anchor.BlockRoot()
+	require.NoError(t, err)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.OperationsPool{}, nil, nil, nil, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	for _, votes := range []*sync.Map{&store.payloadTimelinessVote, &store.payloadDataAvailabilityVote} {
+		value, ok := votes.Load(common.Hash(root))
+		require.True(t, ok)
+		require.Equal(t, [clparams.PtcSize]int8{}, value)
+	}
+}
+
 func (g *embeddedPtcVoteForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	root, err := block.Block.HashSSZ()
 	if err != nil {
@@ -115,7 +130,7 @@ func TestOnBlockFromForwardSyncUsesMaxPtcSizeForZeroConfig(t *testing.T) {
 	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)}, true)
 	votes := store.payloadTimelinessVoteValue(anchorRoot)
 	require.Equal(t, int8(-1), votes[clparams.MaxPtcSize-1])
-	require.Equal(t, int8(1), votes[clparams.MaxPtcSize-2])
+	require.Zero(t, votes[clparams.MaxPtcSize-2])
 }
 
 func TestOnBlockFromForwardSyncAcceptsPersistedParentEnvelopeWithoutEngineStatus(t *testing.T) {

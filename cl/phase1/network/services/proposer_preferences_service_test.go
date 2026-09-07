@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -35,6 +36,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 	beaconCfg.SlotsPerEpoch = 32
 	beaconCfg.SlotsPerHistoricalRoot = 8192
 	beaconCfg.MinSeedLookahead = 1
+	beaconCfg.GloasForkEpoch = 0
 	beaconCfg.ValidatorRegistryLimit = 1024
 	forkChoiceMock := &forkchoice_mock.ForkChoiceStorageMock{
 		Headers:             map[common.Hash]*cltypes.BeaconBlockHeader{},
@@ -110,6 +112,27 @@ func TestProposerPreferencesServiceNames(t *testing.T) {
 	names := service.Names()
 	require.Len(t, names, 1)
 	require.Equal(t, "proposer_preferences", names[0])
+}
+
+func TestProposerPreferencesServiceGloasForkBoundary(t *testing.T) {
+	for _, slot := range []uint64{95, 96, 100} {
+		t.Run(fmt.Sprint(slot), func(t *testing.T) {
+			service, _, clock, epbsPool, _ := setupProposerPreferencesService(t, gomock.NewController(t))
+			service.beaconCfg.GloasForkEpoch = 3
+			clock.EXPECT().GetCurrentSlot().Return(uint64(94)).AnyTimes()
+			msg := newTestSignedProposerPreferences(slot, 42)
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			if slot < 96 {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorContains(t, err, "pre-Gloas")
+				require.Empty(t, epbsPool.ProposerPreferences.Keys())
+				return
+			}
+			require.NoError(t, err)
+			_, ok := epbsPool.GetPreference(slot, testDependentRoot)
+			require.True(t, ok)
+		})
+	}
 }
 
 func TestProposerPreferencesServiceNilMessage(t *testing.T) {
