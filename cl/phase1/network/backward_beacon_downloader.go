@@ -274,8 +274,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 		return
 	}
 	if len(blocks) == 0 {
-		// An empty response is protocol-legal: the peer may have pruned the range.
-		log.Debug("[Caplin] empty backward beacon block response", "start", start, "count", count)
+		b.rpc.BanPeer(peerId)
 		requestSent.Store(false)
 		return
 	}
