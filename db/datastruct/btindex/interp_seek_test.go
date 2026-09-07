@@ -25,6 +25,7 @@ func seekWith(t *testing.T, bt *BtIndex, g *seg.Reader, interp bool, budget uint
 	t.Helper()
 	BtInterp, BtInterpBudget = interp, budget
 	cur, err := bt.bplus.Seek(g, k)
+	defer cur.Close()
 	if err != nil {
 		return seekResult{errS: err.Error()}
 	}

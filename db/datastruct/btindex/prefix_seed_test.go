@@ -68,6 +68,7 @@ func probeSet(t *testing.T, kvPath string) [][]byte {
 func seekSnapshot(t *testing.T, bt *BtIndex, g *seg.Reader, x []byte) string {
 	t.Helper()
 	c, err := bt.bplus.Seek(g, x)
+	defer c.Close()
 	if err != nil {
 		return "err:" + err.Error()
 	}
