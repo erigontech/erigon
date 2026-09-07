@@ -19,7 +19,6 @@ package jsonstream
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"math/rand"
 	"strings"
 	"testing"
@@ -150,62 +149,4 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold)
 		require.Error(t, s.Flush(), "the failure must still be reported")
 	})
-}
-
-// benchWriteString drives one write path over a fixed value, recycling the
-// buffer instead of flushing so the measurement holds no io and no growth.
-func benchWriteString(b *testing.B, write func(*jsoniter.Stream, string), val string) {
-	b.Helper()
-	s := jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, InitialBufferSize)
-	b.ReportAllocs()
-	for b.Loop() {
-		write(s, val)
-		if len(s.Buffer()) >= FlushThreshold {
-			s.SetBuffer(s.Buffer()[:0])
-		}
-	}
-}
-
-// BenchmarkWriteString measures both paths in one binary, so the jsoniter
-// sub-benchmark is the baseline the fast one is compared against:
-// benchstat -col /impl pairs them per shape.
-func BenchmarkWriteString(b *testing.B) {
-	longClean := "0x" + strings.Repeat("ab", 2048)
-	for _, tc := range []struct{ name, val string }{
-		{"op3", "ADD"},
-		{"op6", "SWAP16"},
-		{"hex18", "0x1234567890abcdef"},
-		{"storageKey66", "0x" + strings.Repeat("ab", 32)},
-		{"escapeEarly", `a "quoted" value`},
-		{"clean4k", longClean},
-		{"escapeLate4k", longClean + `"`},
-		{"quotes4k", strings.Repeat(`"`, 4096)},
-		{"backslashes4k", strings.Repeat("\\", 4096)},
-		{"ctrl4k", strings.Repeat("\x00", 4096)},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.Run("impl=jsoniter", func(b *testing.B) {
-				benchWriteString(b, (*jsoniter.Stream).WriteString, tc.val)
-			})
-			b.Run("impl=fast", func(b *testing.B) {
-				benchWriteString(b, writeStringFast, tc.val)
-			})
-		})
-	}
-}
-
-func BenchmarkWriteObjectField(b *testing.B) {
-	for _, tc := range []struct{ name, val string }{
-		{"gas", "gas"},
-		{"storageKey66", "0x" + strings.Repeat("ab", 32)},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.Run("impl=jsoniter", func(b *testing.B) {
-				benchWriteString(b, (*jsoniter.Stream).WriteObjectField, tc.val)
-			})
-			b.Run("impl=fast", func(b *testing.B) {
-				benchWriteString(b, writeObjectFieldFast, tc.val)
-			})
-		})
-	}
 }

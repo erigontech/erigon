@@ -33,6 +33,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/klauspost/compress/gzhttp"
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -183,32 +184,33 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-// minGzipBodySize is the minimum response body size to compress. Responses
-// smaller than this are sent as-is: gzip framing overhead would exceed savings.
+// minGzipBodySize is the minimum response body size to compress, for gzip and
+// zstd alike -- gzhttp carries one MinSize threshold for both encoders.
+// Responses smaller than this are sent as-is: framing overhead would exceed
+// savings.
 const minGzipBodySize = 1024
 
 // Raw and compressed byte counters: out/in gives the live compression ratio,
 // the out rate tracks RPC egress.
-// path="streaming" is kept from the two-path counters this replaces: gzhttp only
-// streams, and dropping the label would silently break existing selectors.
 var (
+	// path="streaming" is kept from the counters these replace: dropping it would
+	// break existing selectors.
 	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
 	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
+	// New series: no selector pins the label, it is carried for symmetry.
+	zstdInBytes  = metrics.GetOrCreateCounter(`rpc_zstd_in_bytes_total{path="streaming"}`)
+	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
 )
 
-// gzipWrapper compresses with klauspost's gzhttp middleware. It buffers only
-// minGzipBodySize bytes -- enough to decide whether compressing pays -- and
-// streams everything after, so no response is ever held whole. BestSpeed
-// because bytes leave as they are produced, making per-flush latency matter
-// more than ratio.
+// gzipWrapper compresses with klauspost's gzhttp middleware, which buffers only
+// minGzipBodySize -- enough to decide whether compressing pays -- then streams,
+// so no response is held whole.
 var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(minGzipBodySize),
-		gzhttp.CompressionLevel(gzip.BestSpeed),
-		// gzhttp enables and prefers zstd by default. CompressionLevel applies
-		// only to gzip, so enabling zstd would silently serve an unmeasured
-		// encoder at its own default level to every browser that advertises it.
-		gzhttp.EnableZstd(false),
+		gzhttp.CompressionLevel(gzip.BestSpeed), // gzip only
+		gzhttp.EnableZstd(true),
+		gzhttp.ZstdCompressionLevel(int(zstd.SpeedFastest)), // zstd only
 	)
 	if err != nil {
 		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))
@@ -264,21 +266,28 @@ type gzipMeter struct {
 	wireCommitted int
 }
 
-// commit adds what has been counted since the last call. Only a compressed response
-// has a ratio, so nothing is committed until gzhttp has settled on gzip: it passes
-// the rest through untouched -- a client without gzip, a body under MinSize, a
-// content type it skips -- where both sides count the same bytes and out/in reads 1.
-// One request is served by one goroutine, so the deltas need no lock.
+// commit adds what has been counted since the last call, to the counters for
+// whichever encoder gzhttp settled on. Only a compressed response has a ratio,
+// so nothing is committed while it passes the rest through untouched -- a client
+// offering neither encoding, a body under MinSize, a content type it skips --
+// where both sides count the same bytes and out/in reads 1. One request is
+// served by one goroutine, so the deltas need no lock.
 func (m *gzipMeter) commit() {
-	if !strings.EqualFold(m.wire.Header().Get("Content-Encoding"), "gzip") {
+	var in, out metrics.Counter
+	switch strings.ToLower(m.wire.Header().Get("Content-Encoding")) {
+	case "gzip":
+		in, out = gzipInBytes, gzipOutBytes
+	case "zstd":
+		in, out = zstdInBytes, zstdOutBytes
+	default:
 		return
 	}
 	if d := m.raw.n - m.rawCommitted; d > 0 {
-		gzipInBytes.AddInt(d)
+		in.AddInt(d)
 		m.rawCommitted = m.raw.n
 	}
 	if d := m.wire.n - m.wireCommitted; d > 0 {
-		gzipOutBytes.AddInt(d)
+		out.AddInt(d)
 		m.wireCommitted = m.wire.n
 	}
 }

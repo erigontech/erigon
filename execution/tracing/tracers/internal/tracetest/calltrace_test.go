@@ -73,7 +73,7 @@ type callTrace struct {
 	From     common.Address  `json:"from"`
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasUsed  *hexutil.Uint64 `json:"gasUsed"`
-	To       common.Address  `json:"to,omitempty"`
+	To       *common.Address `json:"to,omitempty"`
 	Input    hexutil.Bytes   `json:"input"`
 	Output   hexutil.Bytes   `json:"output,omitempty"`
 	Error    string          `json:"error,omitempty"`
@@ -544,83 +544,6 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	require.Len(t, createFrame.Logs, 2, "expected 2 logs inside CREATE frame")
 	require.Equal(t, hexutil.Uint(0), createFrame.Logs[0].Position, "LOG_A in CREATE: before subcall, position should be 0x0")
 	require.Equal(t, hexutil.Uint(1), createFrame.Logs[1].Position, "LOG_B in CREATE: after subcall, position should be 0x1")
-}
-
-func BenchmarkTracers(b *testing.B) {
-	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
-	if err != nil {
-		b.Fatalf("failed to retrieve tracer test suite: %v", err)
-	}
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-		file := file // capture range variable
-		b.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(b *testing.B) {
-			blob, err := os.ReadFile(filepath.Join("testdata", "call_tracer", file.Name()))
-			if err != nil {
-				b.Fatalf("failed to read testcase: %v", err)
-			}
-			test := new(callTracerTest)
-			if err := json.Unmarshal(blob, test); err != nil {
-				b.Fatalf("failed to parse testcase: %v", err)
-			}
-			benchTracer(b, "callTracer", test)
-		})
-	}
-}
-
-func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
-	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
-	if err != nil {
-		b.Fatalf("failed to parse testcase input: %v", err)
-	}
-	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-	context := evmtypes.BlockContext{
-		CanTransfer: protocol.CanTransfer,
-		Transfer:    misc.Transfer,
-		Coinbase:    accounts.InternAddress(test.Context.Miner),
-		BlockNumber: uint64(test.Context.Number),
-		Time:        uint64(test.Context.Time),
-		Difficulty:  *test.Context.Difficulty,
-		GasLimit:    uint64(test.Context.GasLimit),
-	}
-	rules := context.Rules(test.Genesis.Config)
-	msg, err := tx.AsMessage(*signer, nil, rules)
-	if err != nil {
-		b.Fatalf("failed to prepare transaction for tracing: %v", err)
-	}
-	origin, _ := signer.Sender(tx)
-	baseFee := test.Context.BaseFee
-	txContext := evmtypes.TxContext{
-		Origin:   origin,
-		GasPrice: tx.GetEffectiveGasTip(baseFee),
-	}
-	m := execmoduletester.New(b)
-	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
-	require.NoError(b, err)
-	defer dbTx.Rollback()
-	statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-
-	b.ReportAllocs()
-	for b.Loop() {
-		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
-		if err != nil {
-			b.Fatalf("failed to create call tracer: %v", err)
-		}
-		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-		snap := statedb.PushSnapshot()
-		st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-		if _, err = st.Execute(true /* refunds */, false /* gasBailout */); err != nil {
-			b.Fatalf("failed to execute transaction: %v", err)
-		}
-		if _, err = tracer.GetResult(); err != nil {
-			b.Fatal(err)
-		}
-		statedb.RevertToSnapshot(snap, nil)
-		statedb.PopSnapshot(snap)
-	}
 }
 
 // TestZeroValueToNotExitCall tests the calltracer(s) on the following:

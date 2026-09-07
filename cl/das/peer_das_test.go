@@ -1933,16 +1933,16 @@ func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) 
 func TestRecoverBlobsRequestDoesNotRetainFullBlock(t *testing.T) {
 	blockType := reflect.TypeFor[cltypes.ColumnSyncableSignedBlock]()
 	requestType := reflect.TypeFor[recoverBlobsRequest]()
-	for i := range requestType.NumField() {
-		require.NotEqual(t, blockType, requestType.Field(i).Type, "recovery queue must not retain a full block")
+	for field := range requestType.Fields() {
+		require.NotEqual(t, blockType, field.Type, "recovery queue must not retain a full block")
 	}
 }
 
 func TestDownloadRequestDoesNotRetainFullBlock(t *testing.T) {
 	blockType := reflect.TypeFor[cltypes.ColumnSyncableSignedBlock]()
 	requestType := reflect.TypeFor[downloadRequest]()
-	for i := range requestType.NumField() {
-		fieldType := requestType.Field(i).Type
+	for field := range requestType.Fields() {
+		fieldType := field.Type
 		if fieldType.Kind() == reflect.Map {
 			require.NotEqual(t, blockType, fieldType.Elem(), "column download lifecycle must not retain full blocks")
 		}

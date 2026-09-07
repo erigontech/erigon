@@ -1083,14 +1083,13 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		return nil, err
 	}
 
-	u.Flags |= commitment.NonceUpdate
+	// encAccount is the whole account record, so flag every field: a cell may skip its
+	// state read only when the update it was given covers the account completely. A
+	// zero code hash is the empty one the initialiser already put in u.
+	u.Flags |= commitment.NonceUpdate | commitment.BalanceUpdate | commitment.CodeUpdate
 	u.Nonce = acc.Nonce
-
-	u.Flags |= commitment.BalanceUpdate
 	u.Balance = acc.Balance
-
 	if !acc.CodeHash.IsZero() {
-		u.Flags |= commitment.CodeUpdate
 		u.CodeHash = acc.CodeHash.Value()
 	}
 

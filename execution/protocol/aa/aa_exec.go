@@ -445,8 +445,7 @@ func newValidationPhaseError(
 	revertEntityName string,
 	frameReverted bool,
 ) *ValidationPhaseError {
-	var vpeCast *ValidationPhaseError
-	if errors.As(innerErr, &vpeCast) {
+	if vpeCast, ok := errors.AsType[*ValidationPhaseError](innerErr); ok {
 		return vpeCast
 	}
 	var errorMessage string

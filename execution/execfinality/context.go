@@ -19,18 +19,18 @@ package execfinality
 import (
 	"context"
 
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-type finalityContext struct {
+type FinalityContext struct {
 	finalisedBlockNum uint64
 	maxReorgDepth     uint64
 	retentionBlockNum uint64
 	collateToBlockNum uint64
+	txNumsReader      rawdbv3.TxNumsReader
 }
 
 type resolveOptions struct {
@@ -45,10 +45,11 @@ func WithoutFinalisedBlock() ResolveOption {
 	}
 }
 
-func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) dbfinality.Context {
-	ctx := finalityContext{
+func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader) FinalityContext {
+	ctx := FinalityContext{
 		finalisedBlockNum: finalisedBlockNum,
 		maxReorgDepth:     maxReorgDepth,
+		txNumsReader:      txNumsReader,
 	}
 	if finalisedBlockNum > 0 && !initialCycle {
 		ctx.retentionBlockNum = finalisedBlockNum
@@ -63,7 +64,7 @@ func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCy
 	return ctx
 }
 
-func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...ResolveOption) (dbfinality.Context, error) {
+func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader, options ...ResolveOption) (kv.FinalityContext, error) {
 	headBlockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return nil, err
@@ -76,25 +77,25 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	if opts.withoutFinalisedBlock {
 		finalisedBlockNum = 0
 	}
-	return NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
+	return NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle, txNumsReader), nil
 }
 
-func (c finalityContext) PruneToBlockNum() uint64 {
+func (c FinalityContext) PruneToBlockNum() uint64 {
 	return c.retentionBlockNum
 }
 
-func (c finalityContext) RetireToBlockNum() uint64 {
+func (c FinalityContext) RetireToBlockNum() uint64 {
 	return c.retentionBlockNum
 }
 
-func (c finalityContext) MaxReorgDepth() uint64 {
+func (c FinalityContext) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
 
-func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
-	err = db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, stepLastTxNum)
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
 		if err != nil {
 			return err
 		}
