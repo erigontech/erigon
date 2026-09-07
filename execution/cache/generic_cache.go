@@ -68,10 +68,10 @@ func elemBytesFor[T any]() int64 {
 	return int64(unsafe.Sizeof(e)) + 4
 }
 
-// slotChargeBytes is a slot at the 5/4 ratio fitTableSlots pins, plus a byte to
-// stay on the covering side of the rounding. It sizes the ceiling only: a
-// power-of-two capacity rounds to a 2x table, so every generation below the
-// ceiling charges from tableSlots instead.
+// slotChargeBytes is a slot at freelru's best table ratio, 5/4. It seeds the
+// ceiling search and nothing else: a capacity off that ratio costs more, up to
+// 5/2, so this is a lower bound on the real charge and the search starts above
+// the answer. Every reservation charges the exact table through tableSlots.
 func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
 
 // tableSlots is the array length freelru allocates for a capacity. It sizes both
@@ -102,47 +102,45 @@ func shardArrayBytes(totalCap, shards uint32, elemBytes int64) int64 {
 // maxCacheSlots caps the slot array whatever the byte budget says.
 const maxCacheSlots = 16_000_000
 
-// fitTableSlots rounds a capacity down to the largest one freelru does not round
-// up. Only 4/5 of a power of two leaves the table ratio at 5/4; anywhere else it
-// lands in [5/4, 5/2), where a fixed per-slot charge is wrong in either
-// direction, swinging with GOMAXPROCS through the shard count.
-func fitTableSlots(perShard uint32) uint32 {
-	if perShard < minShardStart {
-		return perShard
-	}
-	// Start at the capacity's own table: it is already the fitted one whenever
-	// the capacity sits on the boundary, and stepping straight past it would
-	// halve the cache.
-	for table := tableSlots(perShard); table >= minShardStart; table /= 2 {
-		if fitted := uint32(table / 5 * 4); fitted >= minShardStart && fitted <= perShard {
-			return fitted
-		}
-	}
-	return perShard
-}
-
 // budgetedSlots splits a byte budget into a slot ceiling and the shard count it
-// is divided by, sized so each shard's table sits on the 5/4 boundary.
+// is divided by, the ceiling being the largest one whose exact cost fits.
 func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32, elemBytes int64) (maxCap, shards uint32) {
 	perSlot := uint64(payloadBytes) + uint64(slotChargeBytes(elemBytes))
 	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
 	shards = max(initialShardCount(approx, shardCeil()), 1)
-	perShardCap := fitCeiling(fitTableSlots(approx/shards), capacityBytes, func(c uint32) int64 {
+	perShardCap := fitCeiling(approx/shards, maxCacheSlots/shards, capacityBytes, func(c uint32) int64 {
 		return generationBytesFor(c*shards, shards, int64(payloadBytes), elemBytes)
 	})
 	return perShardCap * shards, shards
 }
 
-// fitCeiling steps a fitted ceiling down until cost reports it inside the
-// budget. A ceiling derived by dividing a budget by the per-slot charge is an
-// estimate: it carries neither the per-shard structs nor the gap between a
-// fitted table and the 5/4 ratio it is charged at, both of which scale with the
-// shard count, so the quotient alone can buy a generation larger than itself.
-func fitCeiling(fitted uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
-	for fitted > 1 && cost(fitted) > int64(budget) {
-		fitted = max(fitTableSlots(fitted-1), 1)
+// fitCeiling is the largest capacity up to ceiling whose exact cost is inside
+// the budget. estimate only seeds the search: dividing a budget by the per-slot
+// charge carries neither the per-shard structs nor the gap between a capacity's
+// table and the 5/4 ratio it is charged at, both of which scale with the shard
+// count, so the quotient alone can buy a generation larger than itself and can
+// also fall short of one. cost is non-decreasing in capacity -- the payload term
+// grows with it and the table it rounds up to never shrinks -- so the answer is
+// the boundary a binary search converges on.
+func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
+	if cost(1) > int64(budget) {
+		return 1
 	}
-	return fitted
+	ceiling = max(ceiling, 1)
+	hi := max(min(estimate, ceiling), 1)
+	for hi < ceiling && cost(hi) <= int64(budget) {
+		hi = uint32(min(uint64(hi)*2, uint64(ceiling)))
+	}
+	lo := uint32(1)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if cost(mid) <= int64(budget) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
 }
 
 // minShardStart keeps a shard's initial table off a handful of slots, which a
