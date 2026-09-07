@@ -101,7 +101,7 @@ func TestSkewedFixtureShape(t *testing.T) {
 			mx, med := bucketOccupancy(bt.bplus)
 			t.Logf("%s: pivots=%d maxBucket=%d median=%d prefixTable=%s nodeOfft=%s",
 				tc.name, bt.bplus.numNodes(), mx, med,
-				datasize.ByteSize(2*len(bt.bplus.prefixLo)*4).HR(),
+				datasize.ByteSize(len(bt.bplus.prefixLo)*4).HR(),
 				datasize.ByteSize(uint64(bt.bplus.numNodes())*4).HR())
 			if tc.name == "skewed" {
 				require.Greater(t, mx, med*4, "skewed fixture must be skewed")
@@ -128,18 +128,18 @@ func sampleKeysAcrossRange(tb testing.TB, bt *BtIndex, kv *seg.Decompressor, com
 
 func benchArms(b *testing.B, bt *BtIndex, g *seg.Reader, probes [][]byte) {
 	t := bt.bplus
-	saveLo, saveHi, saveOfft := t.prefixLo, t.prefixHi, t.nodeOfft
-	defer func() { t.prefixLo, t.prefixHi, t.nodeOfft = saveLo, saveHi, saveOfft }()
+	saveLo, saveOfft := t.prefixLo, t.nodeOfft
+	defer func() { t.prefixLo, t.nodeOfft = saveLo, saveOfft }()
 
 	for _, arm := range []struct {
 		name       string
 		seed, offt bool
 	}{{"base", false, false}, {"seed", true, false}, {"offt", false, true}, {"seed+offt", true, true}} {
 		b.Run(arm.name, func(b *testing.B) {
-			t.prefixLo, t.prefixHi = nil, nil
+			t.prefixLo = nil
 			t.nodeOfft = nil
 			if arm.seed {
-				t.prefixLo, t.prefixHi = saveLo, saveHi
+				t.prefixLo = saveLo
 			}
 			if arm.offt {
 				t.nodeOfft = saveOfft

@@ -17,10 +17,10 @@ type bsResult struct {
 }
 
 func bsWith(b *BpsTree, seed, offt bool, x []byte) bsResult {
-	saveLo, saveHi, saveOfft := b.prefixLo, b.prefixHi, b.nodeOfft
-	defer func() { b.prefixLo, b.prefixHi, b.nodeOfft = saveLo, saveHi, saveOfft }()
+	saveLo, saveOfft := b.prefixLo, b.nodeOfft
+	defer func() { b.prefixLo, b.nodeOfft = saveLo, saveOfft }()
 	if !seed {
-		b.prefixLo, b.prefixHi = nil, nil
+		b.prefixLo = nil
 	}
 	if !offt {
 		b.nodeOfft = nil
@@ -115,12 +115,12 @@ func TestPrefixSeedMatchesFullBinarySearch(t *testing.T) {
 				require.NoError(t, err)
 				wantSeek := seekSnapshot(t, bt, g, x)
 
-				saveLo, saveHi, saveOfft := bt.bplus.prefixLo, bt.bplus.prefixHi, bt.bplus.nodeOfft
-				bt.bplus.prefixLo, bt.bplus.prefixHi, bt.bplus.nodeOfft = nil, nil, nil
+				saveLo, saveOfft := bt.bplus.prefixLo, bt.bplus.nodeOfft
+				bt.bplus.prefixLo, bt.bplus.nodeOfft = nil, nil
 				gotV, gotOK, gotOff, err := bt.bplus.Get(g, x)
 				require.NoError(t, err)
 				gotSeek := seekSnapshot(t, bt, g, x)
-				bt.bplus.prefixLo, bt.bplus.prefixHi, bt.bplus.nodeOfft = saveLo, saveHi, saveOfft
+				bt.bplus.prefixLo, bt.bplus.nodeOfft = saveLo, saveOfft
 
 				require.Equalf(t, gotOK, wantOK, "probe %d (%x): Get ok", i, x)
 				require.Equalf(t, gotV, wantV, "probe %d (%x): Get value", i, x)
@@ -141,10 +141,10 @@ func TestPrefixSeedBucketBoundsCoverEveryPivot(t *testing.T) {
 	for i := range n {
 		p := nodePrefix(b.nodeKey(i)) >> (16 - b.prefixBits)
 		require.LessOrEqualf(t, int(b.prefixLo[p]), i, "pivot %d prefix %04x below bucket lo", i, p)
-		require.Greaterf(t, int(b.prefixHi[p]), i, "pivot %d prefix %04x at or above bucket hi", i, p)
+		require.Greaterf(t, int(b.prefixLo[p+1]), i, "pivot %d prefix %04x at or above bucket hi", i, p)
 	}
 	require.Equal(t, uint32(0), b.prefixLo[0])
-	require.Equal(t, uint32(n), b.prefixHi[len(b.prefixHi)-1])
+	require.Equal(t, uint32(n), b.prefixLo[len(b.prefixLo)-1])
 
 	for i := 1; i < n; i++ {
 		require.LessOrEqualf(t, nodePrefix(b.nodeKey(i-1)), nodePrefix(b.nodeKey(i)),

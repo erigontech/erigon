@@ -82,13 +82,12 @@ type BpsTree struct {
 
 	// pivot cache: keysBlob holds the on-disk pivot records (mmap-backed on-disk,
 	// heap for WarmUp); nodeOfftEF holds record i's offset and di is derived as
-	// i*nodeStride. nodeOfft, prefixLo and prefixHi are open-time derived caches.
+	// i*nodeStride. nodeOfft and prefixLo are open-time derived caches.
 	keysBlob   []byte
 	nodeOfftEF *eliasfano32.EliasFano
 	nodeStride uint64
 	nodeOfft   []uint32
 	prefixLo   []uint32
-	prefixHi   []uint32
 	prefixBits uint
 
 	M     uint64 // limit on amount of 'children' for node
@@ -144,20 +143,14 @@ func (b *BpsTree) buildNodeIndex() {
 		return
 	}
 	width := min(max(uint(bits.Len(uint(n))), 8), 16)
-	size := 1 << width
-	cnt := make([]uint32, size)
+	lo := make([]uint32, 1<<width+1)
 	for i := range n {
-		cnt[nodePrefix(b.nodeKey(i))>>(16-width)]++
+		lo[(nodePrefix(b.nodeKey(i))>>(16-width))+1]++
 	}
-	lo := make([]uint32, size)
-	hi := make([]uint32, size)
-	var run uint32
-	for p := range cnt {
-		lo[p] = run
-		run += cnt[p]
-		hi[p] = run
+	for p := 1; p < len(lo); p++ {
+		lo[p] += lo[p-1]
 	}
-	b.prefixLo, b.prefixHi, b.prefixBits = lo, hi, width
+	b.prefixLo, b.prefixBits = lo, width
 }
 
 func (b *BpsTree) nodeDi(i int) uint64 { return uint64(i) * b.nodeStride }
@@ -361,7 +354,7 @@ func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 
 	if b.prefixLo != nil && r > 0 {
 		p := nodePrefix(x) >> (16 - b.prefixBits)
-		bl, br := int(b.prefixLo[p]), int(b.prefixHi[p])
+		bl, br := int(b.prefixLo[p]), int(b.prefixLo[p+1])
 		if br < r {
 			dr = b.nodeDi(br)
 			khi = b.nodeKey(br)
