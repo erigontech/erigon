@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
@@ -89,7 +88,6 @@ var Defaults = Config{
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
-		SlowBlockThreshold:       blockmetrics.Disabled,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -316,5 +314,5 @@ type Sync struct {
 	PersistReceiptsCacheV2         bool
 	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 
-	SlowBlockThreshold time.Duration
+	SlowBlockThreshold *time.Duration
 }

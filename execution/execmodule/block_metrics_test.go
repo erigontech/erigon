@@ -154,6 +154,27 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	assert.True(t, sawAccountReads, "state_reads.accounts was zero in every record — the counters are not reaching the emitter")
 }
 
+func TestSlowBlockThresholdRestoresReadMetrics(t *testing.T) {
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	prevReadMetrics := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+	dbg.KVReadLevelledMetrics = false
+
+	t.Run("threshold set", func(t *testing.T) {
+		execmoduletester.New(t,
+			execmoduletester.WithKey(privKey),
+			execmoduletester.WithSlowBlockThreshold(0),
+		)
+		require.True(t, dbg.KVReadLevelledMetrics,
+			"the threshold must bring the counters with it, or state_reads silently vanishes")
+	})
+
+	require.False(t, dbg.KVReadLevelledMetrics,
+		"read timing must not stay on for the rest of the test binary")
+}
+
 func TestSlowBlockMetricsSilentByDefault(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -181,6 +202,58 @@ func TestSlowBlockMetricsSilentByDefault(t *testing.T) {
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
 
 	assert.Empty(t, collector.records(t), "metrics must stay off unless the threshold is set")
+}
+
+func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithSlowBlockThreshold(0),
+	)
+
+	send := func(value uint64) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(value), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	}
+
+	canonical, err := m.GenerateChain(1, send(1_000))
+	require.NoError(t, err)
+	sideFork, err := m.GenerateChainFrom(m.Genesis, 1, send(2_000))
+	require.NoError(t, err)
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+
+	collector := installCollector(t)
+
+	status, err := m.InsertBlocks(t.Context(), sideFork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	tip := sideFork.Blocks[len(sideFork.Blocks)-1].Header()
+	result, err := m.ValidateChain(t.Context(), tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	_, err = m.UpdateForkChoice(t.Context(), tip)
+	require.NoError(t, err)
+
+	assert.Empty(t, collector.records(t),
+		"a forkchoice that unwinds commits more than this block's writes, so commit_ms would not be this block's")
 }
 
 func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {

@@ -322,6 +322,13 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
+func (pe *PipelineExecutor) LastValidationExecStageTiming() time.Duration {
+	if pe.validationSync == nil {
+		return 0
+	}
+	return pe.validationSync.StageTiming(stages.Execution)
+}
+
 func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 	// Use a terse logger to suppress low-level noise during fork validation.
 	// Defaults to LvlWarn (matching the original hard-coded level), but can

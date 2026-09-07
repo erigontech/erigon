@@ -25,7 +25,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -48,16 +47,23 @@ func buildEthCfg(t *testing.T, args []string) ethconfig.Config {
 
 func TestSlowBlockThresholdFlag(t *testing.T) {
 	t.Run("off unless asked", func(t *testing.T) {
-		require.Equal(t, blockmetrics.Disabled, buildEthCfg(t, nil).Sync.SlowBlockThreshold)
+		require.Nil(t, buildEthCfg(t, nil).Sync.SlowBlockThreshold,
+			"the zero value of ethconfig.Sync must leave the feature off")
+	})
+
+	t.Run("negative disables", func(t *testing.T) {
+		require.Nil(t, buildEthCfg(t, []string{"--debug.slow-block-threshold", "-1s"}).Sync.SlowBlockThreshold)
 	})
 
 	t.Run("zero means every block", func(t *testing.T) {
 		cfg := buildEthCfg(t, []string{"--debug.slow-block-threshold", "0"})
-		require.Zero(t, cfg.Sync.SlowBlockThreshold)
+		require.NotNil(t, cfg.Sync.SlowBlockThreshold)
+		require.Zero(t, *cfg.Sync.SlowBlockThreshold)
 	})
 
 	t.Run("duration reaches the sync config", func(t *testing.T) {
 		cfg := buildEthCfg(t, []string{"--debug.slow-block-threshold", "250ms"})
-		require.Equal(t, 250*time.Millisecond, cfg.Sync.SlowBlockThreshold)
+		require.NotNil(t, cfg.Sync.SlowBlockThreshold)
+		require.Equal(t, 250*time.Millisecond, *cfg.Sync.SlowBlockThreshold)
 	})
 }

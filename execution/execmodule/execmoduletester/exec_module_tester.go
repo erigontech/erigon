@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -514,7 +515,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
 	}
 	if opt.slowBlockThreshold != nil {
-		cfg.Sync.SlowBlockThreshold = *opt.slowBlockThreshold
+		cfg.Sync.SlowBlockThreshold = opt.slowBlockThreshold
+		if tb != nil {
+			prevReadMetrics := dbg.KVReadLevelledMetrics
+			tb.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+		}
+		dbg.EnableKVReadLevelledMetrics()
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -150,7 +149,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		forkHeader:    forkHeader,
 		forkBody:      &types.Body{},
 	}
-	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, blockmetrics.Disabled)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
 
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
@@ -164,11 +163,13 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
 	reader := sideForkReader{canonicalHash: common.HexToHash("0x01")}
 
-	off := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, blockmetrics.Disabled)
+	off := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
 	require.Nil(t, off.blockMetricsCache,
 		"a disabled threshold must not build the cache: the nil check is what keeps newPayload from recording")
-	require.Nil(t, off.TakeBlockMetrics(common.HexToHash("0x02")))
+	rec, _ := off.TakeBlockMetrics(common.HexToHash("0x02"))
+	require.Nil(t, rec)
 
-	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, 0)
+	every := time.Duration(0)
+	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)
 	require.NotNil(t, on.blockMetricsCache)
 }

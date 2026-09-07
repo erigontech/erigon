@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -301,7 +302,10 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
-	cfg.Sync.SlowBlockThreshold = ctx.Duration(utils.SlowBlockThresholdFlag.Name)
+	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
+		cfg.Sync.SlowBlockThreshold = &d
+		dbg.EnableKVReadLevelledMetrics()
+	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))

@@ -466,6 +466,17 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, fina
 	return nil
 }
 
+func (s *Sync) StageTiming(id stages.SyncStage) time.Duration {
+	var took time.Duration
+	for i := range s.timings {
+		t := s.timings[i]
+		if t.stage == id && !t.isUnwind && !t.isPrune {
+			took += t.took
+		}
+	}
+	return took
+}
+
 func (s *Sync) PrintTimings() []any {
 	var logCtx []any
 	count := 0

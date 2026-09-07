@@ -73,10 +73,11 @@ type ForkValidator struct {
 
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 
-	blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
+	blockMetricsCache  *lru.Cache[common.Hash, *blockmetrics.Record]
+	slowBlockThreshold time.Duration
 }
 
-func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64, slowBlockThreshold time.Duration) *ForkValidator {
+func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64, slowBlockThreshold *time.Duration) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
@@ -88,21 +89,24 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 	}
 
 	var blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
-	if slowBlockThreshold >= 0 {
+	var threshold time.Duration
+	if slowBlockThreshold != nil {
 		blockMetricsCache, err = lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
 		if err != nil {
 			panic(err)
 		}
+		threshold = *slowBlockThreshold
 	}
 	return &ForkValidator{
-		executor:          executor,
-		currentHeight:     currentHeight,
-		blockReader:       blockReader,
-		ctx:               ctx,
-		validHashes:       validHashes,
-		timingsCache:      timingsCache,
-		blockMetricsCache: blockMetricsCache,
-		maxReorgDepth:     maxReorgDepth,
+		executor:           executor,
+		currentHeight:      currentHeight,
+		blockReader:        blockReader,
+		ctx:                ctx,
+		validHashes:        validHashes,
+		timingsCache:       timingsCache,
+		blockMetricsCache:  blockMetricsCache,
+		slowBlockThreshold: threshold,
+		maxReorgDepth:      maxReorgDepth,
 	}
 }
 
@@ -328,7 +332,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	}
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
-	fv.recordBlockMetrics(sd, header, body, hash, validation, &beforeIO, len(headersChain))
+	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain))
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
@@ -375,7 +379,7 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	return BlockTimings{}
 }
 
-func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, validation time.Duration, beforeIO *blockmetrics.Sample, blocksValidated int) {
+func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int) {
 	if fv.blockMetricsCache == nil {
 		return
 	}
@@ -395,19 +399,19 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 		rec.TxCount = len(body.Transactions)
 	}
 	rec.Accounts, rec.Storage, rec.Code, rec.CountersValid = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics()).Since(*beforeIO)
-	rec.Execution = max(validation-stateHash, 0)
+	rec.Execution = max(fv.executor.LastValidationExecStageTiming()-stateHash, 0)
 	fv.blockMetricsCache.Add(hash, rec)
 }
 
-func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) *blockmetrics.Record {
+func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) (*blockmetrics.Record, time.Duration) {
 	if fv.blockMetricsCache == nil {
-		return nil
+		return nil, 0
 	}
 	if rec, ok := fv.blockMetricsCache.Get(hash); ok {
 		fv.blockMetricsCache.Remove(hash)
-		return rec
+		return rec, fv.slowBlockThreshold
 	}
-	return nil
+	return nil, 0
 }
 
 func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {

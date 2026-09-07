@@ -766,7 +766,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
-		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist)
+		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore)
 	}
 
 	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -986,14 +986,17 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 	e.logger.Log(dbgLevel, msg, logArgs...)
 }
 
-func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration) {
-	if e.syncCfg.SlowBlockThreshold < 0 || e.forkValidator == nil {
+func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration, headNum, finishProgressBefore uint64) {
+	if e.forkValidator == nil {
 		return
 	}
-	rec := e.forkValidator.TakeBlockMetrics(blockHash)
+	rec, threshold := e.forkValidator.TakeBlockMetrics(blockHash)
 	if rec == nil {
 		return
 	}
+	if headNum != finishProgressBefore+1 {
+		return
+	}
 	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist
-	blockmetrics.Emit(e.logger, e.syncCfg.SlowBlockThreshold, rec)
+	blockmetrics.Emit(e.logger, threshold, rec)
 }
