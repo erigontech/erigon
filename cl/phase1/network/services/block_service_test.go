@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -110,6 +111,26 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
+}
+
+// A newPayload call the execution layer never answered says nothing about the
+// block, so the sender must not be rejected (and banned) for it.
+func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.OnBlockErr = fmt.Errorf("%w: execution client is down", forkchoice.ErrNewPayloadNoStatus)
+
+	err := blockService.ProcessMessage(context.Background(), nil, blocks[1])
+	require.ErrorIs(t, err, ErrIgnore)
 }
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {

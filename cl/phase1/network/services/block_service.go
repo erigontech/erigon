@@ -224,6 +224,11 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
+		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
+			// The execution layer never answered, so nothing is known about the
+			// block. Banning the sender would punish it for a local failure.
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		return err
 	}
 	return nil
