@@ -305,12 +305,12 @@ func TestExecOnlyClampsInsteadOfGoingNegative(t *testing.T) {
 	assert.Zero(t, got.ReadTime)
 }
 
-// The envelope is a cross-client contract, like the field names. Both patterns
-// are ethpandaops/benchmarkoor pkg/blocklog/erigon.go, byte for byte.
+// The envelope is a cross-client contract, like the field names. The patterns
+// are the consumer's: ethpandaops/benchmarkoor pkg/blocklog/erigon.go.
 var (
 	ansiPattern    = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	consolePattern = regexp.MustCompile(
-		`^\[?(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\s*\]?\s*\[[^\]]+\]\s+(\{.+\})\s*$`)
+		`^\[?(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\s*\]?\s*(?:\[[^\]]+\]\s*)?\s*(\{.+\})\s*$`)
 )
 
 func consolePayload(t *testing.T, line string) string {
@@ -331,23 +331,23 @@ func jsonPayload(t *testing.T, line string) string {
 }
 
 func TestEmittedLineSurvivesEveryLogFormat(t *testing.T) {
-	t.Parallel()
-
 	for _, tc := range []struct {
 		name    string
-		format  log.Format
+		format  func(*testing.T) log.Format
 		extract func(*testing.T, string) string
 	}{
-		{"console, no tty", log.TerminalFormatNoColor(), consolePayload},
-		{"console on a tty", log.TerminalFormat(), consolePayload},
-		{"--log.console.json", log.JsonFormat(), jsonPayload},
+		{"console, no tty", func(*testing.T) log.Format { return log.TerminalFormatNoColor() }, consolePayload},
+		{"console on a tty", func(*testing.T) log.Format { return log.TerminalFormat() }, consolePayload},
+		{"console on a tty, no timestamps", func(t *testing.T) log.Format {
+			t.Setenv("ERIGON_LOG_NO_TIMESTAMPS", "true")
+			return log.TerminalFormat()
+		}, consolePayload},
+		{"--log.console.json", func(*testing.T) log.Format { return log.JsonFormat() }, jsonPayload},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			var buf bytes.Buffer
 			logger := log.New()
-			logger.SetHandler(log.StreamHandler(&buf, tc.format))
+			logger.SetHandler(log.StreamHandler(&buf, tc.format(t)))
 			Emit(logger, 0, sampleRecord())
 
 			line := buf.String()

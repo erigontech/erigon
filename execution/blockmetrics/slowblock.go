@@ -20,17 +20,19 @@
 //
 // The payload is never a standalone line. It is the Msg of an erigon log
 // record, so the envelope follows the operator's log config: a consumer strips
-// ANSI, then takes either the console payload ("[WARN] [t] {…}" off a TTY,
-// "WARN[t] {…}" on one) or the msg field under --log.console.json /
-// --log.dir.json, where the record arrives escaped inside it.
-// TestEmittedLineSurvivesEveryLogFormat pins all three. The payload carries
-// level and msg anyway because the spec requires both and pins their values.
+// ANSI, then takes either the console payload — "[WARN] [t] {…}" off a TTY,
+// "WARN[t] {…}" on one, and no "[t]" at all under ERIGON_LOG_NO_TIMESTAMPS —
+// or the msg field under --log.console.json / --log.dir.json, where the record
+// arrives escaped inside it. TestEmittedLineSurvivesEveryLogFormat pins all
+// four. The payload carries level and msg anyway because the spec requires
+// both and pins their values.
 //
 // Rounding follows the spec's presentation and nothing else: mgas_per_sec to
 // two decimals because the spec says two, hit_rate to two to match besu, and
 // every *_ms as its measured nanoseconds expressed in milliseconds. The spec
-// types the durations int64; erigon validates a block in well under a
-// millisecond, where an integer would report 0.
+// types the durations int64; at --debug.slow-block-threshold=0, the mode a
+// harness runs, erigon validates a block in well under a millisecond, where an
+// integer reports 0. The consumer types them float64.
 //
 // total_ms is execution_ms + state_hash_ms + commit_ms — the identity the
 // spec's own reference record balances on — not wall clock. Everything before
