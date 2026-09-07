@@ -1,12 +1,15 @@
 package snaptype
 
 import (
+	"encoding/binary"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type vanishedDirEntry struct{ name string }
@@ -104,5 +107,29 @@ func TestStateSeedable(t *testing.T) {
 				t.Errorf("IsStateFileSeedable(%q) = %v; want %v", tc.filename, result, tc.expected)
 			}
 		})
+	}
+}
+
+func TestLoadSaltRewritesMalformedFile(t *testing.T) {
+	baseDir := t.TempDir()
+	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+	if err := os.WriteFile(fpath, []byte("bad"), os.ModePerm); err != nil {
+		t.Fatal(err)
+	}
+
+	salt, err := LoadSalt(baseDir, true, log.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saltBytes) != 4 {
+		t.Fatalf("salt file not rewritten to 4 bytes, got %d", len(saltBytes))
+	}
+	if got := binary.BigEndian.Uint32(saltBytes); *salt != got {
+		t.Errorf("LoadSalt returned %d, file holds %d", *salt, got)
 	}
 }
