@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,17 +34,14 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	// Force-load the native package, to trigger registration
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 )
-
-// logIndex tests: a log's `index` is counted over the whole block, the way
-// StateDB.logSize is in geth, so it does not restart at 0 on each transaction -
-// neither when the whole block is traced, nor when one transaction is traced on
-// its own from a state built out of history.
 
 var (
 	// emitOne emits one log and stops.
@@ -55,35 +51,44 @@ var (
 	// emitAround emits a log, calls emitOne, then emits another log, so the
 	// callee's log falls between the caller's two.
 	emitAroundAddr = common.HexToAddress("0x00000000000000000000000000000000000033ff")
+	// emitAndRevert emits a log and then reverts, so the log never survives.
+	emitAndRevertAddr = common.HexToAddress("0x00000000000000000000000000000000000044ff")
+	// emitAroundRevert is emitAround over emitAndRevert: the callee takes an
+	// index and gives it back, so the caller's second log takes it instead.
+	emitAroundRevertAddr = common.HexToAddress("0x00000000000000000000000000000000000055ff")
 )
 
-// log0 emits one LOG0 with empty data (offset 0, size 0).
-var stop = []byte{byte(vm.STOP)}
-
-var log0 = []byte{
-	byte(vm.PUSH1), 0x00,
-	byte(vm.PUSH1), 0x00,
-	byte(vm.LOG0),
+// logIndexTestGenesis allocates the log-emitting contracts the numbering tests
+// call.
+func logIndexTestGenesis(sender common.Address) *types.Genesis {
+	log0 := func(p *program.Program) *program.Program {
+		return p.Push(0).Push(0).Op(vm.LOG0)
+	}
+	// The success flag is dropped so a reverting callee does not stop the caller.
+	callTo := func(p *program.Program, addr common.Address) *program.Program {
+		return p.Call(nil, addr, 0, 0, 0, 0, 0).Op(vm.POP)
+	}
+	emitter := func(code []byte) types.GenesisAccount {
+		return types.GenesisAccount{Code: code, Nonce: 1}
+	}
+	return &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			sender:      {Balance: big.NewInt(1000000000)},
+			emitOneAddr: emitter(log0(program.New()).Op(vm.STOP).Bytes()),
+			emitTwoAddr: emitter(log0(log0(program.New())).Op(vm.STOP).Bytes()),
+			emitAroundAddr: emitter(
+				log0(callTo(log0(program.New()), emitOneAddr)).Op(vm.STOP).Bytes()),
+			emitAndRevertAddr: emitter(
+				log0(program.New()).Push(0).Push(0).Op(vm.REVERT).Bytes()),
+			emitAroundRevertAddr: emitter(
+				log0(callTo(log0(program.New()), emitAndRevertAddr)).Op(vm.STOP).Bytes()),
+		},
+	}
 }
 
-// callEmitOne calls emitOne passing nothing and keeping nothing: opCall pops
-// gas, addr, value, inOffset, inSize, retOffset, retSize, so they go on the
-// stack backwards.
-var callEmitOne = slices.Concat(
-	[]byte{
-		byte(vm.PUSH1), 0x00, // retSize
-		byte(vm.PUSH1), 0x00, // retOffset
-		byte(vm.PUSH1), 0x00, // inSize
-		byte(vm.PUSH1), 0x00, // inOffset
-		byte(vm.PUSH1), 0x00, // value
-		byte(vm.PUSH20),
-	},
-	emitOneAddr[:],
-	[]byte{byte(vm.GAS), byte(vm.CALL), byte(vm.POP)},
-)
-
-// createLogIndexTestModule builds a one-block chain whose three transactions
-// emit 2, 1 and 3 logs, the last of them across a nested call. Returns the
+// createLogIndexTestModule builds a one-block chain whose four transactions emit
+// 2, 1, 3 and 2 surviving logs, across nested and reverting calls. Returns the
 // module and the transaction hashes in block order.
 func createLogIndexTestModule(t *testing.T) (*execmoduletester.ExecModuleTester, []common.Hash) {
 	t.Helper()
@@ -92,26 +97,13 @@ func createLogIndexTestModule(t *testing.T) (*execmoduletester.ExecModuleTester,
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 
-	gspec := &types.Genesis{
-		Config: chain.TestChainBerlinConfig,
-		Alloc: types.GenesisAlloc{
-			sender:      {Balance: big.NewInt(1000000000)},
-			emitOneAddr: {Code: slices.Concat(log0, stop), Nonce: 1, Balance: big.NewInt(0)},
-			emitTwoAddr: {Code: slices.Concat(log0, log0, stop), Nonce: 1, Balance: big.NewInt(0)},
-			emitAroundAddr: {
-				Code:    slices.Concat(log0, callEmitOne, log0, stop),
-				Nonce:   1,
-				Balance: big.NewInt(0),
-			},
-		},
-	}
-
+	gspec := logIndexTestGenesis(sender)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	signer := *types.LatestSignerForChainID(nil)
 	var hashes []common.Hash
 	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		for nonce, to := range []common.Address{emitTwoAddr, emitOneAddr, emitAroundAddr} {
+		for nonce, to := range []common.Address{emitTwoAddr, emitOneAddr, emitAroundAddr, emitAroundRevertAddr} {
 			txn, err := types.SignTx(
 				types.NewTransaction(uint64(nonce), to, &u256.Num0, 200000, &u256.Num1, nil), signer, key)
 			require.NoError(t, err)
@@ -132,6 +124,7 @@ type traceLog struct {
 }
 
 type traceFrame struct {
+	Error string       `json:"error"`
 	Logs  []traceLog   `json:"logs"`
 	Calls []traceFrame `json:"calls"`
 }
@@ -153,10 +146,10 @@ func withLogCallTracer() *tracersConfig.TraceConfig {
 	return &tracersConfig.TraceConfig{Tracer: &name, TracerConfig: &cfg}
 }
 
-// wantByTxn is the block's log numbering, per transaction: the six logs the
-// three transactions emit take 0x0..0x5 over the whole block. Each entry is
-// what emittedLogs returns for that transaction, so the entries concatenate to
-// what the whole block's trace returns.
+// wantByTxn is the block's log numbering, per transaction: the eight surviving
+// logs the four transactions emit take 0x0..0x7 over the whole block. Each entry
+// is what emittedLogs returns for that transaction, so the entries concatenate
+// to what the whole block's trace returns.
 var wantByTxn = []struct {
 	name string
 	want []traceLog
@@ -184,6 +177,15 @@ var wantByTxn = []struct {
 			{Address: emitOneAddr, Index: 4, Position: 0},
 		},
 	},
+	{
+		// The callee's log took 0x7 and the revert gave it back, so the caller's
+		// second log takes it and the surviving numbering stays contiguous.
+		name: "reverted frame gives its index back",
+		want: []traceLog{
+			{Address: emitAroundRevertAddr, Index: 6, Position: 0},
+			{Address: emitAroundRevertAddr, Index: 7, Position: 1},
+		},
+	},
 }
 
 // TestCallTracerWithLogBlockWideIndex pins that tracing a whole block numbers
@@ -204,13 +206,17 @@ func TestCallTracerWithLogBlockWideIndex(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
 	require.Len(t, traces, len(wantByTxn))
 
-	var got []traceLog
-	var want []traceLog
 	for i, trace := range traces {
-		got = append(got, emittedLogs(trace.Result)...)
-		want = append(want, wantByTxn[i].want...)
+		require.Equal(t, wantByTxn[i].want, emittedLogs(trace.Result), "txn %d", i)
 	}
-	require.Equal(t, want, got)
+
+	// Without this the last transaction's numbering would also hold for a callee
+	// that emitted nothing: reaching REVERT is what proves its LOG0 ran, and the
+	// index it took is the one the caller's second log then takes.
+	callee := traces[3].Result.Calls
+	require.Len(t, callee, 1)
+	require.Equal(t, "execution reverted", callee[0].Error)
+	require.Empty(t, callee[0].Logs)
 }
 
 // TestCallTracerWithLogIndexOfSingleTransaction pins the same numbering when one
@@ -232,5 +238,34 @@ func TestCallTracerWithLogIndexOfSingleTransaction(t *testing.T) {
 			require.NoError(t, json.Unmarshal(buf.Bytes(), &frame))
 			require.Equal(t, tc.want, emittedLogs(frame))
 		})
+	}
+}
+
+// TestCallTracerWithLogIndexPerBundle pins that each bundle of
+// debug_traceCallMany numbers its logs from zero: a bundle is a block of its
+// own, so the count does not carry over from the bundle before it.
+func TestCallTracerWithLogIndexPerBundle(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	api := newDebugApiForTest(m)
+
+	gas := hexutil.Uint64(200000)
+	call := ethapi.CallArgs{From: &m.Address, To: &emitTwoAddr, Gas: &gas}
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{call}}, {Transactions: []ethapi.CallArgs{call}}}
+
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	require.NoError(t, api.TraceCallMany(m.Ctx, bundles, stateCtx, withLogCallTracer(), stream))
+	require.NoError(t, stream.Flush())
+
+	var traces [][]traceFrame
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
+	require.Len(t, traces, len(bundles))
+
+	for i, bundle := range traces {
+		require.Len(t, bundle, 1)
+		require.Equal(t, wantByTxn[0].want, emittedLogs(bundle[0]), "bundle %d", i)
 	}
 }

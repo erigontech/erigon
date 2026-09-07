@@ -2856,10 +2856,8 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.sdProbeEpoch++
 }
 
-// SetFirstLogIndex tells the state which block-wide index the next log takes. A
-// caller that builds its state from history at a transaction boundary never ran
-// the earlier transactions of the block, so it has to hand in what they emitted.
-// Call it right after New: Reset starts a new block and takes the counter to zero.
+// SetFirstLogIndex tells the state which block-wide index the next log takes.
+// Reset starts a new block and takes the counter back to zero.
 func (sdb *IntraBlockState) SetFirstLogIndex(idx uint32) {
 	sdb.logs.indexInBlock = uint(idx)
 }

@@ -331,10 +331,8 @@ func (t *callTracer) Stop(err error) {
 	t.interrupt.Store(true)
 }
 
-// clearFailedLogs clears the logs of a callframe and all its children
-// in case of execution failure. The frames it drops are the ones whose logs the
-// state reverted, and reverting gave each of those indices back, so what
-// survives keeps the contiguous numbering the state assigned it.
+// clearFailedLogs clears the logs of a callframe and all its children in case
+// of execution failure. Revert gave those indices back, so no renumbering.
 func clearFailedLogs(cf *callFrame, parentFailed bool) {
 	failed := cf.failed() || parentFailed
 	if failed {
