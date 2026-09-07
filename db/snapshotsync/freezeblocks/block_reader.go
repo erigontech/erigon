@@ -172,11 +172,9 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	if observed {
 		return value, true
 	}
-	timeout := time.NewTimer(r.frozenBlocksTimeout)
-	defer timeout.Stop()
 	select {
 	case <-refreshed:
-	case <-timeout.C:
+	case <-time.After(r.frozenBlocksTimeout):
 	}
 	value, observed, _ = r.frozenBlocks.Load()
 	return value, observed
