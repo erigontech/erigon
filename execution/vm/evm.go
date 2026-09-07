@@ -501,8 +501,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Caller:   frameCaller,
 				ReadOnly: evm.readOnly || typ == STATICCALL,
 				EVM:      evm,
-
-				value: value,
+				Value:    value,
 			}
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting

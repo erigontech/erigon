@@ -178,11 +178,8 @@ type PrecompileContext struct {
 	Caller   accounts.Address
 	ReadOnly bool
 	EVM      *EVM
-
-	value uint256.Int
+	Value    uint256.Int
 }
-
-func (ctx *PrecompileContext) Value() uint256.Int { return ctx.value }
 
 // PrecompileGas is the frame's gas, charged through the same helpers the
 // interpreter uses. Going through it is what keeps the reservoir and the
@@ -402,17 +399,10 @@ func (g *PrecompileGas) adoptChildUsage(usage mdgas.MdGasUsage) bool {
 	return true
 }
 
-func orZero(v *uint256.Int) uint256.Int {
-	if v == nil {
-		return uint256.Int{}
-	}
-	return *v
-}
-
 // Call runs a nested CALL out of the precompile's frame.
-func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
+func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value uint256.Int) ([]byte, error) {
 	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.Call(ctx.ActingAs, addr, input, handed, orZero(value), false)
+		return ctx.EVM.Call(ctx.ActingAs, addr, input, handed, value, false)
 	})
 }
 
@@ -423,28 +413,21 @@ func (ctx *PrecompileContext) StaticCall(gas *PrecompileGas, addr accounts.Addre
 	})
 }
 
-// CallCode runs a nested CALLCODE out of the precompile's frame.
-func (ctx *PrecompileContext) CallCode(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
-	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.CallCode(ctx.ActingAs, addr, input, handed, orZero(value))
-	})
-}
-
 // DelegateCall runs a nested DELEGATECALL out of the precompile's frame, which
 // keeps this frame's own identity, caller and value. DELEGATECALL has no value
 // operand — the callee observes the calling frame's msg.value — so there is
 // deliberately no value parameter here.
 func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
 	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.value, handed)
+		return ctx.EVM.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.Value, handed)
 	})
 }
 
 // Create runs a nested CREATE out of the precompile's frame, or CREATE2 when
 // salt is non-nil.
-func (ctx *PrecompileContext) Create(gas *PrecompileGas, code []byte, executionGas uint64, endowment, salt *uint256.Int) (ret []byte, created accounts.Address, err error) {
+func (ctx *PrecompileContext) Create(gas *PrecompileGas, code []byte, executionGas uint64, endowment uint256.Int, salt *uint256.Int) (ret []byte, created accounts.Address, err error) {
 	ret, err = ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		out, addr, leftover, usage, cerr := ctx.EVM.Create(ctx.ActingAs, code, handed, orZero(endowment), salt, false)
+		out, addr, leftover, usage, cerr := ctx.EVM.Create(ctx.ActingAs, code, handed, endowment, salt, false)
 		created = addr
 		return out, leftover, usage, cerr
 	})

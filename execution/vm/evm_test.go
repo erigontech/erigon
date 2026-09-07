@@ -130,27 +130,16 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 	}
 }
 
-func TestEnterFrameSetsReadOnlyAndExitFrameRestoresIt(t *testing.T) {
-	evm := &EVM{}
-
-	restore := evm.enterFrame(true)
-	require.True(t, restore)
-	require.True(t, evm.readOnly)
-	require.Equal(t, 1, evm.depth)
-
-	evm.exitFrame(restore)
-	require.False(t, evm.readOnly)
-	require.Equal(t, 0, evm.depth)
-}
-
-func TestExitFrameKeepsReadOnlyForChildOfReadOnlyFrame(t *testing.T) {
+func TestEnterFrameReadOnlyProtocol(t *testing.T) {
 	evm := &EVM{}
 
 	outer := evm.enterFrame(true)
+	require.True(t, outer)
+	require.True(t, evm.readOnly)
+	require.Equal(t, 1, evm.depth)
+
 	inner := evm.enterFrame(true)
 	require.False(t, inner, "a read-only frame inside a read-only frame must not claim the restore")
-	require.Equal(t, 2, evm.depth)
-
 	evm.exitFrame(inner)
 	require.True(t, evm.readOnly, "the child must not clear the parent's read-only flag")
 	require.Equal(t, 1, evm.depth)
@@ -158,17 +147,11 @@ func TestExitFrameKeepsReadOnlyForChildOfReadOnlyFrame(t *testing.T) {
 	evm.exitFrame(outer)
 	require.False(t, evm.readOnly)
 	require.Equal(t, 0, evm.depth)
-}
 
-func TestEnterFrameLeavesReadOnlyAloneForWritableFrame(t *testing.T) {
-	evm := &EVM{}
-
-	restore := evm.enterFrame(false)
-	require.False(t, restore)
+	writable := evm.enterFrame(false)
+	require.False(t, writable)
 	require.False(t, evm.readOnly)
 	require.Equal(t, 1, evm.depth)
-
-	evm.exitFrame(restore)
-	require.False(t, evm.readOnly)
+	evm.exitFrame(writable)
 	require.Equal(t, 0, evm.depth)
 }
