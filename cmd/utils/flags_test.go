@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
@@ -352,4 +353,34 @@ func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	gotFalse := parse("--commitment.plainValues=false")
 	require.NotNil(t, gotFalse)
 	require.False(t, *gotFalse)
+}
+
+func TestSetParallelCommitment(t *testing.T) {
+	orig := statecfg.ExperimentalParallelCommitment
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = orig })
+
+	require.True(t, statecfg.DefaultParallelCommitment, "parallel commitment must be on by default")
+	require.Equal(t, statecfg.DefaultParallelCommitment, ExperimentalParallelCommitmentFlag.Value,
+		"advertised flag default drifted from the effective default")
+
+	run := func(seed bool, args ...string) bool {
+		statecfg.ExperimentalParallelCommitment = seed
+		flag := ExperimentalParallelCommitmentFlag
+		app := &cli.Command{
+			Flags: []cli.Flag{&flag},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setParallelCommitment(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return statecfg.ExperimentalParallelCommitment
+	}
+
+	for _, seed := range []bool{true, false} {
+		require.Equal(t, seed, run(seed), "unset flag must leave COMMITMENT_PARALLEL in charge")
+		require.False(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=false"),
+			"explicit =false must select the sequential trie")
+		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))
+	}
 }
