@@ -66,6 +66,8 @@ type BackwardBeaconDownloader struct {
 	requestEnvelopes       func(context.Context, [][32]byte, ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
 	engine                 execution_client.ExecutionEngine
 	onNewBlock             OnNewBlock
+	initialGloasRoot       common.Hash
+	onInitialGloasBlock    func(*cltypes.SignedBeaconBlock) error
 	finished               atomic.Bool
 	reqInterval            *time.Ticker
 	baseInterval           time.Duration
@@ -277,6 +279,12 @@ func (b *BackwardBeaconDownloader) SetGloasSuccessorValidator(validate func(*clt
 	b.validateGloasSuccessor = validate
 }
 
+// SetOnInitialGloasBlock persists the trusted anchor without classifying its payload before traversing its ancestors.
+func (b *BackwardBeaconDownloader) SetOnInitialGloasBlock(root common.Hash, persist func(*cltypes.SignedBeaconBlock) error) {
+	b.initialGloasRoot = root
+	b.onInitialGloasBlock = persist
+}
+
 // SetExpectedRoot sets the expected root we expect to download.
 func (b *BackwardBeaconDownloader) SetExpectedRoot(root common.Hash) {
 	b.mu.Lock()
@@ -485,6 +493,35 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	// [New in Gloas:EIP7732] Fetch envelopes for GLOAS FULL blocks before processing.
 	log.Debug("[BackwardBeaconDownloader] processResponses start", "blocks", len(responses), "slotToDownload", b.slotToDownload.Load(), "expectedRoot", b.expectedRoot)
 	expectedBlock := blockWithRoot(responses, b.expectedRoot)
+	if expectedBlock == nil && b.canDeferInitialGloasBlock() && b.db != nil && b.blockReader != nil {
+		if err := b.db.View(ctx, func(tx kv.Tx) error {
+			stored, err := b.blockReader.ReadBlockByRoot(ctx, tx, b.expectedRoot)
+			if err != nil {
+				return err
+			}
+			if stored != nil && stored.Block != nil && stored.Block.Body != nil {
+				expectedBlock = blockWithRoot([]*cltypes.SignedBeaconBlock{stored}, b.expectedRoot)
+			}
+			return nil
+		}); err != nil {
+			log.Warn("Failed to read initial GLOAS block", "root", b.expectedRoot, "err", err)
+			return nil
+		}
+	}
+	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion && b.canDeferInitialGloasBlock() {
+		if err := b.onInitialGloasBlock(expectedBlock); err != nil {
+			log.Warn("Failed to persist initial GLOAS block", "root", b.expectedRoot, "err", err)
+			return nil
+		}
+		b.prevBatchTopBlock = expectedBlock
+		b.setExpectedRoot(expectedBlock.Block.ParentRoot)
+		if expectedBlock.Block.Slot == 0 {
+			b.finished.Store(true)
+			return nil
+		}
+		b.slotToDownload.Store(expectedBlock.Block.Slot - 1)
+		expectedBlock = blockWithRoot(responses, b.expectedRoot)
+	}
 	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
 		if b.prevBatchTopBlock != nil && !isDirectSuccessor(expectedBlock, b.prevBatchTopBlock) {
 			return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
@@ -624,6 +661,11 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	}
 
 	return nil
+}
+
+func (b *BackwardBeaconDownloader) canDeferInitialGloasBlock() bool {
+	return b.httpFallbackURL == "" && b.prevBatchTopBlock == nil &&
+		b.onInitialGloasBlock != nil && b.expectedRoot == b.initialGloasRoot
 }
 
 func blockWithRoot(blocks []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) *cltypes.SignedBeaconBlock {

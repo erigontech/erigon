@@ -49,7 +49,7 @@ var errELBehind = errors.New("EL behind: payload not processable yet")
 var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
 
 var (
-	errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
+	ErrInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
 	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
 )
 
@@ -373,7 +373,7 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", validationErr)
-		return fmt.Errorf("%w: execution payload is invalid", errInvalidExecutionPayloadEnvelope)
+		return fmt.Errorf("%w: execution payload is invalid", ErrInvalidExecutionPayloadEnvelope)
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
 	}
@@ -407,7 +407,7 @@ const (
 func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
-		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
+		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
 
 	f.mu.Lock()
@@ -423,7 +423,7 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelopeCoordinated] received signed envelope with nil message")
-		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
+		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
@@ -461,7 +461,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
 		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
-			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
+			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
 		}
 	}
 
@@ -476,7 +476,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %w", errInvalidExecutionPayloadEnvelope, err)
+		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
 	// Validate payload with EL
@@ -790,7 +790,7 @@ func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx conte
 // applyLocalSelfBuildEnvelope coordinates fork-choice ownership around local envelope processing.
 func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
-		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
+		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
 
 	f.mu.Lock()
@@ -836,7 +836,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %w", errInvalidExecutionPayloadEnvelope, err)
+		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
 	// Validate payload with EL (NewPayload).

@@ -56,6 +56,7 @@ type pendingEnvelopeKey struct {
 type pendingEnvelopeJob struct {
 	envelope   *cltypes.SignedExecutionPayloadEnvelope
 	ownedBytes uint64
+	processing atomic.Bool
 }
 
 const (
@@ -65,6 +66,8 @@ const (
 	maxPendingEnvelopes          = 1024
 	maxPendingEnvelopeBytes      = 4 * clparams.MaxChunkSize
 )
+
+var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block unavailable")
 
 type executionPayloadService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
@@ -133,6 +136,15 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#execution_payload
 // [New in Gloas:EIP7732]
 func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	err := s.processMessage(ctx, signedEnvelope)
+	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+	}
+	return err
+}
+
+func (s *executionPayloadService) processMessage(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
@@ -164,15 +176,15 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	if !blockKnown || block == nil {
 		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
 		if err != nil {
-			return fmt.Errorf("%w: %w", ErrIgnore, err)
+			return fmt.Errorf("%w: %w", errEnvelopeBlockUnavailable, err)
 		}
 		if !queued {
-			return fmt.Errorf("%w: execution payload envelope already queued", ErrIgnore)
+			return fmt.Errorf("%w: execution payload envelope already queued", errEnvelopeBlockUnavailable)
 		}
 		log.Trace("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)
-		return ErrIgnore
+		return errEnvelopeBlockUnavailable
 	}
 	if block.Block == nil {
 		return fmt.Errorf("%w: beacon block %v is incomplete", ErrIgnore, beaconBlockRoot)
@@ -193,10 +205,6 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			s.emitExecutionPayloadGossip(block, envelope)
-		}
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
@@ -328,16 +336,20 @@ func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64)
 	}
 }
 
-// tryProcessPendingEnvelope re-runs full validation via ProcessMessage once the block has arrived.
+// tryProcessPendingEnvelope retains queue ownership until validation finishes or forkchoice takes over.
 func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, job *pendingEnvelopeJob) (func(), bool) {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
-	if !ok || block == nil {
-		return nil, false // Block still not here, keep waiting
+	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
+		return nil, false
 	}
-	return func() {
-		s.releasePendingEnvelopeBytes(job.ownedBytes)
-		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
-			log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
+	err := s.processMessage(ctx, job.envelope)
+	if err != nil {
+		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
+		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
+			!errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) && !errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+			job.processing.Store(false)
+			return nil, false
 		}
-	}, true
+	}
+	return func() { s.releasePendingEnvelopeBytes(job.ownedBytes) }, true
 }

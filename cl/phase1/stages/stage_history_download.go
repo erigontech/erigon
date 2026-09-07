@@ -70,6 +70,7 @@ type historyDownloader interface {
 	SetExpectedRoot(common.Hash)
 	SetNeverSkip(bool)
 	SetOnNewBlock(network.OnNewBlock)
+	SetOnInitialGloasBlock(common.Hash, func(*cltypes.SignedBeaconBlock) error)
 	SetSlotToDownload(uint64)
 	SetThrottle(time.Duration)
 }
@@ -143,6 +144,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.downloader.SetExpectedRoot(blockRoot)
 	cfg.downloader.SetBlockChecker(cfg.executionBlocksCollector)
 	cfg.downloader.SetBlockReader(cfg.blockReader)
+	cfg.downloader.SetOnInitialGloasBlock(blockRoot, func(block *cltypes.SignedBeaconBlock) error {
+		return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
+		})
+	})
 
 	var initialBeaconBlock *cltypes.SignedBeaconBlock
 

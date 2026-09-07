@@ -465,7 +465,18 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 
 	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
 	require.NoError(t, err)
-	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
+	require.NotSame(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
+	require.NotNil(t, options.selectedBid)
+	require.Same(t, externalBid, options.selectedBid.bid)
+	require.Empty(t, options.selectedBuilderURL)
+	candidateErr := errors.New("configured candidate transition unavailable")
+	_, _, err = handler.processProducedBlockWithProcessor(postState, block,
+		func(_ *state.CachingBeaconState, candidate *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			require.Same(t, externalBid, candidate.BeaconBody.SignedExecutionPayloadBid)
+			return nil, candidateErr
+		}, options.selectedBid)
+	require.ErrorIs(t, err, candidateErr)
+	require.ErrorContains(t, err, "local execution unavailable")
 }
 
 func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
@@ -507,7 +518,7 @@ func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, block.ExecutionValue)
 	require.Zero(t, block.ExecutionValue.Sign())
-	require.Same(t, externalBid, options.selectedP2PBid.bid)
+	require.Same(t, externalBid, options.selectedBid.bid)
 
 	candidateErr := errors.New("candidate transition unavailable")
 	processedSelfBuild := false
@@ -521,7 +532,7 @@ func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
 			processedSelfBuild = true
 			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
 		},
-		options.selectedP2PBid,
+		options.selectedBid,
 	)
 	require.ErrorIs(t, err, candidateErr)
 	require.False(t, processedSelfBuild)
@@ -750,7 +761,7 @@ func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testin
 	require.Equal(t, []byte("auth-two"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
 }
 
-func TestDecodeGloasBlockProductionOptionsKeepsDistinctPoliciesForOneRequest(t *testing.T) {
+func TestDecodeGloasBlockProductionOptionsDeduplicatesPoliciesForOneRequest(t *testing.T) {
 	base := &cltypes.BuilderEntry{
 		URL: "https://builder.example",
 		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
@@ -786,7 +797,7 @@ func TestDecodeGloasBlockProductionOptionsKeepsDistinctPoliciesForOneRequest(t *
 
 			options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
 			require.NoError(t, err)
-			require.Len(t, options.builderConfig.Builders, 2)
+			require.Len(t, options.builderConfig.Builders, 1)
 		})
 	}
 }
@@ -3997,4 +4008,38 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
 	// separate matter and not what this measures.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
+}
+
+func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.T) {
+	for _, exitBuilder := range []bool{false, true} {
+		t.Run(fmt.Sprint(exitBuilder), func(t *testing.T) {
+			fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{exitBuilder: exitBuilder})
+			selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+			expectedState, err := fixture.productionState.Copy()
+			require.NoError(t, err)
+			_, err = processBlockForProduction(expectedState, fixture.block)
+			require.NoError(t, err)
+			expectedRoot, err := expectedState.HashSSZ()
+			require.NoError(t, err)
+			candidate := &gloasBidCandidate{
+				bid: fixture.externalBid, executionValueWei: gweiToWei(big.NewInt(3)),
+				builderURL: "https://builder.example",
+			}
+			handler := &ApiHandler{}
+			selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block, candidate)
+			require.NoError(t, err)
+			if exitBuilder {
+				require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+				actualRoot, err := selectedState.HashSSZ()
+				require.NoError(t, err)
+				require.Equal(t, expectedRoot, actualRoot)
+				require.Len(t, fixture.block.Blobs, 1)
+				require.Len(t, fixture.block.KzgProofs, 1)
+			} else {
+				require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+				require.Empty(t, fixture.block.Blobs)
+				require.Empty(t, fixture.block.KzgProofs)
+			}
+		})
+	}
 }

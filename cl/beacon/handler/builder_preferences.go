@@ -110,13 +110,17 @@ func (a *ApiHandler) PostEthV1ValidatorBuilderPreferences(w http.ResponseWriter,
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := entries.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+		if err := entries.DecodeSSZStrictStructural(body, int(clparams.GloasVersion)); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		indexedEntries = make([]indexedEntry, len(entries))
+		indexedEntries = make([]indexedEntry, 0, len(entries))
 		for i, entry := range entries {
-			indexedEntries[i] = indexedEntry{index: i, entry: entry}
+			if err := entry.Validate(); err != nil {
+				failures = append(failures, poolingFailure{Index: i, Message: builderFailureMessage(err)})
+				continue
+			}
+			indexedEntries = append(indexedEntries, indexedEntry{index: i, entry: entry})
 		}
 	default:
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType)).WriteTo(w)

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -268,10 +269,10 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
 		slot, hexutil.Encode(randaoReveal[:]))
 
-	var blockResponse json.RawMessage
+	var response *beaconResponse
 	var getErr error
 	for range 5 {
-		getErr = s.client.get(ctx, path, &blockResponse)
+		response, getErr = s.client.getResponse(ctx, path)
 		if getErr == nil {
 			break
 		}
@@ -281,8 +282,8 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("get block template: %w", getErr)
 	}
 
-	// Parse the block template. The v3 response is a DenebBeaconBlock
-	// ({"block": {...}, "kzg_proofs": [...], "blobs": [...]}).
+	blockResponse := response.Data
+
 	version := s.cfg.GetCurrentStateVersion(epoch)
 	var denebBlock struct {
 		Block     json.RawMessage `json:"block"`
@@ -303,6 +304,10 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("parse block template: %w", err)
 	}
 
+	if block.Block.Body == nil {
+		return fmt.Errorf("block template body is missing")
+	}
+
 	// Ensure execution payload sub-fields are initialized (the JSON response
 	// may leave some nil which causes HashSSZ to panic).
 	if block.Block.Body.ExecutionPayload != nil {
@@ -317,6 +322,17 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		}
 	}
 
+	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	if version >= clparams.GloasVersion {
+		if block.Block.Slot != slot {
+			return fmt.Errorf("block template slot %d does not match requested slot %d", block.Block.Slot, slot)
+		}
+		signedEnvelope, err = s.signExecutionPayloadEnvelope(block.Block, response.ExecutionPayloadEnvelope, key)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Sign the block.
 	sig, err := signBlock(key, block.Block, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
@@ -324,11 +340,9 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	}
 	block.Signature = sig
 
-	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
-	// with empty blob sidecars.
 	versionStr := version.String()
 	var submitBody any = block
-	if version >= clparams.DenebVersion {
+	if version >= clparams.DenebVersion && version < clparams.GloasVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,
 			KZGProofs:   solid.NewStaticListSSZ[*cltypes.KZGProof](cltypes.MaxBlobsCommittmentsPerBlock*int(s.cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF),
@@ -339,8 +353,70 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("submit block: %w", err)
 	}
 
+	if signedEnvelope != nil {
+		headers := http.Header{
+			"Eth-Consensus-Version":  {versionStr},
+			"Eth-Blob-Data-Included": {"false"},
+		}
+		if err := s.client.postJSONWithHeaders(ctx, "/eth/v1/beacon/execution_payload_envelopes", signedEnvelope, headers); err != nil {
+			return fmt.Errorf("submit execution payload envelope: %w", err)
+		}
+	}
+
 	s.logger.Info("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
 	return nil
+}
+
+func (s *Service) signExecutionPayloadEnvelope(block *cltypes.BeaconBlock, data json.RawMessage, key *ValidatorKey) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if block.Body.SignedExecutionPayloadBid == nil || block.Body.SignedExecutionPayloadBid.Message == nil {
+		return nil, fmt.Errorf("block template execution payload bid is missing")
+	}
+	bid := block.Body.SignedExecutionPayloadBid.Message
+	if bid.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		if len(data) != 0 {
+			return nil, fmt.Errorf("external builder template includes an unsigned execution payload envelope")
+		}
+		return nil, nil
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("self-build template execution payload envelope is missing")
+	}
+	envelope := cltypes.NewExecutionPayloadEnvelope(s.cfg)
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse execution payload envelope: %w", err)
+	}
+	if envelope == nil || envelope.Payload == nil || envelope.ExecutionRequests == nil {
+		return nil, fmt.Errorf("execution payload envelope is incomplete")
+	}
+	if withdrawals := envelope.Payload.Withdrawals; withdrawals != nil {
+		for i := 0; i < withdrawals.Len(); i++ {
+			if withdrawals.Get(i) == nil {
+				return nil, fmt.Errorf("execution payload withdrawal %d is null", i)
+			}
+		}
+	}
+	blockRoot, err := block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("hash block template: %w", err)
+	}
+	if envelope.BeaconBlockRoot != blockRoot || envelope.ParentBeaconBlockRoot != block.ParentRoot ||
+		envelope.BuilderIndex != bid.BuilderIndex || envelope.Payload.BlockHash != bid.BlockHash ||
+		envelope.Payload.SlotNumber != block.Slot {
+		return nil, fmt.Errorf("execution payload envelope does not match block template")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("hash execution requests: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return nil, fmt.Errorf("execution requests do not match block template")
+	}
+	epoch := block.Slot / s.cfg.SlotsPerEpoch
+	signature, err := signObject(key, envelope, s.cfg.DomainBeaconBuilder, epoch, s.cfg, s.genesisValidatorsRoot)
+	if err != nil {
+		return nil, fmt.Errorf("sign execution payload envelope: %w", err)
+	}
+	return &cltypes.SignedExecutionPayloadEnvelope{Message: envelope, Signature: signature}, nil
 }
 
 // maybeAttest submits attestations for validators with duties at this slot.

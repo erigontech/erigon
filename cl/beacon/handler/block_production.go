@@ -694,13 +694,17 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	var postState *state.CachingBeaconState
 	var blockBuildingMachine *eth2.Impl
 	if gloasOptions != nil {
-		postState, blockBuildingMachine, err = a.processProducedBlock(baseState, block, gloasOptions.selectedP2PBid)
+		postState, blockBuildingMachine, err = a.processProducedBlock(baseState, block, gloasOptions.selectedBid)
 	} else {
 		postState, blockBuildingMachine, err = a.processProducedBlock(baseState, block)
 	}
 	if err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
+	}
+	if gloasOptions != nil && gloasOptions.selectedBid != nil &&
+		block.BeaconBody.SignedExecutionPayloadBid == gloasOptions.selectedBid.bid {
+		gloasOptions.selectedBuilderURL = gloasOptions.selectedBid.builderURL
 	}
 	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 	startConsensusProcessing = time.Now()
@@ -982,31 +986,15 @@ func (a *ApiHandler) produceBlock(
 					options.builderRouteReserved = true
 				}
 			}
-			if selected != nil && selected.builderURL == "" {
+			if selected != nil {
 				selected.selfBuildErr = localErr
-				options.selectedP2PBid = selected
+				options.selectedBid = selected
 				block.BeaconBody = beaconBody
 				block.Blobs = blobs
 				block.KzgProofs = kzgProofs
 				block.ExecutionValue = new(big.Int)
 				if localExecValue != nil {
 					block.ExecutionValue.Set(localExecValue)
-				}
-				return block, nil
-			}
-			if selected != nil {
-				log.Info("GLOAS: selected external builder bid over self-build",
-					"slot", targetSlot,
-					"builderIndex", selected.bid.Message.BuilderIndex,
-					"bidValue", selected.bid.Message.Value,
-					"localValue", localExecValue)
-				beaconBody.SignedExecutionPayloadBid = selected.bid
-				block.BeaconBody = beaconBody
-				block.Blobs = blobs
-				block.KzgProofs = kzgProofs
-				block.ExecutionValue = selected.executionValueWei
-				if options != nil {
-					options.selectedBuilderURL = selected.builderURL
 				}
 				return block, nil
 			}
@@ -1109,7 +1097,8 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	if block.Version().AfterOrEqual(clparams.GloasVersion) && block.BeaconBody == nil {
 		return baseState, nil, errors.New("cannot process blinded Gloas block")
 	}
-	if block.Version().Before(clparams.GloasVersion) || a.epbsPool == nil {
+	hasSelectedCandidate := len(selectedCandidates) > 0 && selectedCandidates[0] != nil
+	if block.Version().Before(clparams.GloasVersion) || (a.epbsPool == nil && !hasSelectedCandidate) {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
@@ -1119,7 +1108,6 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
-	hasSelectedCandidate := len(selectedCandidates) > 0 && selectedCandidates[0] != nil
 	if !hasSelectedCandidate && selfBid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
@@ -1188,7 +1176,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	// Candidate processing includes work unrelated to the bid. Evict only errors
 	// marked as deterministic bid-validation failures.
 	bidEvicted := false
-	if errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
+	if a.epbsPool != nil && errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
 		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	}
 	if selfBuildErr != nil {

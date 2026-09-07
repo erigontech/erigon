@@ -396,7 +396,7 @@ func (b *BuilderConfig) validate() error {
 	if len(b.Builders) > MaxBuilderEntries {
 		return fmt.Errorf("builder count %d exceeds %d", len(b.Builders), MaxBuilderEntries)
 	}
-	seen := make(map[string]struct{}, len(b.Builders))
+	seen := make(map[[2]string]struct{}, len(b.Builders))
 	for i, entry := range b.Builders {
 		if entry == nil {
 			return fmt.Errorf("builder %d is nil", i)
@@ -404,11 +404,7 @@ func (b *BuilderConfig) validate() error {
 		if err := entry.validate(); err != nil {
 			return fmt.Errorf("builder %d: %w", i, err)
 		}
-		encoded, err := entry.EncodeSSZ(nil)
-		if err != nil {
-			return fmt.Errorf("builder %d: %w", i, err)
-		}
-		key := string(encoded)
+		key := [2]string{entry.URL, string(entry.Auth.Message.Data)}
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("builder %d duplicates an earlier entry", i)
 		}
@@ -456,6 +452,42 @@ func (b *BuilderPreferencesEntries) DecodeSSZStrict(buf []byte, version int) err
 	}
 	*b = entries
 	return b.validate()
+}
+
+func (b *BuilderPreferencesEntries) DecodeSSZStrictStructural(buf []byte, version int) error {
+	entries, err := commonssz.DecodeDynamicListStrict[*rawBuilderPreferencesEntry](buf, 0, uint32(len(buf)), MaxBuilderPreferencesEntries, version)
+	if err != nil {
+		return err
+	}
+	*b = make(BuilderPreferencesEntries, len(entries))
+	for i, entry := range entries {
+		(*b)[i] = &entry.BuilderPreferencesEntry
+	}
+	return nil
+}
+
+type rawBuilderPreferencesEntry struct{ BuilderPreferencesEntry }
+
+func (b *rawBuilderPreferencesEntry) DecodeSSZ(buf []byte, version int) error {
+	return b.DecodeSSZStrict(buf, version)
+}
+
+func (b *rawBuilderPreferencesEntry) DecodeSSZStrict(buf []byte, version int) error {
+	var urlBytes hexutil.Bytes
+	var auth rawSignedBuilderRequestAuth
+	if err := ssz2.UnmarshalSSZStrict(buf, version, b.ProposerPubkey[:], &rawByteList{value: &urlBytes, limit: MaxBuilderURLSize}, &auth, &b.MaxExecutionPayment); err != nil {
+		return err
+	}
+	b.URL = string(urlBytes)
+	b.Auth = &SignedBuilderRequestAuth{
+		Message:   &BuilderRequestAuth{Data: auth.message.data, Slot: auth.message.slot},
+		Signature: auth.signature,
+	}
+	return nil
+}
+
+func (b *rawBuilderPreferencesEntry) Clone() clonable.Clonable {
+	return new(rawBuilderPreferencesEntry)
 }
 
 func (b BuilderPreferencesEntries) Clone() clonable.Clonable {
@@ -573,6 +605,10 @@ func (b BuilderPreferencesEntry) MarshalJSON() ([]byte, error) {
 	}
 	type builderPreferencesEntry BuilderPreferencesEntry
 	return json.Marshal(builderPreferencesEntry(b))
+}
+
+func (b *BuilderPreferencesEntry) Validate() error {
+	return b.validate()
 }
 
 func (b *BuilderPreferencesEntry) validate() error {

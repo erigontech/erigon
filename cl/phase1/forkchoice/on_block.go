@@ -729,7 +729,7 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 }
 
 func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.SignedExecutionPayloadEnvelope) bool {
-	if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
+	if errors.Is(err, ErrInvalidExecutionPayloadEnvelope) {
 		return false
 	}
 	if pending == nil {

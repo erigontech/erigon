@@ -40,7 +40,7 @@ type gloasBlockProductionOptions struct {
 	includePayload       bool
 	selectedBuilderURL   string
 	builderRouteReserved bool
-	selectedP2PBid       *gloasBidCandidate
+	selectedBid          *gloasBidCandidate
 	selfBuildPayload     *selfBuildPayload
 	payloadFeeRecipient  *common.Address
 	deferPayloadCache    bool
@@ -91,16 +91,12 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
 	}
 	validBuilders := make([]*cltypes.BuilderEntry, 0, len(config.Builders))
-	seen := make(map[string]struct{}, len(config.Builders))
+	seen := make(map[[2]string]struct{}, len(config.Builders))
 	for _, entry := range config.Builders {
 		if entry == nil || entry.Validate() != nil || entry.Auth.Message.Slot != targetSlot {
 			continue
 		}
-		encoded, err := entry.EncodeSSZ(nil)
-		if err != nil {
-			continue
-		}
-		key := string(encoded)
+		key := [2]string{entry.URL, string(entry.Auth.Message.Data)}
 		if _, ok := seen[key]; ok {
 			continue
 		}

@@ -966,7 +966,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			})
 		}
 	}
-	if status == http.StatusOK && emitIntegrationEvents && a.emitters != nil {
+	if emitIntegrationEvents && a.emitters != nil {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if ok && block != nil && block.Block != nil && signedEnvelope.Message.Payload != nil {
 			a.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{

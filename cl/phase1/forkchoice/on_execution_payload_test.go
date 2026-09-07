@@ -323,7 +323,7 @@ func TestPendingEnvelopeErrorClassification(t *testing.T) {
 	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: %w", errPayloadValidationAdmission, context.Canceled), stale))
 	require.True(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, recent))
 	require.False(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, stale))
-	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope), nil))
+	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", ErrInvalidExecutionPayloadEnvelope), nil))
 }
 
 func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing.T) {

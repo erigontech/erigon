@@ -24,9 +24,14 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,8 +48,10 @@ func (*failingHistoryDownloader) SetBlockReader(network.BeaconBlockBodyReader) {
 func (*failingHistoryDownloader) SetExpectedRoot(common.Hash)                  {}
 func (*failingHistoryDownloader) SetNeverSkip(bool)                            {}
 func (*failingHistoryDownloader) SetOnNewBlock(network.OnNewBlock)             {}
-func (*failingHistoryDownloader) SetSlotToDownload(uint64)                     {}
-func (*failingHistoryDownloader) SetThrottle(time.Duration)                    {}
+func (*failingHistoryDownloader) SetOnInitialGloasBlock(common.Hash, func(*cltypes.SignedBeaconBlock) error) {
+}
+func (*failingHistoryDownloader) SetSlotToDownload(uint64)  {}
+func (*failingHistoryDownloader) SetThrottle(time.Duration) {}
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
@@ -134,4 +141,46 @@ func TestWaitForHistoryDownloadJoinsFinishedWorker(t *testing.T) {
 		downloader: &failingHistoryDownloader{finished: true},
 	}, 0, historyDone)
 	require.ErrorIs(t, err, wantErr)
+}
+
+type initialGloasHistoryDownloader struct {
+	failingHistoryDownloader
+	block   *cltypes.SignedBeaconBlock
+	persist func(*cltypes.SignedBeaconBlock) error
+}
+
+func (d *initialGloasHistoryDownloader) SetOnInitialGloasBlock(_ common.Hash, persist func(*cltypes.SignedBeaconBlock) error) {
+	d.persist = persist
+}
+func (d *initialGloasHistoryDownloader) RequestMore(context.Context) error {
+	if d.persist == nil {
+		return errors.New("initial Gloas callback was not configured")
+	}
+	if err := d.persist(d.block); err != nil {
+		return err
+	}
+	return d.err
+}
+func TestHistoryDownloadPersistsInitialGloasBlockWithoutPayloadClassification(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 10
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	t.Cleanup(db.Close)
+	stop := errors.New("stop after anchor persistence")
+	downloader := &initialGloasHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}, block: block}
+	err = SpawnStageHistoryDownload(StageHistoryReconstructionCfg{beaconCfg: &cfg, downloader: downloader, startingRoot: root, startingSlot: 10, indiciesDB: db, logger: log.New()}, t.Context(), log.New())
+	require.ErrorIs(t, err, stop)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		got, err := beacon_indicies.ReadCanonicalBlockRoot(tx, 10)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash(root), got)
+		executionHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, executionHash)
+		return nil
+	}))
 }

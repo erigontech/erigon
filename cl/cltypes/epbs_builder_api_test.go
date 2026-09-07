@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -208,4 +209,43 @@ func TestBuilderPreferencesEntriesJSONAndSSZ(t *testing.T) {
 	_, err = tooMany.EncodeSSZ(nil)
 	require.Error(t, err)
 	require.Error(t, json.Unmarshal([]byte("null"), &fromJSON))
+}
+
+func TestBuilderConfigRejectsDuplicateIdentityAcrossPolicies(t *testing.T) {
+	entry := &BuilderEntry{URL: "https://builder.example", Auth: validSignedBuilderRequestAuth(), BuilderPubkeys: []common.Bytes48{}}
+	variant := entry.Clone().(*BuilderEntry)
+	variant.BuilderBoostFactor = 200
+	config := &BuilderConfig{Builders: []*BuilderEntry{entry, variant}}
+	_, err := config.MarshalJSON()
+	require.ErrorContains(t, err, "duplicates")
+	_, err = config.EncodeSSZ(nil)
+	require.ErrorContains(t, err, "duplicates")
+	variant.Auth.Message.Data = []byte("different-auth")
+	_, err = config.MarshalJSON()
+	require.NoError(t, err)
+	_, err = config.EncodeSSZ(nil)
+	require.NoError(t, err)
+}
+
+func TestBuilderPreferencesStructuralDecodePreservesEmptyAuthEntry(t *testing.T) {
+	pubkey := common.Bytes48{1}
+	urlBytes := hexutil.Bytes("https://builder.example")
+	auth := &rawSignedBuilderRequestAuth{message: &rawBuilderRequestAuth{slot: 12}}
+	invalid, err := ssz2.MarshalSSZ(nil, pubkey[:], &rawByteList{value: &urlBytes, limit: MaxBuilderURLSize}, auth, uint64(1))
+	require.NoError(t, err)
+	valid := &BuilderPreferencesEntry{URL: string(urlBytes), Auth: validSignedBuilderRequestAuth()}
+	validBytes, err := valid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encoded := binary.LittleEndian.AppendUint32(nil, 8)
+	encoded = binary.LittleEndian.AppendUint32(encoded, uint32(8+len(invalid)))
+	encoded = append(encoded, invalid...)
+	encoded = append(encoded, validBytes...)
+	var entries BuilderPreferencesEntries
+	require.Error(t, entries.DecodeSSZStrict(encoded, 0))
+	require.NoError(t, entries.DecodeSSZStrictStructural(encoded, 0))
+	require.Len(t, entries, 2)
+	require.Error(t, entries[0].Validate())
+	require.NoError(t, entries[1].Validate())
+	encoded[0] = 9
+	require.Error(t, entries.DecodeSSZStrictStructural(encoded, 0))
 }
