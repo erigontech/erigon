@@ -1001,3 +1001,61 @@ func TestVerifyParallel_StorageIncrementalDeletes(t *testing.T) {
 		requireIncrementalEquiv(t, keys, upds, k2, u2, w)
 	}
 }
+
+// Regression marker for #20961: a follow-up block that carries only part of an
+// account (here a balance write with no nonce write) must not make the trie
+// treat the rest of the account as zero.
+func Test_ModeParallel_SiblingConsistency(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	keys1, upds1 := NewUpdateBuilder().
+		Balance("00", 100).
+		Nonce("00", 1).
+		Balance("01", 200).
+		Nonce("01", 2).
+		Balance("02", 300).
+		Nonce("02", 3).
+		Build()
+	keys2, upds2 := NewUpdateBuilder().
+		Balance("00", 150).
+		Build()
+
+	directMs := NewMockState(t)
+	directTrie := NewHexPatriciaHashed(1, directMs, DefaultTrieConfig())
+	defer directTrie.Release()
+	directRoot := func(keys [][]byte, upds []Update) []byte {
+		require.NoError(t, directMs.applyPlainUpdates(keys, upds))
+		ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+		defer ut.Close()
+		return processRoot(t, directTrie, ut)
+	}
+	directRoot(keys1, upds1)
+	wantRoot := directRoot(keys2, upds2)
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	parRoot := func(keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
+		require.NoError(t, parMs.applyPlainUpdates(keys, upds))
+		tr := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), 1, DefaultTrieConfig())
+		defer tr.Release()
+		tr.SetNumWorkers(2)
+		tr.ResetContext(parMs)
+		require.NoError(t, tr.RootTrie().SetState(blob))
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for i, k := range keys {
+			ut.TouchPlainKeyDirect(string(k), &upds[i])
+		}
+		root, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		state, err := tr.RootTrie().EncodeCurrentState(nil)
+		require.NoError(t, err)
+		return bytes.Clone(root), state
+	}
+	_, blob := parRoot(keys1, upds1, nil)
+	gotRoot, _ := parRoot(keys2, upds2, blob)
+
+	require.Equal(t, wantRoot, gotRoot,
+		"a carried balance-only update must not zero the account's untouched nonce")
+}

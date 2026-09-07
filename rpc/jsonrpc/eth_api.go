@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -150,10 +151,9 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
-	_preMergeData             atomic.Pointer[preMergeVerdict]
-	_preMergeDataTTL          time.Duration
-	_preMergeProbeMu          sync.Mutex
-	_preMergeProbeInFlight    *preMergeProbe
+	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
+	// availability, which widens as segments arrive.
+	_preMergeData concurrent.CachedValue[bool]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -194,14 +194,13 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
-	return &BaseAPI{
+	api := &BaseAPI{
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
-		_preMergeDataTTL:  defaultPreMergeDataTTL,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
 		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
@@ -211,6 +210,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
+	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
+	return api
 }
 
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
@@ -255,8 +256,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 // view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
-	var blockNotFound rpc.BlockNotFoundErr
-	if !errors.As(err, &blockNotFound) {
+	if _, ok := errors.AsType[rpc.BlockNotFoundErr](err); !ok {
 		return blockNumber, err
 	}
 
@@ -457,23 +457,6 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
-// preMergeVerdict is the archive-vs-expiry answer with the time it was observed: it
-// reads live snapshot availability, which widens as segments arrive.
-type preMergeVerdict struct {
-	holds bool
-	at    time.Time
-}
-
-// preMergeProbe is a probe other callers can wait on rather than repeat. Its result is
-// readable once done is closed.
-type preMergeProbe struct {
-	done  chan struct{}
-	holds bool
-	err   error
-}
-
-var errPreMergeProbeAbandoned = errors.New("pre-merge block data probe did not complete")
-
 const defaultPreMergeDataTTL = 30 * time.Second
 
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
@@ -529,72 +512,28 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 }
 
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
-// point, which tells a legacy archive from chain-history expiry when the stored prune
-// mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
-// available block answers on its own: expiry keeps pre-merge headers and bodies, and
-// the transaction segment spanning the merge point reaches below it. Only a readable
-// transaction of an early block does, so block data the search cannot read leaves the
-// question open rather than settling it, and an open question is not remembered. The
-// answer is availability rather than policy, so a settled one is kept for a short TTL in
-// both directions instead of being decided once. One probe answers every caller waiting
-// on it: each costs several backend reads under an open read transaction, so refreshing
-// the TTL must not fan out with the load.
+// point, which tells a legacy archive from chain-history expiry where the stored prune
+// mode carries the same sentinel for both. Only a readable transaction of an early block
+// settles it: expiry keeps pre-merge headers and bodies, and the transaction segment
+// spanning the merge point reaches below it.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
-		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
-			return v.holds, nil
+		if holds, observed, fresh := api._preMergeData.Load(); observed && fresh {
+			return holds, nil
 		}
-		probe, leader := api.joinPreMergeProbe()
-		if leader {
-			return api.runPreMergeProbe(ctx, tx, mergeHeight, probe)
+		holds, ran, err := api._preMergeData.Produce(ctx, func() (bool, bool, error) {
+			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
+		})
+		switch {
+		case err == nil:
+			return holds, nil
+		case ran || ctx.Err() != nil:
+			return false, err
 		}
-		select {
-		case <-probe.done:
-			if probe.err == nil {
-				return probe.holds, nil
-			}
-			// The probe reads through the transaction of the caller that ran it, so its
-			// failure is about that caller rather than about the datadir: ask again here.
-		case <-ctx.Done():
-			return false, ctx.Err()
-		}
+		// The probe reads through the transaction of the caller that ran it, so a failure
+		// is about that caller rather than about the datadir: one that only waited asks
+		// again on its own.
 	}
-}
-
-// runPreMergeProbe answers the callers waiting on probe. A probe that dies without a
-// result must still release them, and with an error rather than its zero verdict, so
-// that the next caller asks again instead of taking an answer nobody produced.
-func (api *BaseAPI) runPreMergeProbe(ctx context.Context, tx kv.Tx, mergeHeight uint64, probe *preMergeProbe) (bool, error) {
-	holds, decided := false, false
-	err := errPreMergeProbeAbandoned
-	defer func() { api.finishPreMergeProbe(probe, holds, err) }()
-
-	holds, decided, err = api.probePreMergeBlockData(ctx, tx, mergeHeight)
-	if err == nil && decided {
-		api._preMergeData.Store(&preMergeVerdict{holds: holds, at: time.Now()})
-	}
-	return holds, err
-}
-
-// joinPreMergeProbe registers this caller as the one running the probe, or hands back
-// the probe already in flight. The lock covers that bookkeeping alone, never the probe.
-func (api *BaseAPI) joinPreMergeProbe() (*preMergeProbe, bool) {
-	api._preMergeProbeMu.Lock()
-	defer api._preMergeProbeMu.Unlock()
-	if probe := api._preMergeProbeInFlight; probe != nil {
-		return probe, false
-	}
-	probe := &preMergeProbe{done: make(chan struct{})}
-	api._preMergeProbeInFlight = probe
-	return probe, true
-}
-
-func (api *BaseAPI) finishPreMergeProbe(probe *preMergeProbe, holds bool, err error) {
-	api._preMergeProbeMu.Lock()
-	defer api._preMergeProbeMu.Unlock()
-	probe.holds, probe.err = holds, err
-	close(probe.done)
-	api._preMergeProbeInFlight = nil
 }
 
 // probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
@@ -753,12 +692,9 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
-// from the receipt cache where it still covers the block, and otherwise from
-// re-executing it, which reaches only as far back as state history. Enabling the
-// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
-// on its own --prune.receipts.distance window when one is set, and alongside history
-// otherwise.
+// checkReceiptsAvailable gates endpoints serving the full receipts of a block. Below
+// Byzantium those carry a post state the cache does not store, so the block has to be
+// re-executed and reaches only as far back as state history.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
@@ -767,6 +703,16 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	if computed {
 		return api.checkPruneHistory(ctx, tx, block)
 	}
+	return api.checkReceiptSourceAvailable(ctx, tx, block)
+}
+
+// checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
+// the caller reads off them: the receipt cache where it still covers the block, and
+// otherwise a re-execution reaching only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired on
+// its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
+func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -781,7 +727,7 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	switch amount := p.ReceiptsAmount(); {
 	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
-	case p.ReceiptsFollowHistory():
+	case !amount.Enabled():
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
@@ -800,9 +746,6 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return false, err
-	}
-	if chainConfig.IsByzantium(block) {
-		return false, nil
 	}
 	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
@@ -825,10 +768,14 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // checkLogsAvailable gates a log query on the data it reads: the receipts of the
 // range, which are derived from the block's transactions, plus the log indices when
 // the filter searches them. The indices are retired at the history cutoff whatever
-// the receipt retention is. Every leg is a lower bound, so checking the first block
-// of the range covers all of it.
+// the receipt retention is. Logs are read off a receipt without its post state, so
+// this takes the receipt source rather than the full-receipt gate. Every leg is a
+// lower bound, so checking the first block of the range covers all of it.
 func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	if err := api.checkReceiptSourceAvailable(ctx, tx, block); err != nil {
 		return err
 	}
 	if !usesLogIndex(crit) {
@@ -888,7 +835,7 @@ type APIImpl struct {
 	ethBackend                  rpchelper.ApiBackend
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
-	gasCache                    *GasPriceCache
+	gasCache                    gasprice.Cache
 	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64

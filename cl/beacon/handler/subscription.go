@@ -54,7 +54,6 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		return
 	}
 
-	var err error
 	// process each sub request
 	for _, subRequest := range req {
 		expiry := a.ethClock.GetSlotTime(subRequest.UntilEpoch * a.beaconChainCfg.SlotsPerEpoch)
@@ -69,10 +68,11 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			}
 		} else {
 			if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-				syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
+				sn, err := subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
 				if err != nil {
 					return err
 				}
+				syncnets = sn
 				return nil
 			}); err != nil {
 				beaconhttp.WrapEndpointError(err).WriteTo(w)

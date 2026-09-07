@@ -131,13 +131,11 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		if header == nil {
+		number, err := api.BaseAPI.resolveLogsBlockHash(ctx, tx, *crit.BlockHash)
+		if err != nil {
 			return nil, err
 		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
-
+		begin, end = number, number
 	} else {
 		var err error
 		begin, end, err = logRangeLatestOnly(tx, crit)

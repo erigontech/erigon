@@ -288,7 +288,7 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	bid := newTestExecutionPayloadBid(12, 3, 1000)
-	handler.epbsPool.HighestBids.Add(pool.HighestBidKey{
+	handler.epbsPool.StoreHighestBid(pool.HighestBidKey{
 		Slot:            bid.Slot,
 		ParentBlockHash: bid.ParentBlockHash,
 		ParentBlockRoot: bid.ParentBlockRoot,

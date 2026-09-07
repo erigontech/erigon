@@ -361,30 +361,6 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 	}
 }
 
-// BenchmarkHashOrNumberEncodeRLP pins why the hash branch encodes through a pointer:
-// a common.Hash boxed by value is not addressable, so the reflection encoder copies
-// it with reflect.New before it can take a byte slice of it.
-func BenchmarkHashOrNumberEncodeRLP(b *testing.B) {
-	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
-
-	b.Run("byValue", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			if err := rlp.Encode(io.Discard, hn.Hash); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("byPointer", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			if err := rlp.Encode(io.Discard, &hn.Hash); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
 // TestHashOrNumberEncodeRLPPointerIsAllocFree pins both EncodeRLP branches: the
 // hash branch encodes through a pointer and allocates nothing, the number branch
 // boxes a uint64 into any and allocates once above the runtime's 0-255 cache. It

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("{\"error\":{\"code\":1,\"message\":\"x\",\"data\":[]}}")

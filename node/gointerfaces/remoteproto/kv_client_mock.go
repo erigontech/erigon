@@ -351,6 +351,50 @@ func (c *MockKVClientIndexRangeCall) DoAndReturn(f func(context.Context, *IndexR
 	return c
 }
 
+// MaxPrunableStepsBacklog mocks base method.
+func (m *MockKVClient) MaxPrunableStepsBacklog(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MaxPrunableStepsBacklogReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "MaxPrunableStepsBacklog", varargs...)
+	ret0, _ := ret[0].(*MaxPrunableStepsBacklogReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaxPrunableStepsBacklog indicates an expected call of MaxPrunableStepsBacklog.
+func (mr *MockKVClientMockRecorder) MaxPrunableStepsBacklog(ctx, in any, opts ...any) *MockKVClientMaxPrunableStepsBacklogCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxPrunableStepsBacklog", reflect.TypeOf((*MockKVClient)(nil).MaxPrunableStepsBacklog), varargs...)
+	return &MockKVClientMaxPrunableStepsBacklogCall{Call: call}
+}
+
+// MockKVClientMaxPrunableStepsBacklogCall wrap *gomock.Call
+type MockKVClientMaxPrunableStepsBacklogCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientMaxPrunableStepsBacklogCall) Return(arg0 *MaxPrunableStepsBacklogReply, arg1 error) *MockKVClientMaxPrunableStepsBacklogCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientMaxPrunableStepsBacklogCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*MaxPrunableStepsBacklogReply, error)) *MockKVClientMaxPrunableStepsBacklogCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientMaxPrunableStepsBacklogCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*MaxPrunableStepsBacklogReply, error)) *MockKVClientMaxPrunableStepsBacklogCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Range mocks base method.
 func (m *MockKVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	m.ctrl.T.Helper()

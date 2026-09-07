@@ -235,7 +235,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 		if err != nil {
 			return err
 		}
-		for key != nil && len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+		for len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
 			k := key[:len(key)-8]
 			stepBytes := key[len(key)-8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
@@ -296,7 +296,7 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		if err != nil {
 			return err
 		}
-		if initial == nil || len(initial) <= 8 {
+		if len(initial) <= 8 {
 			break
 		}
 		baseKey := initial[:len(initial)-8]
@@ -306,11 +306,11 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 			if err != nil {
 				return err
 			}
-			if k == nil || len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
+			if len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
 				break
 			}
 		}
-		if k == nil || len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+		if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 			break
 		}
 		stepBytes := k[len(k)-8:]

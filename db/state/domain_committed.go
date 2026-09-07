@@ -189,8 +189,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			return 0, false
 		}
 
-		k, _ := itemGetter.Next(nil)
-		if !bytes.Equal(fullKey, k) {
+		if itemGetter.MatchCmp(fullKey) != 0 {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 

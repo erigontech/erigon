@@ -237,8 +237,8 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 }
 
 func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
-	var err error
 	if hi.valsCDup == nil {
+		var err error
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}

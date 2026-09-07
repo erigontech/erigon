@@ -182,34 +182,6 @@ func FuzzHexCompactRoundtrip(f *testing.F) {
 	})
 }
 
-func BenchmarkHexToCompact(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		HexToCompact(testBytes)
-	}
-}
-
-func BenchmarkCompactToHex(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		CompactToHex(testBytes)
-	}
-}
-
-func BenchmarkKeybytesToHex(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		KeybytesToHex(testBytes)
-	}
-}
-
-func BenchmarkHexToKeybytes(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		HexToKeybytes(testBytes)
-	}
-}
-
 func TestHexToCompactInto(t *testing.T) {
 	hex := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	want := HexToCompact(hex)

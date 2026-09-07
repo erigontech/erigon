@@ -84,13 +84,3 @@ func TestReceiptForStorage_RoundTrip(t *testing.T) {
 		require.Equal(t, []byte(want.Logs[i].Data), []byte(l.Data))
 	}
 }
-
-func BenchmarkReceiptForStorageEncode(b *testing.B) {
-	r := storageReceiptFixture()
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := rlp.EncodeToBytes(r); err != nil {
-			b.Fatal(err)
-		}
-	}
-}

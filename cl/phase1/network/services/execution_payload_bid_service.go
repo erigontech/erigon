@@ -368,13 +368,13 @@ func (s *executionPayloadBidService) storeValidBid(msg *cltypes.SignedExecutionP
 	}
 	s.seenCache.Add(seenKey, struct{}{})
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	s.epbsPool.HighestBids.Add(bidKey, msg)
+	s.epbsPool.StoreHighestBid(bidKey, msg)
 	return nil
 }
 
 func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	existing, found := s.epbsPool.HighestBids.Get(bidKey)
+	existing, found := s.epbsPool.GetHighestBid(bidKey)
 	if !found || existing == nil || existing.Message == nil {
 		return nil
 	}

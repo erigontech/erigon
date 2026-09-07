@@ -1272,6 +1272,9 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 // the self-destruct-vs-field priority iterate these in explicit order (e.g.
 // SelfDestructs before the reviving field writes) rather than relying on a flat
 // stream's element order.
+func (s *WriteSet) Addresses() iter.Seq2[accounts.Address, *VersionedWrite[*accounts.Account]] {
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[*accounts.Account] { return s.address })
+}
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }
@@ -1889,6 +1892,8 @@ func SetAccountFieldFromAccount(out *WriteSet, addr accounts.Address, path Accou
 // TouchUpdates feeds the write set directly to a commitment.Updates buffer
 // via TouchPlainKeyDirect, one partial Update per write. The buffer merges
 // per key (ModeUpdate and ModeParallel both accumulate flags additively).
+// An address whose writes do not cover balance, nonce and code hash together
+// costs one account read at fold time, where the trie fills in the rest.
 func (s *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	if s == nil {
 		return

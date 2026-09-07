@@ -154,13 +154,6 @@ func TestAddressHexChecksum(t *testing.T) {
 	}
 }
 
-func BenchmarkAddressHex(b *testing.B) {
-	testAddr := HexToAddress("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-	for b.Loop() {
-		testAddr.Hex()
-	}
-}
-
 func TestMixedcaseAccount_Address(t *testing.T) {
 
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-55.md
