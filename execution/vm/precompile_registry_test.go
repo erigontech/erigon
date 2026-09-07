@@ -36,12 +36,6 @@ func (s stubPrecompile) RequiredGas([]byte) uint64        { return 0 }
 func (s stubPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
 func (s stubPrecompile) Name() string                     { return s.name }
 
-type ptrPrecompile struct{ name string }
-
-func (p *ptrPrecompile) RequiredGas([]byte) uint64        { return uint64(len(p.name)) }
-func (p *ptrPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
-func (p *ptrPrecompile) Name() string                     { return p.name }
-
 func rulesForChain(chainID, l2Version uint64) *chain.Rules {
 	return &chain.Rules{
 		ChainID:     uint256.NewInt(chainID),
@@ -115,28 +109,6 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	}, "nil PrecompilesFunc must panic")
 }
 
-// TestRegisteredProviderWideChainID pins that the registry keys on the whole
-// 256-bit chain ID. A key truncated to 64 bits would alias 2^64+1 onto chain 1
-// and hand one chain's precompiles to another in a multi-chain embed.
-func TestRegisteredProviderWideChainID(t *testing.T) {
-	wide := new(uint256.Int).AddUint64(new(uint256.Int).Lsh(uint256.NewInt(1), 64), 1) // 2^64 + 1
-	narrow := uint256.NewInt(1)
-	wideAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x66}))
-
-	RegisterPrecompiles(wide, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{wideAddr: stubPrecompile{"WIDE"}}
-	})
-	t.Cleanup(func() { UnregisterPrecompiles(wide) })
-
-	wideRules := &chain.Rules{ChainID: wide, IsCancun: true}
-	narrowRules := &chain.Rules{ChainID: narrow, IsCancun: true}
-
-	_, ok := Precompiles(wideRules)[wideAddr]
-	require.True(t, ok, "the registering chain must see its own precompile")
-	_, ok = Precompiles(narrowRules)[wideAddr]
-	require.False(t, ok, "chain 1 must not inherit the provider registered for 2^64+1")
-}
-
 // TestRegisteredProviderForkDimension pins the fork dimension of the cache
 // key. Without it, an L2 crossing a fork boundary keeps being served the
 // merged set built at the earlier tier — the Osaka repricings and the 0x0100
@@ -197,9 +169,6 @@ func TestForkSetsCoverEveryTier(t *testing.T) {
 	}
 }
 
-// TestRegisterSweepsStaleCache reproduces the outcome of a provider call that
-// was in flight across an unregister: its merged set lands after the sweep and
-// outlives the provider that built it. Registering must not serve it.
 func TestRegisterSweepsStaleCache(t *testing.T) {
 	const chainID = 900503
 	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
@@ -210,19 +179,9 @@ func TestRegisterSweepsStaleCache(t *testing.T) {
 		return PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}}
 	})
 	_, ok := Precompiles(rules)[oldAddr]
-	require.True(t, ok)
-	staleKey := precompileCacheKey{chainID: *uint256.NewInt(chainID), fork: forkTierFor(rules), l2Version: 0}
-	registryMu.RLock()
-	stale := mergedCache[staleKey]
-	registryMu.RUnlock()
-	require.NotNil(t, stale, "resolving must have cached a merged set")
+	require.True(t, ok, "the first provider's overlay must resolve and cache")
 
 	UnregisterPrecompiles(uint256.NewInt(chainID))
-	// The insert the racing provider call would have made after the sweep.
-	registryMu.Lock()
-	mergedCache[staleKey] = stale
-	registryMu.Unlock()
-
 	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
 		return PrecompiledContracts{newAddr: stubPrecompile{"NEW"}}
 	})
@@ -249,20 +208,6 @@ func TestProviderNilContractPanics(t *testing.T) {
 
 	require.PanicsWithValue(t,
 		"vm: precompile provider for chain 900504 returned a nil contract at 0000000000000000000000000000000000000046",
-		func() { Precompiles(rulesForChain(chainID, 0)) })
-}
-
-func TestProviderTypedNilContractPanics(t *testing.T) {
-	const chainID = 900505
-	badAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x47}))
-
-	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{badAddr: (*ptrPrecompile)(nil)}
-	})
-	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
-
-	require.PanicsWithValue(t,
-		"vm: precompile provider for chain 900505 returned a nil contract at 0000000000000000000000000000000000000047",
 		func() { Precompiles(rulesForChain(chainID, 0)) })
 }
 

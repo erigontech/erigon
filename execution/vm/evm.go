@@ -39,40 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// frameIdentity resolves the address a frame acts as and its caller for the
-// given call type: CALLCODE and DELEGATECALL run foreign code under the
-// calling frame's own identity.
-func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (self, frameCaller accounts.Address) {
-	switch typ {
-	case CALLCODE:
-		return caller, caller
-	case DELEGATECALL:
-		return caller, callerAddress
-	default:
-		return addr, caller
-	}
-}
-
-// enterFrame applies the per-frame depth and read-only protocol shared by
-// the interpreter and the stateful-precompile dispatch, so nested calls
-// inherit static protection either way.
-func (evm *EVM) enterFrame(readOnly bool) (restoreReadonly bool) {
-	restoreReadonly = readOnly && !evm.readOnly
-	if restoreReadonly {
-		evm.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	evm.depth++
-	return restoreReadonly
-}
-
-func (evm *EVM) exitFrame(restoreReadonly bool) {
-	evm.depth--
-	if restoreReadonly {
-		evm.readOnly = false
-	}
-}
-
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	p, ok := evm.precompiles[addr]
 	return p, ok
@@ -384,16 +350,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}()
 	}
 
-	// The interpreter rejects a value-bearing CALL from a static frame while
-	// charging gas, so that frame never reaches here. A stateful precompile
-	// calling back in through PrecompileContext.EVM does, and has to be refused
-	// on the same terms — above the tracer and BAL hooks below, or a refusal
-	// would record an address access (consensus-relevant under EIP-7928) and an
-	// Enter/Exit pair that the opcode path never produces.
-	if evm.readOnly && typ == CALL && !value.IsZero() {
-		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
-	}
-
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
@@ -506,7 +462,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		self, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
+		self, frameCaller := addr, caller
+		switch typ {
+		case CALLCODE:
+			self, frameCaller = caller, caller
+		case DELEGATECALL:
+			self, frameCaller = caller, callerAddress
+		}
 		contract := Contract{
 			caller:   frameCaller,
 			addr:     self,
@@ -659,11 +621,6 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
-
-	// Write protection, for the same reason as in evm.call.
-	if evm.readOnly {
-		return nil, accounts.Address{}, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
-	}
 
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {
@@ -831,12 +788,6 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 // otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller accounts.Address, code []byte, gas mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	// Refused before the nonce read below, for the same reason as in evm.call:
-	// deriving the CREATE address touches state the opcode path never reaches.
-	if evm.readOnly {
-		return nil, accounts.NilAddress, gas, mdgas.MdGasUsage{}, ErrWriteProtection
-	}
-
 	ch := &codeAndHash{code: code}
 	op := CREATE
 	if salt != nil {

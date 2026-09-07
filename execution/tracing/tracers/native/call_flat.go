@@ -201,7 +201,7 @@ func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		return
 	}
 	t.tracer.OnTxStart(env, tx, from)
-	t.activePrecompiles = vm.ActivePrecompilesFromContext(env)
+	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 }
 
 func (t *flatCallTracer) OnTxEnd(receipt *types.Receipt, err error) {
