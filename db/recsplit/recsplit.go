@@ -177,8 +177,7 @@ type RecSplit struct {
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
 	lvl                log.Lvl
-	minDelta           uint64 // minDelta for Elias Fano encoding of "enum -> offset" index
-	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
+	prevOffset         uint64 // Previously added offset - the base of the gap written to the offsets file
 	bucketSize         int
 	keyExpectedCount   uint64 // Number of keys in the hash table
 	keysAdded          uint64 // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
@@ -548,13 +547,6 @@ func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 	if offset > rs.maxOffset {
 		rs.maxOffset = offset
 	}
-	if rs.keysAdded > 0 {
-		delta := offset - rs.prevOffset
-		if rs.keysAdded == 1 || delta < rs.minDelta {
-			rs.minDelta = delta
-		}
-	}
-
 	if rs.enums {
 		if rs.keysAdded > 0 && offset < rs.prevOffset {
 			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))

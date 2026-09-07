@@ -483,6 +483,8 @@ func TestTwoLayerIndexOffsetGaps(t *testing.T) {
 	for i := range offsets {
 		switch {
 		case i%7 == 0: // duplicate offset: gap 0
+		case i == N/3:
+			off += 1 << 62 // gap needs all 10 uvarint bytes
 		case i == N/2:
 			off += 1 << 33
 		default:
