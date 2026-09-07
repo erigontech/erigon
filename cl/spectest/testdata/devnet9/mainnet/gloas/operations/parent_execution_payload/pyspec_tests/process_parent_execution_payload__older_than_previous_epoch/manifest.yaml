@@ -1,0 +1,6 @@
+preset: mainnet
+fork: gloas
+runner: operations
+handler: parent_execution_payload
+suite: pyspec_tests
+case: process_parent_execution_payload__older_than_previous_epoch

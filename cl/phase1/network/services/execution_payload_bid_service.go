@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -97,10 +98,13 @@ type bidValidationStateKey struct {
 }
 
 type bidValidationStateEntry struct {
-	mu           sync.Mutex
-	state        *state.CachingBeaconState
-	parentSlot   uint64
-	parentRandao common.Hash
+	mu                 sync.Mutex
+	state              *state.CachingBeaconState
+	parentSlot         uint64
+	parentVersion      clparams.StateVersion
+	parentRandao       common.Hash
+	parentExitsMu      sync.Mutex
+	parentBuilderExits []solid.BuilderExitRequest
 }
 
 var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
@@ -403,17 +407,60 @@ func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.Sign
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 	builderPubkey := builder.Pubkey
+	builderAddress := builder.ExecutionAddress
+	parentPayloadHash := validationStateEntry.state.GetLatestExecutionPayloadBid().BlockHash
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	domain, err := validationStateEntry.state.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
 	validationStateEntry.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("%w: bid validation failed: failed to get domain: %w", ErrIgnore, err)
 	}
+	if validationStateEntry.parentVersion >= clparams.GloasVersion && bid.ParentBlockHash == parentPayloadHash {
+		exits, err := s.parentBuilderExitRequests(validationStateEntry, bid.ParentBlockRoot)
+		if err != nil {
+			return err
+		}
+		for _, request := range exits {
+			if request.PubKey == builderPubkey && request.SourceAddress == builderAddress {
+				return fmt.Errorf("%w: builder may exit in parent payload", ErrIgnore)
+			}
+		}
+	}
 	if err := validateBuilderBidSignature(msg, domain, builderPubkey); err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 
 	return nil
+}
+
+func (s *executionPayloadBidService) parentBuilderExitRequests(entry *bidValidationStateEntry, root common.Hash) ([]solid.BuilderExitRequest, error) {
+	entry.parentExitsMu.Lock()
+	defer entry.parentExitsMu.Unlock()
+	if entry.parentBuilderExits != nil {
+		return entry.parentBuilderExits, nil
+	}
+	envelope, err := s.forkchoiceStore.ReadEnvelopeFromDisk(root)
+	if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+		return nil, fmt.Errorf("%w: parent payload execution requests unavailable", errBidDependencyUnavailable)
+	}
+	exits := envelope.Message.ExecutionRequests.BuilderExits
+	count := 0
+	if exits != nil {
+		count = exits.Len()
+	}
+	if uint64(count) > s.beaconCfg.MaxBuilderExitRequestsPerPayload {
+		return nil, fmt.Errorf("%w: parent payload has too many builder exits", errBidDependencyUnavailable)
+	}
+	requests := make([]solid.BuilderExitRequest, count)
+	for i := range count {
+		request := exits.Get(i)
+		if request == nil {
+			return nil, fmt.Errorf("%w: parent payload has nil builder exit", errBidDependencyUnavailable)
+		}
+		requests[i] = *request
+	}
+	entry.parentBuilderExits = requests
+	return requests, nil
 }
 
 func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutionPayloadBid, now time.Time) error {
@@ -536,6 +583,7 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
 	}
 	entry.parentSlot = parentState.Slot()
+	entry.parentVersion = parentState.Version()
 	entry.parentRandao = parentState.GetRandaoMixes(state.Epoch(parentState))
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bidSlot)
 	if proposalEpoch > state.Epoch(parentState)+s.beaconCfg.MinSeedLookahead {
@@ -592,14 +640,14 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 	if builder == nil {
 		return nil, fmt.Errorf("builder %d not found", builderIndex)
 	}
-	if !state.CanBuilderCoverBid(validationState, builderIndex, bid.Value) {
-		return nil, fmt.Errorf("%w: builder %d cannot cover bid value %d", ErrIgnore, builderIndex, bid.Value)
+	if builder.Version != s.beaconCfg.PayloadBuilderVersion {
+		return nil, fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
 	}
 	if !state.IsActiveBuilder(validationState, builderIndex) {
 		return nil, fmt.Errorf("builder %d is not active", builderIndex)
 	}
-	if builder.Version != s.beaconCfg.PayloadBuilderVersion {
-		return nil, fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
+	if !state.CanBuilderCoverBid(validationState, builderIndex, bid.Value) {
+		return nil, fmt.Errorf("%w: builder %d cannot cover bid value %d", ErrIgnore, builderIndex, bid.Value)
 	}
 	return builder, nil
 }
