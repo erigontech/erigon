@@ -413,3 +413,28 @@ func TestCaplinStateRemoveOverlapsDoesNotReopenPendingUnlink(t *testing.T) {
 	require.NotZero(t, total, "walk must reach the dirty set, else a zero count proves nothing")
 	require.Zero(t, count, "a retired segment awaiting unlink must not be reopened")
 }
+
+func TestCaplinStateRemoveOverlapsKeepsSupersededIdxPinnedByRetiredSegment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	oldSeg, oldIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	pin := s.View()
+	defer pin.Close()
+
+	_, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+	require.NoError(t, s.OpenFolder())
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, oldSeg, "the pin must defer the unlink, or this test proves nothing")
+	require.FileExists(t, oldIdx, "a retired segment's open index outlives the dirty set")
+	require.FileExists(t, newIdx)
+
+	pin.Close()
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.NoFileExists(t, oldIdx, "once the pin drains the next pass must reclaim it")
+}

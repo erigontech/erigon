@@ -1668,8 +1668,8 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	return nil
 }
 
-// removeOrphanedIdx unlinks the superseded index files no dirty segment has open. The read
-// lock spans the unlink, or openSegments could reopen one between the check and the unlink.
+// removeOrphanedIdx unlinks the superseded index files neither a dirty segment nor a pinned
+// retired one has open. The read lock spans the unlink, or openSegments could reopen one.
 func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 	if len(superseded) == 0 {
 		return
@@ -1678,17 +1678,29 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 	defer s.dirtyLock.RUnlock()
 
 	held := make(map[string]struct{})
+	hold := func(seg *DirtySegment) {
+		for _, index := range seg.indexes {
+			if index != nil {
+				held[index.FilePath()] = struct{}{}
+			}
+		}
+	}
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, seg := range segs {
-				for _, index := range seg.indexes {
-					if index != nil {
-						held[index.FilePath()] = struct{}{}
-					}
-				}
+				hold(seg)
 			}
 			return true
 		})
+	}
+	cur := s.visible.Load()
+	for h := s.oldestVisible; h != nil; h = h.next {
+		for _, sn := range h.retired {
+			hold(sn)
+		}
+		if h == cur {
+			break
+		}
 	}
 
 	orphans := make([]string, 0, len(superseded))
