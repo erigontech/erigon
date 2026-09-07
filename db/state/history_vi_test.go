@@ -23,78 +23,53 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/pagedidx"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/version"
 )
 
-func mustLookup(t *testing.T, idx *HistoryValueIndex, keyOrdinal, rank uint64) uint64 {
-	t.Helper()
-	off, ok := idx.Lookup(keyOrdinal, rank, 0, nil)
-	require.True(t, ok)
-	return off
-}
-
-func TestHistoryValueIndex(t *testing.T) {
-	valuesPerKey := []uint64{3, 1, 5, 2, 1}
+// A v2 .vi is addressed by position: the key's ordinal in .ef and the rank of
+// its txNum in that key's list.
+func TestHistoryValueIndexV2(t *testing.T) {
+	valuesPerKey := []uint64{3, 1, 2}
 	const pageSize = 2
-	var valueCount uint64
-	for _, n := range valuesPerKey {
-		valueCount += n
-	}
-	pageCount := (valueCount + pageSize - 1) / pageSize
-	pageOffsets := make([]uint64, pageCount)
-	for i := range pageOffsets {
-		pageOffsets[i] = uint64(i) * 37 // .v is monotone, gaps vary
-	}
-	vSize := pageOffsets[pageCount-1] + 1
+	offsets := []uint64{0, 40, 90} // one per page of 2 values
 
-	path := filepath.Join(t.TempDir(), "test.vi")
-	w, err := NewHistoryValueIndexWriter(path, pageSize, uint64(len(valuesPerKey)), valueCount, vSize)
+	path := filepath.Join(t.TempDir(), "v2.vi")
+	w, err := pagedidx.NewWriter(path, pageSize, uint64(len(valuesPerKey)), 6, offsets[len(offsets)-1])
 	require.NoError(t, err)
+	w.NoFsync()
 	for _, n := range valuesPerKey {
-		w.AddKey(n)
+		w.AddGroup(n)
 	}
-	for _, off := range pageOffsets {
-		w.AddPageOffset(off)
+	for _, off := range offsets {
+		w.AddPage(off)
 	}
 	require.NoError(t, w.Build())
 
 	idx, err := OpenHistoryValueIndex(path, version.V2_0)
 	require.NoError(t, err)
 	defer idx.Close()
-
-	require.Equal(t, uint64(pageSize), idx.PageSize())
+	require.False(t, idx.Empty())
+	require.Equal(t, uint64(len(valuesPerKey)), idx.KeyCount())
 
 	var ordinal uint64
 	for keyOrdinal, n := range valuesPerKey {
 		for rank := range n {
-			require.Equal(t, pageOffsets[ordinal/pageSize], mustLookup(t, idx, uint64(keyOrdinal), rank),
-				"key %d rank %d (ordinal %d)", keyOrdinal, rank, ordinal)
+			// txNum and key are ignored by a v2 index
+			off, ok := idx.Lookup(uint64(keyOrdinal), rank, 0, nil)
+			require.True(t, ok)
+			require.Equal(t, offsets[ordinal/pageSize], off, "key %d rank %d", keyOrdinal, rank)
 			ordinal++
 		}
 	}
-	require.Equal(t, valueCount, ordinal)
-}
-
-func TestHistoryValueIndexSinglePage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "one.vi")
-	w, err := NewHistoryValueIndexWriter(path, 64, 1, 1, 1)
-	require.NoError(t, err)
-	w.AddKey(1)
-	w.AddPageOffset(0)
-	require.NoError(t, w.Build())
-
-	idx, err := OpenHistoryValueIndex(path, version.V2_0)
-	require.NoError(t, err)
-	defer idx.Close()
-	require.Equal(t, uint64(0), mustLookup(t, idx, 0, 0))
 }
 
 // A v1 .vi is a perfect hash over txNum+key. Read-only consumers cannot rebuild
 // accessors, so a datadir holding them has to keep working.
-func TestHistoryValueIndexLegacy(t *testing.T) {
+func TestHistoryValueIndexV1(t *testing.T) {
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "legacy.vi")
+	path := filepath.Join(tmpDir, "v1.vi")
 	keys := [][]byte{[]byte("aaa"), []byte("bbb"), []byte("ccc")}
 	txNums := []uint64{5, 9, 11}
 

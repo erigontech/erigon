@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/pagedidx"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -262,7 +263,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	p := ps.AddNew(fName, keyCount)
 	defer ps.Delete(p)
 
-	w, err := NewHistoryValueIndexWriter(historyIdxPath, pageSize, keyCount, valueCount, uint64(hist.Size()))
+	w, err := pagedidx.NewWriter(historyIdxPath, pageSize, keyCount, valueCount, uint64(hist.Size()))
 	if err != nil {
 		return err
 	}
@@ -280,7 +281,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		keyBuf, _ = iiReader.Next(keyBuf[:0])
 		valBuf, _ = iiReader.Next(valBuf[:0])
 
-		w.AddKey(multiencseq.Count(efBaseTxNum, valBuf))
+		w.AddGroup(multiencseq.Count(efBaseTxNum, valBuf))
 
 		seq.Reset(efBaseTxNum, valBuf)
 		it.Reset(&seq, 0)
@@ -289,7 +290,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				return err
 			}
 			if value%pageSize == 0 {
-				w.AddPageOffset(valOffset)
+				w.AddPage(valOffset)
 			}
 			value++
 			if value%pageSize == 0 {
