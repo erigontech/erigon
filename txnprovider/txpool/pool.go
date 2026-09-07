@@ -502,10 +502,8 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return nil
 	}
 
-	err = p.senders.registerNewSenders(p.unprocessedRemoteTxns, p.logger)
-	if err != nil {
-		return err
-	}
+	allocatedSenders := p.senders.registerNewSendersFrom(p.unprocessedRemoteTxns, p.logger)
+	defer func() { p.senders.forgetUnusedSenders(allocatedSenders, p.all.hasTxns) }()
 
 	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
 	if err != nil {
