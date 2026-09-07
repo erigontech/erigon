@@ -95,70 +95,69 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	// head, bounds, and lookups cannot switch generations.
 	overlayTx := api.filters.WithOverlay(tx)
 
-	uintTimestamp := timeStamp.TurnIntoUint64()
-
-	currentHeader := rawdb.ReadCurrentHeader(overlayTx)
-	if currentHeader == nil {
-		return nil, errors.New("current header not found")
-	}
-	currentHeaderTime := currentHeader.Time
-	highestNumber := currentHeader.Number.Uint64()
-
-	firstHeader, err := api.headerByNumber(ctx, 0, overlayTx)
+	blockNum, err := api.blockNumByTimestamp(ctx, overlayTx, timeStamp.TurnIntoUint64())
 	if err != nil {
 		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildBlockResponse(ctx, api._blockReader, overlayTx, blockNum, fullTx)
+}
+
+func (api *ErigonImpl) blockNumByTimestamp(ctx context.Context, tx kv.Tx, uintTimestamp uint64) (uint64, error) {
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	if currentHeader == nil {
+		return 0, errors.New("current header not found")
+	}
+	highestNumber := currentHeader.Number.Uint64()
+
+	if currentHeader.Time <= uintTimestamp {
+		return highestNumber, nil
+	}
+
+	firstHeader, err := api.headerByNumber(ctx, 0, tx)
+	if err != nil {
+		return 0, err
 	}
 
 	if firstHeader == nil {
-		return nil, errors.New("no genesis header found")
+		return 0, errors.New("no genesis header found")
 	}
 
-	firstHeaderTime := firstHeader.Time
-
-	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, highestNumber, fullTx)
-		if err != nil {
-			return nil, err
-		}
-
-		return blockResponse, nil
+	if firstHeader.Time >= uintTimestamp {
+		return 0, nil
 	}
 
-	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, 0, fullTx)
-		if err != nil {
-			return nil, err
-		}
-
-		return blockResponse, nil
-	}
-
-	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
-		currentHeader, err := api._blockReader.HeaderByNumber(ctx, overlayTx, uint64(blockNum))
+	blockNum := sort.Search(int(highestNumber), func(blockNum int) bool {
+		header, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum))
 		if err != nil {
 			return false
 		}
 
-		if currentHeader == nil {
+		if header == nil {
 			return false
 		}
 
-		return currentHeader.Time >= uintTimestamp
+		return header.Time >= uintTimestamp
 	})
 
-	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), overlayTx)
+	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	if resultingHeader == nil {
-		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
+		return 0, fmt.Errorf("no header found with header number: %d", blockNum)
 	}
 
 	for resultingHeader.Time > uintTimestamp {
-		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, overlayTx)
+		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 
 		if beforeHeader == nil || beforeHeader.Time < uintTimestamp {
@@ -169,16 +168,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, uint64(blockNum))
-	if err != nil {
-		return nil, err
-	}
-	response, err := buildBlockResponse(ctx, api._blockReader, overlayTx, uint64(blockNum), fullTx)
-	if err != nil {
-		return nil, err
-	}
-
-	return response, nil
+	return uint64(blockNum), nil
 }
 
 func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
