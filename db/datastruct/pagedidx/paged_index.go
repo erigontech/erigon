@@ -42,16 +42,17 @@ import (
 
 const version = 1
 
-// header: version, page size
-const headerLen = 1 + 8
+// header: version, page size, item count
+const headerLen = 1 + 8 + 8
 
 // Index resolves an item's value from its (group, member) position.
 type Index struct {
-	f        *os.File
-	m        mmap.Ro
-	groups   *eliasfano32.EliasFano
-	values   *eliasfano32.EliasFano
-	pageSize uint64
+	f         *os.File
+	m         mmap.Ro
+	groups    *eliasfano32.EliasFano
+	values    *eliasfano32.EliasFano
+	pageSize  uint64
+	itemCount uint64
 }
 
 func Open(path string) (*Index, error) {
@@ -82,6 +83,7 @@ func Open(path string) (*Index, error) {
 	}
 	idx.m = m
 	idx.pageSize = binary.BigEndian.Uint64(m[1:])
+	idx.itemCount = binary.BigEndian.Uint64(m[9:])
 	if idx.pageSize == 0 {
 		idx.Close()
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
@@ -108,6 +110,35 @@ func (i *Index) Get(group, member uint64) (uint64, bool) {
 	return i.values.Get(page), true
 }
 
+// Group returns the group owning the item at ordinal, and false when the index
+// holds no such item. Empty groups own nothing, so the search looks for the
+// first group starting after the ordinal and steps back one.
+func (i *Index) Group(ordinal uint64) (uint64, bool) {
+	if i.groups == nil || ordinal >= i.itemCount {
+		return 0, false
+	}
+	last := i.groups.Count() - 1
+	if ordinal >= i.groups.Get(last) {
+		return last, true
+	}
+	_, pos, _ := i.groups.Seek(ordinal + 1)
+	return pos - 1, true
+}
+
+// Page returns the page holding value, and false when value falls before the
+// first page.
+func (i *Index) Page(value uint64) (uint64, bool) {
+	if i.values == nil || value < i.values.Get(0) {
+		return 0, false
+	}
+	last := i.values.Count() - 1
+	if value >= i.values.Get(last) {
+		return last, true
+	}
+	_, pos, _ := i.values.Seek(value + 1)
+	return pos - 1, true
+}
+
 func (i *Index) Empty() bool { return i == nil || i.values == nil }
 
 func (i *Index) Close() {
@@ -128,12 +159,13 @@ func (i *Index) Close() {
 // Writer builds an Index. AddGroup is called once per group in order, AddPage
 // once per page in order; the two may be interleaved.
 type Writer struct {
-	path     string
-	groups   *eliasfano32.EliasFano
-	values   *eliasfano32.EliasFano
-	items    uint64
-	pageSize uint64
-	noFsync  bool
+	path      string
+	groups    *eliasfano32.EliasFano
+	values    *eliasfano32.EliasFano
+	items     uint64
+	pageSize  uint64
+	itemCount uint64
+	noFsync   bool
 }
 
 // NewWriter sizes the two sequences up front, which is all Elias-Fano needs.
@@ -142,7 +174,7 @@ func NewWriter(path string, pageSize, groupCount, itemCount, maxValue uint64) (*
 	if pageSize == 0 {
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
 	}
-	w := &Writer{path: path, pageSize: pageSize}
+	w := &Writer{path: path, pageSize: pageSize, itemCount: itemCount}
 	if groupCount == 0 || itemCount == 0 { // nothing to address: header only
 		return w, nil
 	}
@@ -180,6 +212,7 @@ func (w *Writer) Build() error {
 	var header [headerLen]byte
 	header[0] = version
 	binary.BigEndian.PutUint64(header[1:], w.pageSize)
+	binary.BigEndian.PutUint64(header[9:], w.itemCount)
 	if _, err := bw.Write(header[:]); err != nil {
 		return err
 	}

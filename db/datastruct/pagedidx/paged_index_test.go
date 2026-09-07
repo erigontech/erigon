@@ -109,3 +109,73 @@ func TestPageSizeZeroRejected(t *testing.T) {
 	_, err := NewWriter(filepath.Join(t.TempDir(), "bad"), 0, 1, 1, 1)
 	require.Error(t, err)
 }
+
+// Group is the reverse of Get's first half: which group owns an ordinal.
+func TestGroup(t *testing.T) {
+	// group 0 holds ordinals 0-2, group 1 holds 3, group 2 holds 4-5
+	itemsPerGroup := []uint64{3, 1, 2}
+	idx := build(t, "group", 2, itemsPerGroup, []uint64{0, 37, 74})
+
+	want := []uint64{0, 0, 0, 1, 2, 2}
+	for ordinal, wantGroup := range want {
+		g, ok := idx.Group(uint64(ordinal))
+		require.True(t, ok, "ordinal %d", ordinal)
+		require.Equal(t, wantGroup, g, "ordinal %d", ordinal)
+	}
+
+	_, ok := idx.Group(6)
+	require.False(t, ok, "one past the last item")
+	_, ok = idx.Group(1 << 40)
+	require.False(t, ok, "far past the last item")
+}
+
+// An empty group owns no ordinal, so the search has to skip past it.
+func TestGroupSkipsEmpty(t *testing.T) {
+	// groups 1 and 3 are empty; ordinals 0-2 are group 0, ordinal 3 is group 2
+	itemsPerGroup := []uint64{3, 0, 1, 0, 2}
+	idx := build(t, "empty-groups", 2, itemsPerGroup, []uint64{0, 37, 74})
+
+	want := []uint64{0, 0, 0, 2, 4, 4}
+	for ordinal, wantGroup := range want {
+		g, ok := idx.Group(uint64(ordinal))
+		require.True(t, ok, "ordinal %d", ordinal)
+		require.Equal(t, wantGroup, g, "ordinal %d", ordinal)
+	}
+}
+
+// Page is the reverse of Get's second half: which page holds a value.
+func TestPage(t *testing.T) {
+	idx := build(t, "page", 2, []uint64{3, 1, 2}, []uint64{10, 37, 74})
+
+	for _, tc := range []struct {
+		value uint64
+		page  uint64
+	}{
+		{10, 0}, {11, 0}, {36, 0},
+		{37, 1}, {73, 1},
+		{74, 2}, {1 << 40, 2}, // past the last page start, still the last page
+	} {
+		p, ok := idx.Page(tc.value)
+		require.True(t, ok, "value %d", tc.value)
+		require.Equal(t, tc.page, p, "value %d", tc.value)
+	}
+
+	_, ok := idx.Page(9)
+	require.False(t, ok, "before the first page")
+}
+
+func TestReverseOnEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty2")
+	w, err := NewWriter(path, 64, 0, 0, 0)
+	require.NoError(t, err)
+	w.NoFsync()
+	require.NoError(t, w.Build())
+	idx, err := Open(path)
+	require.NoError(t, err)
+	defer idx.Close()
+
+	_, ok := idx.Group(0)
+	require.False(t, ok)
+	_, ok = idx.Page(0)
+	require.False(t, ok)
+}
