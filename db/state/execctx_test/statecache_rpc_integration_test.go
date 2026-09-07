@@ -510,14 +510,14 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 	// and the SD's Close.
 	deleteDomains.Close()
 
-	oldValue, _, err := rpcTx.GetLatest(domain, key)
+	oldValue, _, err := rpcTx.GetLatest(domain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, value, oldValue)
 
 	freshTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer freshTx.Rollback()
-	freshValue, _, err := freshTx.GetLatest(domain, key)
+	freshValue, _, err := freshTx.GetLatest(domain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Empty(t, freshValue)
 
@@ -544,9 +544,9 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)

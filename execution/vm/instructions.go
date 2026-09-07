@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 
@@ -1126,7 +1125,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
@@ -1180,7 +1178,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
@@ -1216,7 +1213,6 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 

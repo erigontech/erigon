@@ -216,11 +216,12 @@ func (imp *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit
 		}
 		// Append validator
 		if s.Version() >= clparams.ElectraVersion {
-			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0)
+			if err := statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0); err != nil {
+				return err
+			}
 		} else {
 			// Append validator and done
-			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
-			return nil
+			return statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
 		}
 	}
 	if s.Version() >= clparams.ElectraVersion {
@@ -1150,8 +1151,7 @@ func (imp *impl) ProcessBlsToExecutionChange(
 	copy(credentials[12:], change.To[:])
 
 	// Update the state with the modified validator.
-	s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
-	return nil
+	return s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
 }
 
 func (imp *impl) ProcessAttestations(
@@ -1622,12 +1622,13 @@ func (imp *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposer
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
 	}
-	s.SetRandaoMixAt(int(epoch%s.BeaconConfig().EpochsPerHistoricalVector), mix)
-	return nil
+	return s.SetRandaoMixAt(int(epoch%s.BeaconConfig().EpochsPerHistoricalVector), mix)
 }
 
 func (imp *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error {
-	state.AddEth1DataVote(eth1Data)
+	if err := state.AddEth1DataVote(eth1Data); err != nil {
+		return err
+	}
 	newVotes := state.Eth1DataVotes()
 
 	// Count how many times body.Eth1Data appears in the votes.
@@ -1673,7 +1674,9 @@ func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 
 		sSlot += 1
-		s.SetSlot(sSlot)
+		if err := s.SetSlot(sSlot); err != nil {
+			return err
+		}
 		if sSlot%beaconConfig.SlotsPerEpoch != 0 {
 			continue
 		}
@@ -1934,8 +1937,12 @@ func (imp *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidati
 	}
 
 	// Initiate source validator exit and append pending consolidation
-	s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
-	s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+	if err := s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance())); err != nil {
+		return err
+	}
+	if err := s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay); err != nil {
+		return err
+	}
 
 	s.AppendPendingConsolidation(&solid.PendingConsolidation{
 		SourceIndex: sourceIndex,
@@ -1990,7 +1997,9 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
 	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
-	s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc)
+	if err := s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc); err != nil {
+		return err
+	}
 	return state.QueueExcessActiveBalance(s, vindex, &validator)
 }
 

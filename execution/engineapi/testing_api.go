@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	execctx "github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -101,7 +102,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
 		}
 		defer sd.Close()
-		reader = state.NewReaderV3(sd.AsStateGetter(dbTx))
+		reader = state.NewReaderV3(sd.AsStateGetter(dbTx, execctxapi.StateGetterOptions{}))
 	}
 
 	decoded := make([]types.Transaction, 0, len(*transactions))

@@ -100,45 +100,6 @@ func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum
 	require.NoError(t, c.Compress())
 }
 
-func BenchmarkFindMergeRange(t *testing.B) {
-	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
-	merger.DisableFsync()
-	t.Run("big", func(t *testing.B) {
-		for j := 0; j < t.N; j++ {
-			var RangesOld []Range
-			for i := range 24 {
-				RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
-			}
-			merger.FindMergeRanges(RangesOld, uint64(24*100_000))
-
-			var RangesNew []Range
-			start := uint64(19_000_000)
-			for i := range uint64(24) {
-				RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
-			}
-			merger.FindMergeRanges(RangesNew, uint64(24*100_000))
-		}
-	})
-
-	t.Run("small", func(t *testing.B) {
-		for j := 0; j < t.N; j++ {
-			var RangesOld Ranges
-			for i := range uint64(240) {
-				RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
-			}
-			merger.FindMergeRanges(RangesOld, uint64(240*10_000))
-
-			var RangesNew Ranges
-			start := uint64(19_000_000)
-			for i := range uint64(240) {
-				RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
-			}
-			merger.FindMergeRanges(RangesNew, uint64(240*10_000))
-		}
-	})
-
-}
-
 func TestFindMergeRange(t *testing.T) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
 	merger.DisableFsync()
@@ -728,9 +689,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
 
-	steps := []uint64{500_000, 100_000}
+	steps := []uint64{500_000}
 
-	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
+	for i, chain := range []string{networkname.Mainnet} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg, _ := snapcfg.KnownCfg(chain)

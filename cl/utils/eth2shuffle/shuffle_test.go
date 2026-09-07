@@ -51,7 +51,7 @@ func readEncodedListInput(input string, requiredLen int64, lineIndex int) ([]uin
 	if int64(len(itemStrs)) != requiredLen {
 		return nil, fmt.Errorf("expected outputs length does not match list size on line %d\n", lineIndex)
 	}
-	items := make([]uint64, len(itemStrs), len(itemStrs))
+	items := make([]uint64, len(itemStrs))
 	for i, itemStr := range itemStrs {
 		item, err := strconv.ParseInt(itemStr, 10, 64)
 		if err != nil {
@@ -132,7 +132,7 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("ShuffleList", func(it *testing.T) {
 					// create input, this slice will be shuffled.
-					testInput := make([]uint64, listSize, listSize)
+					testInput := make([]uint64, listSize)
 					copy(testInput, shuffleIn)
 					// shuffle!
 					eth2shuffle.ShuffleList(hashFn, testInput, rounds, seed)
@@ -146,7 +146,7 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("UnshuffleList", func(it *testing.T) {
 					// create input, this slice will be un-shuffled.
-					testInput := make([]uint64, listSize, listSize)
+					testInput := make([]uint64, listSize)
 					copy(testInput, shuffleOut)
 					// un-shuffle!
 					eth2shuffle.UnshuffleList(hashFn, testInput, rounds, seed)

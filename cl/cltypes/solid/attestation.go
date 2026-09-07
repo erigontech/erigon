@@ -298,9 +298,14 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int, cfg *clparams.BeaconChainConfig) *Attestation {
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int, cfg *clparams.BeaconChainConfig) (*Attestation, error) {
 	committeeBits := NewBitVector(maxCommittees)
-	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
+	if err := committeeBits.SetBitAt(int(s.CommitteeIndex), true); err != nil {
+		return nil, fmt.Errorf("committee index out of range: %w", err)
+	}
+	if memberIndexInCommittee < 0 || memberIndexInCommittee >= committeeLen {
+		return nil, fmt.Errorf("member index %d out of range for committee of length %d", memberIndexInCommittee, committeeLen)
+	}
 	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
@@ -319,7 +324,7 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeL
 	if cfg != nil && cfg.SlotsPerEpoch > 0 && s.Data != nil {
 		attestation.SetVersion(cfg.GetCurrentStateVersion(s.Data.Slot / cfg.SlotsPerEpoch))
 	}
-	return attestation
+	return attestation, nil
 }
 
 func (s *SingleAttestation) AttestationData() *AttestationData {

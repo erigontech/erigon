@@ -136,6 +136,7 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	select {
 	case <-b.done:
 	case <-ctx.Done():
+		// Completion may become ready while select chooses, so recheck before abandoning the result.
 		select {
 		case <-b.done:
 		default:

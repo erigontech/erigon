@@ -397,8 +397,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// at a strictly higher TxIndex; per-path (not account-wide) so a field with
 		// no post-self-destruct write correctly reads as the fresh account's zero.
 		revived := false
-		if pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
-			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
+		pathRead := s.versionMap.ReadStatus(addr, path, key, s.txIndex)
+		if pathRead.DepIdx() > destructTxIndex &&
+			(pathRead.Status() == MVReadResultDone || pathRead.Status() == MVReadResultDependency) {
 			revived = true
 		}
 		if !revived && path != CodePath {
@@ -436,6 +437,13 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					if path == StoragePath {
+						readVersion := sdVersion
+						if pathRead.Status() == MVReadResultDone {
+							readVersion = pathRead.Version()
+						}
+						s.recordWipedRead(addr, path, key, readVersion)
+					}
 					// Per-path revival misses account-level life: a balance-only
 					// credit (fee, transfer) revives the account without writing a
 					// CodeHash entry, and a live account's wiped code hash is
@@ -1559,7 +1567,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		var clean bool
 		if r.so != nil {
 			if !r.so.deleted {
-				v, clean = r.so.GetState(key)
+				var err error
+				if v, clean, err = r.so.GetState(key); err != nil {
+					return uint256.Int{}, r.source, r.version, false, err
+				}
 			}
 		} else {
 			// Cold committed read resolved by committedStorageDirect: no dirty
@@ -1574,7 +1585,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if r.so == nil || r.so.deleted {
 			return uint256.Int{}, StorageRead, UnknownVersion, false, nil
 		}
-		v, clean := r.so.GetState(key)
+		v, clean, err := r.so.GetState(key)
+		if err != nil {
+			return uint256.Int{}, StorageRead, UnknownVersion, false, err
+		}
 		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil

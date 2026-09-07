@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -46,7 +47,7 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 			t.Parallel()
 			_, tx, domains := NewTestRwTx(t)
 			vm := NewVersionMap(nil)
-			ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
+			ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
 			defer ibs.Close()
 			ibs.SetTxContext(0, 1)
 			ibs.SetNoMaterialize(true)

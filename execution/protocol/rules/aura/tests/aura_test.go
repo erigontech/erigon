@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -83,7 +84,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.Header().AuRaStep,
 	)
 
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 
 	headers, blocks, receipts := make([]*types.Header, 1), make(types.Blocks, 1), make([]types.Receipts, 1)
 	headers[0] = header
@@ -170,7 +171,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	config := genesis.Config
-	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
@@ -188,7 +189,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
 	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
-	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx)))
+	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
 	defer ibs.Close()

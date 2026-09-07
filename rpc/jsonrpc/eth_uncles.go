@@ -50,7 +50,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
 
@@ -86,7 +86,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
@@ -125,7 +125,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,9 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return &n, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithOverlay(tx)
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -153,12 +154,12 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, *number)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, *number)
+	block, err := api.blockWithSenders(ctx, overlayTx, hash, *number)
 	if err != nil {
 		return nil, err
 	}

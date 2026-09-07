@@ -365,10 +365,6 @@ func onlyKnownFeatures(features Features) error {
 	return nil
 }
 
-func (idx *Index) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&idx.data[0])
-}
-
 func (idx *Index) Size() int64 { return idx.size }
 func (idx *Index) Enums() bool { return idx.enums }
 func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {

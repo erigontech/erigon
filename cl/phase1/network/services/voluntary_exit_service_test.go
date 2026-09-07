@@ -61,7 +61,7 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	}
 	_, st, _ := tests.GetBellatrixRandom()
 	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	t.syncedData.OnHeadState(st)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
@@ -153,7 +153,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
-				t.syncedData.OnHeadState(st)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -194,7 +194,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 				)
 				_, st, _ := tests.GetBellatrixRandom()
 				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
-				t.syncedData.OnHeadState(st)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
@@ -220,7 +220,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
-				t.syncedData.OnHeadState(st)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {

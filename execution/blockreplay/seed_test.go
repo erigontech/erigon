@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -35,7 +36,7 @@ func TestSeedReadback(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(ctx, roTx, logger)
 	require.NoError(t, err)
 	defer doms.Close()
-	r := state.NewReaderV3(doms.AsStateGetter(roTx))
+	r := state.NewReaderV3(doms.AsStateGetter(roTx, execctxapi.StateGetterOptions{}))
 
 	checkedContract := false
 	for a, d := range fx.Accounts {

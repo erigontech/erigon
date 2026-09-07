@@ -454,7 +454,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		hooks := result.TracingHooks()
 		if result.Err != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(nil, err)
+				hooks.OnTxEnd(nil, result.Err)
 			}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 		}
@@ -473,7 +473,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		}
 
 		if err != nil {
-			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, err)
 		}
 
 		if receipt != nil {
@@ -490,9 +490,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					defer ibs.Close()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
-							Tracer: result.TracingHooks(),
-						})
+						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
 					}
 
 					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)

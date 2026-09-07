@@ -123,7 +123,7 @@ func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 			ReceiptHash: common.Hash{0xde, 0xad},
 		}
 		header.Number.SetUint64(uint64(i + 1))
-		block := types.NewBlockWithHeader(header)
+		block := types.NewBlockWithHeader(header, nil)
 		hash := block.Hash()
 		parent = hash
 		receipts := types.Receipts{&types.Receipt{CumulativeGasUsed: uint64(21_000 * (i + 1))}}

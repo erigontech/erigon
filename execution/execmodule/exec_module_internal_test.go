@@ -19,11 +19,14 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -55,6 +58,35 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+func TestDrainWaitsForInFlightExecution(t *testing.T) {
+	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	release := sync.OnceFunc(func() { module.semaphore.Release(1) })
+	t.Cleanup(release)
+
+	started := make(chan struct{})
+	drained := make(chan struct{})
+	go func() {
+		close(started)
+		module.Drain()
+		close(drained)
+	}()
+	<-started
+
+	select {
+	case <-drained:
+		t.Fatal("drain returned while execution was still active")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		t.Fatal("drain did not return after execution became idle")
+	}
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {

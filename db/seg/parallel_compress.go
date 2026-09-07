@@ -391,10 +391,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
 
-	var err error
-
-	var intermediateFile *os.File
-	if intermediateFile, err = dir.CreateTemp(segmentFilePath); err != nil {
+	intermediateFile, err := dir.CreateTemp(segmentFilePath)
+	if err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	intermediatePath := intermediateFile.Name()
@@ -744,10 +742,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					uncoveredCount += int(pos) - lastUncovered
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
-				if patternCode != nil {
-					if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
-						return e
-					}
+				if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					return e
 				}
 			}
 			if int(l) > lastUncovered {
@@ -1135,7 +1131,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 			}
 		}
 
-		superStringsPool.Put(superstring)
+		superStringsPool.Put(superstring) //nolint:staticcheck // slice-header boxing beats an indirection here
 	}
 }
 

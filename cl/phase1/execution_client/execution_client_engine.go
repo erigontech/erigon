@@ -193,14 +193,20 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil, nil
+		if isDeadlineExceeded(err) {
+			return nil, fmt.Errorf("%w: %w", ErrForkChoiceUpdateTimeout, err)
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
@@ -345,7 +351,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
 	}
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
 	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
@@ -365,7 +374,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 // block-production values.
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 	if cc.beaconCfg == nil {
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")

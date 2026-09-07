@@ -17,7 +17,7 @@ func buildAggregateAttestation(
 	single *solid.SingleAttestation,
 	validatorPosition, committeeLength uint64,
 	cfg *clparams.BeaconChainConfig,
-) *solid.Attestation {
+) (*solid.Attestation, error) {
 	return single.ToAttestation(int(validatorPosition), int(committeeLength), int(cfg.MaxCommitteesPerSlot), cfg)
 }
 
@@ -48,7 +48,13 @@ func (s *Service) submitAggregateAndProof(
 		Data:           attData,
 		Signature:      sig,
 	}
-	aggregate := buildAggregateAttestation(single, validatorPosition, committeeLength, s.cfg)
+	aggregate, err := buildAggregateAttestation(single, validatorPosition, committeeLength, s.cfg)
+	if err != nil {
+		s.logger.Warn("[dev-validator] build aggregate attestation failed",
+			"slot", slot, "committeeIndex", committeeIndex,
+			"committeeLength", committeeLength, "validatorPosition", validatorPosition, "err", err)
+		return
+	}
 
 	msg := &cltypes.AggregateAndProof{
 		AggregatorIndex: key.ValidatorIndex,

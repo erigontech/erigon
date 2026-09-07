@@ -109,7 +109,10 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		metrics:         label == dbcfg.ChainDB,
 	}
 	if label == dbcfg.ChainDB {
-		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
+		if dbg.EnvBool("CHAINDATA_READAHEAD", true) {
+			// enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (dosen GB)
+			opts = opts.RemoveFlags(mdbx.NoReadahead)
+		}
 		if dbg.MdbxNoSync {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
 		}

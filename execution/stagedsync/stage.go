@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -180,6 +181,7 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
+	FinalityCtx     dbfinality.Context
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }

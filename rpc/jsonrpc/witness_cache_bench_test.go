@@ -44,7 +44,7 @@ func BenchmarkWitnessServeOnDemand(b *testing.B) {
 		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
 			b.ReportAllocs()
 			var out int
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				buf, err := w.MarshalFastJSON()
 				if err != nil {
 					b.Fatal(err)
@@ -69,7 +69,7 @@ func BenchmarkWitnessServeCacheHit(b *testing.B) {
 		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
 			b.ReportAllocs()
 			var out int
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				buf, err := shell.MarshalFastJSON()
 				if err != nil {
 					b.Fatal(err)

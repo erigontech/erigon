@@ -158,9 +158,9 @@ func TestOperationsPool(t *testing.T) {
 func TestOperationsPoolPruneFinalized(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(3 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(3*cfg.SlotsPerEpoch))
 	for i := range 3 {
-		finalizedState.AddValidator(solid.NewValidatorFromParameters(
+		require.NoError(t, finalizedState.AddValidator(solid.NewValidatorFromParameters(
 			common.Bytes48{byte(i)},
 			common.Hash{},
 			cfg.MaxEffectiveBalance,
@@ -169,7 +169,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 			0,
 			cfg.FarFutureEpoch,
 			cfg.FarFutureEpoch,
-		), cfg.MaxEffectiveBalance)
+		), cfg.MaxEffectiveBalance))
 	}
 
 	t.Run("proposer slashings", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
 		pools.VoluntaryExitsPool.Insert(2, voluntaryExit(2))
 		pools.VoluntaryExitsPool.Insert(10, voluntaryExit(10))
-		finalizedState.SetExitEpochForValidatorAtIndex(2, 4)
+		require.NoError(t, finalizedState.SetExitEpochForValidatorAtIndex(2, 4))
 
 		pools.PruneFinalized(finalizedState, 3)
 
@@ -229,7 +229,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.BLSToExecutionChangesPool.Insert(remove.Signature, remove)
 		pools.BLSToExecutionChangesPool.Insert(missing.Signature, missing)
 		credentials := common.Hash{byte(cfg.ETH1AddressWithdrawalPrefixByte)}
-		finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials)
+		require.NoError(t, finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials))
 
 		pools.PruneFinalized(finalizedState, 3)
 
@@ -276,7 +276,7 @@ func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
 	finalizedState := state.New(&cfg)
 	validator := solid.NewValidator()
 	validator.SetSlashed(true)
-	finalizedState.AddValidator(validator, 0)
+	require.NoError(t, finalizedState.AddValidator(validator, 0))
 	pools := NewOperationsPool(&cfg)
 	pools.ProposerSlashingsPool.Insert(common.Bytes96{1}, nil)
 	pools.ProposerSlashingsPool.Insert(common.Bytes96{4}, &cltypes.ProposerSlashing{
@@ -300,7 +300,7 @@ func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
 func TestOperationsPoolPruneFinalizedUsesCheckpointEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(2*cfg.SlotsPerEpoch))
 	validator := solid.NewValidatorFromParameters(
 		common.Bytes48{},
 		common.Hash{},
@@ -311,7 +311,7 @@ func TestOperationsPoolPruneFinalizedUsesCheckpointEpoch(t *testing.T) {
 		cfg.FarFutureEpoch,
 		3,
 	)
-	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	require.NoError(t, finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance))
 	slashing := proposerSlashing(0, 1)
 
 	t.Run("before boundary", func(t *testing.T) {
@@ -338,7 +338,7 @@ func TestOperationsPoolPruneFinalizedConcurrentInsert(t *testing.T) {
 	finalizedState := state.New(&cfg)
 	validator := solid.NewValidator()
 	validator.SetExitEpoch(1)
-	finalizedState.AddValidator(validator, 0)
+	require.NoError(t, finalizedState.AddValidator(validator, 0))
 	pools := NewOperationsPool(&cfg)
 	pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
 

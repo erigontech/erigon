@@ -24,7 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -37,10 +40,57 @@ import (
 
 const testMergeLimit = snaptype.Erigon2MergeLimit
 
-// blockFilesTxStub is a kv.Getter that also exposes a pinned block-files view,
+type blockFinalityContextStub struct {
+	retireTo uint64
+}
+
+func (c blockFinalityContextStub) PruneToBlockNum() uint64 {
+	return 0
+}
+
+func (c blockFinalityContextStub) RetireToBlockNum() uint64 {
+	return c.retireTo
+}
+
+func (c blockFinalityContextStub) MaxReorgDepth() uint64 {
+	return 0
+}
+
+func (c blockFinalityContextStub) ReadyForCollation(_ context.Context, _ kv.RoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	return 0, 0, 0, 0, false, nil
+}
+
+func TestBlockRetireUsesFinalityContext(t *testing.T) {
+	ctx := context.Background()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := ethconfig.Defaults
+	cfg.MaxReorgDepth = 96
+	br := NewBlockRetire(
+		ctx,
+		1,
+		datadir.New(t.TempDir()),
+		nil,
+		nil,
+		db,
+		&chain.Config{},
+		&cfg,
+		nil,
+		nil,
+		log.New(),
+	)
+	defer br.Close()
+	blockFrom, blockTo, can := br.canRetire(8_000, blockFinalityContextStub{retireTo: 9_904}, snaptype.Unknown)
+	require.True(t, can)
+	require.Equal(t, uint64(8_000), blockFrom)
+	require.Equal(t, uint64(9_000), blockTo)
+	_, _, can = br.canRetire(8_000, blockFinalityContextStub{retireTo: 1_000}, snaptype.Unknown)
+	require.False(t, can)
+}
+
+// blockFilesTxStub is a kv.Tx that also exposes a pinned block-files view,
 // like a temporal tx does.
 type blockFilesTxStub struct {
-	kv.Getter
+	kv.Tx
 	view *blocksnapshots.View
 }
 
@@ -65,7 +115,7 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	}
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
@@ -81,9 +131,110 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.False(t, okLive, "retired segment must be gone from the live set")
 
 	// ...but a reader using the tx's pinned view still does.
-	_, okTx, relTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
-	relTx()
+	_, okTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
+}
+
+// A tx that pins no view cannot read block files: the reader used to open its
+// own view per read, which let a file retire between two reads of one tx.
+func TestBlockReaderRejectsTxWithoutBlockView(t *testing.T) {
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), log.New())
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots)
+
+	require.Panics(t, func() {
+		blockReader.viewSingleFile(nil, snaptype2.Transactions, 0)
+	}, "a tx that is not a view provider must be rejected")
+
+	require.Panics(t, func() {
+		blockReader.viewSingleFile(blockFilesTxStub{}, snaptype2.Transactions, 0)
+	}, "a view provider holding no view must be rejected")
+}
+
+// The integrity checks read block files through the caller's tx, so a tx pinning no
+// view is rejected rather than falling back to whatever the live set holds.
+func TestIntegrityChecksUseTxBlockView(t *testing.T) {
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), log.New())
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots)
+
+	require.Panics(t, func() {
+		_ = blockReader.IntegrityTxnID(t.Context(), blockFilesTxStub{}, true)
+	})
+	require.Panics(t, func() {
+		_ = blockReader.Integrity(t.Context(), blockFilesTxStub{})
+	})
+}
+
+// txNum -> block resolves through the tx's own pinned view, so segments integrated
+// after the tx started stay invisible to it.
+func TestBlockNumberUsesTxBlockView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	memTx, err := mdbxtest.NewTestDB(t, dbcfg.ChainDB).BeginRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(memTx.Rollback)
+
+	// Pinned while the store still holds nothing.
+	tx := blockFilesTxStub{Tx: memTx, view: snapshots.View()}
+	defer tx.view.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	txBlockIndex := TxBlockIndexFromBlockReader(NewBlockReader(snapshots))
+	blockNum, ok, err := txBlockIndex.BlockNumber(t.Context(), tx, 1)
+	require.NoError(t, err)
+	require.False(t, ok, "bodies integrated after the view was pinned must be invisible to the tx")
+	require.Zero(t, blockNum)
+}
+
+// The tip a reader may ask for must come from the same generation it reads from:
+// FrozenBlocks counts segments the tx's view cannot resolve.
+func TestFrozenBlocksInViewUsesTxBlockView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots)
+
+	tx := blockFilesTxStub{view: snapshots.View()}
+	defer tx.view.Close()
+
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.Equal(t, uint64(2*testMergeLimit-1), blockReader.FrozenBlocks())
+	require.Equal(t, uint64(testMergeLimit-1), blockReader.FrozenBlocksInView(tx),
+		"segments integrated after the view was pinned must not raise the tx's tip")
 }
 
 // The minimal/full-node step: expire old transaction segments (handing their files to the

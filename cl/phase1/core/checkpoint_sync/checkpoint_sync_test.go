@@ -66,12 +66,7 @@ func setCheckpointURLs(t *testing.T, urls ...string) {
 // newMockSlowHttpServer creates a mock HTTP server that never responds and exits gracefully when context is cancelled
 func newMockSlowHttpServer(ctx context.Context) *httptest.Server {
 	mockSlowServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			}
-		}
+		<-ctx.Done()
 	}))
 	return mockSlowServer
 }
@@ -199,7 +194,7 @@ func TestLocalCheckpointSyncFromFinalizedFile(t *testing.T) {
 
 	genesisState, err := st.Copy()
 	require.NoError(t, err)
-	genesisState.AddEth1DataVote(cltypes.NewEth1Data()) // Add some data to the genesis state so that it is different from the state read from the file
+	require.NoError(t, genesisState.AddEth1DataVote(cltypes.NewEth1Data())) // Add some data to the genesis state so that it is different from the state read from the file
 
 	syncer := NewLocalCheckpointSyncer(genesisState, f)
 	state, err := syncer.GetLatestBeaconState(context.Background())
@@ -308,7 +303,7 @@ func distinctRemoteState(t *testing.T, base *state.CachingBeaconState) *state.Ca
 	t.Helper()
 	remote, err := base.Copy()
 	require.NoError(t, err)
-	remote.AddEth1DataVote(cltypes.NewEth1Data())
+	require.NoError(t, remote.AddEth1DataVote(cltypes.NewEth1Data()))
 	return remote
 }
 
