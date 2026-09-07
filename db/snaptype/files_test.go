@@ -1,6 +1,7 @@
 package snaptype
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io/fs"
 	"os"
@@ -111,25 +112,43 @@ func TestStateSeedable(t *testing.T) {
 }
 
 func TestLoadSaltRewritesMalformedFile(t *testing.T) {
-	baseDir := t.TempDir()
-	fpath := filepath.Join(baseDir, "salt-blocks.txt")
-	if err := os.WriteFile(fpath, []byte("bad"), os.ModePerm); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		rewrite bool
+	}{
+		{name: "empty", content: []byte{}, rewrite: true},
+		{name: "too short", content: []byte("bad"), rewrite: true},
+		{name: "too long", content: []byte("toolong"), rewrite: true},
+		{name: "valid", content: []byte{1, 2, 3, 4}, rewrite: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseDir := t.TempDir()
+			fpath := filepath.Join(baseDir, "salt-blocks.txt")
+			if err := os.WriteFile(fpath, tc.content, os.ModePerm); err != nil {
+				t.Fatal(err)
+			}
 
-	salt, err := LoadSalt(baseDir, true, log.New())
-	if err != nil {
-		t.Fatal(err)
-	}
+			salt, err := LoadSalt(baseDir, true, log.New())
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(saltBytes) != 4 {
-		t.Fatalf("salt file not rewritten to 4 bytes, got %d", len(saltBytes))
-	}
-	if got := binary.BigEndian.Uint32(saltBytes); *salt != got {
-		t.Errorf("LoadSalt returned %d, file holds %d", *salt, got)
+			saltBytes, err := os.ReadFile(fpath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(saltBytes) != 4 {
+				t.Fatalf("salt file not rewritten to 4 bytes, got %d", len(saltBytes))
+			}
+			// A salt decoded from stale bytes is the silent half of the bug: the
+			// file was rewritten but the returned value came from the old content.
+			if got := binary.BigEndian.Uint32(saltBytes); *salt != got {
+				t.Errorf("LoadSalt returned %d, file holds %d", *salt, got)
+			}
+			if !tc.rewrite && !bytes.Equal(saltBytes, tc.content) {
+				t.Errorf("a valid salt file was rewritten: got %x, want %x", saltBytes, tc.content)
+			}
+		})
 	}
 }
