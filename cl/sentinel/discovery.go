@@ -563,6 +563,13 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 // handleNewConnection admits or rejects a peer that has just connected, then runs its status
 // handshake. Reports whether the peer was kept.
 func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
+	// ConnectWithPeer consults the ban list, but it only covers dials we initiate; a peer
+	// banned for repeated handshake failures reconnects and reaches here regardless.
+	if s.peers.BanStatus(peerId) {
+		s.closePeer(peerId)
+		return false
+	}
+
 	{
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
@@ -591,28 +598,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 		}
 	}
 
-	return s.exchangeStatus(peerId, s.peers.BanStatus, validate,
-		s.closePeer,
-		func(id peer.ID) {
-			s.p2p.Host().Peerstore().RemovePeer(id)
-			s.closePeer(id)
-			s.peers.RemovePeer(id)
-		})
-}
-
-// exchangeStatus runs one status handshake for peerId and reports whether the peer was kept.
-// The ban must be read while the slot is held: a handshake completing meanwhile may install it.
-func (s *Sentinel) exchangeStatus(peerId peer.ID, banned func(peer.ID) bool, validate func() (bool, error), closePeer, dropPeer func(peer.ID)) bool {
-	if !s.handshakeGate.tryAcquire(peerId) {
-		return false
-	}
-	defer s.handshakeGate.release(peerId)
-
-	if banned(peerId) {
-		closePeer(peerId)
-		return false
-	}
-
 	valid, err := validate()
 	if err != nil {
 		// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
@@ -624,7 +609,9 @@ func (s *Sentinel) exchangeStatus(peerId peer.ID, banned func(peer.ID) bool, val
 		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
-		dropPeer(peerId)
+		s.p2p.Host().Peerstore().RemovePeer(peerId)
+		s.closePeer(peerId)
+		s.peers.RemovePeer(peerId)
 		return false
 	}
 
