@@ -253,9 +253,9 @@ func newFindDiffsetHarness(t *testing.T) (context.Context, kv.TemporalRwTx, *fre
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	br := freezeblocks.NewBlockReader(snaps, nil)
+	br := freezeblocks.NewBlockReader(snaps)
 
 	ctx := t.Context()
 	tx, err := db.BeginTemporalRw(ctx)
