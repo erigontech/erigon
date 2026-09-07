@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -67,12 +68,6 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				syncnets = append(syncnets, uint64(i))
 			}
 		} else {
-			// headState, cn := a.syncedData.HeadState()
-			// defer cn()
-			// if headState == nil {
-			// 	http.Error(w, "head state not available", http.StatusServiceUnavailable)
-			// 	return
-			// }
 			if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 				syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
 				if err != nil {
@@ -80,10 +75,9 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				}
 				return nil
 			}); err != nil {
-				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				beaconhttp.WrapEndpointError(err).WriteTo(w)
 				return
 			}
-			//cn()
 		}
 
 		// subscribe to subnets
@@ -118,8 +112,10 @@ func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.Respon
 	}
 	for _, sub := range req {
 		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {
-			log.Error("failed to add attestation subscription", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			if !errors.Is(err, synced_data.ErrNotSynced) {
+				log.Error("failed to add attestation subscription", "err", err)
+			}
+			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		}
 	}

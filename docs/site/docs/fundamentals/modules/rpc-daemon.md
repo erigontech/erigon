@@ -108,6 +108,7 @@ Flags:
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
       --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+      --rpc.subscription.filters.timeout duration   Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction. (default 5m0s)
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")

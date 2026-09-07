@@ -65,6 +65,82 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
+## Beacon-chain withdrawals
+
+Beacon-chain withdrawals credit balances outside of any transaction, so by default no
+trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
+include them by passing a trace-settings object as the last positional parameter. It is
+positional, so the parameters before it have to be supplied even when they are not
+otherwise needed:
+
+```js
+// trace_block(blockNumber, gasBailOut, traceSettings)
+["0x1194bf0", false, { "IncludeWithdrawals": true }]
+
+// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
+["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
+```
+
+The default is off — omit the object, or leave the field out, and withdrawals are not
+reported. How they appear depends on the method:
+
+* **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
+  `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set
+  to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain
+  denominates withdrawals in Gwei). These entries carry no `transactionHash` or
+  `transactionPosition`, since no transaction caused them.
+
+* **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
+  result shape, so withdrawals surface only through `stateDiff`. You must request
+  `"stateDiff"` in the trace types; when you do, one extra entry is appended to the
+  result array, carrying the withdrawal state changes. Its shape depends on whether the
+  recipient already existed: an existing account gets a `"*"` balance change with `code`
+  and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"`
+  entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either
+  way. Multiple withdrawals to the same address are merged into a single balance change.
+
+## The gasBailOut option
+
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
+`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
+`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
+`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and
+always enable it internally, so everything below applies to them unconditionally.
+
+:::warning
+`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
+changes replayed state in ways that make the output unsuitable for reconstructing
+balances:
+
+* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
+  calls whenever the flag is set, for *every* replayed transaction — funded senders
+  included, not only underfunded ones.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that
+  is the internal Go parameter, spelled with a lowercase `o`, not the JSON-RPC
+  `gasBailOut` this section documents.
+* **The producer is still paid.** The block producer's tip is credited as usual.
+* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
+  non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
+  while still crediting the recipient. Value appears from nowhere, so a trace can show
+  what looks like balance creation.
+* **Where the chain configures a burn contract, that contract is credited too.** A
+  **non-free** London transaction credits the configured `burntContract` with
+  `gasUsed * baseFee`; on Aura from Prague the blob fee is added on top. Gnosis and
+  Chiado configure one, and so do Polygon's Bor chains — mainnet, Amoy, Mumbai and the
+  devnet. The sender was never debited, so this is a second source of apparent balance
+  creation in `stateDiff`. Aura marks zero-fee certified service transactions as free
+  and the credit is guarded by `!msg.IsFree()`, so those are excluded. Chains with no
+  configured contract never receive this extra credit — every other effect above still
+  applies to them.
+:::
+
+Whether one transaction's altered state is visible to the next depends on the execution
+path. Replaying a historical block for traces alone runs each transaction in parallel
+against its own canonical pre-state, so nothing propagates. The sequential path — taken
+when `stateDiff` or `vmTrace` is requested, for Bor state-sync transactions, and for
+single-transaction blocks — carries the altered state forward to every later transaction
+in the block.
+
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
@@ -92,7 +168,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- |
 | `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
 | `trace_callMany` | `Array<Object>` — one per input call |
-| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
+| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash`. One extra trailing entry when `stateDiff` is requested with `"IncludeWithdrawals": true` and the block has withdrawals — see [trace_replayBlockTransactions](#trace_replayblocktransactions) |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
 | `trace_get` | `TraceEntry` (single call frame at the requested position) |
 
@@ -117,7 +193,7 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
-| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (a consensus payout rather than a call — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors; `trace_block` alone also emits Aura block-reward-contract payouts and, on request, beacon-chain withdrawals. See `rewardType` for the full set). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
 | `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
@@ -156,13 +232,13 @@ The `action` object's shape depends on `type`:
 | `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
 | `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
 
-**`type: "reward"`** (block/uncle reward, in `trace_block` and `trace_filter`)
+**`type: "reward"`** (block and uncle rewards in `trace_block` and `trace_filter`; Aura block-reward-contract and withdrawal rewards in `trace_block` only)
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `author` | DATA, 20 BYTES | Address receiving the reward (miner / uncle author). |
+| `author` | DATA, 20 BYTES | Address receiving the reward: the block author, the uncle author, the beneficiary attributed by the block-reward contract for `"external"`, or the withdrawal recipient for `"withdrawal"`. |
 | `value` | QUANTITY | Wei amount of the reward. |
-| `rewardType` | String | `"block"` or `"uncle"`. |
+| `rewardType` | String | `trace_filter` emits only `"block"` and `"uncle"`. `trace_block` maps the consensus reward kind through `rewardKindToString`, so it also returns `"external"` for a block-reward-contract payout on Aura chains such as Gnosis, and emits `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). That mapping additionally defines `"emptyStep"` (an AuthorityRound empty-step author) and `"unknown"`, but no current code path produces either. |
 
 ### Result variants
 
@@ -200,6 +276,9 @@ Executes the given call and returns a number of possible traces for it.
 1. `Object` - \[Transaction object] where `from` field is optional and `nonce` field is omitted.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+4. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
+
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
 
 #### Returns
 
@@ -248,6 +327,9 @@ Performs multiple call traces on top of the same block. i.e. transaction `n` wil
 
 1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'` (default block parameter).
+3. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
+
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: [
@@ -352,6 +434,8 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
 1. `Data` - Raw transaction data.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
+
 ```js
 params: [
   "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
@@ -405,8 +489,10 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity`, `Number`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: a hex block number, a bare JSON integer (an Erigon extension — not a standard `QUANTITY`), a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
+4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js
 params: [
@@ -417,7 +503,18 @@ params: [
 
 #### Returns
 
-`Array<Object>` — one entry per transaction in the block. Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+`Array<Object>` — by default one entry per transaction in the block (see below for the one exception). Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+
+The one-entry-per-transaction mapping does not hold when withdrawals are requested.
+With `"stateDiff"` in the trace types and `"IncludeWithdrawals": true` in the trace
+settings, a block that has withdrawals gets **one extra entry appended** after the
+last transaction — an empty `trace` and a `stateDiff` carrying only the withdrawal state
+changes, with no `transactionHash`. That diff is a balance change alone only when the
+recipient already existed; a recipient created by the withdrawal also gets `code` and
+`nonce` entries, as described under [Beacon-chain withdrawals](#beacon-chain-withdrawals).
+Consumers that index results positionally
+against the block's transaction list must skip that trailing entry. See [Beacon-chain
+withdrawals](#beacon-chain-withdrawals).
 
 #### Example
 
@@ -466,6 +563,8 @@ Replays a transaction, returning the traces.
 
 1. `Hash` - Transaction hash.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+4. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: [
@@ -519,7 +618,9 @@ Returns traces created at given block.
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity`, `Number`, `Tag` or `null` - A plain block number: a hex string, or a bare JSON integer as an Erigon extension (not a standard `QUANTITY`), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
+2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
+3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js
 params: [
@@ -529,7 +630,7 @@ params: [
 
 #### Returns
 
-`Array<TraceEntry>` — flat list of all call frames in the block, including any `"reward"` entries for block/uncle rewards. Each entry includes block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+`Array<TraceEntry>` — flat list of all call frames in the block, including any `"reward"` entries for block, uncle and (when requested) withdrawal rewards. Every entry carries `blockHash` and `blockNumber`; `transactionHash` and `transactionPosition` are present on transaction call frames but omitted from `"reward"` entries, which no transaction caused. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -589,6 +690,8 @@ Returns traces matching given filter
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
    * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+3. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 
 ```js
@@ -603,7 +706,7 @@ params: [{
 
 #### Returns
 
-`Array<TraceEntry>` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Each entry has block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+`Array<TraceEntry>` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Call frames carry `blockHash`, `blockNumber`, `transactionHash` and `transactionPosition`; `"reward"` entries are block-level and carry only `blockHash` and `blockNumber` — `newRewardTrace` sets no transaction fields at all. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -657,6 +760,8 @@ Returns trace at given position.
 
 1. `Hash` - Transaction hash.
 2. `Array` - Index positions of the traces.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+4. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: [
@@ -719,6 +824,8 @@ Returns all traces of given transaction
 #### Parameters
 
 1. `Hash` - Transaction hash
+2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+3. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]

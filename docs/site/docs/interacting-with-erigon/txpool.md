@@ -6,13 +6,15 @@ sidebar_position: 8
 
 # txpool
 
-The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending, queued, and base fee transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
+The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending and queued transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
 
 The TxPool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
 
 ### Transaction Pool Architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
+* The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
+* Blob transactions (type 3) are not reported by `txpool_content` and `txpool_contentFrom`, matching Geth and Nethermind. They are still counted by `txpool_status`
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
 * Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
@@ -49,7 +51,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 ## **txpool\_content**
 
-Returns the content of the transaction pool, organized by sender address and categorized into pending, queued, and baseFee sub-pools.
+Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions. Blob transactions are not returned.
 
 **Parameters**
 
@@ -68,14 +70,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}
 | ------- | --------------------------------------------------- |
 | Object  | Transaction pool content organized by sub-pool type |
 | pending | Object                                              |
-| baseFee | Object                                              |
 | queued  | Object                                              |
 
 ***
 
 ## **txpool\_contentFrom**
 
-Returns the content of the transaction pool for a specific sender address, showing all transactions from that address across all sub-pools.
+Returns the content of the transaction pool for a specific sender address, categorized into pending and queued transactions. The same rules as `txpool_content` apply.
 
 **Parameters**
 
@@ -96,14 +97,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e
 | ------- | -------------------------------------------------- |
 | Object  | Transaction pool content for the specified address |
 | pending | Object                                             |
-| baseFee | Object                                             |
 | queued  | Object                                             |
 
 ***
 
 ## **txpool\_status**
 
-Returns the current status of the transaction pool, including the count of transactions in each sub-pool.
+Returns the current status of the transaction pool, with the count of pending and queued transactions.
 
 **Parameters**
 
@@ -122,5 +122,4 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":"1"}'
 | ------- | ------------------------------ |
 | Object  | Transaction pool status counts |
 | pending | QUANTITY                       |
-| baseFee | QUANTITY                       |
 | queued  | QUANTITY                       |
