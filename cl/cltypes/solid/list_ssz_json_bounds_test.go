@@ -41,22 +41,17 @@ func TestListSSZUnmarshalJSONRejectsElementAtZeroLimit(t *testing.T) {
 	require.Zero(t, list.Len())
 }
 
-func TestZeroValueListSSZUnmarshalJSONAcceptsNonEmptyList(t *testing.T) {
-	var list ListSSZ[*DepositRequest]
+func TestZeroValueListSSZUnmarshalJSONRequiresConfiguration(t *testing.T) {
+	for _, input := range []string{`null`, `[]`, `[{}]`} {
+		t.Run(input, func(t *testing.T) {
+			var list ListSSZ[*DepositRequest]
 
-	err := list.UnmarshalJSON([]byte(`[{}]`))
+			err := list.UnmarshalJSON([]byte(input))
 
-	require.NoError(t, err)
-	require.Equal(t, 1, list.Len())
-}
-
-func TestZeroValueListSSZUnmarshalJSONRetainsResourceGuard(t *testing.T) {
-	var list ListSSZ[*DepositRequest]
-
-	err := list.UnmarshalJSON([]byte(`[{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]`))
-
-	require.ErrorContains(t, err, "list exceeds decoder resource limit 16")
-	require.Zero(t, list.Len())
+			require.ErrorContains(t, err, "list is not configured for decoding")
+			require.Zero(t, list.Len())
+		})
+	}
 }
 
 func TestListSSZUnmarshalJSONPreservesNullAsEmpty(t *testing.T) {

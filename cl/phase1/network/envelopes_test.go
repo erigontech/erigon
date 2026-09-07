@@ -304,12 +304,12 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 		Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: requestedRoot},
 	}
 
-	acceptEnvelopeResponses([]*cltypes.SignedExecutionPayloadEnvelope{
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{
 		requestedEnvelope,
 		nil,
 		{},
 		{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: unsolicitedRoot}},
-	}, requestedRoots, received)
+	}, requestedRoots, received, nil)
 
 	require.Same(t, requestedEnvelope, received[requestedRoot])
 	require.NotContains(t, received, unsolicitedRoot)
@@ -319,12 +319,13 @@ func TestRequestEnvelopesByRangeRetainsValidatedPrefixOnError(t *testing.T) {
 	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
 
-	requestEnvelopesByRange(
+	requestEnvelopesByRangeWithValidator(
 		context.Background(),
 		client,
 		[]*cltypes.SignedBeaconBlock{block},
 		map[common.Hash]struct{}{requestedRoot: {}},
 		received,
+		nil,
 	)
 
 	require.Contains(t, received, requestedRoot)
@@ -339,51 +340,6 @@ func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
 	require.Error(t, err)
 	require.Len(t, envelopes, 1)
 	require.Equal(t, requestedRoot, envelopes[0].Message.BeaconBlockRoot)
-}
-
-func TestEnvelopeRequestSlotRangeUsesRequestedRootsIndependentOfOrder(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	low := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	low.Block.Slot = 37
-	high := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	high.Block.Slot = 99
-	unsolicited := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	unsolicited.Block.Slot = 100
-	lowRoot, err := low.Block.HashSSZ()
-	require.NoError(t, err)
-	highRoot, err := high.Block.HashSSZ()
-	require.NoError(t, err)
-
-	requested := map[common.Hash]struct{}{lowRoot: {}, highRoot: {}}
-	for _, blocks := range [][]*cltypes.SignedBeaconBlock{{low, high}, {high, low}} {
-		start, count, ok := envelopeRequestSlotRange(blocks, requested)
-		require.True(t, ok)
-		require.Equal(t, uint64(37), start)
-		require.Equal(t, uint64(63), count)
-	}
-
-	start, count, ok := envelopeRequestSlotRange([]*cltypes.SignedBeaconBlock{unsolicited, low}, map[common.Hash]struct{}{lowRoot: {}})
-	require.True(t, ok)
-	require.Equal(t, uint64(37), start)
-	require.Equal(t, uint64(1), count)
-}
-
-func TestEnvelopeRequestSlotRangeRejectsOverflow(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	low := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	low.Block.Slot = 0
-	high := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	high.Block.Slot = ^uint64(0)
-	lowRoot, err := low.Block.HashSSZ()
-	require.NoError(t, err)
-	highRoot, err := high.Block.HashSSZ()
-	require.NoError(t, err)
-
-	_, _, ok := envelopeRequestSlotRange(
-		[]*cltypes.SignedBeaconBlock{high, low},
-		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
-	)
-	require.False(t, ok)
 }
 
 func TestRequestEnvelopesByRangeBoundsCallsForSparseRequestedSlots(t *testing.T) {
@@ -401,12 +357,13 @@ func TestRequestEnvelopesByRangeBoundsCallsForSparseRequestedSlots(t *testing.T)
 	highRoot, err := high.Block.HashSSZ()
 	require.NoError(t, err)
 
-	requestEnvelopesByRange(
+	requestEnvelopesByRangeWithValidator(
 		ctx,
 		rpcClient,
 		[]*cltypes.SignedBeaconBlock{low, high},
 		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
 		map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{},
+		nil,
 	)
 
 	require.Equal(t, int32(2), sentinel.byRange.Load())

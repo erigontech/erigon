@@ -113,8 +113,7 @@ func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
 
 func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 	if !l.configured {
-		l.limit = progressiveDecodeLimit(0)
-		l.configured = true
+		return errors.New("list is not configured for decoding")
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		l.list = nil
