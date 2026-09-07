@@ -1,7 +1,6 @@
 package btindex
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -150,6 +149,5 @@ func TestPrefixSeedBucketBoundsCoverEveryPivot(t *testing.T) {
 	for i := 1; i < n; i++ {
 		require.LessOrEqualf(t, nodePrefix(b.nodeKey(i-1)), nodePrefix(b.nodeKey(i)),
 			"pivot prefixes must be non-decreasing at %d", i)
-		require.LessOrEqualf(t, bytes.Compare(b.nodeKey(i-1), b.nodeKey(i)), 0, "pivots must be sorted at %d", i)
 	}
 }

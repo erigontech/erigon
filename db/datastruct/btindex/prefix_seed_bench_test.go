@@ -59,7 +59,7 @@ func generateSkewedKV(tb testing.TB, tmp string, keyCount int, logger log.Logger
 	return dataPath
 }
 
-func bucketOccupancy(b *BpsTree) (maxN, medianN, p99, empty int) {
+func bucketOccupancy(b *BpsTree) (maxN, medianN int) {
 	counts := make(map[uint32]int)
 	n := b.numNodes()
 	for i := range n {
@@ -75,9 +75,8 @@ func bucketOccupancy(b *BpsTree) (maxN, medianN, p99, empty int) {
 	sort.Ints(vals)
 	if len(vals) > 0 {
 		medianN = vals[len(vals)/2]
-		p99 = vals[(len(vals)*99)/100]
 	}
-	return maxN, medianN, p99, len(b.prefixLo) - len(counts)
+	return maxN, medianN
 }
 
 func TestSkewedFixtureShape(t *testing.T) {
@@ -99,9 +98,9 @@ func TestSkewedFixtureShape(t *testing.T) {
 			defer bt.Close()
 			defer kv.Close()
 
-			mx, med, p99, empty := bucketOccupancy(bt.bplus)
-			t.Logf("%s: pivots=%d maxBucket=%d p99=%d median=%d emptyBuckets=%d prefixTable=%s nodeOfft=%s",
-				tc.name, bt.bplus.numNodes(), mx, p99, med, empty,
+			mx, med := bucketOccupancy(bt.bplus)
+			t.Logf("%s: pivots=%d maxBucket=%d median=%d prefixTable=%s nodeOfft=%s",
+				tc.name, bt.bplus.numNodes(), mx, med,
 				datasize.ByteSize(2*len(bt.bplus.prefixLo)*4).HR(),
 				datasize.ByteSize(uint64(bt.bplus.numNodes())*4).HR())
 			if tc.name == "skewed" {
