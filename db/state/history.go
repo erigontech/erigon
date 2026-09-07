@@ -667,7 +667,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		return HistoryCollation{}, err
 	}
 	if !bitmap.IsEmpty() {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
 	}

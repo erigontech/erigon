@@ -2231,9 +2231,9 @@ func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+		for i := range updates {
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 

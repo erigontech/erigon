@@ -785,7 +785,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		require.EqualValues(t, 1, stat.PruneCountTx)
 
 		// prune exactly pruneLimit*pruneIters transactions
-		for i := 0; i < pruneIters; i++ {
+		for i := range pruneIters {
 			stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
 			require.NoError(t, err)
 			t.Logf("[%d] stats: %v", i, stat)
