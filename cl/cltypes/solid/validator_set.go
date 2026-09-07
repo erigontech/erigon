@@ -80,14 +80,11 @@ func (v *ValidatorSet) Bytes() []byte {
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
 
-	if size <= cap(v.buffer) {
-		v.buffer = v.buffer[:size]
-		return
+	if size > cap(v.buffer) {
+		increasedValidatorsCapacity := int(uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier)+1) * validatorSize
+		v.buffer = slices.Grow(v.buffer, increasedValidatorsCapacity-len(v.buffer))
 	}
-	increasedValidatorsCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
-	buffer := make([]byte, size, increasedValidatorsCapacity*validatorSize)
-	copy(buffer, v.buffer)
-	v.buffer = buffer
+	v.buffer = v.buffer[:size]
 }
 
 func (v *ValidatorSet) Append(val Validator) {

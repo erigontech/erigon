@@ -69,7 +69,7 @@ func TestConcurrentDownload(t *testing.T) {
 	test.downloader.Close()
 	for w := range waits {
 		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
-		w(t.Context())
+		_ = w(t.Context())
 	}
 }
 
@@ -214,7 +214,7 @@ func TestVerifyData(t *testing.T) {
 	}
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644))
 	err := test.downloader.AddNewSeedableFile(t.Context(), "a")
 	require.NoError(err)
 	err = test.downloader.VerifyData(test.downloader.ctx, nil, false)
@@ -979,13 +979,13 @@ func TestGoSeedCountsCancelAfterStart(t *testing.T) {
 		"a cancel arriving after the task started must still count as a drop")
 }
 
-// goSeed waits on seedCtx, not the batch's own cancellation, so cancelling the batch alone must
-// not drop seed work still queued behind a full semaphore — it must all eventually run.
+// A batch that succeeds drops nothing: seed work queued behind a full semaphore must all still run
+// once the bound frees up. That goSeed waits on seedCtx rather than the batch's own cancellation is
+// pinned by TestKeptLocalSeedingSurvivesTorrentClosed, which drives the real end/wait path.
 func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 	require := require.New(t)
 	const limit = 2
 	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
-	_, batch.cancel = context.WithCancelCause(context.Background())
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
 	defer batch.seedCancel(nil)
 
@@ -1006,7 +1006,6 @@ func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
 		"only %d of %d tasks should be able to run concurrently", limit, n)
 
-	batch.cancel(nil)
 	closeRelease()
 
 	done := make(chan struct{})
@@ -1174,8 +1173,8 @@ func TestEndIsIdempotent(t *testing.T) {
 	_, batch.cancel = context.WithCancelCause(d.ctx)
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
-	batch.end(t.Context(), errors.New("first end"))
-	batch.end(t.Context(), errors.New("second end"))
+	_ = batch.end(t.Context(), errors.New("first end"))
+	_ = batch.end(t.Context(), errors.New("second end"))
 
 	d.activeDownloadRequestsLock.Lock()
 	defer d.activeDownloadRequestsLock.Unlock()
@@ -1271,6 +1270,52 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 			"seeding dropped mid-join must not report success, or the caller publishes chain.toml for it")
 	case <-time.After(30 * time.Second):
 		t.Fatal("wait did not return after the caller cancelled")
+	}
+}
+
+// Seeding hangs off d.ctx, so Downloader.Close drops it while the caller's context is still live.
+// wait reads only the caller's context, so that drop must reach the result some other way.
+func TestKeptLocalSeedingReportsDownloaderShutdown(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+	d.seedSem = semaphore.NewWeighted(1)
+	d.incDownloadRequests()
+
+	// Hold the only slot so every goSeed task is parked in Acquire for the whole join.
+	require.NoError(d.seedSem.Acquire(context.Background(), 1))
+	defer d.seedSem.Release(1)
+
+	_, names := writeKeptLocalSnapshots(t, d, 2, 64)
+
+	// No torrents: wait's loop returns at once, so the shutdown below lands inside end()'s join.
+	batch := &downloadBatch{d: d}
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+	for _, name := range names {
+		batch.goSeed(func() error { return d.seedKeptSnapshot(batch.seedCtx, name) })
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- batch.wait(t.Context()) }()
+
+	require.Never(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+
+	d.stop()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(err, context.Canceled,
+			"seeding dropped by shutdown must not report success to a caller whose context is still live")
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait did not return after the downloader stopped")
 	}
 }
 

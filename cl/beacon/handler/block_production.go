@@ -1476,12 +1476,21 @@ func (a *ApiHandler) produceBeaconBody(
 			int(a.beaconChainCfg.MaxWithdrawalsPerPayload),
 			44,
 		)
-		payload.Withdrawals.Range(
-			func(index int, value *cltypes.Withdrawal, length int) bool {
-				executionPayload.Withdrawals.Append(value)
-				return true
-			},
-		)
+		if payload.Withdrawals == nil {
+			// Before Capella the execution payload has no withdrawals field; from Capella on the
+			// engine API makes it mandatory, so its absence is a structurally invalid response.
+			if stateVersion.AfterOrEqual(clparams.CapellaVersion) {
+				executionErr = fmt.Errorf("produceBeaconBody: %w: missing withdrawals", execution_client.ErrInvalidGetPayloadResponse)
+				return
+			}
+		} else {
+			payload.Withdrawals.Range(
+				func(index int, value *cltypes.Withdrawal, length int) bool {
+					executionPayload.Withdrawals.Append(value)
+					return true
+				},
+			)
+		}
 		executionPayload.Transactions = payload.Transactions
 		executionPayload.BlockAccessList = payload.BlockAccessList
 		executionPayload.SlotNumber = payload.SlotNumber
