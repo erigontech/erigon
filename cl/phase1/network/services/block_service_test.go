@@ -58,6 +58,12 @@ type attesterSlashingErrorStore struct {
 	err error
 }
 
+type onBlockErrorStore struct {
+	forkchoice.ForkChoiceStorage
+	ready *atomic.Bool
+	calls *atomic.Int32
+}
+
 type failFirstUpdateDB struct {
 	kv.RwDB
 	failed bool
@@ -84,6 +90,14 @@ func (db *failFirstUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) 
 
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
 	return s.err
+}
+
+func (s onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	s.calls.Add(1)
+	if !s.ready.Load() {
+		return forkchoice.ErrBlockTooEarly
+	}
+	return nil
 }
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
@@ -655,6 +669,36 @@ func TestBlockServiceGossipReservationCanBeReleased(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 	service.ReleaseGossipReservation(child)
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceQueuesClockBoundaryBlockForRetry(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	var ready atomic.Bool
+	var calls atomic.Int32
+	service.(*blockService).forkchoiceStore = onBlockErrorStore{
+		ForkChoiceStorage: fcu,
+		ready:             &ready,
+		calls:             &calls,
+	}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, child))
+	root, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	impl := service.(*blockService)
+	queuedValue, queued := impl.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, queued)
+	job := queuedValue.(*blockJob)
+
+	impl.processScheduledBlock(t.Context(), root, job, time.Now())
+	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, queued)
+	require.GreaterOrEqual(t, calls.Load(), int32(2))
+
+	ready.Store(true)
+	impl.processScheduledBlock(t.Context(), root, job, time.Now())
+	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, queued)
 }
 
 func TestBlockServiceCommittedReservationAllowsExactRESTReplayOnly(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,24 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
+
+type boundedChunkReader struct {
+	data  []byte
+	limit int
+	off   int
+}
+
+func (r *boundedChunkReader) Read(p []byte) (int, error) {
+	if r.off >= r.limit {
+		return 0, errors.New("read beyond builder preference limit")
+	}
+	if r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.off]
+	r.off++
+	return 1, nil
+}
 
 func testBuilderPreferencesEntries() cltypes.BuilderPreferencesEntries {
 	entries := make(cltypes.BuilderPreferencesEntries, 2)
@@ -116,6 +135,21 @@ func TestPostValidatorBuilderPreferencesAcceptsMaximumJSONList(t *testing.T) {
 	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostValidatorBuilderPreferencesRejectsExcessEntriesBeforeReadingTheirBodies(t *testing.T) {
+	prefix := "[" + strings.Repeat("{},", cltypes.MaxBuilderPreferencesEntries) + "{"
+	reader := &boundedChunkReader{data: []byte(prefix + "}]"), limit: len(prefix)}
+	handler := &ApiHandler{builderClient: mock_services.NewMockBuilderClient(gomock.NewController(t))}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", reader)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "entry count 4097 exceeds 4096")
 }
 
 func TestPostValidatorBuilderPreferencesReportsMalformedJSONEntryAndContinues(t *testing.T) {

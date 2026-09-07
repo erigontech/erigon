@@ -31,9 +31,10 @@ type BeaconResponse struct {
 	Version             *clparams.StateVersion
 	ExecutionOptimistic *bool
 
-	Extra     map[string]any
-	headers   map[string]string
-	noContent bool
+	Extra      map[string]any
+	headers    map[string]string
+	noContent  bool
+	statusCode int
 }
 
 func NewBeaconResponse(data any) *BeaconResponse {
@@ -44,6 +45,10 @@ func NewBeaconResponse(data any) *BeaconResponse {
 
 func NewNoContentResponse() *BeaconResponse {
 	return &BeaconResponse{noContent: true}
+}
+
+func NewAcceptedResponse() *BeaconResponse {
+	return &BeaconResponse{noContent: true, statusCode: http.StatusAccepted}
 }
 
 func (r *BeaconResponse) Headers() map[string]string {

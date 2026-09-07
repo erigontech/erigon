@@ -719,9 +719,15 @@ func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {
 	allowed.httpClient.Transport = mockRoundTripper(func(r *http.Request) (*http.Response, error) {
 		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
 	})
-	allowed.transport = nil
+	allowed.transport = allowed.httpClient.Transport
 	require.NoError(t, allowed.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request))
 	require.NoError(t, allowed.SubmitSignedBeaconBlock(t.Context(), "http://builder.local:18550", cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)))
+
+	unpinned := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
+	unpinned.lookupIP = rejected.lookupIP
+	unpinned.httpClient.Transport = allowed.httpClient.Transport
+	unpinned.transport = nil
+	require.ErrorContains(t, unpinned.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request), "pinned transport")
 }
 
 func TestSubmitSignedBeaconBlock(t *testing.T) {
@@ -883,6 +889,7 @@ func validBuilderRequestAuth() *cltypes.SignedBuilderRequestAuth {
 func publicBuilderTestClient(transport http.RoundTripper) *builderClient {
 	return &builderClient{
 		httpClient: &http.Client{Transport: transport},
+		transport:  transport,
 		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
 			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
 		},

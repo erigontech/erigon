@@ -150,7 +150,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
 			}
 			if beaconResponse.noContent {
-				w.WriteHeader(http.StatusNoContent)
+				statusCode := beaconResponse.statusCode
+				if statusCode == 0 {
+					statusCode = http.StatusNoContent
+				}
+				w.WriteHeader(statusCode)
 				return
 			}
 		}

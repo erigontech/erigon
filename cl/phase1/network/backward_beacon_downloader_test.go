@@ -1193,6 +1193,42 @@ func TestBackwardBeaconDownloaderInitialCheckpointUsesFetchedSuccessor(t *testin
 	}
 }
 
+func TestBackwardBeaconDownloaderRejectsLostCanonicalSuccessor(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	target := makeGloasBlock(10, hash(0xaa), hash(0x42))
+	successor := makeGloasBlock(11, hash(0xbb), hash(0xcc))
+	linkBeaconBlocks(t, target, successor)
+	staleSuccessor := makeGloasBlock(12, hash(0xdd), hash(0xee))
+	targetRoot, err := target.Block.HashSSZ()
+	require.NoError(t, err)
+	successorEncoded, err := successor.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var successorRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		successorRequests.Add(1)
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(successorEncoded)
+	}))
+	t.Cleanup(server.Close)
+
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:           targetRoot,
+		prevBatchTopBlock:      staleSuccessor,
+		httpFallbackURL:        server.URL,
+		beaconCfg:              cfg,
+		validateGloasSuccessor: acceptGloasSuccessor,
+	}
+	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
+	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		return true, nil
+	})
+
+	err = downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{target})
+
+	require.ErrorIs(t, err, errInvalidCanonicalGloasSuccessor)
+	require.Zero(t, successorRequests.Load())
+}
+
 func TestBackwardBeaconDownloaderRejectsUnvalidatedInitialSuccessor(t *testing.T) {
 	target := makeGloasBlock(10, hash(0xaa), common.Hash{0x42})
 	successor := makeGloasBlock(12, hash(0xbb), hash(0xcc))

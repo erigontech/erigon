@@ -49,6 +49,7 @@ var (
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
+	ErrBlockTooEarly                 = errors.New("block is too early compared to current_slot")
 	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
 	ErrForkSchemaSlotMismatch        = errors.New("block schema fork disagrees with the fork implied by its slot")
 )
@@ -142,7 +143,7 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	blockRoot, _, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, true)
 	if err != nil {
 		f.mu.RUnlock()
-		if errors.Is(err, errBlockAtFinalizedHorizon) {
+		if errors.Is(err, errBlockAtFinalizedHorizon) || errors.Is(err, ErrBlockTooEarly) {
 			return invalidBlockError(err)
 		}
 		return err
@@ -175,7 +176,7 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 		return common.Hash{}, 0, invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
 	}
 	if f.Slot() < block.Block.Slot {
-		return common.Hash{}, 0, invalidBlockError(errors.New("block is too early compared to current_slot"))
+		return common.Hash{}, 0, ErrBlockTooEarly
 	}
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)

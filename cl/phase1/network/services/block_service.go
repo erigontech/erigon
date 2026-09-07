@@ -248,7 +248,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	b.publishBlockGossipEvent(msg)
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+			errors.Is(err, forkchoice.ErrParentEnvelopePending) || errors.Is(err, forkchoice.ErrBlockTooEarly) {
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}

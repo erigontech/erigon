@@ -2110,9 +2110,8 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	waitForIntegration := apiVersion == 2
 	if err := a.broadcastBlockWithIntegrationWait(ctx, block.SignedBlock, validation, waitForIntegration); err != nil {
 		if errors.Is(err, errPublishedBlockAccepted) {
-			w.WriteHeader(http.StatusAccepted)
 			a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
-			return newBeaconResponse(nil), nil
+			return beaconhttp.NewAcceptedResponse(), nil
 		}
 		if errors.Is(err, errPublishedBlockValidation) {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)

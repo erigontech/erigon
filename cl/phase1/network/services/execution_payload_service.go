@@ -174,6 +174,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 			"builderIndex", builderIndex)
 		return ErrIgnore
 	}
+	if block.Block == nil {
+		return fmt.Errorf("%w: beacon block %v is incomplete", ErrIgnore, beaconBlockRoot)
+	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
 	// for this block root from this builder.

@@ -1333,6 +1333,8 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
 	}
+	finishProduction := a.payloadPreparationGate.beginProduction()
+	defer finishProduction()
 	var (
 		baseBlockRoot common.Hash
 		baseBlockSlot uint64

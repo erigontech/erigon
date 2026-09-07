@@ -487,6 +487,9 @@ func (b *builderClient) builderCall(ctx context.Context, method string, target b
 }
 
 func (b *builderClient) builderCallWithTransport(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader, transport http.RoundTripper) (*builderHTTPResponse, error) {
+	if transport == nil {
+		return nil, errors.New("builder pinned transport is unavailable")
+	}
 	var attemptTimeout time.Duration
 	if deadline, ok := ctx.Deadline(); ok && len(target.ips) > 1 {
 		attemptTimeout = time.Until(deadline) / time.Duration(len(target.ips))
@@ -507,9 +510,7 @@ func (b *builderClient) builderCallWithTransport(ctx context.Context, method str
 		return nil, errors.New("nil builder HTTP client")
 	}
 	client := *b.httpClient
-	if transport != nil {
-		client.Transport = transport
-	}
+	client.Transport = transport
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return errors.New("builder redirects are not allowed")
 	}

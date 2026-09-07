@@ -1041,9 +1041,9 @@ func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentInt
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 	req.Header.Set("Eth-Builder-Url", builderURL)
 
-	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
-	require.NoError(t, err)
+	handler.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Empty(t, recorder.Body.String())
 	select {
 	case <-forwarded:
 	case <-time.After(time.Second):
@@ -1108,9 +1108,9 @@ func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=consensus", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
-	require.NoError(t, err)
+	handler.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Empty(t, recorder.Body.String())
 	require.Equal(t, 1, preflightCalls)
 }
 

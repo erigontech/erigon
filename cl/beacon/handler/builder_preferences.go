@@ -64,31 +64,45 @@ func (a *ApiHandler) PostEthV1ValidatorBuilderPreferences(w http.ResponseWriter,
 	switch contentType {
 	case "application/json":
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBuilderPreferencesRequestSize))
-		var rawEntries []json.RawMessage
-		if err := decoder.Decode(&rawEntries); err != nil {
+		token, err := decoder.Token()
+		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
+		opening, ok := token.(json.Delim)
+		if !ok || opening != '[' {
+			message := "builder preferences entries must be an array"
+			if token == nil {
+				message = "builder preferences entries cannot be null"
+			}
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New(message)).WriteTo(w)
 			return
 		}
-		if rawEntries == nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("builder preferences entries cannot be null")).WriteTo(w)
-			return
-		}
-		if len(rawEntries) > cltypes.MaxBuilderPreferencesEntries {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("builder preferences entry count %d exceeds %d", len(rawEntries), cltypes.MaxBuilderPreferencesEntries)).WriteTo(w)
-			return
-		}
-		indexedEntries = make([]indexedEntry, 0, len(rawEntries))
-		for i, rawEntry := range rawEntries {
+		indexedEntries = make([]indexedEntry, 0, cltypes.MaxBuilderPreferencesEntries)
+		for i := 0; decoder.More(); i++ {
+			if i >= cltypes.MaxBuilderPreferencesEntries {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("builder preferences entry count %d exceeds %d", i+1, cltypes.MaxBuilderPreferencesEntries)).WriteTo(w)
+				return
+			}
+			var rawEntry json.RawMessage
+			if err := decoder.Decode(&rawEntry); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
 			entry := new(cltypes.BuilderPreferencesEntry)
 			if err := json.Unmarshal(rawEntry, entry); err != nil {
 				failures = append(failures, poolingFailure{Index: i, Message: builderFailureMessage(err)})
 				continue
 			}
 			indexedEntries = append(indexedEntries, indexedEntry{index: i, entry: entry})
+		}
+		if _, err := decoder.Token(); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
+			return
 		}
 	case "application/octet-stream":
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBuilderPreferencesRequestSize))

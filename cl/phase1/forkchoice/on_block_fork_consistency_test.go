@@ -79,4 +79,18 @@ func TestOnBlockDoesNotShortCircuitKnownPreGloasBlock(t *testing.T) {
 	err = store.OnBlock(context.Background(), block, true, false, false)
 
 	require.ErrorContains(t, err, "block is too early")
+	require.ErrorIs(t, err, ErrBlockTooEarly)
+	require.NotErrorIs(t, err, ErrBlockInvalid)
+}
+
+func TestValidateBlockForPublishingClassifiesClockBoundaryAsInvalid(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	block.Block.Slot = 1
+	store := &ForkChoiceStore{beaconCfg: &cfg, forkGraph: &getFinalizedExecutionHashForkGraph{}}
+
+	err := store.ValidateBlockForPublishing(block, false)
+
+	require.ErrorIs(t, err, ErrBlockTooEarly)
+	require.ErrorIs(t, err, ErrBlockInvalid)
 }

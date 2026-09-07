@@ -487,7 +487,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	expectedBlock := blockWithRoot(responses, b.expectedRoot)
 	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
 		if b.prevBatchTopBlock != nil && !isDirectSuccessor(expectedBlock, b.prevBatchTopBlock) {
-			b.clearGloasSuccessor()
+			return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
 		}
 		if b.prevBatchTopBlock == nil {
 			successor, err := b.fetchGloasSuccessor(ctx, expectedBlock)
@@ -574,7 +574,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				var envelope *cltypes.SignedExecutionPayloadEnvelope
 				if block.Version() >= clparams.GloasVersion {
 					if b.prevBatchTopBlock != nil && !isDirectSuccessor(block, b.prevBatchTopBlock) {
-						b.clearGloasSuccessor()
+						return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
 					}
 					if b.prevBatchTopBlock == nil {
 						successor, successorErr := b.fetchGloasSuccessor(ctx, block)
@@ -645,13 +645,6 @@ func isDirectSuccessor(block, successor *cltypes.SignedBeaconBlock) bool {
 	}
 	root, err := block.Block.HashSSZ()
 	return err == nil && successor.Block.ParentRoot == root
-}
-
-func (b *BackwardBeaconDownloader) clearGloasSuccessor() {
-	b.prevBatchTopBlock = nil
-	b.gloasSuccessorRoot = common.Hash{}
-	b.gloasSuccessorNext = 0
-	b.gloasSuccessorFailures = 0
 }
 
 func canonicalBackwardResponses(responses []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) []*cltypes.SignedBeaconBlock {

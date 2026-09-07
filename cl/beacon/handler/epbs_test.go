@@ -1490,6 +1490,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	var gotFeeRecipient common.Address
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
 		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			require.False(t, handler.payloadPreparationGate.idle())
 			gotFeeRecipient = attrs.SuggestedFeeRecipient
 			return []byte{1}, nil
 		}).Times(6)

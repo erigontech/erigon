@@ -397,6 +397,29 @@ func TestExecutionPayloadServiceRejectsFinalizedUnknownBlockBeforeQueue(t *testi
 	require.Zero(t, impl.pendingBytes.Load())
 }
 
+func TestExecutionPayloadServiceRejectsKnownFinalizedBlockWithForgedEnvelopeSlot(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 63}}
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	validationCalled := false
+	fcu.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+		validationCalled = true
+		require.Same(t, envelope, got)
+		require.True(t, checkBlobData)
+		require.True(t, validatePayload)
+		return errors.New("block slot 63 != envelope.payload.slot_number 100")
+	}
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "block slot 63 != envelope.payload.slot_number 100")
+	require.True(t, validationCalled)
+}
+
 func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
