@@ -71,8 +71,6 @@ func TestEmitThreshold(t *testing.T) {
 		threshold time.Duration
 		wantEmit  bool
 	}{
-		{"disabled suppresses", Disabled, false},
-		{"negative suppresses", -5 * time.Second, false},
 		{"zero emits every block", 0, true},
 		{"below total emits", 99 * time.Millisecond, true},
 		{"equal to total emits", 100 * time.Millisecond, true},
@@ -206,12 +204,14 @@ func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
 	assert.Equal(t, int64(4), got.CacheMiss)
 }
 
-func TestDiffAbsorbsCounterReset(t *testing.T) {
+func TestExecOnlyIsTheOnlyClampLayer(t *testing.T) {
 	t.Parallel()
 
 	before := kvmetrics.DomainIOMetrics{CacheReadCount: 100, CachePutCount: 20, StateCacheHitCount: 7}
-	got := diff(before, kvmetrics.DomainIOMetrics{})
+	raw := diff(before, kvmetrics.DomainIOMetrics{})
+	assert.Negative(t, raw.Reads, "diff subtracts raw so one layer owns the clamp")
 
+	got := execOnly(raw, DomainCounts{})
 	assert.Zero(t, got.Reads)
 	assert.Zero(t, got.Writes)
 	assert.Zero(t, got.CacheHits)

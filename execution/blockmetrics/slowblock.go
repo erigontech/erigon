@@ -28,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const Disabled = time.Duration(-1)
-
 type slowBlockLog struct {
 	Level       string          `json:"level"`
 	Msg         string          `json:"msg"`
@@ -133,7 +131,7 @@ func (d DomainCounts) entry() cacheEntry {
 func ms(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
 
 func Emit(logger log.Logger, threshold time.Duration, r *Record) {
-	if logger == nil || r == nil || threshold < 0 {
+	if logger == nil || r == nil {
 		return
 	}
 	if threshold > 0 && r.Total() < threshold {
