@@ -1312,29 +1312,34 @@ func TestPostExecutionPayloadEnvelopeRequestedValidationFailureIsNotBroadcast(t 
 }
 
 func TestPostExecutionPayloadEnvelopeConsensusFailureIsNotBroadcast(t *testing.T) {
-	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	ctrl := gomock.NewController(t)
-	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
-	handler.sentinel = &nonNilSentinelClient{}
-	fcu.ValidateExecutionPayloadEnvelopeForConsensusErr = forkchoice.ErrIgnore
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
-	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
-	body, err := json.Marshal(envelope)
-	require.NoError(t, err)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=consensus", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-	request.Header.Set("Eth-Blob-Data-Included", "false")
-	recorder := httptest.NewRecorder()
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		for _, validationErr := range []error{forkchoice.ErrIgnore, errors.New("execution payload is invalid")} {
+			t.Run(mode+"/"+validationErr.Error(), func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				ctrl := gomock.NewController(t)
+				handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+				handler.sentinel = &nonNilSentinelClient{}
+				fcu.ValidateExecutionPayloadEnvelopeForConsensusErr = validationErr
+				envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+				fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+				body, err := json.Marshal(envelope)
+				require.NoError(t, err)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation="+mode, bytes.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				recorder := httptest.NewRecorder()
 
-	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+				handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-	require.True(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
-	require.True(t, fcu.ValidateExecutionPayloadEnvelopeForConsensusCalled)
-	require.False(t, fcu.OnExecutionPayloadCalled)
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				require.True(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+				require.True(t, fcu.ValidateExecutionPayloadEnvelopeForConsensusCalled)
+				require.False(t, fcu.OnExecutionPayloadCalled)
+			})
+		}
+	}
 }
-
 func TestPostExecutionPayloadEnvelopeGossipsIgnoredLocalEnvelope(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)

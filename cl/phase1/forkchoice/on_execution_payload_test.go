@@ -4032,6 +4032,93 @@ func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testi
 	}
 }
 
+func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    execution_client.PayloadStatus
+		engineErr error
+		wantErr   bool
+	}{
+		{name: "valid", status: execution_client.PayloadStatusValidated},
+		{name: "invalid", status: execution_client.PayloadStatusInvalidated, wantErr: true},
+		{name: "invalid with error", status: execution_client.PayloadStatusInvalidated, engineErr: errors.New("execution state root mismatch"), wantErr: true},
+		{name: "syncing", status: execution_client.PayloadStatusNotValidated, wantErr: true},
+		{name: "unavailable", status: execution_client.PayloadStatusNone, wantErr: true},
+		{name: "engine error", status: execution_client.PayloadStatusNone, engineErr: errors.New("engine unavailable"), wantErr: true},
+		{name: "valid with error", status: execution_client.PayloadStatusValidated, engineErr: errors.New("engine unavailable"), wantErr: true},
+		{name: "unknown status", status: execution_client.PayloadStatus(100), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			engine.EXPECT().NewPayload(gomock.Any(), envelope.Message.Payload, &block.Block.ParentRoot, []common.Hash{}, []hexutil.Bytes{}).Return(tc.status, tc.engineErr)
+			store := &ForkChoiceStore{
+				beaconCfg: cfg,
+				forkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+				engine:    engine,
+			}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.T) {
+	for _, change := range []string{"invalidated", "finalized", "pruned"} {
+		t.Run(change, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			graph := &dataAvailabilityForkGraph{state: blockState, block: block}
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, engine: engine}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+				func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+					require.True(t, store.mu.TryLock(), "EL validation must release the fork-choice lock")
+					defer store.mu.Unlock()
+					switch change {
+					case "invalidated":
+						store.executionPayloadStatus, _ = lru.New[common.Hash, execution_client.PayloadStatus](1)
+						store.executionPayloadStatus.Add(envelope.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+					case "finalized":
+						store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: envelope.Message.Payload.SlotNumber/cfg.SlotsPerEpoch + 1})
+					case "pruned":
+						graph.block = nil
+					}
+					return execution_client.PayloadStatusValidated, nil
+				})
+			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+		})
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusWithoutEL(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusAdmissionCancellation(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: dataAvailabilityForkGraph{state: blockState, block: block}, engine: engine}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.payloadValidationOnce.Do(func() { store.payloadValidationAdmission = make(chan struct{}, 1) })
+	store.payloadValidationAdmission <- struct{}{}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope), context.Canceled)
+	require.True(t, store.mu.TryLock())
+	store.mu.Unlock()
+	require.Len(t, store.payloadValidationAdmission, 1)
+	<-store.payloadValidationAdmission
+}
+
 func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
 	return validAdmissionCancellationFixtureWithBlobs(t, false)
 }

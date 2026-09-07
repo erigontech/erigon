@@ -239,6 +239,15 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
 				return validationErr
 			}
+			if payloadStatus == execution_client.PayloadStatusInvalidated {
+				var requestsHash common.Hash
+				if block.Version() >= clparams.ElectraVersion {
+					requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+				}
+				if _, hashErr := block.Block.Body.ExecutionPayload.RlpHeader(&block.Block.ParentRoot, requestsHash, nil); hashErr != nil {
+					return fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr)
+				}
+			}
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash); err != nil {

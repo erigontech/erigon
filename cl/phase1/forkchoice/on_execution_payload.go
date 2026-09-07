@@ -821,7 +821,24 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return fmt.Errorf("%w: execution payload envelope consensus validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
 	}
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	payloadStatus, err := f.validatePayloadWithEL(ctx, signedEnvelope.Message, block, root)
+	if err != nil {
+		return fmt.Errorf("execution payload envelope EL validation failed: %w", err)
+	}
+	if payloadStatus != execution_client.PayloadStatusValidated {
+		return fmt.Errorf("execution payload envelope is not fully validated by EL: status %d", payloadStatus)
+	}
+	if f.payloadInvalidatedLocked(root, signedEnvelope.Message.Payload.BlockHash) {
+		return fmt.Errorf("%w: execution payload was invalidated during consensus validation", errInvalidExecutionPayloadEnvelope)
+	}
+	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	_, err = f.refreshEnvelopeBlockLocked(root)
+	return err
 }
 
 func (f *ForkChoiceStore) validateExecutionPayloadEnvelopeInput(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

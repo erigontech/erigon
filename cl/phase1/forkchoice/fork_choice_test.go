@@ -48,8 +48,64 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
+func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+	}{
+		{name: "bellatrix", load: tests.GetBellatrixRandom},
+		{name: "capella", load: tests.GetCapellaRandom},
+		{name: "electra", load: tests.GetElectraRandom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, anchorState, _ := tc.load()
+			block := blocks[0]
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			executionHash := block.Block.Body.ExecutionPayload.BlockHash
+			encoded, err := block.EncodeSSZ(nil)
+			require.NoError(t, err)
+			invalid := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), block.Version())
+			require.NoError(t, invalid.DecodeSSZ(encoded, int(block.Version())))
+			invalid.Block.Body.ExecutionPayload.GasUsed++
+			if block.Version() >= clparams.DenebVersion {
+				invalid.Block.Body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+				invalid.Block.Body.ExecutionPayload.BlobGasUsed = 0
+				invalid.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+			}
+			invalidRoot, err := invalid.Block.HashSSZ()
+			require.NoError(t, err)
+			require.NotEqual(t, blockRoot, invalidRoot)
+			engine, err := execution_client.NewExecutionClientDirect(chainreader.ChainReaderWriterEth1{}, nil)
+			require.NoError(t, err)
+			mockEngine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(engine.NewPayload)
+			store := newBellatrixForkChoiceStore(t, anchorState, mockEngine)
+			store.OnTick(anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot)
+			require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+			store.MarkPayloadVerified(blockRoot, executionHash)
+			require.True(t, store.IsPayloadVerified(blockRoot))
+
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "OnBlock: invalid execution payload hash")
+
+			require.True(t, store.IsPayloadVerified(blockRoot))
+			require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
+
+			var requestsHash common.Hash
+			if block.Version() >= clparams.ElectraVersion {
+				requestsHash = cltypes.ComputeExecutionRequestHash(invalid.Block.Body.GetExecutionRequestsList())
+			}
+			invalid.Block.Body.ExecutionPayload.BlockHash, err = invalid.Block.Body.ExecutionPayload.ComputeBlockHash(&invalid.Block.ParentRoot, requestsHash, nil)
+			require.NoError(t, err)
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, nil)
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+		})
+	}
+}
 func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	block := blocks[0]
