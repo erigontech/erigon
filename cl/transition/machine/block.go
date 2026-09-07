@@ -49,6 +49,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	// [New in Gloas:EIP7732] process_parent_execution_payload BEFORE process_block_header
 	var parentSlot uint64
 	if version >= clparams.GloasVersion {
+		parentSlot = s.LatestBlockHeader().Slot
 		if err := impl.ProcessParentExecutionPayload(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process parent execution payload: %w", err)
 		}
@@ -69,8 +70,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)
 		}
 		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
-		parentSlot, err = impl.ProcessExecutionPayloadBid(s, block)
-		if err != nil {
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload bid: %w", err)
 		}
 	} else if version >= clparams.BellatrixVersion {
