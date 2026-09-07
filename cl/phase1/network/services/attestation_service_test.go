@@ -411,10 +411,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 	t.Require().NoError(err)
 }
 
-// An attestation that is dropped before its signature is checked must not
-// consume the per-validator seen slot, otherwise anyone can name a real
-// committee member and censor that validator's genuine attestation for the
-// rest of the epoch at no cost.
+// The per-validator seen slot must be claimed only once the signature has been
+// verified, otherwise anyone can name a real committee member and censor that
+// validator's genuine attestation for the rest of the epoch at no cost.
 func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification() {
 	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 		return 8
@@ -432,8 +431,8 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
 	t.mockForkChoice.HighestSeenVal = mockSlot
 
-	// The forged copy names the same validator but a block this node has not seen,
-	// so validation stops before any signature work.
+	// The block is not in fork choice yet, so validation stops before any
+	// signature work.
 	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		Attestation:      att,
 		ImmediateProcess: true,
@@ -459,6 +458,14 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 	})
 	time.Sleep(time.Millisecond * 60)
 	t.Require().NoError(err)
+
+	// ...and having been verified, it now holds the slot against a duplicate.
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().Contains(err.Error(), "already seen")
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {

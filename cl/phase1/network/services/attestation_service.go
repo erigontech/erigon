@@ -156,7 +156,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
 
 	var err error
-	var markValidatorSeen func()
 	if clVersion >= clparams.ElectraVersion {
 		if att.SingleAttestation == nil {
 			return errors.New("single attestation is empty")
@@ -205,6 +204,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	var (
 		domain      []byte
 		pubKey      common.Bytes48
+		vIndex      uint64
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -229,7 +229,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return err
 		}
-		var vIndex uint64
 		if clVersion <= clparams.DenebVersion {
 			// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 			bits := att.Attestation.AggregationBits.Bytes()
@@ -295,9 +294,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if ok && epochLastTime == targetEpoch {
 			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
-		// The entry is claimed in F, once the signature has been verified: a
-		// message dropped before that must not consume the validator's slot.
-		markValidatorSeen = func() { s.validatorAttestationSeen.Add(vIndex, targetEpoch) }
 
 		// [REJECT] The signature of attestation is valid.
 		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
@@ -356,9 +352,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			if markValidatorSeen != nil {
-				markValidatorSeen()
-			}
+			// Claimed only now: a message dropped before its signature was
+			// verified must not consume the validator's slot for the epoch.
+			s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
 				return
 			} else if err != nil {
