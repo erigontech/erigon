@@ -19,6 +19,7 @@ package stream_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -141,8 +142,8 @@ func TestUnionPairs(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		it := stream.PairsWithError(10)
-		it2 := stream.PairsWithError(12)
+		it := PairsWithError(10)
+		it2 := PairsWithError(12)
 		keys, _, err := stream.ToArrayKV(stream.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
 		require.Len(keys, 10)
@@ -517,4 +518,22 @@ func TestFiler(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
+}
+
+// PairsWithErrorIter - return N, keys and then error
+type PairsWithErrorIter struct {
+	errorAt, i int
+}
+
+func PairsWithError(errorAt int) *PairsWithErrorIter {
+	return &PairsWithErrorIter{errorAt: errorAt}
+}
+func (m *PairsWithErrorIter) Close()        {}
+func (m *PairsWithErrorIter) HasNext() bool { return true }
+func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
+	if m.i >= m.errorAt {
+		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
+	}
+	m.i++
+	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
 }

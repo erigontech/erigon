@@ -155,7 +155,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, v)
 		return accounts.DeserialiseV3(&acc, v)
@@ -245,7 +245,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, v)
 		return accounts.DeserialiseV3(&acc, v)

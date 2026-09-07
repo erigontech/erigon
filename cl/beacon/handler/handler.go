@@ -74,6 +74,12 @@ type selfBuildPayload struct {
 	ExecutionRequests *cltypes.ExecutionRequests
 }
 
+type selfBuildEnvelopeStore interface {
+	Add(uint64, *cltypes.ExecutionPayloadEnvelope) bool
+	Get(uint64) (*cltypes.ExecutionPayloadEnvelope, bool)
+	Remove(uint64) bool
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -106,14 +112,20 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	preparedPayload        preparedPayload
+	payloadPreparationGate payloadPreparationGate
+
 	// Validator data structures
-	validatorParams                    *validator_params.ValidatorParams
+	validatorParams *validator_params.ValidatorParams
+	// unregisteredProposers remembers which proposers have already been warned about, so the
+	// warning is once per proposer rather than once per proposal.
+	unregisteredProposers              *lru.Cache[uint64, struct{}]
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
-	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
+	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer
 	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
 	aggregatePool                      aggregation.AggregationPool
@@ -146,7 +158,8 @@ type ApiHandler struct {
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopes *lru.Cache[uint64, *cltypes.ExecutionPayloadEnvelope]
+	selfBuildEnvelopeUpdatesMu sync.Mutex
+	selfBuildEnvelopes         selfBuildEnvelopeStore
 }
 
 func NewApiHandler(
@@ -171,7 +184,7 @@ func NewApiHandler(
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
-	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	committeeSub committee_subscription.CommitteeSubscribe,
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,
@@ -199,6 +212,10 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
+	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
+	if err != nil {
+		panic(err)
+	}
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -227,6 +244,7 @@ func NewApiHandler(
 		caplinStateSnapshots:               caplinStateSnapshots,
 		peerDas:                            peerDas,
 		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
+		unregisteredProposers:              unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},

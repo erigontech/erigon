@@ -74,7 +74,7 @@ func checkPanic(want error, fn func()) (err error) {
 		if panic == nil {
 			err = errors.New("didn't panic")
 		} else if !reflect.DeepEqual(panic, want) {
-			err = fmt.Errorf("panicked with wrong error: got %q, want %q", panic, want)
+			err = fmt.Errorf("panicked with wrong error: got %v, want %w", panic, want)
 		}
 	}()
 	fn()
@@ -296,34 +296,4 @@ func TestFeedUnsubscribeFromInbox(t *testing.T) {
 	if len(feed.sendCases) != 1 {
 		t.Errorf("sendCases is non-empty after unsubscribe")
 	}
-}
-
-func BenchmarkFeedSend1000(b *testing.B) {
-	var (
-		done  sync.WaitGroup
-		feed  Feed
-		nsubs = 1000
-	)
-	subscriber := func(ch <-chan int) {
-		for i := 0; i < b.N; i++ {
-			<-ch
-		}
-		done.Done()
-	}
-	done.Add(nsubs)
-	for range nsubs {
-		ch := make(chan int, 200)
-		feed.Subscribe(ch)
-		go subscriber(ch)
-	}
-
-	// The actual benchmark.
-	for i := 0; b.Loop(); i++ {
-		if feed.Send(i) != nsubs {
-			panic("wrong number of sends")
-		}
-	}
-
-	b.StopTimer()
-	done.Wait()
 }

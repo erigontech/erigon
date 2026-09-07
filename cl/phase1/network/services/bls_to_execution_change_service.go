@@ -120,7 +120,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		// assert address_change.validator_index < len(state.validators)
 		validator, err := stateReader.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 		if err != nil {
-			return fmt.Errorf("unable to retrieve validator: %v", err)
+			return fmt.Errorf("unable to retrieve validator: %w", err)
 		}
 		wc = validator.WithdrawalCredentials()
 

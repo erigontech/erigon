@@ -17,12 +17,9 @@
 package sentry_multi_client
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -36,24 +33,19 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -89,7 +81,6 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
 		// eth/71 (EIP-8159) BAL exchange
 		eth.ToProto[direct.ETH71][eth.GetBlockAccessListsMsg],
-		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -123,8 +114,6 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH68][eth.BlockBodiesMsg],
 		eth.ToProto[direct.ETH68][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH68][eth.NewBlockMsg],
-		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
-		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
@@ -159,7 +148,6 @@ type MultiClient struct {
 	sentries           []sentryproto.SentryClient
 	ChainConfig        *chain.Config
 	db                 kv.TemporalRoDB
-	WitnessBuffer      *stagedsync.WitnessBuffer
 	Engine             rules.Engine
 	blockReader        dbservices.FullBlockReader
 	statusDataProvider StatusGetter
@@ -183,20 +171,12 @@ func NewMultiClient(
 	blockReader dbservices.FullBlockReader,
 	statusDataProvider StatusGetter,
 	logPeerInfo bool,
-	enableWitProtocol bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
-	// Initialize witness buffer for Polygon chains with witness protocol enabled
-	var witnessBuffer *stagedsync.WitnessBuffer
-	if chainConfig.Bor != nil && enableWitProtocol {
-		witnessBuffer = stagedsync.NewWitnessBuffer()
-	}
-
 	cs := &MultiClient{
 		sentries:                         sentries,
 		ChainConfig:                      chainConfig,
 		db:                               db,
-		WitnessBuffer:                    witnessBuffer,
 		Engine:                           engine,
 		blockReader:                      blockReader,
 		statusDataProvider:               statusDataProvider,
@@ -468,283 +448,6 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 	return nil
 }
 
-func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	var req wit.GetWitnessPacket
-	if err := rlp.DecodeBytes(inreq.Data, &req); err != nil {
-		return fmt.Errorf("decoding GetWitnessPacket: %w, data: %x", err, inreq.Data)
-	}
-
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	seen := make(map[common.Hash]struct{}, len(req.WitnessPages))
-	for _, witnessPage := range req.WitnessPages {
-		seen[witnessPage.Hash] = struct{}{}
-	}
-
-	witnessSize := make(map[common.Hash]uint64, len(seen))
-	headers := make(map[common.Hash]*types.Header, len(seen))
-	for witnessBlockHash := range seen {
-		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessBlockHash)
-		if err != nil {
-			return fmt.Errorf("reading header for witness hash %x: %w", witnessBlockHash, err)
-		}
-		if header == nil {
-			continue
-		}
-		headers[witnessBlockHash] = header
-		key := dbutils.HeaderKey(header.Number.Uint64(), witnessBlockHash)
-		sizeBytes, err := tx.GetOne(kv.BorWitnessSizes, key)
-		if err != nil {
-			return fmt.Errorf("reading witness size for hash %x: %w", witnessBlockHash, err)
-		}
-		if len(sizeBytes) > 0 {
-			witnessSize[witnessBlockHash] = binary.BigEndian.Uint64(sizeBytes)
-		} else {
-			witnessSize[witnessBlockHash] = 0
-		}
-	}
-
-	var response wit.WitnessPacketResponse
-	witnessCache := make(map[common.Hash][]byte, len(seen))
-	totalResponsePayloadDataAmount := 0
-	totalCached := 0
-
-	for _, witnessPage := range req.WitnessPages {
-		size := witnessSize[witnessPage.Hash]
-		totalPages := (size + wit.PageSize - 1) / wit.PageSize // Ceiling division
-
-		var witnessPageResponse wit.WitnessPageResponse
-		witnessPageResponse.Page = witnessPage.Page
-		witnessPageResponse.Hash = witnessPage.Hash
-		witnessPageResponse.TotalPages = totalPages
-
-		if witnessPage.Page < totalPages {
-			var witnessBytes []byte
-			if cachedRLPBytes, exists := witnessCache[witnessPage.Hash]; exists {
-				witnessBytes = cachedRLPBytes
-			} else {
-				header, ok := headers[witnessPage.Hash]
-				if !ok || header == nil {
-					continue
-				}
-				key := dbutils.HeaderKey(header.Number.Uint64(), witnessPage.Hash)
-				queriedBytes, err := tx.GetOne(kv.BorWitnesses, key)
-				if err != nil {
-					return fmt.Errorf("reading witness for hash %x: %w", witnessPage.Hash, err)
-				}
-				witnessCache[witnessPage.Hash] = queriedBytes
-				witnessBytes = queriedBytes
-				totalCached += len(queriedBytes)
-			}
-
-			start := min(wit.PageSize*witnessPage.Page, uint64(len(witnessBytes)))
-			end := min(start+wit.PageSize, uint64(len(witnessBytes)))
-			witnessPageResponse.Data = witnessBytes[start:end]
-			totalResponsePayloadDataAmount += len(witnessPageResponse.Data)
-		}
-		response = append(response, witnessPageResponse)
-
-		// fast fail check
-		if totalCached >= wit.MaximumCachedWitnessOnARequest {
-			return fmt.Errorf("request demands too much memory: %d bytes", totalCached)
-		}
-
-		// memory protection check
-		if totalResponsePayloadDataAmount >= wit.MaximumResponseSize {
-			return fmt.Errorf("response exceeds maximum p2p payload size: %d bytes", totalResponsePayloadDataAmount)
-		}
-	}
-
-	reply := wit.WitnessPacketRLPPacket{
-		RequestId:             req.RequestId,
-		WitnessPacketResponse: response,
-	}
-	b, err := rlp.EncodeToBytes(&reply)
-	if err != nil {
-		return fmt.Errorf("encoding witness response: %w", err)
-	}
-
-	outreq := sentryproto.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
-		Data: &sentryproto.OutboundMessageData{
-			Id:   sentryproto.MessageId_BLOCK_WITNESS_W0,
-			Data: b,
-		},
-	}
-	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil && !libsentry.IsPeerNotFoundErr(err) {
-		return fmt.Errorf("sending witness response: %w", err)
-	}
-	return nil
-}
-
-// addBlockWitnesses processes response to our getBlockWitnesses request
-func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	if cs.WitnessBuffer == nil {
-		return nil
-	}
-
-	var query wit.WitnessPacketRLPPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding addBlockWitnesses: %w, data: %x", err, inreq.Data)
-	}
-
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// group witness pages by hash to reconstruct complete witnesses
-	witnessPages := make(map[common.Hash]map[uint64][]byte)
-	witnessTotalPages := make(map[common.Hash]uint64)
-
-	for _, pageResponse := range query.WitnessPacketResponse {
-		if pageResponse.TotalPages > wit.MaxWitnessPages {
-			return fmt.Errorf("witness response advertises TotalPages %d > max %d for hash %x", pageResponse.TotalPages, wit.MaxWitnessPages, pageResponse.Hash)
-		}
-		// Page >= TotalPages is the empty-response sentinel documented on
-		// wit.WitnessPageResponse.Page; skip without allocating.
-		if pageResponse.Page >= pageResponse.TotalPages {
-			continue
-		}
-		if prev, ok := witnessTotalPages[pageResponse.Hash]; ok && prev != pageResponse.TotalPages {
-			return fmt.Errorf("witness response has inconsistent TotalPages for hash %x: %d vs %d", pageResponse.Hash, prev, pageResponse.TotalPages)
-		}
-		if witnessPages[pageResponse.Hash] == nil {
-			witnessPages[pageResponse.Hash] = make(map[uint64][]byte)
-		}
-		witnessPages[pageResponse.Hash][pageResponse.Page] = pageResponse.Data
-		witnessTotalPages[pageResponse.Hash] = pageResponse.TotalPages
-	}
-
-	// reconstruct witnesses
-	for witnessHash, pages := range witnessPages {
-		totalPages := witnessTotalPages[witnessHash]
-
-		if uint64(len(pages)) != totalPages {
-			// identify missing pages
-			var missingPages []uint64
-			for page := range totalPages {
-				if _, exists := pages[page]; !exists {
-					missingPages = append(missingPages, page)
-				}
-			}
-
-			// request missing pages
-			if len(missingPages) > 0 {
-				witnessPageRequests := make([]wit.WitnessPageRequest, len(missingPages))
-				for i, page := range missingPages {
-					witnessPageRequests[i] = wit.WitnessPageRequest{
-						Hash: witnessHash,
-						Page: page,
-					}
-				}
-
-				getWitnessReq := wit.GetWitnessPacket{
-					RequestId: rand.Uint64(),
-					GetWitnessRequest: &wit.GetWitnessRequest{
-						WitnessPages: witnessPageRequests,
-					},
-				}
-
-				data, err := rlp.EncodeToBytes(&getWitnessReq)
-				if err != nil {
-					cs.logger.Warn("failed to encode GetWitnessMsg for missing pages", "err", err, "hash", witnessHash)
-					continue
-				}
-
-				// send request for missing pages to the same peer
-				request := &sentryproto.SendMessageByIdRequest{
-					PeerId: inreq.PeerId,
-					Data: &sentryproto.OutboundMessageData{
-						Id:   sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
-						Data: data,
-					},
-				}
-
-				if _, err := sentryClient.SendMessageById(ctx, request); err != nil {
-					// if sending to the specific peer fails, try random peers as fallback
-					// TODO: instead of sending to random peers, add new function to send to peers known to have witness
-					cs.logger.Info("failed to send GetWitnessMsg to original peer, trying random peers", "err", err, "hash", witnessHash)
-
-					fallbackRequest := &sentryproto.SendMessageToRandomPeersRequest{
-						Data: &sentryproto.OutboundMessageData{
-							Id:   sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
-							Data: data,
-						},
-						MaxPeers: 1,
-					}
-
-					if _, err := sentryClient.SendMessageToRandomPeers(ctx, fallbackRequest); err != nil {
-						cs.logger.Warn("failed to send GetWitnessMsg for missing pages to any peer", "err", err, "hash", witnessHash)
-					} else {
-						cs.logger.Info("requested missing witness pages via random peer", "hash", witnessHash, "missing_pages", missingPages)
-					}
-				} else {
-					cs.logger.Info("requested missing witness pages from original peer", "hash", witnessHash, "missing_pages", missingPages, "peer", hex.EncodeToString(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
-				}
-			}
-			continue
-		}
-
-		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessHash)
-		if err != nil {
-			return fmt.Errorf("reading header for witness hash %x: %w", witnessHash, err)
-		}
-		if header == nil {
-			cs.logger.Debug("header not found for witness", "hash", witnessHash)
-			continue
-		}
-
-		// reconstruct complete witness data by concatenating pages in order
-		var completeWitness []byte
-		for page := range totalPages {
-			pageData, exists := pages[page]
-			if !exists {
-				cs.logger.Debug("missing page in witness", "hash", witnessHash, "page", page)
-				break
-			}
-			completeWitness = append(completeWitness, pageData...)
-		}
-
-		if uint64(len(pages)) == totalPages {
-			cs.WitnessBuffer.AddWitness(header.Number.Uint64(), witnessHash, completeWitness)
-		}
-	}
-
-	return nil
-}
-
-func (cs *MultiClient) newWitness(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	if cs.WitnessBuffer == nil {
-		return nil
-	}
-
-	var query wit.NewWitnessPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding newWitness: %w, data: %x", err, inreq.Data)
-	}
-
-	bHash := query.Witness.Header().Hash()
-
-	var witBuf bytes.Buffer
-	if err := query.Witness.EncodeRLP(&witBuf); err != nil {
-		return fmt.Errorf("error in witness encoding: err: %w", err)
-	}
-
-	witBytes := witBuf.Bytes()
-	blockNumber := query.Witness.Header().Number.Uint64()
-
-	cs.WitnessBuffer.AddWitness(blockNumber, bHash, witBytes)
-
-	return nil
-}
-
 // blockRange69 handles incoming BLOCK_RANGE_UPDATE messages
 func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
 	var query eth.BlockRangeUpdatePacket
@@ -822,12 +525,6 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentrypr
 		return cs.receipts66(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
-	case sentryproto.MessageId_NEW_WITNESS_W0:
-		return cs.newWitness(ctx, inreq, sentry)
-	case sentryproto.MessageId_BLOCK_WITNESS_W0:
-		return cs.addBlockWitnesses(ctx, inreq, sentry)
-	case sentryproto.MessageId_GET_BLOCK_WITNESS_W0:
-		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_69:
 		return cs.getReceipts69(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_70:

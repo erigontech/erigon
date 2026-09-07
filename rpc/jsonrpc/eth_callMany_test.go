@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -27,7 +28,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -83,7 +84,7 @@ func TestCallManyEmptyBundles(t *testing.T) {
 		require.EqualError(t, err, "empty bundles", name)
 
 		var buf bytes.Buffer
-		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		stream := jsonstream.New(&buf)
 		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
 		require.EqualError(t, err, "empty bundles", name)
 	}
@@ -148,22 +149,22 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, nil, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr1,
 	}
 	callArgAddr2 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &secondNonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr2,
 	}
 
 	callArgTransferAddr2 := ethapi.CallArgs{From: &address2, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &transferCallData,
 	}
 
@@ -232,4 +233,62 @@ func TestCallMany(t *testing.T) {
 	if addr1Balance != 100 || addr2Balance != 0 {
 		t.Errorf("eth_callMany: %s", "balanceUnmatch")
 	}
+}
+
+// countingWriter counts the transport writes a stream makes, and can fail one.
+type countingWriter struct {
+	writes int
+	failAt int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.failAt > 0 && w.writes >= w.failAt {
+		return 0, errors.New("client stopped reading")
+	}
+	return len(p), nil
+}
+
+// TestTraceCallManyStreamsEachResult pins that a custom tracer's result reaches
+// the transport as each call finishes, rather than being held until the whole
+// bundle is traced, and that a transport error surfaces to the caller.
+func TestTraceCallManyStreamsEachResult(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config:   chain.TestChainBerlinConfig,
+		Alloc:    types.GenesisAlloc{address: {Balance: big.NewInt(9000000000000000000)}},
+		GasLimit: 10000000,
+	}
+
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
+	defer contractBackend.Close()
+	contractBackend.Commit()
+
+	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), contractBackend.BlockReader(), contractBackend.Engine(), &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())})
+	debugApi := NewPrivateDebugAPI(baseApi, contractBackend.DB(), nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+
+	calls := make([]ethapi.CallArgs, 4)
+	for i := range calls {
+		nonce := hexutil.Uint64(i)
+		to := address
+		calls[i] = ethapi.CallArgs{From: &address, To: &to, Nonce: &nonce,
+			MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+			MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
+		}
+	}
+	bundles := []Bundle{{Transactions: calls}}
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	tracerName := "callTracer"
+	config := &tracersConfig.TraceConfig{Tracer: &tracerName}
+
+	w := &countingWriter{}
+	stream := jsonstream.New(w)
+	require.NoError(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
+	require.GreaterOrEqual(t, w.writes, len(calls), "each traced call must reach the transport as it is produced")
+
+	failing := &countingWriter{failAt: 2}
+	stream = jsonstream.New(failing)
+	require.Error(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
 }

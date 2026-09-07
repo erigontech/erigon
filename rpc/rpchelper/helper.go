@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -57,6 +58,9 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	return nil
 }
 
+// GetBlockNumber resolves a block selector against tx. Non-nil filters may add
+// the live overlay and pending block; nil filters preserve the caller's view
+// and resolve pending to the latest executed block.
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	if err != nil {
@@ -120,9 +124,9 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
+			// Without filters there is no pending block source, so use execution progress.
 			if filters != nil {
-				pendingBlock := filters.LastPendingBlock()
-				if pendingBlock != nil {
+				if pendingBlock := filters.LastPendingBlock(); pendingBlock != nil {
 					return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
 				}
 			}
@@ -190,6 +194,13 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 	return CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
+func CreateUncachedStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	if latest {
+		return NewLatestStateReader(execctx.NewTemporalTxStateGetter(tx)), nil
+	}
+	return CreateHistoryStateReader(ctx, tx, blockNumber+1, txnIndex, txNumsReader)
+}
+
 func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
@@ -203,7 +214,7 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
 
-func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
+func NewLatestStateReader(getter execctxapi.StateGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 

@@ -45,9 +45,9 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 		MustOpen()
 	t.Cleanup(db.Close)
 
-	agg := state.NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+	agg := state.NewTest(dirs).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)

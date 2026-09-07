@@ -117,11 +117,11 @@ func TestSha256Repeatable(t *testing.T) {
 // Joins too large for the stack buffer take the pooled scratch buffer, which keeps
 // them allocation-free too.
 func TestSha256JoinedPathAllocFree(t *testing.T) {
-	// sync.Pool deliberately drops values under the race detector, so the pooled path
-	// always allocates there and can't be measured.
+	// sync.Pool drops a random quarter of the values put back under the race detector,
+	// so the pooled path is not reliably allocation-free there.
 	//goland:noinspection GoBoolExpressions
 	if race.Enabled {
-		t.Skip("sync.Pool does not pool under -race")
+		t.Skip("sync.Pool does not pool reliably under -race")
 	}
 	big, extra := bytesOfLen(4096, 7), bytesOfLen(32, 8)
 	if n := testing.AllocsPerRun(200, func() { crypto.Sha256(big, extra) }); n != 0 {

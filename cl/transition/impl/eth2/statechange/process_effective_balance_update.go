@@ -45,7 +45,9 @@ func ProcessEffectiveBalanceUpdates(s abstract.BeaconState) error {
 			// Set new effective balance
 			maxEffectiveBalance := state.GetMaxEffectiveBalanceByVersion(validator, s.BeaconConfig(), s.Version())
 			effectiveBalance := min(balance-(balance%beaconConfig.EffectiveBalanceIncrement), maxEffectiveBalance)
-			s.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
+			if err = s.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance); err != nil {
+				return false
+			}
 		}
 		return true
 	})

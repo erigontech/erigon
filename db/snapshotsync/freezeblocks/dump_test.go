@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -38,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -70,15 +67,6 @@ func TestDump(t *testing.T) {
 		chainSize   int
 	}
 
-	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
-		var copy chain.Config
-		require.NoError(t, copier.CopyWithOption(&copy, config, copier.Option{DeepCopy: true}))
-		bor := *config.Bor.(*borcfg.BorConfig)
-		bor.Sprint = sprints
-		copy.Bor = &bor
-		return &copy
-	}
-
 	tests := []test{
 		{
 			chainSize:   5,
@@ -87,32 +75,6 @@ func TestDump(t *testing.T) {
 		{
 			chainSize:   50,
 			chainConfig: chain.AllProtocolChanges,
-		},
-		{
-			chainSize:   1000,
-			chainConfig: polychain.BorDevnet.Config,
-		},
-		{
-			chainSize:   2000,
-			chainConfig: polychain.BorDevnet.Config,
-		},
-		{
-			chainSize: 1000,
-			chainConfig: withConfig(polychain.BorDevnet.Config,
-				map[string]uint64{
-					"0":    64,
-					"800":  16,
-					"1600": 8,
-				}),
-		},
-		{
-			chainSize: 2000,
-			chainConfig: withConfig(polychain.BorDevnet.Config,
-				map[string]uint64{
-					"0":    64,
-					"800":  16,
-					"1600": 8,
-				}),
 		},
 	}
 

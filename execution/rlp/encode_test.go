@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -439,31 +438,6 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 
 var sink any
 
-func BenchmarkPutint(b *testing.B) {
-	buf := make([]byte, 8)
-	for b.Loop() {
-		putint(buf, 0x12345678)
-		sink = buf
-	}
-}
-
-func BenchmarkEncodeUint256Ints(b *testing.B) {
-	ints := make([]*uint256.Int, 200)
-	for i := range ints {
-		ints[i] = new(uint256.Int).Lsh(uint256.NewInt(1), uint(i))
-	}
-	out := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		out.Reset()
-		if err := Encode(out, ints); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
 	require.Len(t, str, 56)
@@ -520,35 +494,6 @@ func TestEncodeUint256Random(t *testing.T) {
 			assert.Equal(t, i, *uint256.NewInt(0).SetBytes(decoded))
 		})
 	}
-}
-
-func BenchmarkEncodeConcurrentInterface(b *testing.B) {
-	type struct1 struct {
-		A string
-		B *uint256.Int
-		C [20]byte
-	}
-	value := []any{
-		uint(999),
-		&struct1{A: "hello", B: uint256.NewInt(0xFFFFFFFF)},
-		[10]byte{1, 2, 3, 4, 5, 6},
-		[]string{"yeah", "yeah", "yeah"},
-	}
-
-	var wg sync.WaitGroup
-	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
-		wg.Go(func() {
-			var buffer bytes.Buffer
-			for i := 0; i < b.N; i++ {
-				buffer.Reset()
-				err := Encode(&buffer, value)
-				if err != nil {
-					panic(err)
-				}
-			}
-		})
-	}
-	wg.Wait()
 }
 
 type ptrTestAddr [20]byte
@@ -610,24 +555,24 @@ func TestEncodeValueAndPointerAgree(t *testing.T) {
 func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
 	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
 
-	// Panic rather than drop the error: a failing Encode would otherwise report a
-	// misleadingly low allocation count. The panic path never runs when it succeeds.
-	mustEncode := func(val any) func() {
-		return func() {
+	allocsPerEncode := func(val any) float64 {
+		return testing.AllocsPerRun(200, func() {
 			if err := Encode(io.Discard, val); err != nil {
-				panic(err)
+				t.Fatal(err)
 			}
-		}
+		})
 	}
-	byValue := testing.AllocsPerRun(200, mustEncode(v))
-	byPointer := testing.AllocsPerRun(200, mustEncode(&v))
+	byValue := allocsPerEncode(v)
+	byPointer := allocsPerEncode(&v)
 	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
 
 	if byValue <= byPointer {
 		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
 	}
-	// encBuffer comes from a sync.Pool, which deliberately drops values under the
-	// race detector, so only the relative comparison above holds there.
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector, so the pooled path is not reliably zero there.
+	// The relative check above survives: its gap is the two reflect.New copies,
+	// which the pool does not touch.
 	//goland:noinspection GoBoolExpressions
 	if !race.Enabled && byPointer != 0 {
 		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)

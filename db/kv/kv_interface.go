@@ -443,13 +443,64 @@ const NoStepBound = Step(math.MaxUint64)
 // Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
+// LastTxNum returns the txNum at the end of the step.
+func (s Step) LastTxNum(stepSize uint64) uint64 { return (uint64(s)+1)*stepSize - 1 }
+
 type (
 	Domain      uint16
 	InvertedIdx uint16
 )
 
+type GetLatestMetrics interface {
+	UpdateCacheReads(domain Domain, start time.Time)
+	UpdateDbReads(domain Domain, start time.Time)
+	UpdateStateCacheHit(domain Domain)
+	UpdateStateCacheMiss(domain Domain)
+	UpdateFileReadsUnique(domain Domain, key []byte, start time.Time)
+}
+
+type GetLatestOptions struct {
+	metrics     GetLatestMetrics
+	start       time.Time
+	maxStep     Step
+	hasMaxStep  bool
+	branchCache bool
+}
+
+func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
+	opts.metrics, opts.start = metrics, start
+	return opts
+}
+
+func (opts GetLatestOptions) WithMaxStep(maxStep Step) GetLatestOptions {
+	if !opts.hasMaxStep || maxStep < opts.maxStep {
+		opts.maxStep, opts.hasMaxStep = maxStep, true
+	}
+	return opts
+}
+
+func (opts GetLatestOptions) WithBranchCache() GetLatestOptions {
+	opts.branchCache = true
+	return opts
+}
+
+func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
+	return opts.metrics, opts.start
+}
+
+func (opts GetLatestOptions) MaxStep() Step {
+	if !opts.hasMaxStep {
+		return NoStepBound
+	}
+	return opts.maxStep
+}
+
+func (opts GetLatestOptions) BranchCache() bool {
+	return opts.branchCache
+}
+
 type TemporalGetter interface {
-	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
+	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
 }
@@ -559,6 +610,9 @@ type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
+	//
+	// k belongs to the callback; v is the batch's own storage, which is never
+	// rewritten in place, so a consumer may retain it.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
@@ -645,9 +699,18 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
+type FinalityContext interface {
+	PruneToBlockNum() uint64
+	RetireToBlockNum() uint64
+	MaxReorgDepth() uint64
+	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+}
+
 type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
+	MaxPrunableStepsBacklog() uint64
+	StepSize() uint64
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	Debug() TemporalDebugDB
@@ -658,6 +721,11 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+	OpenStateSnapshots(ctx context.Context) error
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
+	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (FinalityContext, error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities

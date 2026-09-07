@@ -94,26 +94,51 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}
 }
 
-// BenchmarkJournalStorageChange measures the hot append path; it must stay at
-// zero allocs per op once the entries slice has warmed up.
-func BenchmarkJournalStorageChange(b *testing.B) {
+// Reset reslices entries to zero, so anything left in the backing array stays
+// reachable for as long as the journal is reused — and a kindCode entry's extra
+// holds a whole contract's bytecode. The journal outlives the transaction, so
+// that is a block's worth of dead code pinned by a pooled object.
+func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 	j := newJournal()
-	defer j.release()
-	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
-	key := accounts.InternKey(common.HexToHash("0x01"))
-	prev := uint256.NewInt(42)
+	t.Cleanup(j.release)
 
-	for range 1 << 16 {
-		j.storageChange(addr, key, *prev, false)
+	addr := accounts.InternAddress(common.Address{1})
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	if len(j.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(j.entries))
 	}
+
 	j.Reset()
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		j.storageChange(addr, key, *prev, false)
-		if len(j.entries) == 1<<16 {
-			j.Reset()
+	tail := j.entries[:cap(j.entries)]
+	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
+
+// revert truncates to a snapshot, so the entries it drops outlive it; a Reset
+// that clears only [0:len] would leave that stretch holding its bytecode.
+func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	addr := accounts.InternAddress(common.Address{1})
+	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+
+	j := ibs.journal
+	for range 4 {
+		j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	}
+
+	j.revert(ibs, 2)
+	j.Reset()
+
+	for i, e := range j.entries[:cap(j.entries)] {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
 		}
 	}
 }

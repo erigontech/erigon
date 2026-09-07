@@ -90,16 +90,10 @@ var justificationFinalizationTest = NewEpochProcessing(func(s abstract.BeaconSta
 	return statechange.ProcessJustificationBitsAndFinality(s, nil)
 })
 
-var participationFlagUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessParticipationFlagUpdates(s)
-	return nil
-})
+var participationFlagUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationFlagUpdates)
 var participationRecordUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationRecordUpdates)
 
-var randaoMixesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessRandaoMixesReset(s)
-	return nil
-})
+var randaoMixesTest = NewEpochProcessing(statechange.ProcessRandaoMixesReset)
 
 var registryUpdatesTest = NewEpochProcessing(statechange.ProcessRegistryUpdates)
 
@@ -113,30 +107,13 @@ var rewardsAndPenaltiesTest = NewEpochProcessing(func(s abstract.BeaconState) er
 
 var slashingsTest = NewEpochProcessing(statechange.ProcessSlashings)
 
-var slashingsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessSlashingsReset(s)
-	return nil
-})
+var slashingsResetTest = NewEpochProcessing(statechange.ProcessSlashingsReset)
 
-var recordsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessParticipationRecordUpdates(s)
-	return nil
-})
+var pendingDepositTest = NewEpochProcessing(statechange.ProcessPendingDeposits)
 
-var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessPendingDeposits(s)
-	return nil
-})
+var PendingConsolidationTest = NewEpochProcessing(statechange.ProcessPendingConsolidations)
 
-var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessPendingConsolidations(s)
-	return nil
-})
-
-var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessProposerLookahead(s)
-	return nil
-})
+var ProposerLookaheadTest = NewEpochProcessing(statechange.ProcessProposerLookahead)
 
 var historicalSummariesUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
 

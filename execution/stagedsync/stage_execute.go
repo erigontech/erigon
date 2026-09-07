@@ -240,12 +240,13 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
+) error {
 	var currentInc uint64
 
-	//TODO: why we don't call accumulator.ChangeCode???
+	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//TODO: This is broken - becuase it does not handle the way value changes
+		// TODO: This is broken - becuase it does not handle the way value changes
 		// for previous steps are represented - they will pass nil values here
 		// which will look like a delete (12/11/25 - I've not fixed this as it has
 		// been here for a while and I'm not sure what if anything receives these
@@ -300,7 +301,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				switch {
-				case entry.Value != nil && len(entry.Value) > 0:
+				case len(entry.Value) > 0:
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
@@ -396,7 +397,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
-	var to = prevStageProgress
+	to := prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
@@ -605,14 +606,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
-	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
-		}
-	}
+	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+	stagePruneTimeout := min(baseTimeout+extra, maxTimeout)
 	if timeout > 0 && timeout > stagePruneTimeout {
 		stagePruneTimeout = timeout
 	}
@@ -641,20 +636,21 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
+	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag).
 	// Without the guard, the flag still controls *generation* but every
 	// generated changeset is pruned 96 blocks later, defeating the point.
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
 			pruneChangeSetsStartTime := time.Now()
 			if err := rawdb.PruneTable(
 				tx,
 				kv.ChangeSets3,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				blockPruneTo,
 				ctx,
 				pruneDiffsLimit,
 				pruneChangeSetsTimeout,
@@ -674,20 +670,18 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		}
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			if err := rawdb.PruneTable(
-				tx,
-				kv.BlockAccessList,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-				ctx,
-				pruneBalLimit,
-				pruneTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			blockPruneTo,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 

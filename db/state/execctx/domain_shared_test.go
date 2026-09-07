@@ -47,9 +47,12 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 	return state.NewTest(dirs)
@@ -62,9 +65,9 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
@@ -403,21 +406,11 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	const lastBlock = uint64(29)
 	const unwindTarget = uint64(4) // inside step 0
 
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-	for bn := uint64(0); bn <= lastBlock; bn++ {
-		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
-	}
-
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(err)
-	defer doms.Close()
 	addr := make([]byte, length.Addr)
 	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
 	blockHashes := make(map[uint64]common.Hash)
 
-	executeRange := func(from, to uint64) {
+	executeRange := func(doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, from, to uint64) {
 		for bn := from; bn <= to; bn++ {
 			cs := &changeset.StateChangeSet{}
 			doms.SetChangesetAccumulator(cs)
@@ -438,6 +431,17 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		}
 	}
 
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
 	unwindTo := func(target uint64, curBlock uint64) {
 		var merged [kv.DomainLen][]kv.DomainEntryDiff
 		for bn := curBlock; bn > target; bn-- {
@@ -455,25 +459,25 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	}
 
 	// Cycle 1: execute 0..lastBlock, flush, unwind, flush.
-	executeRange(0, lastBlock)
+	executeRange(doms, rwTx, 0, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Cycle 2: re-execute, unwind, flush.
-	executeRange(unwindTarget+1, lastBlock)
+	executeRange(doms, rwTx, unwindTarget+1, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Cycle 3: re-execute, unwind, flush.
-	executeRange(unwindTarget+1, lastBlock)
+	executeRange(doms, rwTx, unwindTarget+1, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
 	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
@@ -481,10 +485,19 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
 	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
-	maxStep := unwindTarget / stepSize
+	requireNoCommitmentStepAbove(t, rwTx, unwindTarget/stepSize)
+}
+
+// requireNoCommitmentStepAbove fails when the commitment values table still holds
+// an entry above maxStep.
+func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep uint64) {
+	t.Helper()
+	require := require.New(t)
+
 	c, err := rwTx.Cursor(kv.TblCommitmentVals)
 	require.NoError(err)
 	defer c.Close()
+
 	offending := 0
 	var exampleStep uint64
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -620,7 +633,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// unwind step — but the value carried by the retained entry is the
 	// pre-step-1-write value (block 9's state), not the unwindTarget's
 	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
 	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
@@ -730,7 +743,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16)
 	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
@@ -755,7 +768,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
 
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
-	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
 	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
@@ -814,6 +827,21 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	// Blocks 0..19 span step 0 (0..9) and step 1 (10..19).
 	const lastBlock = uint64(19)
 	const unwindTarget = uint64(4) // inside step 0
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	executeBlock := func(doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, bn uint64, fn func()) {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		fn()
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
@@ -824,21 +852,6 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer doms.Close()
-
-	addr := make([]byte, length.Addr)
-	addr[0] = 0x42
-
-	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
-	executeBlock := func(bn uint64, fn func()) {
-		cs := &changeset.StateChangeSet{}
-		doms.SetChangesetAccumulator(cs)
-		fn()
-		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
-		require.NoError(err)
-		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
-		perBlockDiffs[bn] = cs
-		doms.SetChangesetAccumulator(nil)
-	}
 
 	// Forward execution:
 	//   block 0 (step 0): write addr = {nonce=1, balance=100}
@@ -854,23 +867,23 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 
 	pv0, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(0, func() {
+	executeBlock(doms, rwTx, 0, func() {
 		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc1Bytes, 0, pv0))
 	})
 	pv5, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(5, func() {
+	executeBlock(doms, rwTx, 5, func() {
 		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc2Bytes, 5, pv5))
 	})
 	pv15, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(15, func() {
+	executeBlock(doms, rwTx, 15, func() {
 		require.NoError(doms.DomainDel(kv.AccountsDomain, rwTx, addr, 15, pv15))
 	})
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Sanity: post-forward, addr is absent (deleted in block 15).
-	v, _, err := rwTx.GetLatest(kv.AccountsDomain, addr)
+	v, _, err := rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.Empty(v, "post-forward: addr must be absent (was deleted in block 15)")
 
@@ -905,7 +918,7 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	// dups by their raw bytes, so (^1, tombstone) sorts before (^0, acc1);
 	// SeekExact returns the tombstone, getLatestFromDb sees an 8-byte
 	// value, and the caller reads "addr is absent" instead of acc1.
-	v, _, err = rwTx.GetLatest(kv.AccountsDomain, addr)
+	v, _, err = rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 	require.NoError(err)
 	require.NotEmptyf(v,
 		"post-unwind: addr must be restored (got empty slice — step-1 tombstone "+
@@ -1025,7 +1038,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(maxTx - stepSize)
+	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	{ //prune
@@ -1201,7 +1214,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
-		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(stepSize * 2))
+		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize*2, unboundedFinalityCtx))
 
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(err)
@@ -1379,7 +1392,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(2)
+		err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, 2, unboundedFinalityCtx)
 		require.NoError(t, err)
 		rwTtx3, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -1848,7 +1861,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, 1, storageChanges)
 
 		// compute the commitment trie root in sd2 reading state for touched keys from db1
-		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd1))
+		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd1, commitmentdb.LatestStateReaderOptions{}))
 		rootHash, err := sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
 		if err != nil {
 			return

@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -2405,136 +2406,64 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 	t.Run("small_values", func(t *testing.T) { test(t, false) })
 }
 
-// BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys
-// across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
-func BenchmarkHistoryRange(b *testing.B) {
-	logger := log.New()
-	ctx := b.Context()
+func TestMaxHistoryValLen(t *testing.T) {
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).
+		PageSize(ethconfig.DefaultChainDBPageSize).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{kv.TblAccountHistoryVals: kv.TableCfgItem{Flags: kv.DupSort}}
+		}).MustOpen()
+	defer db.Close()
 
-	db, h, txs := filledHistory(b, true, logger)
-	collateAndMergeHistory(b, db, h, txs, true)
+	// historyLargeValues=false stores txNum+value as one dupsort value
+	put := func(valLen int) error {
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.TblAccountHistoryVals, []byte("key"), make([]byte, 8+valLen))
+		})
+	}
+	require.NoError(t, put(maxHistoryValLen))
+	require.Error(t, put(maxHistoryValLen+1))
+}
+
+// requirePagedHistoryFiles fails unless the fixture produced page-compressed .v files. Collate
+// writes WithValuesOnCompressedPage(0), so only merged files reach seg.PagedReader; without this
+// a change to the merge config would silently drop that coverage.
+func requirePagedHistoryFiles(tb testing.TB, ic *HistoryRoTx) {
+	tb.Helper()
+	for _, f := range ic.files {
+		if f.src.decompressor.CompressedPageValuesCount() > 1 {
+			return
+		}
+	}
+	tb.Fatal("no page-compressed .v file: this fixture never reaches seg.PagedReader")
+}
+
+// The history streams return views into re-used buffers that bottom out in seg.PagedReader, so
+// Invariant 2 is what makes them safe to compose. Run over merged files, where the values come
+// from a page-decode buffer rather than straight from the file.
+func TestHistoryStreamsKeepInvariant2(t *testing.T) {
+	logger := log.New()
+	ctx := t.Context()
+	db, h, txs := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
-	require.NoError(b, err)
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	ic := h.beginForTests()
 	defer ic.Close()
+	requirePagedHistoryFiles(t, ic)
 
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
+	t.Run("HistoryRange", func(t *testing.T) {
 		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
-		require.NoError(b, err)
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(b, err)
-		}
-		it.Close()
-	}
-}
-
-// BenchmarkRangeAsOf benchmarks iterating the full key-space at a given txNum
-// from segment files (exercises HistoryRangeAsOfFiles.advanceInFiles).
-func BenchmarkRangeAsOf(b *testing.B) {
-	logger := log.New()
-	ctx := b.Context()
-
-	db, h, txs := filledHistory(b, true, logger)
-	collateAndMergeHistory(b, db, h, txs, true)
-
-	tx, err := db.BeginRo(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-
-	ic := h.beginForTests()
-	defer ic.Close()
-
-	checkTxNum := txs / 2
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
-		require.NoError(b, err)
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(b, err)
-		}
-		it.Close()
-	}
-}
-
-// collateHistory collates all steps into separate per-step files without merging them.
-// This leaves many small files in the heap, exercising heap operations during iteration.
-func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
-	b.Helper()
-	ctx := b.Context()
-	tx, err := db.BeginRwNosync(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
-		require.NoError(b, h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-	}
-	require.NoError(b, tx.Commit())
-}
-
-// BenchmarkHistoryRange_MultiFile is like BenchmarkHistoryRange but keeps all
-// step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
-func BenchmarkHistoryRange_MultiFile(b *testing.B) {
-	logger := log.New()
-	ctx := b.Context()
-
-	db, h, txs := filledHistory(b, true, logger)
-	collateHistory(b, db, h, txs)
-
-	tx, err := db.BeginRo(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-
-	ic := h.beginForTests()
-	defer ic.Close()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
-		require.NoError(b, err)
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(b, err)
-		}
-		it.Close()
-	}
-}
-
-// BenchmarkRangeAsOf_MultiFile is like BenchmarkRangeAsOf but keeps all
-// step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
-func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
-	logger := log.New()
-	ctx := b.Context()
-
-	db, h, txs := filledHistory(b, true, logger)
-	collateHistory(b, db, h, txs)
-
-	tx, err := db.BeginRo(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-
-	ic := h.beginForTests()
-	defer ic.Close()
-
-	checkTxNum := txs / 2
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
-		require.NoError(b, err)
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(b, err)
-		}
-		it.Close()
-	}
+		require.NoError(t, err)
+		defer it.Close()
+		streamtest.RequireInvariant2KV(t, it)
+	})
+	t.Run("RangeAsOf", func(t *testing.T) {
+		it, err := ic.RangeAsOf(ctx, txs/2, nil, nil, order.Asc, -1, tx)
+		require.NoError(t, err)
+		defer it.Close()
+		streamtest.RequireInvariant2KV(t, it)
+	})
 }

@@ -134,11 +134,6 @@ func (d *DataColumnSidecar) getSchemaForVersion(version clparams.StateVersion) [
 	return []any{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
 }
 
-// getSchema returns the SSZ schema using the stored version.
-func (d *DataColumnSidecar) getSchema() []any {
-	return d.getSchemaForVersion(d.version)
-}
-
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {
 	return d.EncodingSizeSSZForVersion(d.version)
 }

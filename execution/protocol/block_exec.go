@@ -20,9 +20,7 @@
 package protocol
 
 import (
-	"cmp"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -42,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
 var (
@@ -64,16 +61,15 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash           `json:"stateRoot"`
-	TxRoot           common.Hash           `json:"txRoot"`
-	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
-	LogsHash         common.Hash           `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot   common.Hash           `json:"stateRoot"`
+	TxRoot      common.Hash           `json:"txRoot"`
+	ReceiptRoot common.Hash           `json:"receiptsRoot"`
+	LogsHash    common.Hash           `json:"logsHash"`
+	Bloom       types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts    types.Receipts        `json:"receipts"`
+	Rejected    RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -201,46 +197,34 @@ func ExecuteBlockEphemerally(
 		Rejected:    rejectedTxs,
 	}
 
-	if chainConfig.Bor != nil {
-		blockLogs := ibs.Logs()
-		var logs []*types.Log
-		for _, receipt := range receipts {
-			logs = append(logs, receipt.Logs...)
-		}
-
-		stateSyncReceipt := &types.Receipt{}
-		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
-
-			if len(blockLogs) > len(logs) {
-				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-
-				// fill the state sync with the correct information
-				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
-				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
-			}
-		}
-
-		execRs.StateSyncReceipt = stateSyncReceipt
-	}
-
 	return execRs, nil
 }
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
-	var author accounts.Address
-	if isBor {
-		author = accounts.InternAddress(header.Coinbase)
-	} else {
-		author = params.SystemAddress
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
+	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. Only
+// chainConfig survives a call, so there is nothing else to seed.
+func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
+	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
+}
+
+// SysCallContractWithEVM runs a system call on an EVM the caller owns instead of
+// building one per call. The EVM must belong to the calling goroutine, and the
+// call overwrites its block context, tx context, IntraBlockState and vm.Config,
+// so the caller must not need any of those to survive. A nil EVM, or one built
+// for a different chainConfig, falls back to allocating one.
+func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, params.SystemAddress, chainConfig)
+	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	msg := types.NewMessage(
 		params.SystemAddress,
 		contract,
@@ -260,13 +244,12 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
-	var txContext evmtypes.TxContext
-	if isBor {
-		txContext = evmtypes.TxContext{}
+	txContext := NewEVMTxContext(msg)
+	if evm == nil || evm.ChainConfig() != chainConfig {
+		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		txContext = NewEVMTxContext(msg)
+		evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
@@ -284,10 +267,6 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		*msg.Value(),
 		false,
 	)
-	if isBor && err != nil {
-		return nil, nil
-	}
-
 	return ret, err
 }
 

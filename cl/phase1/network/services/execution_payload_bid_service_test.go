@@ -109,13 +109,19 @@ func addPreferencesToPoolWithRoot(epbsPool *pool.EpbsPool, slot uint64, dependen
 func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Hash) *state2.CachingBeaconState {
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
-	s.SetSlot(100)
-	s.SetBlockRootAt(63, dependentRoot)
+	if err := s.SetSlot(100); err != nil {
+		panic(err)
+	}
+	if err := s.SetBlockRootAt(63, dependentRoot); err != nil {
+		panic(err)
+	}
 	s.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 2})
 	for i := range 8 {
 		var pk common.Bytes48
 		pk[0] = byte(i)
-		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.EffectiveBalanceIncrement)
+		if err := s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.EffectiveBalanceIncrement); err != nil {
+			panic(err)
+		}
 	}
 	s.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, 8))
 	s.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, 8))
@@ -254,7 +260,7 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 
 	// Bid should NOT be in highest bids (pending, not validated)
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
-	_, found := epbsPool.HighestBids.Get(bidKey)
+	_, found := epbsPool.GetHighestBid(bidKey)
 	require.False(t, found)
 }
 
@@ -323,7 +329,7 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 
 	service.processPendingBids()
 	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	_, found := epbsPool.GetHighestBid(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
 
@@ -352,7 +358,7 @@ func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
 
 	service.processPendingBids()
 	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	_, found := epbsPool.GetHighestBid(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
 
@@ -375,7 +381,7 @@ func TestExecutionPayloadBidServiceUsesDependentRootFromForkchoiceStore(t *testi
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), parentState.Slot())
-	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	_, found := epbsPool.GetHighestBid(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
 
@@ -533,7 +539,7 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 
 	// Check highest bid
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
-	stored, found := epbsPool.HighestBids.Get(bidKey)
+	stored, found := epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, uint64(1000), stored.Message.Value)
 
@@ -544,7 +550,7 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, msg2)
 	require.NoError(t, err)
 
-	stored, found = epbsPool.HighestBids.Get(bidKey)
+	stored, found = epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, uint64(2000), stored.Message.Value)
 
@@ -558,7 +564,7 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 	require.Contains(t, err.Error(), "not higher than existing")
 
 	// Highest bid should still be 2000
-	stored, found = epbsPool.HighestBids.Get(bidKey)
+	stored, found = epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, uint64(2000), stored.Message.Value)
 }
@@ -577,7 +583,7 @@ func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *tes
 	require.True(t, errors.Is(err, ErrIgnore))
 
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot}
-	stored, found := epbsPool.HighestBids.Get(bidKey)
+	stored, found := epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, high, stored)
 	require.False(t, service.seenCache.Contains(seenBidKey{builderIndex: 2, slot: 100}))
@@ -592,7 +598,7 @@ func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T)
 	msg := newTestSignedExecutionPayloadBid(100, 3, 500)
 	existing := newTestSignedExecutionPayloadBid(100, 1, 2000)
 	bidKey := pool.HighestBidKey{Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
-	epbsPool.HighestBids.Add(bidKey, existing)
+	epbsPool.StoreHighestBid(bidKey, existing)
 
 	delete(fcMock.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
 
@@ -640,8 +646,8 @@ func TestExecutionPayloadBidServiceDifferentParentHashes(t *testing.T) {
 	// Both should have their own highest bid
 	bidKey1 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash1, ParentBlockRoot: parentRoot}
 	bidKey2 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash2, ParentBlockRoot: parentRoot}
-	stored1, found1 := epbsPool.HighestBids.Get(bidKey1)
-	stored2, found2 := epbsPool.HighestBids.Get(bidKey2)
+	stored1, found1 := epbsPool.GetHighestBid(bidKey1)
+	stored2, found2 := epbsPool.GetHighestBid(bidKey2)
 	require.True(t, found1)
 	require.True(t, found2)
 	require.Equal(t, uint64(1000), stored1.Message.Value)
@@ -671,7 +677,7 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 
 	// Verify stored in pool
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
-	stored, found := epbsPool.HighestBids.Get(bidKey)
+	stored, found := epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, msg, stored)
 }
@@ -860,7 +866,7 @@ func TestExecutionPayloadBidServiceRejectsPrevRandaoMismatch(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	parentState := newBidParentState(service.beaconCfg, testDependentRoot)
-	parentState.SetRandaoMixAt(int(state2.Epoch(parentState)%service.beaconCfg.EpochsPerHistoricalVector), common.Hash{0x42})
+	require.NoError(t, parentState.SetRandaoMixAt(int(state2.Epoch(parentState)%service.beaconCfg.EpochsPerHistoricalVector), common.Hash{0x42}))
 	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = parentState
 	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
 	addPreferencesToPool(epbsPool, 100)
@@ -913,6 +919,6 @@ func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {
 
 	// Should NOT be in pool
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
-	_, found := epbsPool.HighestBids.Get(bidKey)
+	_, found := epbsPool.GetHighestBid(bidKey)
 	require.False(t, found)
 }

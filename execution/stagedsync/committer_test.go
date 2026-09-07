@@ -17,16 +17,21 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -303,4 +308,87 @@ func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
 		assert.True(t, cc.computeAheadStopped, "the fall back to incremental must be reported at block %d", n)
 	}
 	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+}
+
+func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
+	first := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	second := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	cc := &commitmentCalculator{updates: first, spare: second}
+
+	touch := func(u *commitment.Updates, addr byte) {
+		u.TouchPlainKey(string(bytes.Repeat([]byte{addr}, 20)), nil, u.TouchAccount)
+	}
+
+	touch(cc.updates, 1)
+	handed := cc.handOffUpdates()
+	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, second, cc.updates, "the spare must rotate in")
+	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
+
+	touch(cc.updates, 2)
+	handed = cc.handOffUpdates()
+	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
+	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
+}
+
+// TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the
+// COMMITMENT_AFTER_EXEC barrier, which markProcessed-driven tests cannot see.
+// The *blockResult arm is the sole production caller: without it the exec loop
+// parks on the first block with no escape — processedWake never closes, done
+// needs a Stop() deferred behind the parked loop, and the ctx needs a decideStop
+// downstream of it. The dbg guard on the call is what keeps the default path off
+// the mutex and the per-block channel allocation.
+func TestHandleMessage_MarksProcessedUnderFlag(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	defer func(p bool) { dbg.CommitmentAfterExec = p }(dbg.CommitmentAfterExec)
+	// Batch mode with the changeset window out of reach keeps the arm on its
+	// accumulate-only path, so nothing computes against the nil domains.
+	dbg.BatchCommitments = true
+
+	const blockNum = 7
+	for _, tc := range []struct {
+		name string
+		flag bool
+	}{
+		{name: "flag on releases the barrier", flag: true},
+		{name: "flag off leaves the barrier alone", flag: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbg.CommitmentAfterExec = tc.flag
+			cc := &commitmentCalculator{
+				in:            make(chan applyResult),
+				done:          make(chan struct{}),
+				pending:       map[uint64]*pendingBlock{},
+				computedAhead: map[uint64]bool{},
+				balRoots:      map[uint64][]byte{},
+				perBlockFrom:  math.MaxUint64,
+				processedWake: make(chan struct{}),
+			}
+
+			waiting := make(chan error, 1)
+			go func() { waiting <- cc.WaitProcessed(context.Background(), blockNum) }()
+
+			cc.handleMessage(context.Background(), newTestBlockResult(blockNum, common.Hash{0x01}, blockNum, false))
+
+			if tc.flag {
+				select {
+				case err := <-waiting:
+					require.NoError(t, err)
+				case <-time.After(2 * time.Second):
+					t.Fatal("handleMessage never marked the block processed: the exec loop parks here with no escape")
+				}
+				return
+			}
+			select {
+			case <-waiting:
+				t.Fatal("markProcessed ran with COMMITMENT_AFTER_EXEC off: the default path pays a lock and a channel per block")
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(cc.done)
+			require.NoError(t, <-waiting)
+		})
+	}
 }

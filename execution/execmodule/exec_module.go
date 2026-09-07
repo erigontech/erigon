@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
@@ -116,22 +117,24 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
-func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
+func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	var sd *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
+		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
-		context = c.publishedSD()
+	if sd == nil && c.publishedSD != nil {
+		sd = c.publishedSD()
 	}
 
-	view := &CacheView{context: context, getter: tx}
-	if context != nil {
-		view.getter = context.AsGetter(tx)
+	var view *CacheView
+	if sd != nil {
+		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
+	} else {
+		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
 }
@@ -146,19 +149,19 @@ type CacheView struct {
 	context *execctx.SharedDomains
 	// getter is built once per view: it carries the per-tx cache ReadView, so
 	// per-read getter construction would cost an allocation on every call.
-	getter kv.TemporalGetter
+	getter execctxapi.StateGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
 	if len(k) == 20 {
-		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := c.getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
-	v, _, err := c.getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 
@@ -178,7 +181,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 }
 
 type ExecModule struct {
-	bacgroundCtx context.Context
+	backgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader dbservices.FullBlockReader
 
@@ -194,10 +197,10 @@ type ExecModule struct {
 
 	logger log.Logger
 	// Block building
-	nextPayloadId  uint64
-	lastParameters *builder.Parameters
-	builderFunc    builder.BlockBuilderFunc
-	builders       map[uint64]*builder.BlockBuilder
+	nextPayloadId       uint64
+	builderFunc         builder.BlockBuilderFunc
+	builders            map[uint64]*builderEntry
+	buildersByTimestamp map[uint64]uint64
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -227,10 +230,23 @@ type ExecModule struct {
 	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
+	stateTransitionObserver StateTransitionObserver
+
 	stopNode func() error
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
+
+// ExecModuleOption configures execution-module construction.
+type ExecModuleOption func(*ExecModule)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
+	return func(module *ExecModule) {
+		module.stateTransitionObserver = observer
+	}
+}
 
 func NewExecModule(
 	ctx context.Context,
@@ -251,6 +267,7 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
+	opts ...ExecModuleOption,
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
@@ -266,7 +283,8 @@ func NewExecModule(
 		logger:                  logger,
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
-		builders:                make(map[uint64]*builder.BlockBuilder),
+		builders:                make(map[uint64]*builderEntry),
+		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
@@ -275,13 +293,16 @@ func NewExecModule(
 		engine:                  engine,
 		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
-		bacgroundCtx:            ctx,
+		backgroundCtx:           ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
 		codeStore:               codeStore,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
+	}
+	for _, opt := range opts {
+		opt(em)
 	}
 
 	// Wire the process-global state cache into the read-ahead so its
@@ -297,13 +318,20 @@ func NewExecModule(
 	return em
 }
 
-// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
-// Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
+// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes or
+// ctx ends.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// Drain waits without a local timeout for serialized execution work to finish.
+// Callers must stop producers first because backing resources are unsafe to
+// close while execution still holds a transaction.
+func (e *ExecModule) Drain() {
+	e.WaitIdle(context.Background())
 }
 
 // newDomainStateCache is the module's one construction site of the domain
@@ -408,7 +436,7 @@ func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func() error) error {
 	currentHeader := header
 	for {
-		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
+		isCanonical, err := e.isCanonicalHash(e.backgroundCtx, tx, currentHeader.Hash())
 		if err != nil {
 			return err
 		}
@@ -416,7 +444,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 			break
 		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
-		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
+		currentHeader, err = e.getHeader(e.backgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}

@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -198,6 +198,8 @@ func testSentinelBlocksByRange(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
@@ -211,7 +213,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 		noErr(err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
+		sr.Reset(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -226,7 +228,9 @@ func testSentinelBlocksByRange(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		r.ReadByte()
+		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+			noErr(err)
+		}
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := range blocks {
@@ -278,6 +282,8 @@ func testSentinelBlocksByRoots(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
@@ -291,7 +297,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 		noErr(err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
+		sr.Reset(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -306,7 +312,9 @@ func testSentinelBlocksByRoots(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		r.ReadByte()
+		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+			noErr(err)
+		}
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
@@ -345,6 +353,7 @@ func testSentinelStatusRequest(t *testing.T) {
 	defer stream.Close()
 
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
+	noErr(stream.CloseWrite())
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)

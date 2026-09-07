@@ -67,7 +67,9 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
-	ms.cm[string(prefix)] = data
+	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
+	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
+	ms.cm[string(prefix)] = bytes.Clone(data)
 	return nil
 }
 
@@ -114,6 +116,9 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)
 		return nil, nil
 	}
+	// Mirror TrieContext.Account: a domain read yields the whole account record, so it
+	// flags every field. Decode already left CodeHash at empty for a code-less account.
+	ex.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 	return &ex, nil
 }
 

@@ -114,6 +114,8 @@ type CommitProgress struct {
 
 type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
+	// Implementations must copy prefix and data rather than retain them: callers may pass
+	// pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -208,9 +210,12 @@ type DeferredBranchUpdate struct {
 	raw     BranchData
 	prev    []byte
 	encoded BranchData
+	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// here, so it is never itself reused — this is the buffer that survives pooling.
+	encodedBuf []byte
 }
 
-var deferredUpdatePool = sync.Pool{
+var deferredUpdatePool = &sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{}
 	},
@@ -230,19 +235,41 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = bytes.Clone(prefix)
-	upd.raw = bytes.Clone(raw)
-	upd.prev = bytes.Clone(prev)
+	upd.prefix = reuseBytes(upd.prefix, prefix)
+	upd.raw = reuseBytes(upd.raw, raw)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
 
 	return upd
 }
 
+// reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
+// a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
+// distinguish a nil prev ("look it up") from an empty one ("known absent").
+func reuseBytes(dst, src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
+	}
+	return append(dst[:0], src...)
+}
+
+// capLen hides a recycled buffer's leftover capacity, so what a callback sees is derived
+// from the input rather than from whichever update last used the pooled object.
+func capLen(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return slices.Clip(b)
+}
+
+// putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prefix = nil
-		upd.raw = nil
-		upd.prev = nil
+		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
+		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
@@ -254,6 +281,10 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log and CSV counters. The Prometheus counters do not depend on
+	// it — publishBranchWrites bills those where the write lands.
+	Metrics *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
@@ -311,7 +342,8 @@ func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -328,34 +360,42 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = bytes.Clone(merged)
+		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
+		upd.encoded = upd.encodedBuf
 		return nil
 	}
 	upd.encoded = upd.raw
 	return nil
 }
 
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
 	}
 	return nil
 }
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log and CSV counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -367,20 +407,24 @@ func ApplyDeferredBranchUpdates(
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
 		mxTrieBranchesUpdated.AddInt(written)
+		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -412,17 +456,20 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	var written int
+	var written, bytesOut int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
 			continue
 		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			publishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
 	mxTrieBranchesUpdated.AddInt(written)
+	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -470,9 +517,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	mxTrieBranchesUpdated.Inc()
 	return nil
 }
@@ -661,21 +706,28 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-var errShortenedKeyFound = errors.New("shortened key found")
-
 // A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
-	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				return nil, errShortenedKeyFound
-			}
-		} else if len(key) != length.Addr {
-			return nil, errShortenedKeyFound
+	_, _, shortened, err := branchData.CountPlainKeys()
+	return shortened > 0 || err != nil
+}
+
+// CountPlainKeys tallies the branch's keys by kind. It walks every cell rather than stopping at the
+// first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
+// parse failure, and leaves the tally partial.
+func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		switch {
+		case isStorage && len(key) == length.Addr+length.Hash:
+			plainStorages++
+		case !isStorage && len(key) == length.Addr:
+			plainAccounts++
+		default:
+			shortened++
 		}
 		return nil, nil
 	})
-	return err != nil
+	return plainAccounts, plainStorages, shortened, err
 }
 
 // If fn returns nil, the original key is kept.
@@ -696,6 +748,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
+		if pos >= len(branchData) {
+			return nil, errors.New("replacePlainKeys buffer too small for cell fields")
+		}
 		fields := cellFields(branchData[pos])
 		pos++
 		if fields&fieldExtension != 0 {
@@ -1610,22 +1665,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
@@ -1712,6 +1761,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)

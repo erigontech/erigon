@@ -83,11 +83,15 @@ func (p *p2pManager) peerMonitor(ctx context.Context) {
 					connected++
 					peerInfo := p.Host().Network().Peerstore().PeerInfo(peer)
 					if len(peerInfo.Addrs) == 0 {
-						p.connectWithPeer(ctx, peerInfo, nil)
+						if err := p.connectWithPeer(ctx, peerInfo, nil); err != nil {
+							log.Trace("[caplin p2p] could not connect with peer", "err", err)
+						}
 						emptyAddrs++
 					}
 				} else {
-					p.Host().Network().ClosePeer(peer)
+					if err := p.Host().Network().ClosePeer(peer); err != nil {
+						log.Trace("[caplin p2p] could not close peer", "err", err)
+					}
 					closed++
 				}
 			}

@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -239,7 +240,7 @@ func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
 	a := &ApiHandler{syncedData: syncedData}
 
 	err := a.viewHeadStateWithIdentity(func(*state.CachingBeaconState, common.Hash, uint64) error { return nil })
-	endpointErr, ok := err.(*beaconhttp.EndpointError)
-	require.True(t, ok)
+	var endpointErr *beaconhttp.EndpointError
+	require.True(t, errors.As(err, &endpointErr))
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 }

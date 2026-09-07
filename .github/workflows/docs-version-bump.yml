@@ -12,12 +12,9 @@ run-name: "Docs Version Bump — archive ${{ inputs.archive_version }}, publish 
 # artifacts, verifies the build, and opens a PR.
 #
 # NOTE on {ERIGON_VERSION} injection: the remark plugin
-# (src/remark/version-replace.js) currently special-cases specific archived
-# versions by path (e.g. version-v3.3), rather than resolving generically from
-# versions.json. Until that plugin is made generic, adding a new archived
-# version whose pages contain {ERIGON_VERSION} placeholders may require a
-# matching case in version-replace.js (and/or docusaurus.config.ts) by hand —
-# review the diff this workflow produces before merging.
+# (src/remark/version-replace.js) resolves every archived version generically
+# from versions.json, keyed off the version-vX.Y path segment, so a new archive
+# needs no hand-written case there or in docusaurus.config.ts.
 #
 # NOTE: this does NOT move the Pages deploy trigger. If the docs deploy still
 # lives on a per-release branch (docs-deploy.yml), update that branch separately.
@@ -84,9 +81,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Docusaurus config runs branch-controlled JS (config + plugins) and needs
+      # an authenticated call for its release lookup. Mint a read-only token for
+      # it rather than handing it this job's contents:write GITHUB_TOKEN.
+      - name: Generate read-only token for docs build
+        id: docs_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          permission-contents: read
+
       - name: Snapshot current docs as ${{ inputs.archive_version }}
         env:
           ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          # docs:version loads docusaurus.config.ts, whose release lookup fails
+          # closed; without a token it runs on the anonymous rate limit. Use the
+          # read-only token so branch-controlled config never sees write scope.
+          GITHUB_TOKEN: ${{ steps.docs_token.outputs.token }}
         run: npx docusaurus docs:version "$ARCHIVE_VERSION"
 
       - name: Bump current version label to ${{ inputs.new_label }}
@@ -116,7 +129,9 @@ jobs:
       - name: Verify build
         run: npm run build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same reasoning as the snapshot step: `npm run build` loads the same
+          # branch-controlled config, so it gets the read-only token too.
+          GITHUB_TOKEN: ${{ steps.docs_token.outputs.token }}
 
       - name: Open pull request
         env:
