@@ -167,6 +167,11 @@ func TestDumpBounds_UnboundedWhenOutOfIntRange(t *testing.T) {
 	from, to = dumpBounds(0, 100)
 	require.Equal(t, 0, from)
 	require.Equal(t, 100, to)
+
+	// A from-bound past what int holds starts after every file, so the answer is
+	// no entries. -1 would read as unbounded and dump the whole domain instead.
+	from, _ = dumpBounds(math.MaxUint64, math.MaxUint64)
+	require.Equal(t, math.MaxInt, from)
 }
 
 // Commitment branch keys are nibble prefixes, so one key is often a prefix of

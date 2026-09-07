@@ -360,12 +360,14 @@ func stepDumpBounds(stepSize uint64) (int, int, error) {
 	return from, to, nil
 }
 
-// dumpBounds converts txNum bounds to HistoryDump's int arguments, using its -1
-// "unbounded" for anything that does not fit. HistoryDump filters whole files
-// only, so these are a coarse pre-filter; the exact bound is applied per entry.
+// dumpBounds converts txNum bounds to HistoryDump's int arguments. A bound too
+// large for int saturates rather than becoming HistoryDump's -1 "unbounded": for
+// the upper bound those mean the same thing, but an unbounded lower bound would
+// dump every entry where the caller asked for none. HistoryDump filters whole
+// files only, so these are a coarse pre-filter; the exact bound is per entry.
 func dumpBounds(fromTxNum, toTxNum uint64) (int, int) {
 	maxInt := uint64(^uint(0) >> 1)
-	from, to := -1, -1
+	from, to := math.MaxInt, -1
 	if fromTxNum <= maxInt {
 		from = int(fromTxNum)
 	}
