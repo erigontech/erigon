@@ -4134,7 +4134,6 @@ In addition to tools, the MCP server exposes structured **resources** and **prom
 | Resource | Description |
 |----------|-------------|
 | `erigon://node/info` | Node version, chain, capabilities |
-| `erigon://chain/config` | Full chain configuration |
 | `erigon://blocks/recent` | Last 10 blocks summary |
 | `erigon://network/status` | Sync state and peer count |
 | `erigon://gas/current` | Current gas price |
