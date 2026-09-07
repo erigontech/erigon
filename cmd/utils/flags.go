@@ -1124,12 +1124,12 @@ var (
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
-	// (ModeParallel) for commitment computation. Default off; flip to compare
-	// root hashes against a sequential sync before enabling broadly.
+	// (ModeParallel) for commitment computation. Default on; pass =false to fall
+	// back to the sequential HexPatriciaHashed trie.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
-		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
-		Value: false,
+		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
+		Value: true,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1898,6 +1898,13 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
+func setParallelCommitment(ctx *cli.Command, cfg *ethconfig.Config) {
+	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
+		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+	}
+	cfg.ExperimentalParallelCommitment = statecfg.ExperimentalParallelCommitment
+}
+
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
 func RpcGasCap(ctx *cli.Command) uint64 {
 	return uint64(ctx.Uint(RpcGasCapFlag.Name))
@@ -1997,9 +2004,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
-		cfg.ExperimentalParallelCommitment = true
-	}
+	setParallelCommitment(ctx, cfg)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
