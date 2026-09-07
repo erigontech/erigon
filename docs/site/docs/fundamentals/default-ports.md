@@ -52,6 +52,7 @@ Here is a comprehensive list of port-related options:
 
 * `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 * `--caplin.discovery.tcpport [value]`: TCP Port for Caplin DISCV5 protocol (default: `4001`)
+* `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
 
