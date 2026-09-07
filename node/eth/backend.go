@@ -1299,12 +1299,12 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder(db)
-		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			_ = temporalDb.OpenStateSnapshots(ctx)
 		}
 	}
 

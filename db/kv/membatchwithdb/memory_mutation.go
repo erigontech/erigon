@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -1372,6 +1373,38 @@ func (td temporaldb) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRw
 }
 
 func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFilesChange) {}
+
+func (td temporaldb) OpenStateSnapshots(context.Context) error {
+	return nil
+}
+
+func (td temporaldb) StepSize() uint64 {
+	return td.memoryMutation.Debug().StepSize()
+}
+
+func (td temporaldb) MaxPrunableStepsBacklog() uint64 {
+	return 0
+}
+
+func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, kv.FinalityContext, bool) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) BuildFilesInBackground(kv.FinalityContext) chan struct{} {
+	finished := make(chan struct{})
+	close(finished)
+	return finished
+}
+
+func (td temporaldb) BuildMissedAccessors(context.Context, int, ...kv.BuildAccessorsOption) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) CollateAndPrune(context.Context, func(kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+	finished := make(chan struct{})
+	close(finished)
+	return false, finished, nil
+}
 
 func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	return f(td.memoryMutation)

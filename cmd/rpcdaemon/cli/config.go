@@ -436,10 +436,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// Built before the snapshot stats below and before onNewSnapshot fires: both
 		// resolve txNum to block, which needs a tx pinning a block-files view.
-		db, err = temporal.New(rawDB, agg, allSnapshots)
+		temporalDB, err := temporal.New(rawDB, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
+		db = temporalDB
 
 		logSnapshotStats := func() {
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -468,7 +469,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
-			_ = agg.OpenFolder(db)
+			_ = temporalDB.OpenStateSnapshots(ctx)
 
 			logSnapshotStats()
 		} else {
@@ -487,7 +488,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenFolder(db); err != nil {
+				if err = temporalDB.OpenStateSnapshots(ctx); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					logSnapshotStats()

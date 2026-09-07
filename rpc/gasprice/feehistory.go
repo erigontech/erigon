@@ -344,6 +344,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
+	// The reward percentiles are computed from each block's transactions and the gas
+	// their receipts report; the other series come from headers alone. Availability is
+	// a lower bound, so the oldest block of the range decides for all of it.
+	if len(rewardPercentiles) != 0 {
+		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
+			return common.Big0, nil, nil, nil, nil, nil, err
+		}
+	}
+
 	// percentileKey is the binary-encoded percentile slice used as part of the cache key.
 	percentileKey := encodePercentiles(rewardPercentiles)
 
@@ -368,9 +377,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	chainconfig := oracle.backend.ChainConfig()
 	var frozenBound uint64
 	if oracle.historyCache != nil {
-		if fb, err := oracle.backend.FrozenBlocks(); err == nil {
-			frozenBound = fb
-		}
+		frozenBound = oracle.backend.FrozenBlocks()
 	}
 
 	// Unfrozen heights are cached by hash, so a reorged-out block can no longer
@@ -395,7 +402,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
 	if err := oracle.backend.PrepareFork(ctx); err != nil {
-		return common.Big0, nil, nil, nil, nil, nil, err
+		oracle.log.Debug("fee history: parent identity unresolved, serving sequentially", "err", err)
 	}
 	g, fetchCtx := errgroup.WithContext(ctx)
 	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed

@@ -64,7 +64,8 @@ const MaxTxTTL = 60 * time.Second
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
+// 7.2.0 - Add MaxPrunableStepsBacklog
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 2, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -466,11 +467,19 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 	return reply, nil
 }
 
-func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
+func (s *KvServer) MaxPrunableStepsBacklog(context.Context, *emptypb.Empty) (*remoteproto.MaxPrunableStepsBacklogReply, error) {
+	if s.kv == nil {
+		return nil, errors.New("temporal db is not configured")
+	}
+	return &remoteproto.MaxPrunableStepsBacklogReply{Steps: s.kv.MaxPrunableStepsBacklog()}, nil
+}
+
+func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, _ error) {
 	reply = &remoteproto.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		reply.Value, err = tx.ReadSequence(req.Table)
-		return nil
+		return err
 	}); err != nil {
 		return nil, err
 	}
@@ -529,13 +538,14 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, _ error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		if req.Latest {
 			opts := kv.GetLatestOptions{}
 			if req.MaxStep != nil {
