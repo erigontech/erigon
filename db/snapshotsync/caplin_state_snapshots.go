@@ -558,7 +558,7 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 }
 
 // DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps every .tmp in
-// the output directory (#23470). Both run on loopStates; parallelising the dump breaks that.
+// the output directory. Both run on loopStates; parallelising the dump breaks that.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {

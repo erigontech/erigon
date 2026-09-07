@@ -19,7 +19,7 @@ type RpcClient struct {
 
 func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return path, nil
+		return filepath.ToSlash(path), nil
 	}
 	rel, err := filepath.Rel(me.rootDir, path)
 	if err != nil {
