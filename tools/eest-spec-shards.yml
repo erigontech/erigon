@@ -445,7 +445,7 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 25150
+  expected-tests: 25211
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -500,4 +500,4 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 25150
+  expected-tests: 25211
