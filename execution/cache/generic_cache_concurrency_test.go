@@ -595,11 +595,11 @@ func TestSlotCeilingClampsAboveUint32(t *testing.T) {
 	elem := elemBytesFor[entry[[]byte]]()
 	maxCap, shards := budgetedSlots(overflow(uint64(slotChargeBytes(elem))), 0, elem)
 	require.Positive(t, shards)
-	require.Equal(t, fitTableSlots(maxCacheSlots/shards)*shards, maxCap)
+	require.Equal(t, maxCacheSlots/shards*shards, maxCap)
 
 	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+uint64(slotChargeBytes(elemBytesFor[codeSizeEntry]()))), 0, nil)
 	t.Cleanup(g.Close)
-	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
+	require.Equal(t, uint32(maxCacheSlots), g.maxCap)
 }
 
 // The reservation counts bytes outside freelru's element; the usage report counts
@@ -626,34 +626,61 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 	require.Equal(t, int64(avgStoragePayloadBytes+currentSizeEntryOverhead), external.currentSize.Load())
 }
 
-// A capacity that already sits on a fitted boundary must be kept, not dropped to
-// the boundary below: rounding down past it halves the cache, so raising the
-// byte budget can shrink it.
-func TestFitTableSlotsNoCapacityCliff(t *testing.T) {
+// The ceiling is the largest capacity that fits, not the largest one whose table
+// sits on freelru's 5/4 boundary. One boundary per power-of-two band, so rounding
+// to it strands most of a band: 39% of the code cache's ceiling, 17% of the
+// account cache's.
+func TestCeilingLeavesNoAffordableSlot(t *testing.T) {
 	t.Parallel()
 
-	prev := uint32(0)
-	for perShard := uint32(minShardStart); perShard <= 1<<17; perShard++ {
-		fitted := fitTableSlots(perShard)
-		require.LessOrEqual(t, fitted, perShard, "fitTableSlots(%d) is above its input", perShard)
-		require.GreaterOrEqual(t, fitted, prev,
-			"fitTableSlots(%d) fell to %d from fitTableSlots(%d)=%d", perShard, fitted, perShard-1, prev)
-		prev = fitted
+	elem := elemBytesFor[entry[[]byte]]()
+	for _, budget := range []datasize.ByteSize{16 * datasize.MB, 150 * datasize.MB, 512 * datasize.MB, 1 * datasize.GB} {
+		for _, payload := range []uint32{0, 64, avgStoragePayloadBytes, avgAccountPayloadBytes, 12288} {
+			maxCap, shards := budgetedSlots(budget, payload, elem)
+			cost := func(total uint32) int64 {
+				return generationBytesFor(total, shards, int64(payload), elem)
+			}
+			require.LessOrEqual(t, cost(maxCap), int64(budget),
+				"budgetedSlots(%s, %d) ceiling %d is outside its own budget", budget, payload, maxCap)
+			if maxCap < maxCacheSlots/shards*shards {
+				require.Greater(t, cost(maxCap+shards), int64(budget),
+					"budgetedSlots(%s, %d) stopped at %d over %d shards with a step still affordable",
+					budget, payload, maxCap, shards)
+			}
+		}
 	}
 }
 
-// The fitted ceiling has to stay inside the per-slot charge budgetedSlots divides
-// the byte budget by; above it a cache built from that budget allocates a table
-// the envelope never reserved.
-func TestFitTableSlotsStaysWithinSlotCharge(t *testing.T) {
+// The search doubles its seed when the estimate lands under the answer, so a
+// ceiling in the top half of uint32 has to be reached in wider arithmetic: the
+// doubling wraps to zero otherwise and the walk never ends.
+func TestCeilingTerminatesAboveTheSlotClamp(t *testing.T) {
 	t.Parallel()
 
-	for _, perShard := range []uint32{1 << 10, 20_000, 26_212, 26_215, 1 << 20, maxCacheSlots} {
-		fitted := fitTableSlots(perShard)
-		elem := elemBytesFor[entry[[]byte]]()
-		require.LessOrEqual(t, int64(tableSlots(fitted))*elem, int64(fitted)*slotChargeBytes(elem),
-			"fitTableSlots(%d)=%d needs a %d-slot table, above the per-slot charge",
-			perShard, fitted, tableSlots(fitted))
+	free := func(uint32) int64 { return 0 }
+	for _, estimate := range []uint32{0, 1, 3, 1 << 31, math.MaxUint32} {
+		require.Equal(t, uint32(math.MaxUint32),
+			fitCeiling(estimate, math.MaxUint32, datasize.ByteSize(math.MaxInt64), free),
+			"seeded at %d", estimate)
+	}
+}
+
+// The same for the unsharded ceiling, over the value types that reach the widest
+// freelru elements. Its budget funds one table, so the strand is the same band.
+func TestGrowLRUCeilingLeavesNoAffordableSlot(t *testing.T) {
+	t.Parallel()
+
+	for _, budget := range []datasize.ByteSize{16 * datasize.MB, 64 * datasize.MB, 512 * datasize.MB} {
+		for _, payload := range []uint32{1, 64, 12288} {
+			g := closeOnCleanup(t, newGrowLRU[codeEntry](budget, payload, nil))
+			cost := func(c uint32) int64 { return growLRUBytes(c, g.procs, g.avgBytes, g.elemBytes) }
+			require.LessOrEqual(t, cost(g.maxCap), int64(budget),
+				"newGrowLRU(%s, %d) ceiling %d is outside its own budget", budget, payload, g.maxCap)
+			if g.maxCap < maxCacheSlots {
+				require.Greater(t, cost(g.maxCap+1), int64(budget),
+					"newGrowLRU(%s, %d) stopped at %d with a slot still affordable", budget, payload, g.maxCap)
+			}
+		}
 	}
 }
 

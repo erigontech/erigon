@@ -78,8 +78,8 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	procs := uint32(runtime.GOMAXPROCS(0))
 	elemBytes := elemBytesFor[V]()
 	perSlot := int64(avgBytes) + slotChargeBytes(elemBytes)
-	approx := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
-	maxCap := fitCeiling(approx, maxBytes, func(c uint32) int64 {
+	approx := max(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots)), 1)
+	maxCap := fitCeiling(approx, maxCacheSlots, maxBytes, func(c uint32) int64 {
 		return growLRUBytes(c, procs, int64(avgBytes), elemBytes)
 	})
 	return newGrowLRUWith(maxCap, int64(avgBytes), procs, onEvict)
