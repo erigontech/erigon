@@ -43,6 +43,9 @@ const (
 type StackStream struct {
 	stream *jsoniter.Stream
 	stack  []stackItem
+	// out is the stream's own writer, kept because jsoniter does not expose it.
+	// Nil means the caller reads the response back out of Buffer instead.
+	out io.Writer
 }
 
 // newStackStream creates a new StackStream writing to out. Building the
@@ -52,6 +55,7 @@ func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
 		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
+		out:    out,
 	}
 }
 
@@ -63,16 +67,42 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
+	s.out = out
 	// jsoniter latches the error on the stream, so a reused one would fail every
 	// later Flush without draining.
 	s.stream.Error = nil
 	s.stack = s.stack[:0]
 }
 
-// WriteRawBytes writes already-encoded JSON held as bytes.
+// WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
+// FlushThreshold goes straight to the writer. Such a response commits the HTTP
+// status either way, since flushIfFull drains the buffer the moment this returns.
 func (s *StackStream) WriteRawBytes(content []byte) {
+	if s.out != nil && len(content) >= FlushThreshold {
+		s.writeThrough(content)
+		s.popCommaOrField()
+		return
+	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 	s.popCommaOrField()
+}
+
+// writeThrough drains what is buffered and hands content to the writer. The
+// empty-buffer check only skips a pointless zero-length Write; content is large
+// by the time we get here, so it is written either way.
+func (s *StackStream) writeThrough(content []byte) {
+	if len(s.stream.Buffer()) > 0 && s.stream.Flush() != nil {
+		// Same as flushIfFull: jsoniter latches the error, so these bytes can never
+		// reach the client and holding them only pins memory.
+		s.stream.SetBuffer(s.stream.Buffer()[:0])
+		return
+	}
+	if s.stream.Error != nil {
+		return
+	}
+	if _, err := s.out.Write(content); err != nil {
+		s.stream.Error = err
+	}
 }
 
 // WriteRaw writes raw content to the stream

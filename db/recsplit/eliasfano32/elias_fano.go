@@ -88,7 +88,7 @@ func (b *OffHeapBuilder) Close() {
 	if b.backingFile != nil {
 		name := b.backingFile.Name()
 		_ = b.backingFile.Close()
-		dir.RemoveFile(name)
+		_ = dir.RemoveFile(name)
 		b.backingFile = nil
 	}
 }
@@ -140,7 +140,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	defer func() {
 		if err != nil {
 			f.Close()
-			dir.RemoveFile(f.Name())
+			_ = dir.RemoveFile(f.Name())
 		}
 	}()
 	if err := fallocate(f, sizeBytes); err != nil {
