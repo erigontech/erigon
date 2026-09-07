@@ -1260,19 +1260,27 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, err
 	}
 
+	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
 	// Convert legacy decimal block segments to the epoch layout before anything opens the segment
 	// directory: the two size ladders never align, so an epoch producer cannot extend a decimal
 	// frontier without overlapping it, and that overlap breaks the frozen tx-num sequence.
+	//
+	// A datadir whose pre-epoch download never finished cannot go either way: converting it would
+	// build on a set with holes, and leaving it alone does not help because this build asks the
+	// manifest only for epoch files, so the decimal download can never resume. Say so instead of
+	// failing later with a message about a missing type.
+	if err := freezeblocks.CheckLegacyDownloadFinished(db, dirs, chainConfig); err != nil {
+		return nil, nil, nil, nil, err
+	}
 	if err := freezeblocks.MigrateDecimalToEpoch(ctx, dirs, db, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
 	tdb, dbIsTemporal := db.(*temporal.DB)
-
-	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
 	if allSegmentsDownloadComplete {
 		allSnapshots.OptimisticalyOpenFolder()
 	} else {

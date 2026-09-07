@@ -3075,6 +3075,9 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	// Convert legacy decimal block segments to the epoch layout before opening them.
+	if err = freezeblocks.CheckLegacyDownloadFinished(chainDB, dirs, chainConfig); err != nil {
+		return
+	}
 	if err = freezeblocks.MigrateDecimalToEpoch(ctx, dirs, chainDB, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
 		return
 	}

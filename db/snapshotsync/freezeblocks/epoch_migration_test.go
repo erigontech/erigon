@@ -597,3 +597,16 @@ func TestStartOnPlan(t *testing.T) {
 	require.Equal(t, uint64(16384), startOnPlan(plan, 16_384))
 	require.Equal(t, uint64(18432), startOnPlan(plan, 17_409))
 }
+
+// A pruned type can start inside the sub-1024 tail, where the plan has no later boundary. Returning
+// the last boundary there puts the resume point below the type's own data, so its words would be
+// paired with earlier blocks. Keeping the frontier leaves the range tail-only, with no segment.
+func TestStartOnPlanKeepsFrontierPastLastBoundary(t *testing.T) {
+	plan, tailFrom := planEpochSegments(0, 86_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
+	require.Equal(t, uint64(84_992), tailFrom)
+
+	require.Equal(t, uint64(85_000), startOnPlan(plan, 85_000),
+		"no boundary at or above the frontier: keep it, do not fall back below it")
+	require.Equal(t, uint64(84_992), startOnPlan(plan, 84_992), "an exact boundary is kept")
+	require.Equal(t, uint64(0), startOnPlan(nil, 0))
+}

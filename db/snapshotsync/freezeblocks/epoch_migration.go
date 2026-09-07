@@ -26,6 +26,7 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,17 +148,15 @@ func coverage(epoch, decimal []snaptype.FileInfo) (start, coveredTo uint64, runL
 
 // startOnPlan returns the first boundary of plan at or above frontier. Every block type converts on
 // one shared tiling, because the transactions index is built by walking a bodies segment of the
-// identical range; a pruned type therefore resumes on a boundary, dropping the blocks below it.
+// identical range; a pruned type therefore resumes on a boundary, dropping the blocks below it. A
+// type starting inside the sub-1024 tail has no boundary above it and keeps its own frontier.
 func startOnPlan(plan [][2]uint64, frontier uint64) uint64 {
 	for _, r := range plan {
 		if r[0] >= frontier {
 			return r[0]
 		}
 	}
-	if len(plan) == 0 {
-		return frontier
-	}
-	return plan[len(plan)-1][1]
+	return frontier // no boundary at or above it: tail-only range, nothing to convert
 }
 
 // removeDecimalSegFiles deletes each decimal segment and everything with its range and type: the .seg,
@@ -540,6 +539,33 @@ func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, froz
 		}
 	}
 	m.decimalSegs[snaptype2.Transactions.Enum()] = m.decimalSegs[snaptype2.Transactions.Enum()][delIdx:]
+	return nil
+}
+
+// ErrUnfinishedLegacyDownload names a datadir that cannot go either way: converting it would build on
+// a segment set with holes, and leaving it alone does not help either, because this build asks the
+// manifest for epoch files only, so the decimal download it was in the middle of cannot resume.
+var ErrUnfinishedLegacyDownload = errors.New("this datadir holds an unfinished pre-epoch snapshot download: " +
+	"finish it with the previous release, or remove the snapshots directory and sync again")
+
+// CheckLegacyDownloadFinished guards every entry point that would convert a datadir. It reports
+// ErrUnfinishedLegacyDownload when decimal segments are present from a download that never finished,
+// so the operator is told what the datadir actually is rather than that some type is missing.
+func CheckLegacyDownloadFinished(db kv.RoDB, dirs datadir.Dirs, chainConfig *chain.Config) error {
+	complete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
+	if err != nil {
+		return err
+	}
+	if complete {
+		return nil
+	}
+	hasDecimal, err := HasDecimalBlockSegments(dirs, chainConfig)
+	if err != nil {
+		return err
+	}
+	if hasDecimal {
+		return ErrUnfinishedLegacyDownload
+	}
 	return nil
 }
 
