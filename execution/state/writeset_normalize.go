@@ -43,8 +43,8 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 //  2. Incarnation filter: only includes writes from the validated incarnation.
 //     Stale entries from prior incarnations are excluded.
 //
-//  3. Self-destruct: emits DELETE entries for all storage keys of self-destructed
-//     accounts (matching DomainDelPrefix behaviour).
+//  3. Storage reset: emits DELETE entries for all previous storage keys of
+//     self-destructed and newly created contracts.
 //
 //  4. Account field resolution: resolves account field values from the versionMap
 //     to get the correct accumulated values (not speculative worker values).
@@ -54,22 +54,20 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 //
 // domainStorageKeys, when non-nil, must return every storage slot currently
 // committed for an address (from sd.mem + domain files) — used to emit the
-// full StoragePath=0 cascade when the address self-destructs. vm.StorageKeys
+// full StoragePath=0 cascade for an address-wide storage reset. vm.StorageKeys
 // alone only covers slots written in the current batch; genesis-allocated or
-// prior-block storage isn't there, so the calc would never delete those slots
-// from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
-// / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
-// the block). Pass nil in unit tests that don't exercise pre-block storage.
+// prior-block storage isn't there. Pass nil in unit tests that don't exercise
+// pre-block storage.
 func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
 		return filtered, nil
 	}
 
-	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
+	// storageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
-	// set of storage slots that must be DELETE'd when addr self-destructs.
-	sdStorageSlots := func(addr accounts.Address) ([]accounts.StorageKey, error) {
+	// set of storage slots affected by an address-wide reset.
+	storageSlots := func(addr accounts.Address) ([]accounts.StorageKey, error) {
 		seen := make(map[accounts.StorageKey]struct{})
 		var out []accounts.StorageKey
 		for _, k := range vm.StorageKeys(addr) {
@@ -129,6 +127,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			sdSet[addr] = true
 		}
 	}
+	createSet := make(map[accounts.Address]*VersionedWrite[bool])
+	for addr, vw := range writes.createContract {
+		if vw.Version.Incarnation == incarnation && vw.Val && !sdSet[addr] {
+			createSet[addr] = vw
+		}
+	}
 
 	for h := range writes.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
@@ -159,6 +163,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				continue
 			}
 			writeVal := sw.Val
+			if createSet[h.Address] != nil {
+				if !writeVal.IsZero() {
+					filtered.SetStorage(h.Address, h.Key, sw)
+				}
+				continue
+			}
 			// If addr was self-destructed by an earlier TX in this block, its
 			// storage was wiped — the effective baseline for any slot not
 			// re-written since is 0, regardless of what the versionMap (prior
@@ -191,11 +201,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					continue
 				}
 			case stateReader != nil:
-				// No destruct in this block at all (the range-scan above owns
-				// every SD-then-revival shape): compare against the pre-block
-				// value. Narrower than an IncarnationPath probe: pure CREATE
-				// (no prior SD=true) doesn't wipe pre-existing storage, so its
-				// same-value SSTOREs still no-op against pre-block.
+				// No destruct in this block: compare against the pre-block value.
 				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
 					if writeVal.IsZero() {
 						continue
@@ -262,7 +268,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				continue
 			}
 			filtered.SetSelfDestruct(h.Address, sdw)
-			slots, err := sdStorageSlots(h.Address)
+			slots, err := storageSlots(h.Address)
 			if err != nil {
 				return nil, err
 			}
@@ -283,6 +289,26 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// so it's intentionally not carried into the calc/apply write set (as
 			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
 			// which the worker populates directly — independent of this pass.
+		}
+	}
+
+	for addr, create := range createSet {
+		slots, err := storageSlots(addr)
+		if err != nil {
+			return nil, err
+		}
+		for _, slot := range slots {
+			if _, ok := filtered.GetStorage(addr, slot); ok {
+				continue
+			}
+			filtered.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{
+					Address: addr,
+					Path:    StoragePath,
+					Key:     slot,
+					Version: create.Version,
+				},
+			})
 		}
 	}
 
@@ -514,7 +540,7 @@ func CommittedStorageKeysFn(domains *execctx.SharedDomains, tx kv.TemporalTx) St
 }
 
 // CommittedStorageKeys returns every storage slot committed for addr, the
-// domainStorageKeys input Normalize needs to emit a full self-destruct cascade.
+// domainStorageKeys input Normalize needs to emit a full storage-reset cascade.
 // The prefix walk is skipped for an address with no committed account -- see
 // hasCommittedAccount for why that probe is worth its own read.
 func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr accounts.Address) ([]accounts.StorageKey, error) {
@@ -524,7 +550,7 @@ func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr
 		return nil, err
 	}
 	if !hasAcc {
-		return nil, assertNoCommittedStorage(domains, tx, av[:], "selfDestruct")
+		return nil, assertNoCommittedStorage(domains, tx, av[:], "CommittedStorageKeys")
 	}
 	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
 	var keys []accounts.StorageKey

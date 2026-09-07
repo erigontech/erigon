@@ -229,12 +229,17 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 				if err != nil {
 					return err
 				}
-				if !hasAcc {
+				switch {
+				case !hasAcc:
 					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
-				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
-					return err
+				case blockCache != nil:
+					blockCache.clearStorage(addr, txNum)
+				default:
+					if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+						return err
+					}
 				}
 			}
 
@@ -1055,6 +1060,7 @@ type BlockStateCache struct {
 	// At block boundary, dirty entries are flushed to SharedDomains.
 	currentAccounts map[accounts.Address][]byte // serialized account blobs
 	currentStorage  map[accounts.Address]map[accounts.StorageKey][]byte
+	storageCleared  map[accounts.Address]bool
 
 	// currentCode is the latest code per address (for fast read access via
 	// GetCurrentCode-style fallback if added; today only currentAccounts /
@@ -1090,6 +1096,7 @@ const (
 	bcOpPutAccount    bcOpKind = iota + 1
 	bcOpPutCode                // val=nil means code delete
 	bcOpPutStorage             // val=nil means storage delete
+	bcOpClearStorage           // contract creation: delete storage prefix, retain account
 	bcOpDeleteAccount          // self-destruct / empty-removal: del code + del storage prefix
 )
 
@@ -1111,6 +1118,7 @@ func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
 		currentAccounts: make(map[accounts.Address][]byte),
 		currentStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		storageCleared:  make(map[accounts.Address]bool),
 		currentCode:     make(map[accounts.Address][]byte),
 	}
 }
@@ -1177,6 +1185,14 @@ func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.Stora
 	c.mu.Unlock()
 }
 
+func (c *BlockStateCache) clearStorage(addr accounts.Address, txNum uint64) {
+	c.mu.Lock()
+	delete(c.currentStorage, addr)
+	c.storageCleared[addr] = true
+	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpClearStorage, addr: addr, txNum: txNum})
+	c.mu.Unlock()
+}
+
 // WriteCode records a code write at txNum.
 func (c *BlockStateCache) WriteCode(addr accounts.Address, code []byte, txNum uint64) {
 	c.mu.Lock()
@@ -1202,6 +1218,7 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.currentAccounts[addr] = nil
 	delete(c.currentCode, addr)
 	delete(c.currentStorage, addr)
+	c.storageCleared[addr] = true
 	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpDeleteAccount, addr: addr, txNum: txNum})
 	c.mu.Unlock()
 }
@@ -1266,6 +1283,10 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 			c.mu.RUnlock()
 			return val, true
 		}
+	}
+	if c.storageCleared[addr] {
+		c.mu.RUnlock()
+		return nil, true
 	}
 	c.mu.RUnlock()
 	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
@@ -1340,6 +1361,10 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 				if err := domains.DomainPut(kv.StorageDomain, roTx, composite, op.val, op.txNum, nil); err != nil {
 					return err
 				}
+			}
+		case bcOpClearStorage:
+			if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, addrVal[:], op.txNum); err != nil {
+				return err
 			}
 		}
 	}

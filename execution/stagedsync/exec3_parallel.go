@@ -3123,10 +3123,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// incarnations, and resolves account values from the version map.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					// domainStorageKeys: enumerate every storage slot currently
-					// committed for addr (sd.mem + domain files), so a self-destruct
-					// emits the full StoragePath=0 cascade — covers genesis-allocated
-					// and prior-block storage that vm.StorageKeys doesn't see.
+					// domainStorageKeys enumerates committed storage that is absent
+					// from the version map when an address-wide reset is normalized.
 					domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())

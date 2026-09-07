@@ -1807,7 +1807,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 	// before the stateObject, so a spurious StoragePath=0 here would make those
 	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
 	// The parallel commitment calculator gets the per-slot DELETE entries from
-	// Normalize's SD cascade (sdStorageSlots = vm.StorageKeys ∪
+	// Normalize's SD cascade (storageSlots = vm.StorageKeys ∪
 	// domainStorageKeys), so they don't need to be emitted here.
 
 	return true, nil
