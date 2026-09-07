@@ -146,3 +146,41 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 }
 
 var sinkNormalized *WriteSet
+
+// buildTransferInput is the per-tx write set of a plain value transfer: sender
+// balance+nonce, coinbase balance, no storage and no code. Seven of the nine
+// per-path maps AllHeaders walks are empty in this shape.
+func buildTransferInput(txIndex int) *WriteSet {
+	ws := &WriteSet{}
+	ver := Version{TxIndex: txIndex, Incarnation: 0}
+	sender, coinbase := benchAddr(0), benchAddr(1)
+	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: ver},
+		Val:         *uint256.NewInt(41),
+	})
+	ws.SetNonce(sender, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: ver},
+		Val:         7,
+	})
+	ws.SetBalance(coinbase, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: coinbase, Path: BalancePath, Version: ver},
+		Val:         *uint256.NewInt(3),
+	})
+	return ws
+}
+
+func BenchmarkWriteSetNormalizeTransfer(b *testing.B) {
+	const txIndex = 1
+	ws := buildTransferInput(txIndex)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true, "")
+	reader := &minimalStateReader{}
+	b.ReportAllocs()
+	for b.Loop() {
+		out, err := ws.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		sinkNormalized = out
+	}
+}
