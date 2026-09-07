@@ -2481,6 +2481,18 @@ type blockExecutor struct {
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
 	blockStateCache *state.BlockStateCache
+
+	// currentReader is built once per block: it carries no per-TX state, and the
+	// cache view it pins covers committed state, which cannot move mid-block.
+	currentReader *state.CachedReaderV3
+}
+
+func (be *blockExecutor) currentStateReader(pe *parallelExecutor, applyTx kv.TemporalTx) *state.CachedReaderV3 {
+	if be.currentReader == nil {
+		be.currentReader = state.NewCurrentCachedReaderV3(
+			pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+	}
+	return be.currentReader
 }
 
 // sendResult fans out an applyResult to both the apply loop and
@@ -2969,7 +2981,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.IsHistoric() {
 					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+					stateReader = be.currentStateReader(pe, applyTx)
 				}
 			}
 			existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3087,7 +3099,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						// BlockStateCache write buffer. This ensures the
 						// system TX sees all accumulated state from prior
 						// TXs in the block, not stale sd.mem values.
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+						stateReader = be.currentStateReader(pe, applyTx)
 					}
 				}
 
@@ -3322,7 +3334,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the pre-block balance and stomped tx 28's in-block update.
 				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+				reader = be.currentStateReader(pe, applyTx)
 			}
 			pe.RUnlock()
 
