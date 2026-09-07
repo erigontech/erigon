@@ -36,27 +36,32 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 	}
 	defer tx.Rollback()
 
+	// One selected view for resolution, gate and reads: a background commit can publish
+	// or drop the overlay between two selections, leaving the gate on one generation and
+	// the block or its receipts on another.
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+
 	var (
 		b       *types.Block
 		senders []common.Address
 	)
 	if number == rpc.PendingBlockNumber {
-		b, senders, err = api.getBlockWithSenders(ctx, number, tx)
+		b, senders, err = api.getBlockWithSenders(ctx, number, overlayTx)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum); err != nil {
 			return nil, err
 		}
-		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
+		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), overlayTx)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +70,7 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 		return nil, nil
 	}
 
-	return api.getBlockDetailsImpl(ctx, tx, b, number, senders)
+	return api.getBlockDetailsImpl(ctx, overlayTx, b, number, senders)
 }
 
 func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
@@ -75,8 +80,10 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	}
 	defer tx.Rollback()
 
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+
 	// b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
-	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -84,12 +91,12 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, *blockNumber)
+	b, err := api.blockWithSenders(ctx, overlayTx, hash, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +105,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	}
 	number := rpc.BlockNumber(b.NumberU64())
 
-	return api.getBlockDetailsImpl(ctx, tx, b, number, b.Body().SendersFromTxs())
+	return api.getBlockDetailsImpl(ctx, overlayTx, b, number, b.Body().SendersFromTxs())
 }
 
 func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]any, error) {
@@ -127,6 +134,6 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["issuance"] = getIssuanceRes
-	response["totalFees"] = (*hexutil.Big)(feesRes)
+	response["totalFees"] = (*hexutil.U256)(&feesRes)
 	return response, nil
 }

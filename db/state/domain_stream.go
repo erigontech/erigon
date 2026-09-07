@@ -253,7 +253,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 						return err
 					}
 				}
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(v), cDup: keysCursor, endTxNum: endTxNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: bytes.Clone(key), val: bytes.Clone(v), cDup: keysCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
 				break
 			}
@@ -324,7 +324,7 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 					return err
 				}
 			}
-			ci1.key = common.Copy(k)
+			ci1.key = bytes.Clone(k)
 			ci1.endTxNum = endTxNum
 			ci1.val = bytes.Clone(v)
 			heap.Push(hi.h, ci1)

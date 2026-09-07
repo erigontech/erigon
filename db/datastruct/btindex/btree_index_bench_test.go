@@ -17,6 +17,8 @@
 package btindex
 
 import (
+	"bytes"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -59,4 +61,45 @@ func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkBtIndex_Get(b *testing.B) {
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	compress := seg.CompressKeys
+
+	for _, M := range []uint64{256, 128, 64, 32} {
+		tmp := b.TempDir()
+		kvPath := generateKV(b, tmp, 20, 10, keyCount, log.New(), compress)
+		keys, err := pivotKeysFromKV(kvPath)
+		require.NoError(b, err)
+
+		indexPath := filepath.Join(tmp, fmt.Sprintf("m%d.bt", M))
+		buildBtreeIndexWithM(b, kvPath, indexPath, compress, M, log.New())
+
+		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
+			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+			require.NoError(b, err)
+			defer bt.Close()
+			defer decomp.Close()
+
+			getter := seg.NewReader(decomp.MakeGetter(), compress)
+			rnd := newRnd(uint64(b.N))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				p := rnd.IntN(len(keys))
+				k, _, _, found, err := bt.Get(keys[p], getter)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if !found || !bytes.Equal(keys[p], k) {
+					b.Fatal("key not found or mismatch")
+				}
+			}
+		})
+	}
 }

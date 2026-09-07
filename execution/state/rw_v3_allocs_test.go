@@ -162,37 +162,23 @@ func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
 	require.Nil(t, got)
 }
 
-// BenchmarkCachedReaderAccountRead prices one apply-loop account read that hits
-// the block state cache, on each of its two paths.
-func BenchmarkCachedReaderAccountRead(b *testing.B) {
-	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
-	acc := cacheReadTestAccount()
+// returnReadList pools the list, so leaving Vals populated keeps every value the
+// transaction read — bytecode included — alive for as long as the pool holds it.
+// Not parallel: it inspects an object it has just handed back to the pool.
+func TestReturnReadListUnpinsWhatTheTxnRead(t *testing.T) {
+	lists := readListPool.Get().(ReadLists)
+	tbl := lists[kv.AccountsDomain.String()]
+	tbl.Push("k1", make([]byte, 4096))
+	tbl.Push("k2", make([]byte, 4096))
+	require.Equal(t, 2, tbl.Len())
 
-	b.Run("committed", func(b *testing.B) {
-		cache := NewBlockStateCache()
-		cache.PutCommittedAccount(addr, acc)
-		r := NewCurrentCachedReaderV3(nil, cache)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			got, err := r.ReadAccountData(addr)
-			if err != nil || got == nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	returnReadList(lists)
 
-	b.Run("written", func(b *testing.B) {
-		cache := NewBlockStateCache()
-		cache.WriteAccount(addr, accounts.SerialiseV3(acc), 1)
-		r := NewCurrentCachedReaderV3(nil, cache)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			got, err := r.ReadAccountData(addr)
-			if err != nil || got == nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	require.Zero(t, tbl.Len())
+	for i, v := range tbl.Vals[:cap(tbl.Vals)] {
+		require.Nil(t, v, "Vals[%d] still pins %d bytes the txn read", i, len(v))
+	}
+	for i, k := range tbl.Keys[:cap(tbl.Keys)] {
+		require.Empty(t, k, "Keys[%d] still pins a key", i)
+	}
 }

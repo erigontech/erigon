@@ -422,6 +422,15 @@ func (d *Domain) Close() {
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
+	return w.PutWithPrevDiff(k, v, txNum, preval, w.diff)
+}
+
+// PutWithPrevDiff is PutWithPrev with an explicit diff target instead of the
+// writer's own w.diff — for a caller that is its domain's sole writer and
+// wants to route this write's diff without going through SetDiff (which is
+// shared, mutable, and would otherwise need a lock to stay race-free against
+// a concurrent SetDiff from elsewhere).
+func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
@@ -430,13 +439,19 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, preval)
+	if diff != nil {
+		diff.DomainUpdate(k, step, preval)
 	}
 	return w.addValue(k, v, step)
 }
 
 func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {
+	return w.DeleteWithPrevDiff(k, txNum, prev, w.diff)
+}
+
+// DeleteWithPrevDiff is DeleteWithPrev with an explicit diff target — see
+// PutWithPrevDiff.
+func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev []byte, diff *kv.DomainDiff) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
@@ -446,8 +461,8 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 	if err := w.h.AddPrevValue(k, txNum, prev); err != nil {
 		return err
 	}
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, prev)
+	if diff != nil {
+		diff.DomainUpdate(k, step, prev)
 	}
 	return w.addValue(k, nil, step)
 }
@@ -721,8 +736,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 		g := dt.reusableReader(i)
 		g.Reset(offset)
 
-		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) { // MPH false-positives protection
+		if g.MatchCmp(filekey) != 0 { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
@@ -1489,10 +1503,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	// getLatestFromDb will discard them (step covered by files → fall through to
 	// files which have the pre-unwind value). Use the larger of the natural step
 	// and the first unfiled step. See #20169.
-	unwindStep := step
-	if currentFilesEndStep > unwindStep {
-		unwindStep = currentFilesEndStep
-	}
+	unwindStep := max(step, currentFilesEndStep)
 	var unwindStepBytes [8]byte
 	binary.BigEndian.PutUint64(unwindStepBytes[:], ^uint64(unwindStep))
 
@@ -1957,7 +1968,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 		} else {
 			var invStep [8]byte
 			binary.BigEndian.PutUint64(invStep[:], ^uint64(maxStep))
-			stepWithVal, err = valsC.(kv.CursorDupSort).SeekBothRange(key, invStep[:])
+			stepWithVal, err = valsC.SeekBothRange(key, invStep[:])
 		}
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
@@ -2117,20 +2128,30 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	}
 
 	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done && untilTx <= prg.TxTo
-	minStep := kv.Step(dt.d.minStepInDB(tx))
-	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
+
+	// Backlog comes from the values table's own prune progress: the history keys
+	// table tracks separate progress, and stays empty when history is disabled -
+	// as it is for commitment by default. prg.TxTo is the rotation's target,
+	// stored even when the scan was cut short, so only a completed rotation proves
+	// the values below it are gone; txFrom is 0, so an unfinished one bounds nothing.
+	prunedThrough := uint64(0)
+	if prg.ValueProgress == prune.Done {
+		prunedThrough = prg.TxTo
+	}
+	delta := 0.0
+	if filesEnd := dt.files.EndTxNum(); filesEnd > prunedThrough {
+		delta = float64(filesEnd-prunedThrough) / float64(dt.stepSize)
+	}
+	switch dt.name {
+	case kv.AccountsDomain:
 		mxPrunableDAcc.Set(delta)
-	case "storage":
+	case kv.StorageDomain:
 		mxPrunableDSto.Set(delta)
-	case "code":
+	case kv.CodeDomain:
 		mxPrunableDCode.Set(delta)
-	case "commitment":
+	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 
@@ -2344,7 +2365,7 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 
 		select {
 		case <-ctx.Done():
-			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.LastPrunedValue = bytes.Clone(bareKey)
 			stat.ValueProgress = prune.InProgress
 			return stat, nil
 		default:
@@ -2359,11 +2380,11 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 		var seqKey [8]byte
 		copy(seqKey[:], dupVal[8:])
 		if binary.BigEndian.Uint64(seqKey[:]) != deletionSeqID {
-			if err = rwTx.Delete(dt.d.ValuesTable, seqKey[:]); err != nil {
+			if err := rwTx.Delete(dt.d.ValuesTable, seqKey[:]); err != nil {
 				return stat, err
 			}
 		}
-		if err = keysC.DeleteCurrent(); err != nil {
+		if err := keysC.DeleteCurrent(); err != nil {
 			return stat, err
 		}
 
@@ -2382,7 +2403,7 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 		}
 
 		if stat.PruneCountValues >= limit {
-			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.LastPrunedValue = bytes.Clone(bareKey)
 			stat.ValueProgress = prune.InProgress
 			return stat, nil
 		}

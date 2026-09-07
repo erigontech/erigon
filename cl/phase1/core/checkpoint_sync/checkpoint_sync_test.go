@@ -66,12 +66,7 @@ func setCheckpointURLs(t *testing.T, urls ...string) {
 // newMockSlowHttpServer creates a mock HTTP server that never responds and exits gracefully when context is cancelled
 func newMockSlowHttpServer(ctx context.Context) *httptest.Server {
 	mockSlowServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			}
-		}
+		<-ctx.Done()
 	}))
 	return mockSlowServer
 }

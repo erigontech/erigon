@@ -92,7 +92,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -419,7 +419,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	// Execute all transactions in picked blocks
 
 	count := uint64(^uint(0)) // this just makes it easier to use below
@@ -458,7 +458,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		} else {
 			stream.WriteMore()
 		}
-		if _, err := stream.Write(b); err != nil {
+		stream.WriteRawBytes(b)
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
 		nExported++
@@ -622,7 +623,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		if txIndex == -1 { //is system tx
+		if txIndex == -1 { // is system tx
 			continue
 		}
 		txIndexU64 := uint64(txIndex)
@@ -632,7 +633,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return err
 		}
 		if !ok {
-			continue //guess block doesn't have transactions
+			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)

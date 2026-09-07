@@ -22,7 +22,6 @@ package blockgen
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
@@ -432,6 +431,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -495,11 +495,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
 		// so that EIP-4788 can store it during initialization.
 		if config.IsCancun(b.header.Time) {
-			var beaconBlockRoot common.Hash
-			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-			}
-			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+			beaconBlockRoot := b.header.Hash().U256()
+			beaconBlockRoot.AddUint64(&beaconBlockRoot, 1)
+			parentBeaconBlockRoot := common.U256ToHash(beaconBlockRoot)
+			b.header.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
@@ -573,22 +572,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				// finalize) is applied in order; applying a phase before normalizing
 				// the next lets the next phase's stateReader fallback see it.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
 				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
 				isAura := config.Aura != nil
 				for i, ws := range b.blockIO.Outputs() {
@@ -596,9 +580,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 						continue
 					}
 					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}

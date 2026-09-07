@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -48,7 +47,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	var buf bytes.Buffer
-	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	stream := jsonstream.New(&buf)
 	callTracer := "callTracer"
 	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &callTracer}, stream)
 	if err != nil {

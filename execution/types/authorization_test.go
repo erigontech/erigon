@@ -21,9 +21,10 @@ import (
 	"math"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/holiman/uint256"
 )
 
 // The fixed vector pins the signing preimage independently of SignAuthorization:
@@ -85,24 +86,6 @@ func TestSignAuthorizationRoundTrip(t *testing.T) {
 	}
 	if recovered != authority {
 		t.Fatalf("unexpected authority: got %s, want %s", recovered, authority)
-	}
-}
-
-func BenchmarkAuthorizationRecoverSigner(b *testing.B) {
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		b.Fatal(err)
-	}
-	auth, err := SignAuthorization(privateKey, *uint256.NewInt(7078815900), common.Address{0xaa}, 7)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := auth.RecoverSigner(); err != nil {
-			b.Fatal(err)
-		}
 	}
 }
 

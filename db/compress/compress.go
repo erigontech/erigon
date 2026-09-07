@@ -43,12 +43,14 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []
 }
 
 // DecodeZstdIfNeed decompresses v into buf if enabled, otherwise returns buf and v unchanged.
-// It reuses decoders from the pool and writes into buf (grown to at least len(v)).
+// Reuses decoders from the pool. buf is handed to DecodeAll as-is: pre-growing it here can
+// only ever grow it to the compressed length, which is by construction too small, so zstd
+// would discard it and allocate from the frame content size anyway. Reuse comes from the
+// caller storing the returned slice back.
 func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if !enabled {
 		return buf, v, nil
 	}
-	buf = slices.Grow(buf[:0], len(v))[:len(v)]
 
 	dec := zstdDecPool.Get().(*zstd.Decoder)
 	defer putDec(dec)

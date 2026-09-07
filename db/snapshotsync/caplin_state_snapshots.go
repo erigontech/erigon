@@ -81,11 +81,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	return func(numId uint64) ([]byte, []byte, error) {
 		var key, value []byte
-		var err error
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
-			value, err = tx.GetOne(tableName, key)
-			value = bytes.Clone(value)
+			v, err := tx.GetOne(tableName, key)
+			value = bytes.Clone(v)
 			return err
 		}); err != nil {
 			return nil, nil, err

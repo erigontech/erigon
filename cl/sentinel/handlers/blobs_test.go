@@ -142,7 +142,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
@@ -175,11 +175,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 
@@ -268,7 +270,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
@@ -301,11 +303,13 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 

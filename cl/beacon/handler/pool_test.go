@@ -404,6 +404,26 @@ func TestPoolSyncCommittees(t *testing.T) {
 	}, out.Data)
 }
 
+func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).Return(synced_data.ErrNotSynced)
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
 func TestPoolSyncContributionAndProofs(t *testing.T) {
 	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1

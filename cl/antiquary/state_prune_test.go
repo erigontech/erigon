@@ -352,7 +352,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 		reader := tests.LoadChain(blocks, postState, db, t)
 		seedStateSlots(t, db, kv.BlockRoot, slotRange(0, boundary))
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-		sn.OnHeadState(postState)
+		require.NoError(t, sn.OnHeadState(postState))
 		ctx := context.Background()
 		vt := state_accessors.NewStaticValidatorTable()
 		stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())

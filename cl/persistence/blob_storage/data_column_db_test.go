@@ -500,6 +500,101 @@ func TestDataColumnStorePruneBelowFloorAboveEveryBucketEmptiesTheStore(t *testin
 	}
 }
 
+func TestDataColumnStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	oldRoot := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), oldRoot, 0, createTestDataColumnSidecar(100, 0)))
+	<-events
+
+	require.NoError(t, storage.PruneBelow(500))
+	require.NoError(t, storage.RemoveColumnSidecars(t.Context(), 100, oldRoot, 0))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 100, oldRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists, "cleanup removes must remain available below the write floor")
+
+	lateRoot := common.Hash{2}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lateRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lateRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a rejected write must not emit a sidecar event")
+
+	boundaryRoot := common.Hash{3}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), boundaryRoot, 0, createTestDataColumnSidecar(500, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 500, boundaryRoot, 0)
+	require.NoError(t, err)
+	require.True(t, exists, "the floor itself remains writable")
+	require.Equal(t, beaconevents.OpDataColumnSidecar, (<-events).Event)
+
+	require.NoError(t, storage.PruneBelow(250))
+	lowerRoot := common.Hash{4}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lowerRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lowerRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a lower later prune must not lower the write floor")
+}
+
+func TestDataColumnStorePartialPruneStillRejectsLateWrites(t *testing.T) {
+	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
+	fs.failOn["0"] = errInducedFailure
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.ErrorIs(t, storage.PruneBelow(subdivisionSlot), errInducedFailure)
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(subdivisionSlot-1, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), subdivisionSlot-1, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestDataColumnStoreConcurrentPrunesKeepTheHighestFloor(t *testing.T) {
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, floor := range []uint64{500, 1_000} {
+		go func() {
+			<-start
+			errs <- storage.PruneBelow(floor)
+		}()
+	}
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(999, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 999, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1_000, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 1_000, root, 0)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestBucketStorePruneFloorsAreIndependent(t *testing.T) {
+	first := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	second := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	require.NoError(t, first.PruneBelow(500))
+	root := common.Hash{1}
+	sidecar := createTestDataColumnSidecar(499, 0)
+
+	require.NoError(t, first.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	require.NoError(t, second.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	firstExists, err := first.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	secondExists, err := second.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	require.False(t, firstExists)
+	require.True(t, secondExists)
+}
+
 func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 	// Create a filesystem that will fail on directory creation
 	fs := afero.NewMemMapFs()

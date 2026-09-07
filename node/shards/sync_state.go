@@ -88,8 +88,34 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 	reply := &remoteproto.SyncingReply{
 		CurrentBlock:     currentBlock,
 		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
+		LastNewBlockSeen: max(currentBlock, highestBlock),
 		Syncing:          true,
+	}
+
+	if snap := n.snapDownload.Load(); snap != nil {
+		switch snap.phase {
+		case snapHandoff:
+			// Stop reporting the pin once this tx sees execution at the commitment
+			// block, but leave the state alone: the observing tx can be the pipeline's
+			// own rw tx, ahead of the committed view every poller reads. Ending the
+			// handoff belongs to the pipeline exit that owns it.
+			if currentBlock < snap.commitBlock {
+				reply.CurrentBlock = snap.commitBlock
+				reply.LastNewBlockSeen = max(snap.commitBlock, highestBlock)
+				return reply, nil
+			}
+		case snapDownloading:
+			// Map the byte-completion ratio onto the block-based fields so dashboards
+			// show smooth progress: currentBlock = ratio * blocks_to_be_downloaded.
+			// The ratio scales the snapshots' target, not the live head, which an FCU
+			// can push past what the snapshots actually cover. Committed progress is
+			// the floor: a node downloading further snapshots must not report a
+			// position below the one it already reached.
+			ratio := float64(snap.done) / float64(snap.total)
+			reply.CurrentBlock = max(currentBlock, uint64(ratio*float64(snap.targetBlock)))
+			reply.LastNewBlockSeen = max(reply.CurrentBlock, snap.targetBlock, highestBlock)
+			return reply, nil
+		}
 	}
 
 	if highestBlock == 0 {

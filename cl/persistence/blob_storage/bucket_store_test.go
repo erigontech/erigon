@@ -181,6 +181,7 @@ func TestBucketStorePruneBelowPropagatesReaddirError(t *testing.T) {
 	b := newBucketStore(t, fs)
 
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), ErrPruneNotStarted)
+	require.Zero(t, b.pruneFloor)
 }
 
 func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
@@ -192,6 +193,19 @@ func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), errInducedFailure)
 
 	require.Equal(t, []string{"1", "3"}, rootEntryNames(t, fs))
+}
+
+func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {
+	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
+	fs.failOn["1"] = errInducedFailure
+	b := newBucketStore(t, fs)
+	makeBuckets(t, fs, "0", "1", "2")
+	require.ErrorIs(t, b.pruneBelow(2*subdivisionSlot), errInducedFailure)
+	require.Equal(t, []string{"1", "2"}, rootEntryNames(t, fs))
+
+	delete(fs.failOn, "1")
+	require.NoError(t, b.pruneBelow(subdivisionSlot))
+	require.Equal(t, []string{"2"}, rootEntryNames(t, fs))
 }
 
 func TestBucketStorePruneBelowRemovesEachExpiredBucketOnce(t *testing.T) {
@@ -492,10 +506,9 @@ func TestBucketStoreFailedSyncLeavesNothingBehind(t *testing.T) {
 	require.False(t, tmpExists)
 }
 
-func TestFacadePruneBlocksAWriteIntoTheBucketItRemoves(t *testing.T) {
-	const removeAllDelay = 150 * time.Millisecond
-
-	fs := newCountingFs(newSlowFs(afero.NewMemMapFs(), removeAllDelay))
+func TestFacadePruneRejectsAWriteIntoTheBucketItRemoves(t *testing.T) {
+	fs := newPruneRaceFs(afero.NewMemMapFs())
+	fs.removePath = "0"
 	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	require.NoError(t, fs.MkdirAll("0", 0o755))
 
@@ -505,21 +518,19 @@ func TestFacadePruneBlocksAWriteIntoTheBucketItRemoves(t *testing.T) {
 
 	pruneDone := make(chan error, 1)
 	go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
-	require.Eventually(t, func() bool { return fs.count(opRemoveAll) > 0 }, time.Second, time.Millisecond)
+	<-fs.removeEntered
 
-	streamStarted := time.Now()
 	var streamed bytes.Buffer
 	require.NoError(t, storage.WriteStream(&streamed, liveSlot, liveRoot, 0))
-	require.Less(t, time.Since(streamStarted), removeAllDelay/2)
 
-	liveStarted := time.Now()
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{2}, 0, createTestDataColumnSidecar(liveSlot+1, 0)))
-	require.Less(t, time.Since(liveStarted), removeAllDelay/2)
 
-	prunedStarted := time.Now()
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{3}, 0, createTestDataColumnSidecar(1, 0)))
-	require.GreaterOrEqual(t, time.Since(prunedStarted), removeAllDelay/2)
+	prunedWriteExists, err := storage.ColumnSidecarExists(t.Context(), 1, common.Hash{3}, 0)
+	require.NoError(t, err)
+	require.False(t, prunedWriteExists)
 
+	close(fs.removeRelease)
 	require.NoError(t, <-pruneDone)
 }
 

@@ -559,29 +559,3 @@ func TestTableScanningPrune_KeyLimitIsResumable(t *testing.T) {
 	require.Equal(t, 5, keys, "only out-of-range txNums 10..14 remain")
 	require.Equal(t, 10, dups)
 }
-
-func BenchmarkTableScanningPrune(b *testing.B) {
-	db := openTestDB(b)
-	defer db.Close()
-
-	const N = 10_000
-	tx, err := db.BeginRw(b.Context())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	insertEntries(b, tx, N, 0) // txNums 0..N-1; prune [0, N/2)
-
-	logEvery := time.NewTicker(time.Hour)
-	defer logEvery.Stop()
-	logger := log.New()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cur := openPseudoCursor(b, tx)
-		prune.TableScanningPrune( //nolint:errcheck
-			b.Context(), "bench", "txlookup",
-			0, N/2, 0, 1, logEvery, logger,
-			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
-		)
-		cur.Close()
-	}
-}

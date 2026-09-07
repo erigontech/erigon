@@ -98,6 +98,9 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
+	FrozenBlocksObserved() (uint64, bool)
+	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
@@ -116,7 +119,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		maxBlockNum uint64,
+		finalityCtx kv.FinalityContext,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,
@@ -166,6 +169,23 @@ type DownloaderClient interface {
 	// that we have dbservices.DownloadRequest per path, but haven't yet incorporated the download
 	// "target name" into the API here.
 	Download(context.Context, *downloaderproto.DownloadRequest) error
+}
+
+// DownloadProgressReport is an optional capability of a DownloaderClient: it
+// reports snapshot-download progress in bytes so eth_syncing can surface it.
+type DownloadProgressReport interface {
+	// Completed reports downloaded and total bytes; total == 0 means unknown.
+	Completed() (done, total uint64)
+	// ResetProgress drops any stale sample, so that a phase downloading a small
+	// subset of the files cannot be mistaken for progress on the full set.
+	ResetProgress()
+}
+
+// DownloadProgressProvider is implemented by clients that wrap another
+// downloader client: it exposes the wrapped downloader's progress capability,
+// or nil when that downloader cannot report progress.
+type DownloadProgressProvider interface {
+	DownloadProgress() DownloadProgressReport
 }
 
 // A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.

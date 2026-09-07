@@ -81,7 +81,7 @@ Returns a range of accounts involved in the given block range.
 | maxResults     | QUANTITY        | Maximum number of accounts to retrieve                      |
 | excludeCode    | BOOLEAN         | If true, exclude byte code from results                     |
 | excludeStorage | BOOLEAN         | If true, exclude storage from results                       |
-| incompletes    | BOOLEAN         | If true, return missing preimages (not supported when true) |
+| incompletes    | BOOLEAN         | Accepted but ignored                                        |
 
 #### Example
 

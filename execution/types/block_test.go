@@ -34,11 +34,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -336,28 +333,6 @@ func TestUncleHash(t *testing.T) {
 	}
 }
 
-var benchBuffer = bytes.NewBuffer(make([]byte, 0, 32000))
-
-func BenchmarkEncodeBlock(b *testing.B) {
-	block := makeBenchBlock()
-
-	for b.Loop() {
-		benchBuffer.Reset()
-		if err := rlp.Encode(benchBuffer, block); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func encodedBenchBody(b *testing.B) []byte {
-	b.Helper()
-	var buf bytes.Buffer
-	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
-		b.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
 // TestBodyOnlyTxnDecodeRLPBytes pins the contract that makes DecodeRLPBytes exist:
 // it reads the leading txn fields of a full BodyForStorage encoding and tolerates
 // the unread tail, which rlp.DecodeBytes rejects.
@@ -406,93 +381,6 @@ func TestBodyOnlyTxnDecodeRLPBytesErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
-	enc := encodedBenchBody(b)
-
-	var out BodyOnlyTxn
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := out.DecodeRLPBytes(enc); err != nil {
-			b.Fatal(err)
-		}
-	}
-	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
-		b.Fatalf("unexpected decode result: %+v", out)
-	}
-}
-
-func BenchmarkBodyForStorageDecodeBytes(b *testing.B) {
-	enc := encodedBenchBody(b)
-
-	var out BodyForStorage
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := rlp.DecodeBytes(enc, &out); err != nil {
-			b.Fatal(err)
-		}
-	}
-	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
-		b.Fatalf("unexpected decode result: %+v", out)
-	}
-}
-
-func BenchmarkDecodeBlock(b *testing.B) {
-	block := makeBenchBlock()
-	encoded, err := rlp.EncodeToBytes(block)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-
-	for b.Loop() {
-		var decoded Block
-		if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func makeBenchBlock() *Block {
-	var (
-		key, _   = crypto.GenerateKey()
-		txs      = make([]Transaction, 70)
-		receipts = make([]*Receipt, len(txs))
-		signer   = LatestSigner(chain.AllProtocolChanges)
-		uncles   = make([]*Header, 3)
-	)
-	header := &Header{
-		Difficulty: *uint256.NewInt(285311670611), // 11^11
-		Number:     *uint256.NewInt(0x200),        // 2^9
-		GasLimit:   12345678,
-		GasUsed:    1476322,
-		Time:       9876543,
-		Extra:      []byte("coolest block on chain"),
-	}
-	for i := range txs {
-		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
-		price := uint256.NewInt(300000)
-		data := make([]byte, 100)
-		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
-		signedTx, err := SignTx(tx, *signer, key)
-		if err != nil {
-			panic(err)
-		}
-		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.GetGasLimit())
-	}
-	for i := range uncles {
-		uncles[i] = &Header{
-			Difficulty: *uint256.NewInt(285311670611), // 11^11
-			Number:     *uint256.NewInt(0x200),        // 2^9
-			GasLimit:   12345678,
-			GasUsed:    1476322,
-			Time:       9876543,
-			Extra:      []byte("benchmark uncle"),
-		}
-	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {

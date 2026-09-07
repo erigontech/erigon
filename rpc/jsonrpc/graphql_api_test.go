@@ -42,8 +42,7 @@ func TestGetAccountStorage_InvalidSlot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := api.GetAccountStorage(context.Background(), common.Address{}, tt.slot, rpc.BlockNumber(0))
-			var paramErr *rpc.InvalidParamsError
-			if !errors.As(err, &paramErr) {
+			if _, ok := errors.AsType[*rpc.InvalidParamsError](err); !ok {
 				t.Errorf("expected *rpc.InvalidParamsError, got %T: %v", err, err)
 			}
 		})

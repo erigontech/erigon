@@ -53,7 +53,7 @@ var cmdResetState = &cobra.Command{
 		}
 		defer db.Close()
 
-		sn, _, _, err := allSnapshots(ctx, db, logger)
+		sn, _, err := allSnapshots(ctx, db, logger)
 		if err != nil {
 			logger.Error("Opening snapshots", "error", err)
 			return
