@@ -990,10 +990,10 @@ func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockT
 	if e.forkValidator == nil {
 		return
 	}
-	rec, threshold := e.forkValidator.TakeBlockMetrics(blockHash)
+	rec := e.forkValidator.TakeBlockMetrics(blockHash)
 	if rec == nil || headNum != finishProgressBefore+1 {
 		return
 	}
 	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist
-	blockmetrics.Emit(e.logger, threshold, rec)
+	blockmetrics.Emit(e.logger, common.Deref(e.syncCfg.SlowBlockThreshold), rec)
 }

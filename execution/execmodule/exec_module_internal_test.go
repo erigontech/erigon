@@ -166,8 +166,7 @@ func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
 	off := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
 	require.Nil(t, off.blockMetricsCache,
 		"a disabled threshold must not build the cache: the nil check is what keeps newPayload from recording")
-	rec, _ := off.TakeBlockMetrics(common.HexToHash("0x02"))
-	require.Nil(t, rec)
+	require.Nil(t, off.TakeBlockMetrics(common.HexToHash("0x02")))
 
 	every := time.Duration(0)
 	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)

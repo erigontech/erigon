@@ -160,7 +160,9 @@ var (
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
-// Startup only: read unsynchronised on every domain read.
+// Flag parsing only, while node/cli/flags.go is still the only goroutine: the
+// var is read unsynchronised on every domain read, so a later caller is a data
+// race that -race will report against the reader, not here.
 func EnableKVReadLevelledMetrics() { KVReadLevelledMetrics = true }
 
 func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {

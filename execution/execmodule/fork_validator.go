@@ -73,8 +73,7 @@ type ForkValidator struct {
 
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 
-	blockMetricsCache  *lru.Cache[common.Hash, *blockmetrics.Record]
-	slowBlockThreshold time.Duration
+	blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
 }
 
 func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64, slowBlockThreshold *time.Duration) *ForkValidator {
@@ -89,24 +88,21 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 	}
 
 	var blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
-	var threshold time.Duration
 	if slowBlockThreshold != nil {
 		blockMetricsCache, err = lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
 		if err != nil {
 			panic(err)
 		}
-		threshold = *slowBlockThreshold
 	}
 	return &ForkValidator{
-		executor:           executor,
-		currentHeight:      currentHeight,
-		blockReader:        blockReader,
-		ctx:                ctx,
-		validHashes:        validHashes,
-		timingsCache:       timingsCache,
-		blockMetricsCache:  blockMetricsCache,
-		slowBlockThreshold: threshold,
-		maxReorgDepth:      maxReorgDepth,
+		executor:          executor,
+		currentHeight:     currentHeight,
+		blockReader:       blockReader,
+		ctx:               ctx,
+		validHashes:       validHashes,
+		timingsCache:      timingsCache,
+		blockMetricsCache: blockMetricsCache,
+		maxReorgDepth:     maxReorgDepth,
 	}
 }
 
@@ -403,15 +399,15 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 	fv.blockMetricsCache.Add(hash, rec)
 }
 
-func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) (*blockmetrics.Record, time.Duration) {
+func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) *blockmetrics.Record {
 	if fv.blockMetricsCache == nil {
-		return nil, 0
+		return nil
 	}
 	if rec, ok := fv.blockMetricsCache.Get(hash); ok {
 		fv.blockMetricsCache.Remove(hash)
-		return rec, fv.slowBlockThreshold
+		return rec
 	}
-	return nil, 0
+	return nil
 }
 
 func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
