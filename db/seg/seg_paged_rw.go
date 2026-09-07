@@ -76,12 +76,6 @@ type Page struct {
 	compressionBuf []byte
 }
 
-func FromBytes(buf []byte, compressionEnabled bool) *Page {
-	r := &Page{}
-	r.Reset(buf, compressionEnabled)
-	return r
-}
-
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
 	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf[:0], v, compressionEnabled)

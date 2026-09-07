@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -99,6 +98,8 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
+	FrozenBlocksObserved() (uint64, bool)
 	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
@@ -118,7 +119,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		finalityCtx dbfinality.Context,
+		finalityCtx kv.FinalityContext,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,

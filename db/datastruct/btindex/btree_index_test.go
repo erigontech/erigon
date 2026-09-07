@@ -533,7 +533,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
-		cur.Reset(0, getter)
+		require.NoError(t, cur.Reset(0, getter))
 
 		require.Equal(t, k, cur.Key())
 		require.Equal(t, v, cur.Value())

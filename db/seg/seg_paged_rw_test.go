@@ -626,7 +626,7 @@ func TestPagedReaderResetSeeksToPage(t *testing.T) {
 		pageStart uint64
 	}
 	var entries []entry
-	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	g := NewPagedReader(d.MakeGetter(), true)
 	for i := 0; g.HasNext(); i++ {
 		k, v, _, offset := g.Next2(nil)
 		entries = append(entries, entry{string(k), string(v), offset})
@@ -638,7 +638,7 @@ func TestPagedReaderResetSeeksToPage(t *testing.T) {
 		if i == 0 || entries[i-1].pageStart == want.pageStart {
 			continue // not the first entry of its page
 		}
-		g := NewPagedReader(d.MakeGetter(), pageSize, true)
+		g := NewPagedReader(d.MakeGetter(), true)
 		g.Reset(want.pageStart)
 		require.True(g.HasNext(), "seek to offset %d left the reader empty", want.pageStart)
 		k, v, _, offset := g.Next2(nil)
@@ -664,14 +664,14 @@ func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
 	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
 	defer d.Close()
 
-	ref := NewPagedReader(d.MakeGetter(), pageSize, true)
+	ref := NewPagedReader(d.MakeGetter(), true)
 	k0, v0, _, pageStart := ref.Next2(nil)
 	first := string(k0) + "|" + string(v0)
 	k1, v1, _, _ := ref.Next2(nil)
 	second := string(k1) + "|" + string(v1)
 	require.NotEqual(first, second)
 
-	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	g := NewPagedReader(d.MakeGetter(), true)
 	_, _, _, offset := g.Next2(nil)
 	require.Equal(pageStart, offset)
 
