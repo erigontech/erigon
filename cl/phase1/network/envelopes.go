@@ -151,10 +151,6 @@ func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][3
 	return envelopes, nil
 }
 
-func acceptEnvelopeResponses(responses []*cltypes.SignedExecutionPayloadEnvelope, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
-	acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, nil)
-}
-
 func acceptEnvelopeResponsesWithValidator(
 	responses []*cltypes.SignedExecutionPayloadEnvelope,
 	requestedRoots map[common.Hash]struct{},
@@ -187,10 +183,6 @@ func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedE
 		}
 	}
 	return remaining
-}
-
-func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
-	requestEnvelopesByRangeWithValidator(ctx, r, blocks, requestedRoots, received, nil)
 }
 
 func requestEnvelopesByRangeWithValidator(
@@ -267,35 +259,6 @@ func envelopeRequestSlotRanges(blocks []*cltypes.SignedBeaconBlock, requestedRoo
 		end = slot
 	}
 	return append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
-}
-
-func envelopeRequestSlotRange(blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}) (uint64, uint64, bool) {
-	var minSlot, maxSlot uint64
-	found := false
-	for _, block := range blocks {
-		if block == nil || block.Block == nil {
-			continue
-		}
-		root, err := block.Block.HashSSZ()
-		if err != nil {
-			continue
-		}
-		if _, ok := requestedRoots[root]; !ok {
-			continue
-		}
-		slot := block.Block.Slot
-		if !found || slot < minSlot {
-			minSlot = slot
-		}
-		if !found || slot > maxSlot {
-			maxSlot = slot
-		}
-		found = true
-	}
-	if !found || maxSlot-minSlot == ^uint64(0) {
-		return 0, 0, false
-	}
-	return minSlot, maxSlot - minSlot + 1, true
 }
 
 func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock) envelopeCandidateValidator {
