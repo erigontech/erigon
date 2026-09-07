@@ -974,3 +974,17 @@ func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
 		}
 	}
 }
+
+// A budget too small to buy the start capacity gets the floored ceiling; the
+// shard count has to follow that ceiling, not the pre-floor estimate, or the
+// whole cache runs behind one mutex.
+func TestFlooredCeilingKeepsShardGranularity(t *testing.T) {
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.KB, avgStoragePayloadBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+	if c.maxCap != genericCacheStartCapacity {
+		t.Fatalf("maxCap=%d, want the %d floor", c.maxCap, uint32(genericCacheStartCapacity))
+	}
+	if want := initialShardCount(c.maxCap, shardCeil()); c.shardCount != want {
+		t.Errorf("shardCount=%d, want %d", c.shardCount, want)
+	}
+}

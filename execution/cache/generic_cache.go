@@ -256,16 +256,19 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 // element and its bookkeeping (accounts ≈ 70 B, storage ≈ 64 B). Folding either
 // in charges them twice and shrinks the ceiling. It starts small and jump-grows
 // toward the ceiling on demand, funding each step from the shared envelope.
+// avgBytes of 0 is meaningful, not a request for the default: an inline-only T
+// points at nothing outside its slot.
 func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	if avgBytes == 0 {
-		avgBytes = avgBytesPerEntry
-	}
 	elemBytes := elemBytesFor[entry[T]]()
 	// A shard grows on its own, so its share of maxCap bounds one grow's copy.
 	budgeted, shards := budgetedSlots(capacityBytes, avgBytes, elemBytes)
 	// A budget too small to buy the start capacity keeps it anyway: the byte
 	// accounting a cache evicts and drops on has to stay usable at any budget.
 	maxCap := max(budgeted, genericCacheStartCapacity)
+	if maxCap != budgeted {
+		// Shard granularity follows the ceiling, so the floor has to re-derive it.
+		shards = max(initialShardCount(maxCap, shardCeil()), 1)
+	}
 	// The start size is raised to keep each shard off a one-slot table, which a
 	// large GOMAXPROCS would otherwise produce.
 	start := min(max(uint32(genericCacheStartCapacity), shards*minShardStart), maxCap)
