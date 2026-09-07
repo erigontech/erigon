@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
@@ -190,6 +189,7 @@ type RecSplit struct {
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
 	bucketKeyBuf       [12]byte
 	numBuf             [8]byte
+	gapBuf             [binary.MaxVarintLen64]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	lessFalsePositives bool
@@ -463,6 +463,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
+	rs.prevOffset = 0
 	if rs.offsetFile != nil {
 		_ = rs.offsetFile.Truncate(0)
 		_, _ = rs.offsetFile.Seek(0, 0)
@@ -558,7 +559,8 @@ func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 		if rs.keysAdded > 0 && offset < rs.prevOffset {
 			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
 		}
-		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
+		n := binary.PutUvarint(rs.gapBuf[:], offset-rs.prevOffset)
+		if _, err := rs.offsetWriter.Write(rs.gapBuf[:n]); err != nil {
 			return err
 		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
@@ -593,19 +595,6 @@ func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 	rs.prevOffset = offset
 	if rs.progress != nil && rs.keysAdded%1024 == 0 {
 		rs.progress.Processed.Add(1024)
-	}
-	return nil
-}
-
-func (rs *RecSplit) AddOffset(offset uint64) error {
-	if rs.enums {
-		if rs.keysAdded > 0 && offset < rs.prevOffset {
-			panic(fmt.Sprintf("recsplit: AddOffset offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
-		}
-		binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -870,7 +859,7 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 	return nil
 }
 
-// buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
+// buildOffsetEf replays the offset temp file and builds the Elias-Fano encoding.
 // Uses off-heap EF to keep multi-GB backing buffers out of the Go heap.
 func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	var err error
@@ -888,18 +877,20 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
 
-	mmapSize := int(rs.keysAdded * 8)
-	mmapHandle1, err := mmap.OpenRo(rs.offsetFile, mmapSize)
-	if err != nil {
-		return fmt.Errorf("mmap offset file: %w", err)
+	if _, err := rs.offsetFile.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind offset file: %w", err)
 	}
-	// Discarded, not folded into retErr: an Unmap failure here would trigger the
-	// retErr-triggered cleanup above and discard an offsetEf that finished building correctly.
-	defer func() { _ = mmapHandle1.Unmap() }()
+	r := bufiopool.Reader(rs.offsetFile)
+	defer bufiopool.PutReader(r)
 
-	data := mmapHandle1[:mmapSize]
+	var offset uint64
 	for i := uint64(0); i < rs.keysAdded; i++ {
-		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
+		gap, err := binary.ReadUvarint(r)
+		if err != nil {
+			return fmt.Errorf("read offset %d of %d: %w", i, rs.keysAdded, err)
+		}
+		offset += gap
+		rs.offsetEf.AddOffset(offset)
 	}
 	rs.offsetEf.Build()
 	return nil

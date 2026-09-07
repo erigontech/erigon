@@ -469,3 +469,53 @@ func TestParallelMatchesSequential(t *testing.T) {
 		})
 	}
 }
+
+// Offsets of an `Enums: true` index are spilled as gaps, so pin the round-trip
+// for what gap encoding is sensitive to: repeated offsets and a jump past 2^32.
+func TestTwoLayerIndexOffsetGaps(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const N = 1000
+
+	offsets := make([]uint64, N)
+	var off uint64
+	for i := range offsets {
+		switch {
+		case i%7 == 0: // duplicate offset: gap 0
+		case i == N/2:
+			off += 1 << 33
+		default:
+			off += uint64(i)
+		}
+		offsets[i] = off
+	}
+
+	indexFile := filepath.Join(tmpDir, "index")
+	rs, err := NewRecSplit(RecSplitArgs{
+		KeyCount: N, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: indexFile, LeafSize: 8, Enums: true,
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	for i := range N {
+		if err := rs.AddKey(fmt.Appendf(nil, "key %d", i), offsets[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rs.Build(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := MustOpen(indexFile)
+	defer idx.Close()
+	reader := NewIndexReader(idx)
+	for i := range N {
+		e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+		require.Equal(t, uint64(i), e)
+		require.Equal(t, offsets[i], idx.OrdinalLookup(e))
+	}
+}
