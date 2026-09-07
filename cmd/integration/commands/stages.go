@@ -1193,6 +1193,9 @@ func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*
 			return
 		}
 		if needsMigration {
+			if err = freezeblocks.CheckLegacyDownloadFinished(db, dirs, chainConfig); err != nil {
+				return
+			}
 			var unlock func()
 			if unlock, err = dirs.TryFlock(); err != nil {
 				return
