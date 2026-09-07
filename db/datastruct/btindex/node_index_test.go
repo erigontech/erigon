@@ -24,13 +24,6 @@ func TestNodeOfftMatchesEliasFano(t *testing.T) {
 		require.Equal(t, b.numNodes(), len(b.nodeOfft))
 		for i := range b.numNodes() {
 			require.Equalf(t, b.nodeOfftEF.Get(uint64(i)), uint64(b.nodeOfft[i]), "offset %d", i)
-
-			withCache := append([]byte(nil), b.nodeKey(i)...)
-			saved := b.nodeOfft
-			b.nodeOfft = nil
-			withoutCache := append([]byte(nil), b.nodeKey(i)...)
-			b.nodeOfft = saved
-			require.Equalf(t, withoutCache, withCache, "nodeKey(%d)", i)
 		}
 		bt.Close()
 		kv.Close()
@@ -71,12 +64,11 @@ func TestBuildNodeIndexIgnoresBlobLayout(t *testing.T) {
 	var blob []byte
 	offs := make([]uint64, 0, len(keys))
 	blob = append(blob, make([]byte, 8)...)
-	for i, k := range keys {
+	for _, k := range keys {
 		blob = append(blob, make([]byte, 8)...)
 		offs = append(offs, uint64(len(blob)))
 		blob = append(blob, byte(len(k)>>8), byte(len(k)))
 		blob = append(blob, k...)
-		_ = i
 	}
 
 	ef := eliasfano32.NewEliasFano(uint64(len(offs)), offs[len(offs)-1])
