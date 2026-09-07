@@ -35,9 +35,10 @@ import (
 // they are: rpcdaemon and other read-only consumers cannot rebuild accessors,
 // so a datadir has to keep working until its files are replaced.
 type HistoryValueIndex struct {
-	paged  *pagedidx.Index
-	legacy *recsplit.Index
-	reader *recsplit.IndexReader
+	paged    *pagedidx.Index
+	legacy   *recsplit.Index
+	reader   *recsplit.IndexReader
+	filePath string
 }
 
 func OpenHistoryValueIndex(path string, fileVer version.Version) (*HistoryValueIndex, error) {
@@ -46,13 +47,13 @@ func OpenHistoryValueIndex(path string, fileVer version.Version) (*HistoryValueI
 		if err != nil {
 			return nil, err
 		}
-		return &HistoryValueIndex{legacy: idx, reader: recsplit.NewIndexReader(idx)}, nil
+		return &HistoryValueIndex{legacy: idx, reader: recsplit.NewIndexReader(idx), filePath: path}, nil
 	}
 	idx, err := pagedidx.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return &HistoryValueIndex{paged: idx}, nil
+	return &HistoryValueIndex{paged: idx, filePath: path}, nil
 }
 
 // Lookup returns the offset in the .v file of the page holding the value.
@@ -74,25 +75,7 @@ func (i *HistoryValueIndex) Empty() bool {
 	return i == nil || (i.legacy == nil && i.paged.Empty())
 }
 
-func (i *HistoryValueIndex) FilePath() string {
-	if i.legacy != nil {
-		return i.legacy.FilePath()
-	}
-	return i.paged.FilePath()
-}
-
-// KeyCount returns the number of .ef keys covered, or for a v1 file the number
-// of values it indexes.
-func (i *HistoryValueIndex) KeyCount() uint64 {
-	switch {
-	case i.Empty():
-		return 0
-	case i.legacy != nil:
-		return i.legacy.KeyCount()
-	default:
-		return i.paged.GroupCount()
-	}
-}
+func (i *HistoryValueIndex) FilePath() string { return i.filePath }
 
 func (i *HistoryValueIndex) Close() {
 	if i == nil {

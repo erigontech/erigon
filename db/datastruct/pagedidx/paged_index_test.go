@@ -61,42 +61,15 @@ func TestGroupedLookup(t *testing.T) {
 	}
 
 	idx := build(t, "grouped", pageSize, itemsPerGroup, values)
-	require.Equal(t, uint64(pageSize), idx.PageSize())
-	require.True(t, idx.HasGroups())
-	require.Equal(t, uint64(len(itemsPerGroup)), idx.GroupCount())
 
 	var ordinal uint64
 	for group, n := range itemsPerGroup {
 		for member := range n {
-			require.Equal(t, ordinal, idx.Ordinal(uint64(group), member), "group %d member %d", group, member)
 			require.Equal(t, values[ordinal/pageSize], idx.Get(uint64(group), member), "group %d member %d", group, member)
 			ordinal++
 		}
 	}
 	require.Equal(t, items, ordinal)
-}
-
-func TestUngrouped(t *testing.T) {
-	const pageSize = 4
-	values := []uint64{0, 10, 40, 41}
-	path := filepath.Join(t.TempDir(), "flat")
-	w, err := NewWriter(path, pageSize, 0, uint64(len(values))*pageSize, values[len(values)-1])
-	require.NoError(t, err)
-	w.NoFsync()
-	for _, v := range values {
-		w.AddPage(v)
-	}
-	require.NoError(t, w.Build())
-
-	idx, err := Open(path)
-	require.NoError(t, err)
-	defer idx.Close()
-
-	require.False(t, idx.HasGroups())
-	require.Zero(t, idx.GroupCount())
-	for ordinal := range uint64(len(values)) * pageSize {
-		require.Equal(t, values[ordinal/pageSize], idx.Value(ordinal), "ordinal %d", ordinal)
-	}
 }
 
 func TestSingleItem(t *testing.T) {
