@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -468,4 +469,56 @@ func TestParallelMatchesSequential(t *testing.T) {
 				"parallel (workers=%d) index file differs from sequential", workers)
 		})
 	}
+}
+
+// ResetNextSalt must leave the builder as if it were fresh. It is reached on
+// every collision retry, so state carried over from the failed attempt lands in
+// the rebuilt index.
+func TestResetNextSaltRebuilds(t *testing.T) {
+	for _, ver := range []version.DataStructureVersion{0, 1, 2} {
+		t.Run(fmt.Sprintf("v%d", ver), func(t *testing.T) {
+			testResetNextSaltRebuilds(t, ver, false)
+		})
+		t.Run(fmt.Sprintf("v%d_lessFalsePositives", ver), func(t *testing.T) {
+			testResetNextSaltRebuilds(t, ver, true)
+		})
+	}
+}
+
+func testResetNextSaltRebuilds(t *testing.T, ver version.DataStructureVersion, lessFalsePositives bool) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
+	const N = 1000
+
+	cfg := RecSplitArgs{
+		KeyCount: N, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: indexFile, LeafSize: 8, Enums: true,
+		LessFalsePositives: lessFalsePositives, Version: ver,
+	}
+	rs, err := NewRecSplit(cfg, logger)
+	require.NoError(t, err)
+	defer rs.Close()
+
+	build := func() {
+		t.Helper()
+		for i := range N {
+			require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+		}
+		require.NoError(t, rs.Build(t.Context()))
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+		for i := range N {
+			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+			require.Equal(t, uint64(i), e)
+			require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
+		}
+	}
+
+	build()
+	require.NoError(t, rs.ResetNextSalt())
+	build()
 }

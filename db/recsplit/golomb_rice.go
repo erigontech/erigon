@@ -82,6 +82,14 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	g.bitCount += log2golomb
 }
 
+// Reset empties the encoding, keeping the allocated words for reuse. The append
+// paths OR into existing words, so they have to be zeroed and not just dropped.
+func (g *GolombRice) Reset() {
+	clear(g.data)
+	g.data = g.data[:0]
+	g.bitCount = 0
+}
+
 // Bits returns current number of bits in the compact encoding of the hash function representation
 func (g *GolombRice) Bits() int {
 	return g.bitCount
