@@ -462,19 +462,32 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		self, frameCaller := addr, caller
+		var contract Contract
 		switch typ {
 		case CALLCODE:
-			self, frameCaller = caller, caller
+			contract = Contract{
+				caller:   caller,
+				addr:     caller,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
+			}
 		case DELEGATECALL:
-			self, frameCaller = caller, callerAddress
-		}
-		contract := Contract{
-			caller:   frameCaller,
-			addr:     self,
-			value:    value,
-			Code:     code,
-			CodeHash: codeHash,
+			contract = Contract{
+				caller:   callerAddress,
+				addr:     caller,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
+			}
+		default:
+			contract = Contract{
+				caller:   caller,
+				addr:     addr,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
+			}
 		}
 		readOnly := false
 		if typ == STATICCALL {

@@ -81,8 +81,8 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 // UnregisterPrecompiles removes a chain's provider and its cached merged
 // sets; for tests and controlled teardown of an embedded chain.
 func UnregisterPrecompiles(chainID *uint256.Int) {
-	if chainID == nil {
-		return
+	if chainID == nil || chainID.IsZero() {
+		panic("vm: UnregisterPrecompiles: chain ID 0")
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()

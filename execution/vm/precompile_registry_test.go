@@ -107,6 +107,13 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	require.Panics(t, func() {
 		RegisterPrecompiles(uint256.NewInt(900302), nil)
 	}, "nil PrecompilesFunc must panic")
+
+	for _, id := range []*uint256.Int{nil, new(uint256.Int)} {
+		require.Panics(t, func() { RegisterPrecompiles(id, func(uint64) PrecompiledContracts { return nil }) },
+			"a nil or zero chain ID must be refused on register")
+		require.Panics(t, func() { UnregisterPrecompiles(id) },
+			"and refused on unregister too, or the same argument has two contracts")
+	}
 }
 
 // TestRegisteredProviderForkDimension pins the fork dimension of the cache
