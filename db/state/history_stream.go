@@ -153,12 +153,12 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.FilenameBase, key)
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
-		if historyItem.src.vi.Empty() {
-			continue
-		}
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		offset := historyItem.src.vi.Lookup(keyOrdinal, rank)
+		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
+		if !ok {
+			continue
+		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
@@ -481,12 +481,12 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.FilenameBase, key)
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
-		if historyItem.src.vi.Empty() {
-			continue
-		}
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		offset := historyItem.src.vi.Lookup(keyOrdinal, rank)
+		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
+		if !ok {
+			continue
+		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
@@ -844,12 +844,11 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				compressedPageValuesCount,
 				true,
 			)
-			if historyItem.src.vi.Empty() {
-				// shouldn't since key/txNum in ef
-				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history value index for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+			offset, ok := historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank, txNum, ht.key)
+			if !ok { // shouldn't since key/txNum in ef
+				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}
-
-			ht.histReader.Reset(historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank))
+			ht.histReader.Reset(offset)
 		}
 
 		if compressedPageValuesCount <= 1 {

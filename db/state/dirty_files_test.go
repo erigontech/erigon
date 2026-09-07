@@ -132,7 +132,7 @@ func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
 		{
 			name: "accessor",
 			open: func(t *testing.T, logger log.Logger) {
-				openDirtyAccessor(mask, dirEntries, t.TempDir(), version.Versions{}, func(string) error { return nil }, "test", logger)
+				openDirtyAccessor(mask, dirEntries, t.TempDir(), version.Versions{}, func(string, version.Version) error { return nil }, "test", logger)
 			},
 		},
 	}
@@ -165,7 +165,7 @@ func TestOpenDirtyAccessorLogsOpenErrorAtDebug(t *testing.T) {
 	fileName := "v1.0-accounts.0-1.kvi"
 	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
 
-	openDirtyAccessor("*-accounts.0-1.kvi", []string{fileName}, t.TempDir(), versions, func(string) error {
+	openDirtyAccessor("*-accounts.0-1.kvi", []string{fileName}, t.TempDir(), versions, func(string, version.Version) error {
 		return errors.New("open failed")
 	}, "test", logger)
 

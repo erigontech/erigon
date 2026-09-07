@@ -304,7 +304,9 @@ func TestHistoryCollationBuild(t *testing.T) {
 			for j := range ints {
 				// .ef is walked in key order, so keyWords index is the key ordinal
 				// and j the rank of that txNum in the key's list
-				gh.Reset(sf.historyIdx.Lookup(uint64(i), uint64(j)))
+				off, ok := sf.historyIdx.Lookup(uint64(i), uint64(j), ints[j], []byte(keyWords[i]))
+				require.True(ok)
+				gh.Reset(off)
 				w, _ := gh.Next(nil)
 				require.Equal(valWords[vi], string(w))
 				vi++

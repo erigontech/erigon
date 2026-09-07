@@ -422,7 +422,7 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 // openDirtyAccessor opens a matching, supported accessor.
 // Missing accessors do not invalidate the item, and matching or opening failures
 // are tolerated because accessors can be rebuilt from the data file.
-func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string) error, tag string, logger log.Logger) {
+func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string, fileVer version.Version) error, tag string, logger log.Logger) {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
 		logger.Debug("[agg] "+tag, "err", err, "f", mask)
@@ -435,7 +435,7 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	fName := filepath.Base(fPath)
 	ver.MustSupport(fileVer, fName)
 
-	if err := open(fPath); err != nil {
+	if err := open(fPath, fileVer); err != nil {
 		logger.Debug("[agg] "+tag, "err", err, "f", fName)
 	}
 }
@@ -461,19 +461,19 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 		}
 
 		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
-			openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string) (err error) {
+			openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string, _ version.Version) (err error) {
 				item.index, err = d.openHashMapAccessor(fPath)
 				return err
 			}, tag, d.logger)
 		}
 		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
-			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string) (err error) {
+			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string, _ version.Version) (err error) {
 				item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor))
 				return err
 			}, tag, d.logger)
 		}
 		if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
-			openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string) (err error) {
+			openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string, _ version.Version) (err error) {
 				item.existence, err = d.openExistenceFilter(fPath)
 				return err
 			}, tag, d.logger)
@@ -507,8 +507,8 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		}
 
 		if item.vi == nil {
-			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string) (err error) {
-				item.vi, err = OpenHistoryValueIndex(fPath)
+			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string, fileVer version.Version) (err error) {
+				item.vi, err = OpenHistoryValueIndex(fPath, fileVer)
 				return err
 			}, tag, h.logger)
 		}
@@ -541,7 +541,7 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		}
 
 		if item.index == nil {
-			openDirtyAccessor(ii.efAccessorFileNameMask(fromStep, toStep), accessorEntries, ii.dirs.SnapAccessors, ii.FileVersion.AccessorEFI, func(fPath string) (err error) {
+			openDirtyAccessor(ii.efAccessorFileNameMask(fromStep, toStep), accessorEntries, ii.dirs.SnapAccessors, ii.FileVersion.AccessorEFI, func(fPath string, _ version.Version) (err error) {
 				item.index, err = ii.openHashMapAccessor(fPath)
 				return err
 			}, tag, ii.logger)

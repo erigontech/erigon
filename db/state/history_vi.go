@@ -24,13 +24,18 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/bufiopool"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // History values live in the .v file in (key order, then txNum order), so a
 // value's position is cumValues[keyOrdinal]+rank and its offset only advances
 // once per compressed page. Both sequences are monotone, which is what lets
 // this replace a perfect hash over every (txNum,key).
+//
+// keyOrdinal comes from the matching .ef file, so this format needs the .efi
+// built with Enums and the .ef and .v step ranges to line up.
 const historyValueIndexVersion = 2
 
 const historyValueIndexHeaderLen = 1 + 8
@@ -44,9 +49,22 @@ type HistoryValueIndex struct {
 	pageOffsets *eliasfano32.EliasFano
 	pageSize    uint64
 	filePath    string
+
+	// v1 files address a value by txNum+key through a perfect hash. They are
+	// still read as-is: rpcdaemon and other read-only consumers cannot rebuild
+	// accessors, so a datadir must keep working until the files are replaced.
+	legacy       *recsplit.Index
+	legacyReader *recsplit.IndexReader
 }
 
-func OpenHistoryValueIndex(path string) (*HistoryValueIndex, error) {
+func OpenHistoryValueIndex(path string, fileVer version.Version) (*HistoryValueIndex, error) {
+	if fileVer.Less(version.V2_0) {
+		idx, err := recsplit.OpenIndex(path)
+		if err != nil {
+			return nil, err
+		}
+		return &HistoryValueIndex{filePath: path, legacy: idx, legacyReader: recsplit.NewIndexReader(idx)}, nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -88,25 +106,45 @@ func OpenHistoryValueIndex(path string) (*HistoryValueIndex, error) {
 
 // Lookup returns the offset in the .v file of the page holding the value.
 // keyOrdinal is the key's position in the .ef file, rank the position of the
-// txNum in that key's txNum list.
-func (i *HistoryValueIndex) Lookup(keyOrdinal, rank uint64) uint64 {
-	return i.pageOffsets.Get((i.cumValues.Get(keyOrdinal) + rank) / i.pageSize)
+// txNum in that key's txNum list. txNum and key are only read by v1 files,
+// which address the value by txNum+key rather than by position.
+func (i *HistoryValueIndex) Lookup(keyOrdinal, rank, txNum uint64, key []byte) (uint64, bool) {
+	if i.legacy != nil {
+		var txNumKey [8]byte
+		binary.BigEndian.PutUint64(txNumKey[:], txNum)
+		return i.legacyReader.Lookup2(txNumKey[:], key)
+	}
+	if i.cumValues == nil {
+		return 0, false
+	}
+	return i.pageOffsets.Get((i.cumValues.Get(keyOrdinal) + rank) / i.pageSize), true
 }
 
 func (i *HistoryValueIndex) PageSize() uint64 { return i.pageSize }
-func (i *HistoryValueIndex) Empty() bool      { return i == nil || i.cumValues == nil }
 func (i *HistoryValueIndex) FilePath() string { return i.filePath }
 
+func (i *HistoryValueIndex) Empty() bool {
+	return i == nil || (i.legacy == nil && i.cumValues == nil)
+}
+
 func (i *HistoryValueIndex) KeyCount() uint64 {
-	if i.Empty() {
+	switch {
+	case i.Empty():
 		return 0
+	case i.legacy != nil:
+		return i.legacy.KeyCount()
+	default:
+		return i.cumValues.Count()
 	}
-	return i.cumValues.Count()
 }
 
 func (i *HistoryValueIndex) Close() {
 	if i == nil {
 		return
+	}
+	if i.legacy != nil {
+		i.legacy.Close()
+		i.legacy, i.legacyReader = nil, nil
 	}
 	if i.m != nil {
 		_ = i.m.Unmap()

@@ -808,7 +808,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
 	}
 
-	if historyIdx, err = OpenHistoryValueIndex(historyIdxPath); err != nil {
+	if historyIdx, err = OpenHistoryValueIndex(historyIdxPath, version.V2_0); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
 	closeComp = false
@@ -1091,7 +1091,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, nil
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
-	offset := vi.Lookup(seek.keyOrdinal, seek.rank)
+	offset, ok := vi.Lookup(seek.keyOrdinal, seek.rank, histTxNum, key)
+	if !ok {
+		return nil, false, nil
+	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
 	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
@@ -1401,10 +1404,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
 				}
 
-				if viFile.src.vi.Empty() {
-					return fmt.Errorf("HistoryDump: no history value index in %s for key [%x]", viFile.Fullpath(), key)
+				vOffset, ok := viFile.src.vi.Lookup(keyOrdinal, rank, txNum, key)
+				if !ok {
+					return fmt.Errorf("HistoryDump: failed to resolve offset in %s for key [%x]", viFile.Fullpath(), key)
 				}
-				vOffset := viFile.src.vi.Lookup(keyOrdinal, rank)
 
 				compressedPageValuesCount := viFile.src.decompressor.CompressedPageValuesCount()
 
