@@ -16,7 +16,7 @@
 
 // Package blockmetrics emits per-block execution metrics as JSON. The field
 // names are a cross-client contract — renaming one breaks every consumer.
-// Spec: https://ethresear.ch/t/unifying-execution-layer-execution-metrics/22089
+// Spec: https://ethresear.ch/t/a-small-step-towards-data-driven-protocol-decisions-unified-slowblock-metrics-across-clients/23907
 package blockmetrics
 
 import (
@@ -47,11 +47,11 @@ type blockInfo struct {
 }
 
 type timing struct {
-	ExecutionMs float64 `json:"execution_ms"`
-	StateReadMs float64 `json:"state_read_ms"`
-	StateHashMs float64 `json:"state_hash_ms"`
-	CommitMs    float64 `json:"commit_ms"`
-	TotalMs     float64 `json:"total_ms"`
+	ExecutionMs float64  `json:"execution_ms"`
+	StateReadMs *float64 `json:"state_read_ms,omitempty"`
+	StateHashMs float64  `json:"state_hash_ms"`
+	CommitMs    float64  `json:"commit_ms"`
+	TotalMs     float64  `json:"total_ms"`
 }
 
 type throughput struct {
@@ -101,10 +101,15 @@ type Record struct {
 	CountersValid bool
 }
 
-// Nested inside Execution, so Total does not add it. Follows reth; geth
-// subtracts reads from execution instead, so the two disagree.
+// A share of Execution, so Total does not add it. Under parallel execution it is
+// a sum over concurrent workers against a wall-clock Execution, so it can exceed
+// it; StateReadValid reports whether it still is a share.
 func (r *Record) StateRead() time.Duration {
 	return r.Accounts.ReadTime + r.Storage.ReadTime + r.Code.ReadTime
+}
+
+func (r *Record) StateReadValid() bool {
+	return r.StateRead() <= r.Execution
 }
 
 func (r *Record) Total() time.Duration {
@@ -149,12 +154,16 @@ func Emit(logger log.Logger, threshold time.Duration, r *Record) {
 		},
 		Timing: timing{
 			ExecutionMs: ms(r.Execution),
-			StateReadMs: ms(r.StateRead()),
 			StateHashMs: ms(r.StateHash),
 			CommitMs:    ms(r.Commit),
 			TotalMs:     ms(r.Total()),
 		},
 		Throughput: throughput{MgasPerSec: r.mgasPerSec()},
+	}
+
+	if r.StateReadValid() {
+		stateRead := ms(r.StateRead())
+		entry.Timing.StateReadMs = &stateRead
 	}
 
 	if r.CountersValid {

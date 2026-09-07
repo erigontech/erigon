@@ -184,6 +184,29 @@ func TestStateReadIsInsideExecution(t *testing.T) {
 
 	assert.Equal(t, 5*time.Millisecond, rec.StateRead())
 	assert.Equal(t, 15*time.Millisecond, rec.Total(), "reads are already inside execution; adding them double-counts")
+	assert.True(t, rec.StateReadValid())
+}
+
+func TestStateReadOmittedWhenItExceedsExecution(t *testing.T) {
+	t.Parallel()
+
+	rec := sampleRecord()
+	rec.Execution = 10 * time.Millisecond
+	rec.Accounts = DomainCounts{ReadTime: 90 * time.Millisecond}
+	require.False(t, rec.StateReadValid())
+
+	logger, h := captureLogger()
+	Emit(logger, 0, rec)
+	require.Len(t, h.msgs, 1)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(h.msgs[0]), &got))
+	timing := got["timing"].(map[string]any)
+	require.NotContains(t, timing, "state_read_ms",
+		"a per-worker sum larger than the wall-clock execution is not a share of it; the spec's total arithmetic would not hold")
+	assert.Equal(t,
+		timing["execution_ms"].(float64)+timing["state_hash_ms"].(float64)+timing["commit_ms"].(float64),
+		timing["total_ms"].(float64))
 }
 
 func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
