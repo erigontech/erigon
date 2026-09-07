@@ -2482,15 +2482,19 @@ type blockExecutor struct {
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
 	blockStateCache *state.BlockStateCache
 
-	// currentReader is built once per block: it carries no per-TX state, and the
-	// cache view it pins covers committed state, which cannot move mid-block.
-	currentReader *state.CachedReaderV3
+	// currentReader carries no per-TX state and the cache view it pins covers
+	// committed state, so it is reused across the block's results. It is rebuilt
+	// when the exec loop hands down a different tx, since the view and the
+	// getter are bound to the one it was built from.
+	currentReader   *state.CachedReaderV3
+	currentReaderTx kv.TemporalTx
 }
 
 func (be *blockExecutor) currentStateReader(pe *parallelExecutor, applyTx kv.TemporalTx) *state.CachedReaderV3 {
-	if be.currentReader == nil {
+	if be.currentReader == nil || be.currentReaderTx != applyTx {
 		be.currentReader = state.NewCurrentCachedReaderV3(
 			pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+		be.currentReaderTx = applyTx
 	}
 	return be.currentReader
 }
