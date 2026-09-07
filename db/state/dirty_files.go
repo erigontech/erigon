@@ -120,6 +120,7 @@ func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
+	vi                   *HistoryValueIndex
 	bindex               *btindex.BtIndex
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
@@ -148,17 +149,23 @@ func (i *FilesItem) BtIndex() *btindex.BtIndex { return i.bindex }
 func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
-	i.index.MadvNormal()
+	if i.index != nil {
+		i.index.MadvNormal()
+	}
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
-	i.index.MadvSequential()
+	if i.index != nil {
+		i.index.MadvSequential()
+	}
 }
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
-	i.index.DisableReadAhead()
+	if i.index != nil {
+		i.index.DisableReadAhead()
+	}
 	//i.bindex.DisableReadAhead()
 	//i.existence.DisableReadAhead()
 }
@@ -217,6 +224,8 @@ func (i *FilesItem) closeFiles() {
 	i.decompressor = nil
 	i.index.Close()
 	i.index = nil
+	i.vi.Close()
+	i.vi = nil
 	i.bindex.Close()
 	i.bindex = nil
 	i.existence.Close()
@@ -229,6 +238,9 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	}
 	if i.index != nil {
 		relativePaths = append(relativePaths, i.index.FilePath())
+	}
+	if i.vi != nil {
+		relativePaths = append(relativePaths, i.vi.FilePath())
 	}
 	if i.bindex != nil {
 		relativePaths = append(relativePaths, i.bindex.FilePath())
@@ -262,6 +274,17 @@ func (i *FilesItem) closeFilesAndRemove() {
 			log.Trace("remove after close", "err", err, "file", i.index.FileName())
 		}
 		i.index = nil
+	}
+	if i.vi != nil {
+		path := i.vi.FilePath()
+		i.vi.Close()
+		if err := dir.RemoveFile(path); err != nil {
+			log.Trace("remove after close", "err", err, "file", path)
+		}
+		if err := dir.RemoveFile(path + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", path)
+		}
+		i.vi = nil
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
@@ -483,9 +506,9 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			}
 		}
 
-		if item.index == nil {
+		if item.vi == nil {
 			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string) (err error) {
-				item.index, err = h.openHashMapAccessor(fPath)
+				item.vi, err = OpenHistoryValueIndex(fPath)
 				return err
 			}, tag, h.logger)
 		}
@@ -639,7 +662,7 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil && item.vi == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}

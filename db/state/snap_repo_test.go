@@ -648,7 +648,8 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges 
 			allFiles = append(allFiles, file)
 		}
 		if acc.Has(statecfg.AccessorHashMap) {
-			file, _ := repo.schema.AccessorIdxFile(v, from, to, 0)
+			// zero version: let the schema name it with its own accessor version
+			file, _ := repo.schema.AccessorIdxFile(statecfg.Version{}, from, to, 0)
 			allFiles = append(allFiles, file)
 		}
 	}
@@ -733,7 +734,21 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			return
 		}
 
-		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".vi") || strings.HasSuffix(filename, ".efi") {
+		if strings.HasSuffix(filename, ".vi") {
+			w, err := NewHistoryValueIndexWriter(filename, 1, 1, 1, 1)
+			require.NoError(t, err)
+			w.NoFsync()
+			w.AddKey(1)
+			w.AddPageOffset(0)
+			require.NoError(t, w.Build())
+			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
+				accessorCount++
+			}
+
+			return
+		}
+
+		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".efi") {
 			salt := uint32(1)
 			rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 				KeyCount:   1,

@@ -85,6 +85,13 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			if g.HasNext() {
 				val, _ = g.Next(nil)
 			}
+			var keyOrdinal uint64
+			if offset != 0 {
+				var ok bool
+				if _, keyOrdinal, ok = idx.TwoLayerLookupWithOrdinal(key); !ok {
+					return fmt.Errorf("%s: no ordinal for first key [%x]", hi.hc.h.FilenameBase, key)
+				}
+			}
 			histFileIdx := -1
 			for j := range hi.hc.files {
 				if hi.hc.files[j].startTxNum == item.startTxNum && hi.hc.files[j].endTxNum == item.endTxNum {
@@ -92,7 +99,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 					break
 				}
 			}
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
+			heap.Push(&hi.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx, keyOrdinal: keyOrdinal})
 		}
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
@@ -108,9 +115,11 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		top := hi.h[0] // peek at minimum without removing
 		key := top.key
 		idxVal := top.val
+		keyOrdinal := top.keyOrdinal
 
 		// Get the next key-value pair for the next iteration
 		if top.g.HasNext() {
+			top.keyOrdinal++
 			top.key, _ = top.g.Next(nil)
 			if top.g.HasNext() {
 				top.val, _ = top.g.Next(nil)
@@ -135,7 +144,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, rank, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -144,13 +153,12 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.FilenameBase, key)
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
-		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		reader := hi.hc.statelessIdxReader(top.histFileIdx)
-		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		if !ok {
+		if historyItem.src.vi.Empty() {
 			continue
 		}
+		hi.nextKey = key
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
+		offset := historyItem.src.vi.Lookup(keyOrdinal, rank)
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
@@ -442,7 +450,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := hi.h[0] // peek at minimum without removing
 		key, idxVal := top.key, top.val
+		keyOrdinal := top.keyOrdinal
 		if top.g.HasNext() {
+			top.keyOrdinal++
 			top.key, _ = top.g.Next(nil)
 			if top.g.HasNext() {
 				top.val, _ = top.g.Next(nil)
@@ -459,7 +469,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, rank, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -471,13 +481,12 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.FilenameBase, key)
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
-		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		reader := hi.hc.statelessIdxReader(top.histFileIdx)
-		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		if !ok {
+		if historyItem.src.vi.Empty() {
 			continue
 		}
+		hi.nextKey = key
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
+		offset := historyItem.src.vi.Lookup(keyOrdinal, rank)
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
@@ -731,6 +740,8 @@ type HistoryTraceKeyFiles struct {
 	efbuf, v, histKey []byte
 	seqItr            stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
 	histReader        *seg.PagedReader
+	// where the first value of this key in this file sits, for the value index
+	keyOrdinal, rank uint64
 }
 
 func (ht *HistoryTraceKeyFiles) init() error {
@@ -782,12 +793,13 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			idxReader := ht.hc.iit.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.iit.statelessGetter(ht.fileIdx)
 
-			offset, ok := idxReader.TwoLayerLookup(ht.key)
+			offset, keyOrdinal, ok := idxReader.TwoLayerLookupWithOrdinal(ht.key)
 			if !ok {
 				ht.logger.Debug("weird thing - no offset found", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
 				continue
 			}
+			ht.keyOrdinal = keyOrdinal
 			getter.Reset(offset)
 			gkey, _ := getter.Next(ht.efbuf[:0]) // skip key
 			if !bytes.Equal(gkey, ht.key) {
@@ -797,6 +809,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			}
 			ht.efbuf, _ = getter.Next(ht.efbuf[:0])
 			currSeq := multiencseq.ReadMultiEncSeq(item.startTxNum, ht.efbuf)
+			_, ht.rank, _ = currSeq.Seek(ht.fromTxNum)
 			ht.seqItr = currSeq.Iterator(int(ht.fromTxNum))
 		}
 
@@ -824,7 +837,6 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		}
 
 		if ht.histReader == nil {
-			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.statelessGetter(ht.fileIdx)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
@@ -832,13 +844,12 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				compressedPageValuesCount,
 				true,
 			)
-			offset, ok := idxReader.Lookup(ht.histKey)
-			if !ok {
+			if historyItem.src.vi.Empty() {
 				// shouldn't since key/txNum in ef
-				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history value index for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}
 
-			ht.histReader.Reset(offset)
+			ht.histReader.Reset(historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank))
 		}
 
 		if compressedPageValuesCount <= 1 {

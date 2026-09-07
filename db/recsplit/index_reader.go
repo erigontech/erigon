@@ -90,6 +90,26 @@ func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	return r.index.Lookup(hi, lo)
 }
 
+// TwoLayerLookupByHashWithOrdinal also returns the key's ordinal in the indexed
+// file, which the two-layer lookup computes on the way to the offset. Requires
+// an index built with Enums, otherwise no ordinal exists.
+func (r *IndexReader) TwoLayerLookupByHashWithOrdinal(hi, lo uint64) (offset, ordinal uint64, ok bool) {
+	if !r.index.Enums() || r.index.Empty() {
+		return 0, 0, false
+	}
+	ordinal, ok = r.index.Lookup(hi, lo)
+	if !ok {
+		return 0, 0, false
+	}
+	return r.index.OrdinalLookup(ordinal), ordinal, true
+}
+
+// TwoLayerLookupWithOrdinal is TwoLayerLookupByHashWithOrdinal for an unhashed key.
+func (r *IndexReader) TwoLayerLookupWithOrdinal(key []byte) (offset, ordinal uint64, ok bool) {
+	hi, lo := r.Sum(key)
+	return r.TwoLayerLookupByHashWithOrdinal(hi, lo)
+}
+
 // TwoLayerLookup high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	enums := r.index.Enums()

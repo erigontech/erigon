@@ -772,7 +772,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var comp *seg.Compressor
 		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
-		var index *recsplit.Index
+		var vi *HistoryValueIndex
 		var closeItem = true
 		defer func() {
 			if closeItem {
@@ -785,9 +785,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				if rs != nil {
 					rs.Close()
 				}
-				if index != nil {
-					index.Close()
-				}
+				vi.Close()
 				if historyIn != nil {
 					historyIn.closeFilesAndRemove()
 				}
@@ -920,12 +918,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		if vi, err = OpenHistoryValueIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
 		historyIn = newFilesItem(r.history.from, r.history.to)
 		historyIn.decompressor = decomp
-		historyIn.index = index
+		historyIn.vi = vi
 
 		closeItem = false
 	}
