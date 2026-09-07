@@ -522,3 +522,49 @@ func testResetNextSaltRebuilds(t *testing.T, ver version.DataStructureVersion, l
 	require.NoError(t, rs.ResetNextSalt())
 	build()
 }
+
+// A real collision surfaces part-way through the build, so ResetNextSalt runs
+// with the encoders already holding the failed attempt's output.
+func TestResetNextSaltAfterCollision(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
+	const N = 1000
+
+	rs, err := NewRecSplit(RecSplitArgs{
+		KeyCount: N, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: indexFile, LeafSize: 8, Enums: true, LessFalsePositives: true,
+		Version: 2,
+	}, logger)
+	require.NoError(t, err)
+	defer rs.Close()
+
+	// a duplicated key collides in its bucket, after earlier buckets are encoded
+	for i := range N {
+		key := fmt.Appendf(nil, "key %d", i)
+		if i == N-1 {
+			key = fmt.Appendf(nil, "key %d", 0)
+		}
+		require.NoError(t, rs.AddKey(key, uint64(i*17)))
+	}
+	require.ErrorIs(t, rs.Build(t.Context()), ErrCollision)
+	require.NotZero(t, rs.gr.Bits(), "collision must surface after some buckets are encoded")
+
+	require.NoError(t, rs.ResetNextSalt())
+
+	for i := range N {
+		require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+	}
+	require.NoError(t, rs.Build(t.Context()))
+
+	idx := MustOpen(indexFile)
+	defer idx.Close()
+	reader := NewIndexReader(idx)
+	for i := range N {
+		e, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+		require.True(t, ok)
+		require.Equal(t, uint64(i), e)
+		require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
+	}
+}

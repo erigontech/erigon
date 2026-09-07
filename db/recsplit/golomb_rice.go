@@ -82,8 +82,8 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	g.bitCount += log2golomb
 }
 
-// Reset empties the encoding, keeping the allocated words for reuse. The append
-// paths OR into existing words, so they have to be zeroed and not just dropped.
+// Reset empties the encoding, keeping the words allocated. They are zeroed
+// because every append path ORs into the word it lands on.
 func (g *GolombRice) Reset() {
 	clear(g.data)
 	g.data = g.data[:0]
