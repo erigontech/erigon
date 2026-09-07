@@ -507,7 +507,7 @@ Flags for configuring the parallel block execution engine.
 
 **Commitment-trie construction.** The following flags change how the commitment (state-root) trie is computed during execution.
 
-* `--experimental.parallel-commitment` *(New in v3.6)*: Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Pass `--experimental.parallel-commitment=false`, or set `COMMITMENT_PARALLEL=false`, to fall back to the sequential `HexPatriciaHashed` trie.
+* `--experimental.parallel-commitment` *(New in v3.6)*: Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Pass `--experimental.parallel-commitment=false`, or set `ERIGON_COMMITMENT_PARALLEL=false`, to fall back to the sequential `HexPatriciaHashed` trie.
   * Default: `true`
 * `--experimental.streaming-commitment` *(New in v3.6)* (experimental): Compute the commitment trie with the `StreamingCommitter`, which overlaps trie folding with block execution. If set, takes precedence over `--experimental.parallel-commitment`. No environment-variable equivalent.
   * Default: `false`

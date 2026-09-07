@@ -198,11 +198,15 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 
 // ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
 // (commitment.ModeParallel + VariantParallelHexPatricia). Default true; set
-// COMMITMENT_PARALLEL=false (or --experimental.parallel-commitment=false) to
-// fall back to the sequential HexPatriciaHashed trie.
-const DefaultParallelCommitment = true
+// ERIGON_COMMITMENT_PARALLEL=false (or --experimental.parallel-commitment=false)
+// to fall back to the sequential HexPatriciaHashed trie. The name is spelled
+// with its prefix so the unprefixed COMMITMENT_PARALLEL is not also accepted.
+const (
+	DefaultParallelCommitment = true
+	parallelCommitmentEnvVar  = "ERIGON_COMMITMENT_PARALLEL"
+)
 
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
+var ExperimentalParallelCommitment = dbg.EnvBool(parallelCommitmentEnvVar, DefaultParallelCommitment)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{

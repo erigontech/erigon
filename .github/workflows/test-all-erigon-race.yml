@@ -96,8 +96,8 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
           # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-          # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
-          # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+          # changes. db/state/statecfg reads this name directly; the unprefixed
+          # COMMITMENT_PARALLEL is deliberately not accepted.
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
           TEST_GROUP: ${{ matrix.test-group }}
         run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"

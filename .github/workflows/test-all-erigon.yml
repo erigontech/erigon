@@ -75,8 +75,8 @@ jobs:
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
           # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-          # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
-          # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+          # changes. db/state/statecfg reads this name directly; the unprefixed
+          # COMMITMENT_PARALLEL is deliberately not accepted.
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then

@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/config3"
 )
 
@@ -50,4 +52,16 @@ func TestSchemaEntityEnabled(t *testing.T) {
 	} {
 		assert.Equal(t, tc.enabled, tc.cfg.Enabled, tc.name)
 	}
+}
+
+func TestParallelCommitmentEnvName(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_PARALLEL", "")
+	t.Setenv("COMMITMENT_PARALLEL", "false")
+	require.Equal(t, DefaultParallelCommitment,
+		dbg.EnvBool(parallelCommitmentEnvVar, DefaultParallelCommitment),
+		"unprefixed COMMITMENT_PARALLEL must not select the commitment trie")
+
+	t.Setenv("ERIGON_COMMITMENT_PARALLEL", "false")
+	require.False(t, dbg.EnvBool(parallelCommitmentEnvVar, DefaultParallelCommitment),
+		"ERIGON_COMMITMENT_PARALLEL=false must select the sequential trie")
 }
