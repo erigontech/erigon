@@ -35,7 +35,12 @@ type Cache[K comparable, V any] struct {
 }
 
 func New[K comparable, V any](metricName string, size int) (*Cache[K, V], error) {
-	v, err := lru.NewWithEvict[K, V](size, nil)
+	return NewWithEvict[K, V](metricName, size, nil)
+}
+
+// NewWithEvict creates a measured cache that calls onEvicted when an entry is removed.
+func NewWithEvict[K comparable, V any](metricName string, size int, onEvicted func(K, V)) (*Cache[K, V], error) {
+	v, err := lru.NewWithEvict[K, V](size, onEvicted)
 	if err != nil {
 		return nil, err
 	}

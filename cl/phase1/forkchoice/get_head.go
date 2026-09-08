@@ -143,45 +143,90 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the payload status of the current head node.
-// Must be called after GetHead has been called (head is cached).
-func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
+// ResolveHeadPayloadStatus returns the current head's payload status when it matches root. An
+// invalidated Gloas head is recomputed, cached, and published; a valid different head is a mismatch.
+func (f *ForkChoiceStore) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	status, matches, ready := f.cachedHeadPayloadStatus(root)
+	if ready {
+		return status, matches
+	}
+	if !f.trackGloasWeights() {
+		return cltypes.PayloadStatusPending, false
+	}
+	head, _, status, err := f.getHeadGloasWithPayloadStatus()
+	if err != nil {
+		if f.shouldLogHeadResolutionFailure(time.Now()) {
+			log.Warn("ResolveHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		}
+		return cltypes.PayloadStatusPending, false
+	}
+	if head != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return status, true
+}
+
+func (f *ForkChoiceStore) shouldLogHeadResolutionFailure(now time.Time) bool {
+	nowNanos := now.UnixNano()
+	for {
+		previous := f.headPayloadStatusLogAt.Load()
+		if previous != 0 && nowNanos-previous < int64(time.Minute) {
+			return false
+		}
+		if f.headPayloadStatusLogAt.CompareAndSwap(previous, nowNanos) {
+			return true
+		}
+	}
+}
+
+func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.headPayloadStatus
+	if f.headHash == (common.Hash{}) {
+		return cltypes.PayloadStatusPending, false, false
+	}
+	if f.headHash != root {
+		return cltypes.PayloadStatusPending, false, true
+	}
+	return f.headPayloadStatus, true, true
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+	head, slot, _, err := f.getHeadGloasWithPayloadStatus()
+	return head, slot, err
+}
+
+func (f *ForkChoiceStore) getHeadGloasWithPayloadStatus() (common.Hash, uint64, cltypes.PayloadStatus, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
 		// a nil state degrades to zero attestation weight, as before.
 		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-		headHash, headSlot, ok, err := func() (common.Hash, uint64, bool, error) {
+		headHash, headSlot, payloadStatus, ok, err := func() (common.Hash, uint64, cltypes.PayloadStatus, bool, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 
 			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
-				return common.Hash{}, 0, false, nil
+				return common.Hash{}, 0, cltypes.PayloadStatusPending, false, nil
 			}
 			head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 			if err != nil {
-				return common.Hash{}, 0, false, err
+				return common.Hash{}, 0, cltypes.PayloadStatusPending, false, err
 			}
 			f.headHash = head.Root
 			f.headSlot = slot
 			f.headPayloadStatus = head.PayloadStatus
 			f.publishSelectedHead(f.headHash, f.headSlot)
-			return f.headHash, f.headSlot, true, nil
+			return f.headHash, f.headSlot, f.headPayloadStatus, true, nil
 		}()
 		if err != nil {
-			return common.Hash{}, 0, err
+			return common.Hash{}, 0, cltypes.PayloadStatusPending, err
 		}
 		if ok {
-			return headHash, headSlot, nil
+			return headHash, headSlot, payloadStatus, nil
 		}
 	}
 }

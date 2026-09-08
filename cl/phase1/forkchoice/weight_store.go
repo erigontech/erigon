@@ -73,7 +73,7 @@ func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) 
 // So: PENDING OR not-previous-slot → calculate weight
 // NOT PENDING AND is-previous-slot → return 0
 func getWeight(store WeightStore, f *ForkChoiceStore, node ForkChoiceNode) uint64 {
-	if f.isPreviousSlotPayloadDecision(node) {
+	if f.isPreviousSlotPayloadDecision(node, f.Slot()) {
 		return 0
 	}
 

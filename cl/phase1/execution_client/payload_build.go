@@ -31,7 +31,6 @@ import (
 var ErrPayloadBuildHeadMismatch = errors.New("execution head does not match payload parent")
 
 // PayloadBuilder starts a build through the local execution module without changing fork choice.
-// An implementation backed only by a remote Engine API returns ErrNotSupported.
 type PayloadBuilder interface {
 	StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
 }
