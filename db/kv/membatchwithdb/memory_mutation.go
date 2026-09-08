@@ -183,6 +183,14 @@ func (m *MemoryMutation) isDupDeleted(table string, key []byte, val []byte) bool
 	return ok
 }
 
+func (m *MemoryMutation) hasDeletedEntries(table string) bool {
+	return len(m.deletedEntries[table]) > 0
+}
+
+func (m *MemoryMutation) hasDeletedDups(table string, key []byte) bool {
+	return len(m.deletedDups[table][string(key)]) > 0
+}
+
 func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
@@ -392,9 +400,19 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil && !m.isTableCleared(table) {
+		// Hidden rows don't count against limit, so the db side must be free to
+		// look past them; the merge below still stops at limit.
+		hidden := m.hasDeletedEntries(table)
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			return s, err
+		}
+		if hidden {
+			s.iterDb = newSkipDeletedIter(s.iterDb, func(k, _ []byte) bool { return m.isEntryDeleted(table, k) })
 		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
@@ -406,6 +424,53 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	}
 	return s, nil
 }
+
+// skipDeletedIter hides rows the overlay marked deleted from a db-side stream.
+type skipDeletedIter struct {
+	it      stream.KV
+	deleted func(k, v []byte) bool
+	k, v    []byte
+	hasNext bool
+	err     error
+}
+
+func newSkipDeletedIter(it stream.KV, deleted func(k, v []byte) bool) *skipDeletedIter {
+	s := &skipDeletedIter{it: it, deleted: deleted}
+	s.advance()
+	return s
+}
+
+func (s *skipDeletedIter) advance() {
+	for s.it.HasNext() {
+		k, v, err := s.it.Next()
+		if err != nil {
+			s.err, s.hasNext = err, true
+			return
+		}
+		if s.deleted(k, v) {
+			continue
+		}
+		s.k, s.v, s.hasNext = k, v, true
+		return
+	}
+	s.k, s.v, s.hasNext = nil, nil, false
+}
+
+func (s *skipDeletedIter) HasNext() bool { return s.hasNext }
+
+func (s *skipDeletedIter) Next() (k, v []byte, err error) {
+	if s.err != nil {
+		return nil, nil, s.err
+	}
+	if !s.hasNext {
+		return nil, nil, nil
+	}
+	k, v = s.k, s.v
+	s.advance()
+	return k, v, nil
+}
+
+func (s *skipDeletedIter) Close() { s.it.Close() }
 
 type rangeIter struct {
 	iterDb, iterMem                      stream.KV
@@ -426,7 +491,7 @@ func (s *rangeIter) Close() {
 	}
 }
 func (s *rangeIter) init() (*rangeIter, error) {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -450,25 +515,22 @@ func (s *rangeIter) HasNext() bool {
 }
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextKdb, s.nextKmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
-		if s.hasNextDb {
-			k = s.nextKdb
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
-			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
-				return nil, nil, err
-			}
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		k = s.nextKdb
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
+			return nil, nil, err
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
-		if s.hasNextMem {
-			k = s.nextKmem
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
-			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
-				return nil, nil, err
-			}
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		k = s.nextKmem
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
+			return nil, nil, err
 		}
 	}
 	return
@@ -477,9 +539,17 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil && !m.isTableCleared(table) && !m.isEntryDeleted(table, key) {
+		hidden := m.hasDeletedDups(table, key)
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			return s, err
+		}
+		if hidden {
+			s.iterDb = newSkipDeletedIter(s.iterDb, func(_, v []byte) bool { return m.isDupDeleted(table, key, v) })
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
@@ -513,7 +583,7 @@ func (s *rangeDupSortIter) Close() {
 }
 
 func (s *rangeDupSortIter) init() error {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -538,23 +608,20 @@ func (s *rangeDupSortIter) HasNext() bool {
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextVdb, s.nextVmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
-		if s.hasNextDb {
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
-			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
-				return nil, nil, err
-			}
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
+			return nil, nil, err
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
-		if s.hasNextMem {
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
-			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
-				return nil, nil, err
-			}
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
+			return nil, nil, err
 		}
 	}
 	return
