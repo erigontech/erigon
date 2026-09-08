@@ -19,7 +19,6 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -69,15 +68,7 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
-	if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
-		var e1 rawdbv3.ErrTxNumsAppendWithGap
-		if ok := errors.As(err, &e1); ok {
-			// try again starting from latest available  block
-			return rawdb.AppendCanonicalTxNums(tx, e1.LastBlock()+1)
-		}
-		return err
-	}
-	return nil
+	return rawdb.AppendCanonicalTxNumsFromTip(tx, from)
 }
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {

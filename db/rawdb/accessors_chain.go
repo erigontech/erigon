@@ -24,6 +24,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -709,6 +710,25 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block access list", "err", err)
 	}
+}
+
+// AppendCanonicalTxNumsFromTip appends canonical txNums starting at from,
+// retrying from the index tip when from sits above it.
+//
+// Canonical markers run ahead of the txNums index: insertion writes a
+// marker for every block but appends txNums only when the marker
+// changed. A caller holding a canonical block number therefore cannot
+// assume it is the tip, and AppendCanonicalTxNums refuses to leave a
+// hole. Callers that derive from from the canonical chain want this
+// wrapper; callers that have just truncated to from-1 can append
+// directly.
+func AppendCanonicalTxNumsFromTip(tx kv.RwTx, from uint64) error {
+	err := AppendCanonicalTxNums(tx, from)
+	var gap rawdbv3.ErrTxNumsAppendWithGap
+	if errors.As(err, &gap) {
+		return AppendCanonicalTxNums(tx, gap.LastBlock()+1)
+	}
+	return err
 }
 
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {

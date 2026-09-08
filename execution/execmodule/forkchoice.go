@@ -338,7 +338,10 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := rawdb.TruncateCanonicalHash(tx, newCanonicals[0].number+1, false); err != nil {
 			return nil, err
 		}
-		if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+		// newCanonicals[len-1] is the reconnection point, taken from the
+		// canonical chain, which runs ahead of the txNums index — hence
+		// FromTip rather than a plain append.
+		if err := rawdb.AppendCanonicalTxNumsFromTip(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
 			return nil, err
 		}
 	}
