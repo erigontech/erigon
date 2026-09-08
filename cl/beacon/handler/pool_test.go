@@ -19,20 +19,31 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
+	"github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -191,6 +202,90 @@ func TestPoolVoluntaryExits(t *testing.T) {
 
 	require.Len(t, out.Data, 1)
 	require.Equal(t, voluntaryExit, out.Data[0])
+}
+
+func TestPoolVoluntaryExitsRejectIgnoredValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		epoch     uint64
+		exitEpoch uint64
+	}{
+		{name: "future epoch", epoch: 101, exitEpoch: math.MaxUint64},
+		{name: "maximum epoch", epoch: math.MaxUint64, exitEpoch: math.MaxUint64},
+		{name: "initiated exit", epoch: 100, exitEpoch: 101},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, head, handler, opPool, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			require.NoError(t, head.SetSlot(100*cfg.SlotsPerEpoch))
+			head.ValidatorSet().Set(0, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, tc.exitEpoch, cfg.FarFutureEpoch))
+			require.NoError(t, syncedData.OnHeadState(head))
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(uint64(0)).Return(time.Unix(0, 0))
+			clock.EXPECT().GetSlotByTime(gomock.Any()).Return(100 * cfg.SlotsPerEpoch)
+			clock.EXPECT().GetEpochAtSlot(100 * cfg.SlotsPerEpoch).Return(100)
+			handler.voluntaryExitService = services.NewVoluntaryExitService(opPool, beaconevents.NewEventEmitter(), syncedData, cfg, clock, services.NewBatchSignatureVerifier(t.Context(), nil))
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			handler.gossipManager = gossipManager
+			body, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: tc.epoch, ValidatorIndex: 0}})
+			require.NoError(t, err)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.mux.ServeHTTP(response, req)
+			require.Equal(t, http.StatusBadRequest, response.Code)
+			var endpointError beaconhttp.EndpointError
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &endpointError))
+			require.Equal(t, http.StatusBadRequest, endpointError.Code)
+			require.Equal(t, services.ErrIgnore.Error(), endpointError.Message)
+			require.False(t, opPool.VoluntaryExitsPool.Has(0))
+		})
+	}
+}
+
+func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		validationErr error
+		status        int
+		publishes     int
+	}{
+		{name: "valid", status: http.StatusOK, publishes: 1},
+		{name: "invalid", validationErr: errors.New("invalid signature"), status: http.StatusBadRequest},
+		{name: "ignored", validationErr: services.ErrIgnore, status: http.StatusBadRequest},
+		{name: "wrapped ignore", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+			ctrl := gomock.NewController(t)
+			voluntaryExit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: 3}}
+			service := mock_services.NewMockVoluntaryExitService(ctrl)
+			service.EXPECT().ProcessMessage(gomock.Any(), nil, &services.SignedVoluntaryExitForGossip{
+				SignedVoluntaryExit: voluntaryExit, ImmediateVerification: true,
+			}).Return(tc.validationErr)
+			handler.voluntaryExitService = service
+			encodedSSZ, err := voluntaryExit.EncodeSSZ(nil)
+			require.NoError(t, err)
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(nil).Times(tc.publishes)
+			handler.gossipManager = gossipManager
+			body, err := json.Marshal(voluntaryExit)
+			require.NoError(t, err)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.mux.ServeHTTP(response, req)
+			require.Equal(t, tc.status, response.Code)
+			if tc.validationErr != nil {
+				var endpointError beaconhttp.EndpointError
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &endpointError))
+				require.Equal(t, http.StatusBadRequest, endpointError.Code)
+				require.Equal(t, tc.validationErr.Error(), endpointError.Message)
+			}
+		})
+	}
 }
 
 func TestPoolBlsToExecutionChainges(t *testing.T) {
