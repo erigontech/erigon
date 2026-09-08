@@ -431,8 +431,9 @@ func remap16(x uint64, n uint16) uint16 {
 }
 
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
-// when mapping keys to 64-bit values
-func (rs *RecSplit) ResetNextSalt() {
+// when mapping keys to 64-bit values. Everything the failed attempt accumulated has to go:
+// the encoders append into their existing buffers, so leftovers land in the rebuilt index.
+func (rs *RecSplit) ResetNextSalt() error {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
@@ -451,11 +452,39 @@ func (rs *RecSplit) ResetNextSalt() {
 		_, _ = rs.offsetFile.Seek(0, 0)
 		rs.offsetWriter.Reset(rs.offsetFile)
 	}
+	rs.gr.Reset()
+	rs.ef = eliasfano16.DoubleEliasFano{}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
+
+	if rs.existenceFV0 != nil {
+		// a completed Build closes this file, so start a fresh one rather than rewind
+		_ = rs.existenceFV0.Close()
+		_ = dir.RemoveFile(rs.existenceFV0.Name())
+		f, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return err
+		}
+		rs.existenceFV0 = f
+		rs.existenceWV0.Reset(f)
+	}
+	if rs.existenceFV1 != nil || rs.existenceFV2 != nil {
+		if rs.existenceFV1 != nil {
+			rs.existenceFV1.Close()
+		}
+		if rs.existenceFV2 != nil {
+			rs.existenceFV2.Close()
+		}
+		var err error
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
