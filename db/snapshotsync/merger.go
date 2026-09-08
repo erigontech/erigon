@@ -82,6 +82,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 				break
 			}
 			aggFrom := r.To() - span
+			if !rangesTile(currentRanges, aggFrom, r.To()) {
+				continue
+			}
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
 			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
@@ -91,6 +94,28 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 	}
 	slices.SortFunc(toMerge, func(i, j Range) int { return cmp.Compare(i.From(), j.From()) })
 	return toMerge
+}
+
+// rangesTile reports whether ranges cover [from, to) contiguously using
+// only whole ranges. A range starting below from cannot contribute:
+// filesByRangeOfType drops it, so the merge output would be named for
+// blocks it does not contain. That is what a wide v4 #1 straddling the
+// merge start produces after a deep unwind.
+func rangesTile(ranges []Range, from, to uint64) bool {
+	cursor := from
+	for _, r := range ranges {
+		if r.From() != cursor {
+			continue
+		}
+		if r.To() > to {
+			return false
+		}
+		cursor = r.To()
+		if cursor == to {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
@@ -247,6 +272,7 @@ func (m *Merger) Merge(
 			out[snapType] = append(out[snapType], t...)
 		}
 
+		produced := make([]*DirtySegment, 0, len(snapTypes))
 		for _, t := range snapTypes {
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
@@ -258,8 +284,17 @@ func (m *Merger) Merge(
 				snapshots.IndexBuilder(t),
 			)
 			if err != nil {
+				// A range is all or nothing across its types.
+				// mergeSubSegment cleans up only the type that failed, so
+				// without this the members already written stay on disk,
+				// where the folder scan indexes and advertises them as a
+				// range that is missing a type.
+				for _, done := range produced {
+					done.closeAndRemoveFiles()
+				}
 				return err
 			}
+			produced = append(produced, newDirtySegment)
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}
