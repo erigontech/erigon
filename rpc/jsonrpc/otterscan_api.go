@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -219,9 +219,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the sentinel for the newest page, not a request to read genesis;
+	// the blocks the scan lands on are gated as it reaches them.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
@@ -246,9 +250,12 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
@@ -357,35 +364,30 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	// One selected view for resolution, gate and reads: a background commit can publish
-	// or drop the overlay between two selections, leaving the gate on one generation and
-	// the block or its receipts on another.
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-
 	var b *types.Block
 	if number == rpc.PendingBlockNumber {
-		b, _, err = api.getBlockWithSenders(ctx, number, overlayTx)
+		b, _, err = api.getBlockWithSenders(ctx, number, tx)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum); err != nil {
+		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
-		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), overlayTx)
+		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
 		if err != nil {
 			return nil, err
 		}
@@ -394,18 +396,18 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, overlayTx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(overlayTx, b, number, true)
+	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, true)
 	if err != nil {
 		return nil, err
 	}
 
 	// Receipts
-	receipts, err := api.getReceipts(ctx, overlayTx, b)
+	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
 		return nil, err
 	}

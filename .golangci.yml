@@ -125,45 +125,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          db/datadir\
-          |db/datadir/reset\
-          |db/datastruct/btindex\
-          |db/datastruct/fusefilter\
-          |db/downloader\
-          |db/downloader/webseeds\
-          |db/etl\
-          |db/kv/kvcache\
-          |db/kv/mdbx\
-          |db/kv/mdbx/mdbxtest\
-          |db/kv/membatchwithdb\
-          |db/rawdb\
-          |db/recsplit\
-          |db/recsplit/eliasfano32\
-          |db/seg\
-          |db/snapshotsync\
-          |db/snapshotsync/freezeblocks\
-          |db/test\
-          |diagnostics/diaglib\
-          |diagnostics/diskutils\
-          |execution/commitment\
-          |execution/commitment/trie\
-          |execution/exec\
-          |execution/execmodule\
-          |execution/execmodule/execmoduletester\
-          |execution/protocol\
-          |execution/protocol/aa\
-          |execution/protocol/misc\
-          |execution/protocol/rules/aura\
-          |execution/protocol/rules/ethash\
-          |execution/protocol/rules/merge\
-          |execution/rlp\
-          |execution/stagedsync\
-          |execution/tests\
-          |execution/tests/testutil\
-          |execution/tracing/tracers/js\
-          |execution/types\
-          |execution/types/accounts\
-          |node\
+          node\
           |node/app/component\
           |node/debug\
           |node/nodecfg\
