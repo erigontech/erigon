@@ -1836,126 +1836,6 @@ func (x *IndexPagination) GetLimit() int64 {
 	return 0
 }
 
-type HasPrefixReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TxId          uint64                 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`
-	Table         string                 `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
-	Prefix        []byte                 `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HasPrefixReq) Reset() {
-	*x = HasPrefixReq{}
-	mi := &file_remote_kv_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HasPrefixReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HasPrefixReq) ProtoMessage() {}
-
-func (x *HasPrefixReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HasPrefixReq.ProtoReflect.Descriptor instead.
-func (*HasPrefixReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *HasPrefixReq) GetTxId() uint64 {
-	if x != nil {
-		return x.TxId
-	}
-	return 0
-}
-
-func (x *HasPrefixReq) GetTable() string {
-	if x != nil {
-		return x.Table
-	}
-	return ""
-}
-
-func (x *HasPrefixReq) GetPrefix() []byte {
-	if x != nil {
-		return x.Prefix
-	}
-	return nil
-}
-
-type HasPrefixReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FirstKey      []byte                 `protobuf:"bytes,1,opt,name=first_key,json=firstKey,proto3" json:"first_key,omitempty"`
-	FirstVal      []byte                 `protobuf:"bytes,2,opt,name=first_val,json=firstVal,proto3" json:"first_val,omitempty"`
-	HasPrefix     bool                   `protobuf:"varint,3,opt,name=has_prefix,json=hasPrefix,proto3" json:"has_prefix,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HasPrefixReply) Reset() {
-	*x = HasPrefixReply{}
-	mi := &file_remote_kv_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HasPrefixReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HasPrefixReply) ProtoMessage() {}
-
-func (x *HasPrefixReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HasPrefixReply.ProtoReflect.Descriptor instead.
-func (*HasPrefixReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *HasPrefixReply) GetFirstKey() []byte {
-	if x != nil {
-		return x.FirstKey
-	}
-	return nil
-}
-
-func (x *HasPrefixReply) GetFirstVal() []byte {
-	if x != nil {
-		return x.FirstVal
-	}
-	return nil
-}
-
-func (x *HasPrefixReply) GetHasPrefix() bool {
-	if x != nil {
-		return x.HasPrefix
-	}
-	return false
-}
-
 type HistoryStartFromReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Domain        uint32                 `protobuf:"varint,1,opt,name=domain,proto3" json:"domain,omitempty"`
@@ -1966,7 +1846,7 @@ type HistoryStartFromReq struct {
 
 func (x *HistoryStartFromReq) Reset() {
 	*x = HistoryStartFromReq{}
-	mi := &file_remote_kv_proto_msgTypes[25]
+	mi := &file_remote_kv_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1978,7 +1858,7 @@ func (x *HistoryStartFromReq) String() string {
 func (*HistoryStartFromReq) ProtoMessage() {}
 
 func (x *HistoryStartFromReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[25]
+	mi := &file_remote_kv_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1991,7 +1871,7 @@ func (x *HistoryStartFromReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryStartFromReq.ProtoReflect.Descriptor instead.
 func (*HistoryStartFromReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{25}
+	return file_remote_kv_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *HistoryStartFromReq) GetDomain() uint32 {
@@ -2017,7 +1897,7 @@ type HistoryStartFromReply struct {
 
 func (x *HistoryStartFromReply) Reset() {
 	*x = HistoryStartFromReply{}
-	mi := &file_remote_kv_proto_msgTypes[26]
+	mi := &file_remote_kv_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2029,7 +1909,7 @@ func (x *HistoryStartFromReply) String() string {
 func (*HistoryStartFromReply) ProtoMessage() {}
 
 func (x *HistoryStartFromReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[26]
+	mi := &file_remote_kv_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2042,7 +1922,7 @@ func (x *HistoryStartFromReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryStartFromReply.ProtoReflect.Descriptor instead.
 func (*HistoryStartFromReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{26}
+	return file_remote_kv_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *HistoryStartFromReply) GetStartFrom() uint64 {
@@ -2062,7 +1942,7 @@ type CurrentDomainVersionReq struct {
 
 func (x *CurrentDomainVersionReq) Reset() {
 	*x = CurrentDomainVersionReq{}
-	mi := &file_remote_kv_proto_msgTypes[27]
+	mi := &file_remote_kv_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2074,7 +1954,7 @@ func (x *CurrentDomainVersionReq) String() string {
 func (*CurrentDomainVersionReq) ProtoMessage() {}
 
 func (x *CurrentDomainVersionReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[27]
+	mi := &file_remote_kv_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2087,7 +1967,7 @@ func (x *CurrentDomainVersionReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentDomainVersionReq.ProtoReflect.Descriptor instead.
 func (*CurrentDomainVersionReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{27}
+	return file_remote_kv_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CurrentDomainVersionReq) GetTxId() uint64 {
@@ -2114,7 +1994,7 @@ type CurrentDomainVersionReply struct {
 
 func (x *CurrentDomainVersionReply) Reset() {
 	*x = CurrentDomainVersionReply{}
-	mi := &file_remote_kv_proto_msgTypes[28]
+	mi := &file_remote_kv_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2126,7 +2006,7 @@ func (x *CurrentDomainVersionReply) String() string {
 func (*CurrentDomainVersionReply) ProtoMessage() {}
 
 func (x *CurrentDomainVersionReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[28]
+	mi := &file_remote_kv_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2139,7 +2019,7 @@ func (x *CurrentDomainVersionReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentDomainVersionReply.ProtoReflect.Descriptor instead.
 func (*CurrentDomainVersionReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{28}
+	return file_remote_kv_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CurrentDomainVersionReply) GetMajor() uint64 {
@@ -2165,7 +2045,7 @@ type StepSizeReq struct {
 
 func (x *StepSizeReq) Reset() {
 	*x = StepSizeReq{}
-	mi := &file_remote_kv_proto_msgTypes[29]
+	mi := &file_remote_kv_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2177,7 +2057,7 @@ func (x *StepSizeReq) String() string {
 func (*StepSizeReq) ProtoMessage() {}
 
 func (x *StepSizeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[29]
+	mi := &file_remote_kv_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2190,7 +2070,7 @@ func (x *StepSizeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepSizeReq.ProtoReflect.Descriptor instead.
 func (*StepSizeReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{29}
+	return file_remote_kv_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StepSizeReq) GetTxId() uint64 {
@@ -2209,7 +2089,7 @@ type StepSizeReply struct {
 
 func (x *StepSizeReply) Reset() {
 	*x = StepSizeReply{}
-	mi := &file_remote_kv_proto_msgTypes[30]
+	mi := &file_remote_kv_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2221,7 +2101,7 @@ func (x *StepSizeReply) String() string {
 func (*StepSizeReply) ProtoMessage() {}
 
 func (x *StepSizeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[30]
+	mi := &file_remote_kv_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2234,7 +2114,7 @@ func (x *StepSizeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepSizeReply.ProtoReflect.Descriptor instead.
 func (*StepSizeReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{30}
+	return file_remote_kv_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *StepSizeReply) GetStep() uint64 {
@@ -2253,7 +2133,7 @@ type MaxPrunableStepsBacklogReply struct {
 
 func (x *MaxPrunableStepsBacklogReply) Reset() {
 	*x = MaxPrunableStepsBacklogReply{}
-	mi := &file_remote_kv_proto_msgTypes[31]
+	mi := &file_remote_kv_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2265,7 +2145,7 @@ func (x *MaxPrunableStepsBacklogReply) String() string {
 func (*MaxPrunableStepsBacklogReply) ProtoMessage() {}
 
 func (x *MaxPrunableStepsBacklogReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[31]
+	mi := &file_remote_kv_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2278,7 +2158,7 @@ func (x *MaxPrunableStepsBacklogReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MaxPrunableStepsBacklogReply.ProtoReflect.Descriptor instead.
 func (*MaxPrunableStepsBacklogReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{31}
+	return file_remote_kv_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *MaxPrunableStepsBacklogReply) GetSteps() uint64 {
@@ -2425,16 +2305,7 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\x05limit\x18\x02 \x01(\x12R\x05limit\"O\n" +
 	"\x0fIndexPagination\x12&\n" +
 	"\x0fnext_time_stamp\x18\x01 \x01(\x12R\rnextTimeStamp\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\x12R\x05limit\"Q\n" +
-	"\fHasPrefixReq\x12\x13\n" +
-	"\x05tx_id\x18\x01 \x01(\x04R\x04txId\x12\x14\n" +
-	"\x05table\x18\x02 \x01(\tR\x05table\x12\x16\n" +
-	"\x06prefix\x18\x03 \x01(\fR\x06prefix\"i\n" +
-	"\x0eHasPrefixReply\x12\x1b\n" +
-	"\tfirst_key\x18\x01 \x01(\fR\bfirstKey\x12\x1b\n" +
-	"\tfirst_val\x18\x02 \x01(\fR\bfirstVal\x12\x1d\n" +
-	"\n" +
-	"has_prefix\x18\x03 \x01(\bR\thasPrefix\"B\n" +
+	"\x05limit\x18\x02 \x01(\x12R\x05limit\"B\n" +
 	"\x13HistoryStartFromReq\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\rR\x06domain\x12\x13\n" +
 	"\x05tx_id\x18\x02 \x01(\x04R\x04txId\"6\n" +
@@ -2484,7 +2355,7 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tDirection\x12\v\n" +
 	"\aFORWARD\x10\x00\x12\n" +
 	"\n" +
-	"\x06UNWIND\x10\x012\xe9\a\n" +
+	"\x06UNWIND\x10\x012\xae\a\n" +
 	"\x02KV\x126\n" +
 	"\aVersion\x12\x16.google.protobuf.Empty\x1a\x13.types.VersionReply\x12&\n" +
 	"\x02Tx\x12\x0e.remote.Cursor\x1a\f.remote.Pair(\x010\x01\x12F\n" +
@@ -2497,8 +2368,7 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\n" +
 	"IndexRange\x12\x15.remote.IndexRangeReq\x1a\x17.remote.IndexRangeReply\x126\n" +
 	"\fHistoryRange\x12\x17.remote.HistoryRangeReq\x1a\r.remote.Pairs\x120\n" +
-	"\tRangeAsOf\x12\x14.remote.RangeAsOfReq\x1a\r.remote.Pairs\x129\n" +
-	"\tHasPrefix\x12\x14.remote.HasPrefixReq\x1a\x16.remote.HasPrefixReply\x12N\n" +
+	"\tRangeAsOf\x12\x14.remote.RangeAsOfReq\x1a\r.remote.Pairs\x12N\n" +
 	"\x10HistoryStartFrom\x12\x1b.remote.HistoryStartFromReq\x1a\x1d.remote.HistoryStartFromReply\x12Z\n" +
 	"\x14CurrentDomainVersion\x12\x1f.remote.CurrentDomainVersionReq\x1a!.remote.CurrentDomainVersionReply\x126\n" +
 	"\bStepSize\x12\x13.remote.StepSizeReq\x1a\x15.remote.StepSizeReply\x12W\n" +
@@ -2517,7 +2387,7 @@ func file_remote_kv_proto_rawDescGZIP() []byte {
 }
 
 var file_remote_kv_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_remote_kv_proto_goTypes = []any{
 	(Op)(0),                              // 0: remote.Op
 	(Action)(0),                          // 1: remote.Action
@@ -2545,31 +2415,29 @@ var file_remote_kv_proto_goTypes = []any{
 	(*Pairs)(nil),                        // 23: remote.Pairs
 	(*PairsPagination)(nil),              // 24: remote.PairsPagination
 	(*IndexPagination)(nil),              // 25: remote.IndexPagination
-	(*HasPrefixReq)(nil),                 // 26: remote.HasPrefixReq
-	(*HasPrefixReply)(nil),               // 27: remote.HasPrefixReply
-	(*HistoryStartFromReq)(nil),          // 28: remote.HistoryStartFromReq
-	(*HistoryStartFromReply)(nil),        // 29: remote.HistoryStartFromReply
-	(*CurrentDomainVersionReq)(nil),      // 30: remote.CurrentDomainVersionReq
-	(*CurrentDomainVersionReply)(nil),    // 31: remote.CurrentDomainVersionReply
-	(*StepSizeReq)(nil),                  // 32: remote.StepSizeReq
-	(*StepSizeReply)(nil),                // 33: remote.StepSizeReply
-	(*MaxPrunableStepsBacklogReply)(nil), // 34: remote.MaxPrunableStepsBacklogReply
-	(*typesproto.H256)(nil),              // 35: types.H256
-	(*typesproto.H160)(nil),              // 36: types.H160
-	(*emptypb.Empty)(nil),                // 37: google.protobuf.Empty
-	(*typesproto.VersionReply)(nil),      // 38: types.VersionReply
+	(*HistoryStartFromReq)(nil),          // 26: remote.HistoryStartFromReq
+	(*HistoryStartFromReply)(nil),        // 27: remote.HistoryStartFromReply
+	(*CurrentDomainVersionReq)(nil),      // 28: remote.CurrentDomainVersionReq
+	(*CurrentDomainVersionReply)(nil),    // 29: remote.CurrentDomainVersionReply
+	(*StepSizeReq)(nil),                  // 30: remote.StepSizeReq
+	(*StepSizeReply)(nil),                // 31: remote.StepSizeReply
+	(*MaxPrunableStepsBacklogReply)(nil), // 32: remote.MaxPrunableStepsBacklogReply
+	(*typesproto.H256)(nil),              // 33: types.H256
+	(*typesproto.H160)(nil),              // 34: types.H160
+	(*emptypb.Empty)(nil),                // 35: google.protobuf.Empty
+	(*typesproto.VersionReply)(nil),      // 36: types.VersionReply
 }
 var file_remote_kv_proto_depIdxs = []int32{
 	0,  // 0: remote.Cursor.op:type_name -> remote.Op
-	35, // 1: remote.StorageChange.location:type_name -> types.H256
-	36, // 2: remote.AccountChange.address:type_name -> types.H160
+	33, // 1: remote.StorageChange.location:type_name -> types.H256
+	34, // 2: remote.AccountChange.address:type_name -> types.H160
 	1,  // 3: remote.AccountChange.action:type_name -> remote.Action
 	5,  // 4: remote.AccountChange.storage_changes:type_name -> remote.StorageChange
 	8,  // 5: remote.StateChangeBatch.change_batch:type_name -> remote.StateChange
 	2,  // 6: remote.StateChange.direction:type_name -> remote.Direction
-	35, // 7: remote.StateChange.block_hash:type_name -> types.H256
+	33, // 7: remote.StateChange.block_hash:type_name -> types.H256
 	6,  // 8: remote.StateChange.changes:type_name -> remote.AccountChange
-	37, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
+	35, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
 	3,  // 10: remote.KV.Tx:input_type -> remote.Cursor
 	9,  // 11: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
 	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
@@ -2580,29 +2448,27 @@ var file_remote_kv_proto_depIdxs = []int32{
 	19, // 17: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
 	21, // 18: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
 	22, // 19: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
-	26, // 20: remote.KV.HasPrefix:input_type -> remote.HasPrefixReq
-	28, // 21: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
-	30, // 22: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
-	32, // 23: remote.KV.StepSize:input_type -> remote.StepSizeReq
-	37, // 24: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
-	38, // 25: remote.KV.Version:output_type -> types.VersionReply
-	4,  // 26: remote.KV.Tx:output_type -> remote.Pair
-	7,  // 27: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
-	11, // 28: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
-	23, // 29: remote.KV.Range:output_type -> remote.Pairs
-	14, // 30: remote.KV.Sequence:output_type -> remote.SequenceReply
-	16, // 31: remote.KV.GetLatest:output_type -> remote.GetLatestReply
-	18, // 32: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
-	20, // 33: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
-	23, // 34: remote.KV.HistoryRange:output_type -> remote.Pairs
-	23, // 35: remote.KV.RangeAsOf:output_type -> remote.Pairs
-	27, // 36: remote.KV.HasPrefix:output_type -> remote.HasPrefixReply
-	29, // 37: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
-	31, // 38: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
-	33, // 39: remote.KV.StepSize:output_type -> remote.StepSizeReply
-	34, // 40: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
-	25, // [25:41] is the sub-list for method output_type
-	9,  // [9:25] is the sub-list for method input_type
+	26, // 20: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
+	28, // 21: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
+	30, // 22: remote.KV.StepSize:input_type -> remote.StepSizeReq
+	35, // 23: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
+	36, // 24: remote.KV.Version:output_type -> types.VersionReply
+	4,  // 25: remote.KV.Tx:output_type -> remote.Pair
+	7,  // 26: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
+	11, // 27: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
+	23, // 28: remote.KV.Range:output_type -> remote.Pairs
+	14, // 29: remote.KV.Sequence:output_type -> remote.SequenceReply
+	16, // 30: remote.KV.GetLatest:output_type -> remote.GetLatestReply
+	18, // 31: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
+	20, // 32: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
+	23, // 33: remote.KV.HistoryRange:output_type -> remote.Pairs
+	23, // 34: remote.KV.RangeAsOf:output_type -> remote.Pairs
+	27, // 35: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
+	29, // 36: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
+	31, // 37: remote.KV.StepSize:output_type -> remote.StepSizeReply
+	32, // 38: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
+	24, // [24:39] is the sub-list for method output_type
+	9,  // [9:24] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -2620,7 +2486,7 @@ func file_remote_kv_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_kv_proto_rawDesc), len(file_remote_kv_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   32,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
