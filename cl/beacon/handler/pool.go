@@ -267,8 +267,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
 	}); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-		return
+		verifiedDuplicate := false
+		if errors.Is(err, services.ErrIgnore) && req.VoluntaryExit != nil && a.operationsPool.VoluntaryExitsPool != nil {
+			stored, _ := a.operationsPool.VoluntaryExitsPool.Get(req.VoluntaryExit.ValidatorIndex)
+			verifiedDuplicate = stored != nil && stored.VoluntaryExit != nil && *stored.VoluntaryExit == *req.VoluntaryExit && stored.Signature == req.Signature
+		}
+		if !verifiedDuplicate {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 	}
 	if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameVoluntaryExit, encodedSSZ); err != nil {
 		a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
