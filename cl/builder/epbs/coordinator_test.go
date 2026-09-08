@@ -576,6 +576,25 @@ func TestCoordinatorRejectsMismatchedBuiltPayload(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRejectsBuiltPayloadReusingParentBlockHash(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	assembled.Eth1Block.BlockHash = input.ParentBlockHash
+	publisher := new(coordinatorPublisher)
+	signer := new(coordinatorSigner)
+	coordinator := NewCoordinator(
+		&config, signer, FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: assembled}, publisher, 1,
+	)
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.Error(t, err)
+	require.Nil(t, bid)
+	require.Zero(t, publisher.calls)
+	require.Zero(t, signer.root)
+}
+
 func TestCoordinatorSkipsInactiveBuilderBeforeAssembly(t *testing.T) {
 	for name, mutate := range map[string]func(*SlotInput){
 		"inactive":        func(input *SlotInput) { input.BuilderActive = false },

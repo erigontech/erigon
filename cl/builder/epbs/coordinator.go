@@ -78,6 +78,14 @@ type SlotInput struct {
 	GenesisValidatorsRoot   common.Hash
 	BuilderActive           bool
 	AvailableBidValueGwei   uint64
+	freshness               slotInputFreshnessToken
+}
+
+type slotInputFreshnessToken struct {
+	preferenceRoot common.Hash
+	headStateSlot  uint64
+	headBlockSlot  uint64
+	buildOnFull    bool
 }
 
 type PayloadIdentity struct {
@@ -151,6 +159,14 @@ func NewCoordinator(
 }
 
 func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.SignedExecutionPayloadBid, error) {
+	return c.runSlotGuarded(ctx, input, nil)
+}
+
+func (c *Coordinator) runSlotGuarded(
+	ctx context.Context,
+	input SlotInput,
+	freshness SlotInputFreshness,
+) (*cltypes.SignedExecutionPayloadBid, error) {
 	if err := c.validateInput(ctx, input); err != nil {
 		return nil, err
 	}
@@ -167,6 +183,9 @@ func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.Si
 			c.releaseAuction(auction)
 		}
 	}()
+	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+		return nil, err
+	}
 
 	preferences := input.ValidatedPreferences.Clone().(*cltypes.SignedProposerPreferences)
 	parameters := buildParameters(input, preferences.Message)
@@ -186,6 +205,9 @@ func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.Si
 	}
 	if err := validateBuiltPayload(c.beaconCfg, input, preferences.Message, assembled); err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: %w", err)
+	}
+	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+		return nil, err
 	}
 
 	candidateBidValue, ok, err := c.strategyBidValue(input.Slot, assembled.BlockValue)
@@ -257,6 +279,9 @@ func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.Si
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: retain payload snapshot: %w", err)
 	}
+	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+		return nil, err
+	}
 	if err := c.retainForPublish(auction, identity, owned); err != nil {
 		return nil, err
 	}
@@ -267,6 +292,19 @@ func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.Si
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
 	return signedBid, nil
+}
+
+func validateSlotInputFreshness(ctx context.Context, input SlotInput, freshness SlotInputFreshness) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if freshness == nil {
+		return nil
+	}
+	if err := freshness.ValidateCurrent(ctx, input); err != nil {
+		return fmt.Errorf("epbs/coordinator: slot input is stale: %w", err)
+	}
+	return ctx.Err()
 }
 
 func (c *Coordinator) Payload(identity PayloadIdentity) (*RetainedPayload, bool, error) {
@@ -432,6 +470,9 @@ func validateBuiltPayload(
 	}
 	if payload.BlockHash == (common.Hash{}) {
 		return errors.New("execution payload block hash is zero")
+	}
+	if payload.BlockHash == input.ParentBlockHash {
+		return errors.New("execution payload block hash equals parent block hash")
 	}
 	if payload.ParentHash != input.ParentBlockHash {
 		return errors.New("execution payload parent hash mismatch")
