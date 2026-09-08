@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
-	"github.com/erigontech/erigon/db/datastruct/pagedidx"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -736,8 +736,9 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".vi") {
-			w, err := pagedidx.NewWriter(filename, 1, 1, 1, 1)
+			w, err := posidx.NewWriter(filename, t.TempDir(), 1, 1, 1, 1)
 			require.NoError(t, err)
+			defer w.Close()
 			w.NoFsync()
 			w.AddRun(1)
 			w.AddPage(0)

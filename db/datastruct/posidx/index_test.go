@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package pagedidx
+package posidx
 
 import (
 	"os"
@@ -31,8 +31,9 @@ func build(t *testing.T, name string, pageSize uint64, itemsPerRun, pageValues [
 		items += n
 	}
 	path := filepath.Join(t.TempDir(), name)
-	w, err := NewWriter(path, pageSize, uint64(len(itemsPerRun)), items, pageValues[len(pageValues)-1])
+	w, err := NewWriter(path, t.TempDir(), pageSize, uint64(len(itemsPerRun)), items, pageValues[len(pageValues)-1])
 	require.NoError(t, err)
+	defer w.Close()
 	w.NoFsync()
 	for _, n := range itemsPerRun {
 		w.AddRun(n)
@@ -139,8 +140,9 @@ func TestPage(t *testing.T) {
 
 func TestEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty")
-	w, err := NewWriter(path, 64, 0, 0, 0)
+	w, err := NewWriter(path, t.TempDir(), 64, 0, 0, 0)
 	require.NoError(t, err)
+	defer w.Close()
 	w.NoFsync()
 	require.NoError(t, w.Build())
 
@@ -158,7 +160,7 @@ func TestEmpty(t *testing.T) {
 }
 
 func TestPageSizeZeroRejected(t *testing.T) {
-	_, err := NewWriter(filepath.Join(t.TempDir(), "bad"), 0, 1, 1, 1)
+	_, err := NewWriter(filepath.Join(t.TempDir(), "bad"), t.TempDir(), 0, 1, 1, 1)
 	require.Error(t, err)
 }
 
@@ -176,8 +178,9 @@ func TestItemPastRunEnd(t *testing.T) {
 // rebuilds an accessor it cannot open.
 func TestOpenCorrupt(t *testing.T) {
 	good := filepath.Join(t.TempDir(), "good")
-	w, err := NewWriter(good, 2, 2, 4, 100)
+	w, err := NewWriter(good, t.TempDir(), 2, 2, 4, 100)
 	require.NoError(t, err)
+	defer w.Close()
 	w.NoFsync()
 	w.AddRun(3)
 	w.AddRun(1)
@@ -194,4 +197,98 @@ func TestOpenCorrupt(t *testing.T) {
 		require.Error(t, err, "size %d", size)
 		require.Nil(t, idx, "size %d", size)
 	}
+}
+
+// The sequences are read as []uint64 out of the mapping, so the header must
+// leave them 8-byte aligned. A header that is not a multiple of 8 makes every
+// lookup an unaligned load.
+func TestHeaderKeepsSequencesAligned(t *testing.T) {
+	require.Zero(t, headerLen%8, "header must be a multiple of 8, is %d", headerLen)
+	// ReadEliasFano puts its data 16 bytes into what it is given, so both
+	// sequences inherit the header's alignment.
+	require.Zero(t, (headerLen+16)%8)
+}
+
+func FuzzOpen(f *testing.F) {
+	good := filepath.Join(f.TempDir(), "seed.vi")
+	w, err := NewWriter(good, f.TempDir(), 2, 3, 6, 90)
+	require.NoError(f, err)
+	defer w.Close()
+	w.NoFsync()
+	for _, n := range []uint64{3, 1, 2} {
+		w.AddRun(n)
+	}
+	for _, v := range []uint64{0, 40, 90} {
+		w.AddPage(v)
+	}
+	require.NoError(f, w.Build())
+	body, err := os.ReadFile(good)
+	require.NoError(f, err)
+	f.Add(body)
+	f.Add(body[:headerLen])
+	f.Add(body[:len(body)-1])
+
+	dir := f.TempDir()
+	f.Fuzz(func(t *testing.T, b []byte) {
+		path := filepath.Join(dir, "fuzz.vi")
+		if err := os.WriteFile(path, b, 0o644); err != nil {
+			t.Skip()
+		}
+		// Open must reject a malformed file rather than crash on it. Decoding
+		// what it accepts is deliberately not asserted: a lookup starts from
+		// the sequence's jump table, and validating that costs as much as
+		// rebuilding it, so Open checks the layout and the bit count instead -
+		// which is what truncation and partial writes actually break.
+		idx, err := Open(path)
+		if err != nil {
+			return
+		}
+		idx.Close()
+	})
+}
+
+// Elias-Fano decoding walks the upper bits until it has seen as many set bits
+// as the index asked for, indexing the slice unchecked. Open must reject a file
+// whose bits no longer match its header, or that walk runs off the end during a
+// lookup instead.
+func TestOpenRejectsBitStreamNotMatchingHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src.vi")
+	w, err := NewWriter(path, t.TempDir(), 1, 3, 3, 30)
+	require.NoError(t, err)
+	defer w.Close()
+	w.NoFsync()
+	for range 3 {
+		w.AddRun(1)
+	}
+	for _, v := range []uint64{10, 20, 30} {
+		w.AddPage(v)
+	}
+	require.NoError(t, w.Build())
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NotPanics(t, func() {
+		idx, err := Open(path)
+		require.NoError(t, err)
+		idx.Close()
+	})
+
+	// Clearing bits anywhere past the header leaves the counts intact but the
+	// stream short of the values they promise.
+	for i := headerLen + 16; i < len(body); i++ {
+		if body[i] == 0 {
+			continue
+		}
+		corrupt := append([]byte(nil), body...)
+		corrupt[i] = 0
+		bad := filepath.Join(t.TempDir(), "corrupt.vi")
+		require.NoError(t, os.WriteFile(bad, corrupt, 0o644))
+		idx, err := Open(bad)
+		if err == nil {
+			idx.Close()
+			continue // that byte was not part of the upper bits
+		}
+		require.ErrorIs(t, err, ErrCorrupt)
+		return
+	}
+	t.Fatal("no byte of the sequence was load-bearing")
 }

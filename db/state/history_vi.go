@@ -19,7 +19,7 @@ package state
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/db/datastruct/pagedidx"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -28,7 +28,7 @@ import (
 //
 // buildVI writes .v by walking .ef in key order and each key's txNums in order,
 // so one key owns a run of consecutive values and a value's position is
-// (key number in .ef, rank of its txNum in that key's list) - a pagedidx run
+// (key number in .ef, rank of its txNum in that key's list) - a posidx run
 // and item. That needs the .efi built with Enums, and the .ef and .v step
 // ranges to line up.
 //
@@ -36,7 +36,7 @@ import (
 // they are: rpcdaemon and other read-only consumers cannot rebuild accessors,
 // so a datadir has to keep working until its files are replaced.
 type HistoryValueIndex struct {
-	paged    *pagedidx.Index
+	paged    *posidx.Index
 	legacy   *recsplit.Index
 	reader   *recsplit.IndexReader
 	filePath string
@@ -50,7 +50,7 @@ func OpenHistoryValueIndex(path string, fileVer version.Version) (*HistoryValueI
 		}
 		return &HistoryValueIndex{legacy: idx, reader: recsplit.NewIndexReader(idx), filePath: path}, nil
 	}
-	idx, err := pagedidx.Open(path)
+	idx, err := posidx.Open(path)
 	if err != nil {
 		return nil, err
 	}

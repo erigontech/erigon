@@ -93,11 +93,8 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 				}
 			}
 			histFileIdx := -1
-			for j := range hi.hc.files {
-				if hi.hc.files[j].startTxNum == item.startTxNum && hi.hc.files[j].endTxNum == item.endTxNum {
-					histFileIdx = j
-					break
-				}
+			if f, ok := hi.hc.pairedFile(item); ok {
+				histFileIdx = f.i
 			}
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx, keyOrdinal: keyOrdinal})
 		}
@@ -777,7 +774,6 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histReader = nil
 	}
 	for ht.fileIdx < len(ht.hc.iit.files) {
-		historyItem := ht.hc.files[ht.fileIdx]
 		item := ht.hc.iit.files[ht.fileIdx]
 		if ht.fromTxNum > item.endTxNum {
 			moveToNextFileFn()
@@ -787,6 +783,11 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			// done
 			ht.hasNext = false
 			return nil
+		}
+		historyItem, ok := ht.hc.pairedFile(item)
+		if !ok {
+			moveToNextFileFn()
+			continue
 		}
 
 		if ht.seqItr == nil {
@@ -837,7 +838,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		}
 
 		if ht.histReader == nil {
-			getter := ht.hc.statelessGetter(ht.fileIdx)
+			getter := ht.hc.statelessGetter(historyItem.i)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
 				getter,

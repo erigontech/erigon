@@ -102,6 +102,10 @@ type IISeekInFilesCache struct {
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
+	// second half of the key hash: the map is keyed on the first half alone, and
+	// a positional result taken from a colliding key resolves to a wrong value
+	// rather than to a miss
+	lo uint64
 	// position of the key in the .ef file and of `found` in that key's txNum
 	// list - the history value index is addressed by the pair
 	keyOrdinal, rank uint64

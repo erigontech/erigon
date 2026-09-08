@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datastruct/pagedidx"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -36,8 +36,9 @@ func TestHistoryValueIndexV2(t *testing.T) {
 	offsets := []uint64{0, 40, 90} // one per page of 2 values
 
 	path := filepath.Join(t.TempDir(), "v2.vi")
-	w, err := pagedidx.NewWriter(path, pageSize, uint64(len(valuesPerKey)), 6, offsets[len(offsets)-1])
+	w, err := posidx.NewWriter(path, t.TempDir(), pageSize, uint64(len(valuesPerKey)), 6, offsets[len(offsets)-1])
 	require.NoError(t, err)
+	defer w.Close()
 	w.NoFsync()
 	for _, n := range valuesPerKey {
 		w.AddRun(n)
@@ -121,8 +122,9 @@ func TestHistoryValueIndexV1Empty(t *testing.T) {
 // offset would return a different key's value; it has to fail instead.
 func TestLookupHistoryValueRejectsUnpairedRange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v2.vi")
-	w, err := pagedidx.NewWriter(path, 2, 2, 4, 40)
+	w, err := posidx.NewWriter(path, t.TempDir(), 2, 2, 4, 40)
 	require.NoError(t, err)
+	defer w.Close()
 	w.NoFsync()
 	w.AddRun(2)
 	w.AddRun(2)

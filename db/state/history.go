@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
-	"github.com/erigontech/erigon/db/datastruct/pagedidx"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -243,10 +243,10 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		pageSize = 1
 	}
 
-	var keyBuf, valBuf []byte
+	var valBuf []byte
 	var keyCount, valueCount uint64
 	for i := 0; iiReader.HasNext(); i++ {
-		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		iiReader.Skip() // the count needs the txNum lists, not the keys
 		valBuf, _ = iiReader.Next(valBuf[:0])
 		keyCount++
 		valueCount += multiencseq.Count(efBaseTxNum, valBuf)
@@ -263,10 +263,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	p := ps.AddNew(fName, keyCount)
 	defer ps.Delete(p)
 
-	w, err := pagedidx.NewWriter(historyIdxPath, pageSize, keyCount, valueCount, uint64(hist.Size()))
+	w, err := posidx.NewWriter(historyIdxPath, h.dirs.Tmp, pageSize, keyCount, valueCount, uint64(hist.Size()))
 	if err != nil {
 		return err
 	}
+	defer w.Close()
 	if h.noFsync {
 		w.NoFsync()
 	}
@@ -278,7 +279,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var it multiencseq.SequenceIterator
 	var valOffset, value uint64
 	for keys := uint64(0); iiReader.HasNext(); keys++ {
-		keyBuf, _ = iiReader.Next(keyBuf[:0])
+		iiReader.Skip() // the value index is addressed by position, not by key
 		valBuf, _ = iiReader.Next(valBuf[:0])
 
 		w.AddRun(multiencseq.Count(efBaseTxNum, valBuf))
@@ -1062,6 +1063,17 @@ func (ht *HistoryRoTx) Close() {
 	ht.iit.Close()
 }
 
+// pairedFile returns the history file built from the given .ef file. A v2 .vi
+// is addressed by position in that .ef, so no other file can resolve it.
+func (ht *HistoryRoTx) pairedFile(efItem visibleFile) (it visibleFile, ok bool) {
+	for i := range ht.files {
+		if ht.files[i].startTxNum == efItem.startTxNum && ht.files[i].endTxNum == efItem.endTxNum {
+			return ht.files[i], true
+		}
+	}
+	return it, false
+}
+
 func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	for i := 0; i < len(ht.files); i++ {
 		if ht.files[i].startTxNum <= txNum && ht.files[i].endTxNum > txNum {
@@ -1282,11 +1294,8 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 				val, _ = g.Next(nil)
 			}
 			histFileIdx := -1
-			for j := range ht.files {
-				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
-					histFileIdx = j
-					break
-				}
+			if f, ok := ht.pairedFile(item); ok {
+				histFileIdx = f.i
 			}
 			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
@@ -1407,7 +1416,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 				if !ok {
 					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
 				}
-
 				vOffset, ok, err := viFile.src.LookupHistoryValue(item.startTxNum, item.endTxNum, keyOrdinal, rank, txNum, key)
 				if err != nil {
 					return err

@@ -783,6 +783,43 @@ func (ef *EliasFano) AppendBytes(buf []byte) []byte {
 }
 
 // Read inputs the state of golomb rice encoding from a reader s
+// ReadEliasFanoChecked is ReadEliasFano for bytes that may be corrupt. The
+// plain form derives its layout from the count and universe in the header and
+// allocates from it, so a forged header panics in makeslice before any caller
+// can look at the result.
+func ReadEliasFanoChecked(r []byte) (*EliasFano, int, error) {
+	if len(r) < 16 {
+		return nil, 0, fmt.Errorf("elias-fano header needs 16 bytes, got %d", len(r))
+	}
+	probe := &EliasFano{
+		count: binary.BigEndian.Uint64(r[:8]),
+		u:     binary.BigEndian.Uint64(r[8:16]),
+	}
+	// count is stored as n-1, so 0 is a one-element sequence. These two values
+	// are the ones computeLayout cannot survive: count+1 overflows to a zero
+	// divisor, and universe 0 underflows maxOffset.
+	if probe.count == math.MaxUint64 || probe.u == 0 {
+		return nil, 0, fmt.Errorf("elias-fano count %d, universe %d", probe.count, probe.u)
+	}
+	_, _, _, totalWords := probe.computeLayout()
+	if avail := (len(r) - 16) / uint64Size; totalWords < 0 || totalWords > avail {
+		return nil, 0, fmt.Errorf("elias-fano needs %d words, %d available", totalWords, avail)
+	}
+	ef, n := ReadEliasFano(r)
+	// Decoding walks the upper bits until it has seen as many set bits as the
+	// index it was asked for, and indexes the slice unchecked while it does.
+	// One set bit per element is what makes that walk terminate in range, so
+	// count them once here rather than let a lookup run off the end later.
+	var set int
+	for _, w := range ef.upperBits {
+		set += bits.OnesCount64(w)
+	}
+	if uint64(set) != ef.count+1 {
+		return nil, 0, fmt.Errorf("elias-fano upper bits hold %d values, header says %d", set, ef.count+1)
+	}
+	return ef, n, nil
+}
+
 func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef := &EliasFano{
 		count: binary.BigEndian.Uint64(r[:8]),
