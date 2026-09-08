@@ -717,8 +717,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	if cfg.SSZQLEnabled {
 		mux := http.NewServeMux()
 		mux.Handle("/", srv)
-		mux.Handle("POST /eth/{version}/execution/{blockID}/query", sszql.SSZQueryHandler())
-		mux.Handle("POST /eth/{version}/execution/{blockID}/query/{$}", sszql.SSZQueryHandler())
+		sszqlHandler := sszql.SSZQueryHandler(defaultAPIList)
+		mux.Handle("POST /eth/{version}/execution/{blockID}/query", sszqlHandler)
+		mux.Handle("POST /eth/{version}/execution/{blockID}/query/{$}", sszqlHandler)
 		target = mux
 	}
 	httpHandler := node.NewHTTPHandlerStack(target, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
-func parseQueryV1(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
+func parseQueryV1(api SSZQLAPI, request SSZQLRequest, version uint, block *types.Block) (SSZQLResponse, error) {
 	response := SSZQLResponse{
 		Paths:    make([]Path, 0),
 		Gindices: make([]Gindex, 0),
@@ -16,11 +16,11 @@ func parseQueryV1(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrH
 		Results:  make([]Result, 0),
 	}
 	emptyRes := response
-	aliases, err := parseAliases(request.Aliases, &response, blockID)
+	aliases, err := parseAliases(request.Aliases, &response, block)
 	if err != nil {
 		return emptyRes, err
 	}
-	err = parseQueries(request, &response, blockID, aliases)
+	err = parseQueries(request, &response, block, aliases)
 	if err != nil {
 		return emptyRes, err
 	}
@@ -34,9 +34,9 @@ func parseQueryV1(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrH
 	return response, nil
 }
 
-func parseQueries(req SSZQLRequest, res *SSZQLResponse, blockID rpc.BlockNumberOrHash, aliases map[string]string) error {
+func parseQueries(req SSZQLRequest, res *SSZQLResponse, block *types.Block, aliases map[string]string) error {
 	for _, query := range req.Queries {
-		resolvedPath, err := resolvePath(query.Path, query.Anchor, blockID)
+		resolvedPath, err := resolvePath(query.Path, query.Anchor, block)
 		if err != nil {
 			return err
 		}
@@ -49,7 +49,7 @@ func parseQueries(req SSZQLRequest, res *SSZQLResponse, blockID rpc.BlockNumberO
 	return nil
 }
 
-func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOrHash) (map[string]string, error) {
+func parseAliases(aliases []Alias, res *SSZQLResponse, block *types.Block) (map[string]string, error) {
 	m := make(map[string]string)
 
 	for _, alias := range aliases {
@@ -57,7 +57,7 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOr
 			return nil, fmt.Errorf("%w: %q", errors.New("duplicate alias"), alias.Alias)
 		}
 
-		resolvedPath, err := resolvePath(alias.Path, alias.Anchor, blockID)
+		resolvedPath, err := resolvePath(alias.Path, alias.Anchor, block)
 		if err != nil {
 			return nil, err
 		}
@@ -68,13 +68,20 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOr
 	return m, nil
 }
 
-func resolvePath(path Path, anchor Anchor, blockID rpc.BlockNumberOrHash) (ResolvedPath, error) {
-	response := ResolvedPath{
+func resolvePath(path Path, anchor Anchor, block *types.Block) (ResolvedPath, error) {
+	if path == "/parent_hash" {
+		return ResolvedPath{
+			Gindex: Gindex(4),
+			Leaf:   Leaf(block.ParentHash().Hex()),
+			Value:  Result(block.ParentHash().Hex()),
+		}, nil
+	}
+
+	return ResolvedPath{
 		Gindex: Gindex(99),
 		Leaf:   Leaf("0xabcdef"),
 		Value:  Result("0xabcdef"),
-	}
-	return response, nil
+	}, nil
 }
 
 func generateProof(res *SSZQLResponse) error {
