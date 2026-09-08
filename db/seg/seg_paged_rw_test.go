@@ -64,7 +64,7 @@ func TestPagedReader(t *testing.T) {
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
-	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	g1 := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	var buf []byte
 	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
@@ -73,7 +73,7 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
-	g := NewPagedReader(d.MakeGetter(), 2, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
@@ -157,7 +157,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 2, true) // Read with compression enabled
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, true) // Read with compression enabled
 	var buf []byte
 	i := 0
 	for g.HasNext() {
@@ -404,7 +404,7 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 3, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 3, false)
 	var buf []byte
 	var prevKey []byte
 	i := 0
@@ -626,7 +626,7 @@ func TestPagedReaderResetSeeksToPage(t *testing.T) {
 		pageStart uint64
 	}
 	var entries []entry
-	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
 	for i := 0; g.HasNext(); i++ {
 		k, v, _, offset := g.Next2(nil)
 		entries = append(entries, entry{string(k), string(v), offset})
@@ -638,7 +638,7 @@ func TestPagedReaderResetSeeksToPage(t *testing.T) {
 		if i == 0 || entries[i-1].pageStart == want.pageStart {
 			continue // not the first entry of its page
 		}
-		g := NewPagedReader(d.MakeGetter(), pageSize, true)
+		g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
 		g.Reset(want.pageStart)
 		require.True(g.HasNext(), "seek to offset %d left the reader empty", want.pageStart)
 		k, v, _, offset := g.Next2(nil)
@@ -664,14 +664,14 @@ func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
 	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
 	defer d.Close()
 
-	ref := NewPagedReader(d.MakeGetter(), pageSize, true)
+	ref := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
 	k0, v0, _, pageStart := ref.Next2(nil)
 	first := string(k0) + "|" + string(v0)
 	k1, v1, _, _ := ref.Next2(nil)
 	second := string(k1) + "|" + string(v1)
 	require.NotEqual(first, second)
 
-	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
 	_, _, _, offset := g.Next2(nil)
 	require.Equal(pageStart, offset)
 
