@@ -605,11 +605,7 @@ func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	targetHasStorage, err := evm.intraBlockState.HasStorage(address)
-	if err != nil {
-		return false, err
-	}
-	return targetNonce != 0 || !targetCodeHash.IsEmpty() || targetHasStorage, nil
+	return targetNonce != 0 || !targetCodeHash.IsEmpty(), nil
 }
 
 func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
