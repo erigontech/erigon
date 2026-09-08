@@ -119,8 +119,9 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			name: "validator already in pool",
 			mock: func() {
 				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
+				t.voluntaryExitService.(*voluntaryExitService).ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 			},
-			msg:     mockMsg,
+			msg:     &SignedVoluntaryExitForGossip{SignedVoluntaryExit: mockMsg.SignedVoluntaryExit},
 			wantErr: true,
 			err:     ErrIgnore,
 		},
@@ -293,6 +294,8 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 
 	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
 	t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(validatorIndex))
+	msg.ImmediateVerification = false
+	t.voluntaryExitService.(*voluntaryExitService).ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	validator.SetExitEpoch(0)
 	st.ValidatorSet().Set(int(validatorIndex), validator)
 	t.Require().NoError(t.syncedData.OnHeadState(st))

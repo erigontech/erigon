@@ -106,11 +106,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return ErrIgnore
+	if !msg.ImmediateVerification {
+		if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
+			return ErrIgnore
+		}
+		if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+			return ErrIgnore
+		}
 	}
 
 	currentEpoch := uint64(0)

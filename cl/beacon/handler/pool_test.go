@@ -261,8 +261,8 @@ func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
 		{name: "invalid", validationErr: errors.New("invalid signature"), status: http.StatusBadRequest},
 		{name: "ignored", validationErr: services.ErrIgnore, status: http.StatusBadRequest},
 		{name: "wrapped ignore", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), status: http.StatusBadRequest},
-		{name: "retained duplicate", validationErr: services.ErrIgnore, stored: voluntaryExit, status: http.StatusOK, publishes: 1},
-		{name: "wrapped retained duplicate", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), stored: voluntaryExit, status: http.StatusOK, publishes: 1},
+		{name: "retained duplicate", validationErr: services.ErrIgnore, stored: voluntaryExit, status: http.StatusBadRequest},
+		{name: "wrapped retained duplicate", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), stored: voluntaryExit, status: http.StatusBadRequest},
 		{name: "hard error with retained duplicate", validationErr: errors.New("invalid signature"), stored: voluntaryExit, status: http.StatusBadRequest},
 		{name: "nil retained exit", validationErr: services.ErrIgnore, storeNil: true, status: http.StatusBadRequest},
 		{name: "nil retained message", validationErr: services.ErrIgnore, stored: &cltypes.SignedVoluntaryExit{}, status: http.StatusBadRequest},
@@ -304,46 +304,87 @@ func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
 }
 
 func TestPoolVoluntaryExitsRetryFailedPublish(t *testing.T) {
-	_, _, _, _, head, handler, opPool, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	cfg := handler.beaconChainCfg
-	require.NoError(t, head.SetSlot(1000*cfg.SlotsPerEpoch))
-	key, err := bls.GenerateKey()
-	require.NoError(t, err)
-	var publicKey common.Bytes48
-	copy(publicKey[:], bls.CompressPublicKey(key.PublicKey()))
-	head.ValidatorSet().Set(0, solid.NewValidatorFromParameters(publicKey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
-	require.NoError(t, syncedData.OnHeadState(head))
-	exit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1000, ValidatorIndex: 0}}
-	domain, err := head.GetDomain(cfg.DomainVoluntaryExit, exit.VoluntaryExit.Epoch)
-	require.NoError(t, err)
-	root, err := fork.ComputeSigningRoot(exit.VoluntaryExit, domain)
-	require.NoError(t, err)
-	copy(exit.Signature[:], key.Sign(root[:]).Bytes())
-	ctrl := gomock.NewController(t)
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(uint64(0)).Return(time.Unix(0, 0))
-	clock.EXPECT().GetSlotByTime(gomock.Any()).Return(1000 * cfg.SlotsPerEpoch)
-	clock.EXPECT().GetEpochAtSlot(1000 * cfg.SlotsPerEpoch).Return(1000)
-	handler.voluntaryExitService = services.NewVoluntaryExitService(opPool, beaconevents.NewEventEmitter(), syncedData, cfg, clock, services.NewBatchSignatureVerifier(t.Context(), nil))
-	encodedSSZ, err := exit.EncodeSSZ(nil)
-	require.NoError(t, err)
-	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	gomock.InOrder(
-		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(errors.New("temporary publish failure")),
-		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(nil),
-	)
-	handler.gossipManager = gossipManager
-	body, err := json.Marshal(exit)
-	require.NoError(t, err)
-	for attempt := range 2 {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		handler.mux.ServeHTTP(response, req)
-		require.Equal(t, http.StatusOK, response.Code, "attempt %d: %s", attempt+1, response.Body.String())
-		stored, ok := opPool.VoluntaryExitsPool.Get(0)
-		require.True(t, ok)
-		require.Equal(t, exit, stored)
+	for _, tc := range []struct {
+		name             string
+		epoch            uint64
+		prune            bool
+		invalidSignature bool
+		initiated        bool
+		publishErr       error
+		status           int
+	}{
+		{name: "failed publish", epoch: 1000, publishErr: errors.New("temporary publish failure"), status: http.StatusOK},
+		{name: "alternate epoch", epoch: 999, status: http.StatusOK},
+		{name: "absent pool entry", epoch: 1000, prune: true, status: http.StatusOK},
+		{name: "invalid signature", epoch: 1000, invalidSignature: true, status: http.StatusBadRequest},
+		{name: "future epoch", epoch: 1001, status: http.StatusBadRequest},
+		{name: "initiated exit", epoch: 1000, initiated: true, status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, head, handler, opPool, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			require.NoError(t, head.SetSlot(1000*cfg.SlotsPerEpoch))
+			key, err := bls.GenerateKey()
+			require.NoError(t, err)
+			var publicKey common.Bytes48
+			copy(publicKey[:], bls.CompressPublicKey(key.PublicKey()))
+			validator := solid.NewValidatorFromParameters(publicKey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch)
+			head.ValidatorSet().Set(0, validator)
+			require.NoError(t, syncedData.OnHeadState(head))
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(uint64(0)).Return(time.Unix(0, 0)).Times(2)
+			clock.EXPECT().GetSlotByTime(gomock.Any()).Return(1000 * cfg.SlotsPerEpoch).Times(2)
+			clock.EXPECT().GetEpochAtSlot(1000 * cfg.SlotsPerEpoch).Return(1000).Times(2)
+			handler.voluntaryExitService = services.NewVoluntaryExitService(opPool, beaconevents.NewEventEmitter(), syncedData, cfg, clock, services.NewBatchSignatureVerifier(t.Context(), nil))
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			handler.gossipManager = gossipManager
+			for attempt := range 2 {
+				exit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1000, ValidatorIndex: 0}}
+				status := http.StatusOK
+				publishErr := tc.publishErr
+				if attempt == 1 {
+					exit.VoluntaryExit.Epoch = tc.epoch
+					status = tc.status
+					publishErr = nil
+					if tc.prune {
+						require.True(t, opPool.VoluntaryExitsPool.DeleteIfExist(0))
+					}
+					if tc.initiated {
+						validator.SetExitEpoch(1001)
+						head.ValidatorSet().Set(0, validator)
+						require.NoError(t, syncedData.OnHeadState(head))
+					}
+				}
+				domain, err := head.GetDomain(cfg.DomainVoluntaryExit, exit.VoluntaryExit.Epoch)
+				require.NoError(t, err)
+				root, err := fork.ComputeSigningRoot(exit.VoluntaryExit, domain)
+				require.NoError(t, err)
+				copy(exit.Signature[:], key.Sign(root[:]).Bytes())
+				if attempt == 1 && tc.invalidSignature {
+					exit.Signature = common.Bytes96{}
+				}
+				encodedSSZ, err := exit.EncodeSSZ(nil)
+				require.NoError(t, err)
+				publishes := 0
+				if status == http.StatusOK {
+					publishes = 1
+				}
+				gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(publishErr).Times(publishes)
+				body, err := json.Marshal(exit)
+				require.NoError(t, err)
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				response := httptest.NewRecorder()
+				handler.mux.ServeHTTP(response, req)
+				require.Equal(t, status, response.Code, "attempt %d: %s", attempt+1, response.Body.String())
+				if attempt == 0 {
+					stored, ok := opPool.VoluntaryExitsPool.Get(0)
+					require.True(t, ok)
+					require.Equal(t, exit, stored)
+				}
+			}
+		})
 	}
 }
 
