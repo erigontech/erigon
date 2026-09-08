@@ -21,7 +21,7 @@ func (s FixedMarginStrategy) Decide(_ uint64, blockValue *big.Int) *big.Int {
 		return nil
 	}
 
-	scaledMargin := big.NewInt(int64(math.Round(s.Margin * marginPrecision)))
+	scaledMargin := big.NewInt(int64(math.Floor(s.Margin * marginPrecision)))
 	bid := new(big.Int).Mul(blockValue, scaledMargin)
 	bid.Div(bid, big.NewInt(marginPrecision))
 	if s.MinProfit != nil && new(big.Int).Sub(blockValue, bid).Cmp(s.MinProfit) < 0 {

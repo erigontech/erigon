@@ -26,13 +26,11 @@ var (
 // Adapter converts the in-process execution builder result into consensus-layer payload types.
 type Adapter struct {
 	execution execmodule.ExecutionModule
-	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-// NewAdapter creates an execution-layer adapter for the active consensus version.
-func NewAdapter(execution execmodule.ExecutionModule, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Adapter {
-	return &Adapter{execution: execution, version: version, beaconCfg: beaconCfg}
+func NewAdapter(execution execmodule.ExecutionModule, beaconCfg *clparams.BeaconChainConfig) *Adapter {
+	return &Adapter{execution: execution, beaconCfg: beaconCfg}
 }
 
 func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Parameters) (uint64, error) {
@@ -66,8 +64,11 @@ func (a *Adapter) GetPayload(ctx context.Context, payloadID uint64) (*AssembledP
 	if result.Unknown {
 		return nil, fmt.Errorf("eladapter: payload %d: %w", payloadID, ErrUnknownPayload)
 	}
-	if result.Busy || result.Block == nil {
+	if result.Busy {
 		return nil, nil
+	}
+	if result.Block == nil {
+		return nil, fmt.Errorf("%w: builder produced no block", ErrInvalidResult)
 	}
 	return a.convertResult(&result)
 }
@@ -84,13 +85,68 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 		return nil, fmt.Errorf("%w: nil block header", ErrInvalidResult)
 	}
 	header := block.Header()
+	if !header.Number.IsUint64() {
+		return nil, fmt.Errorf("%w: block number overflows uint64", ErrInvalidResult)
+	}
+	if uint64(len(header.Extra)) > a.beaconCfg.MaxExtraDataBytes {
+		return nil, fmt.Errorf("%w: extra data length %d exceeds limit %d", ErrInvalidResult, len(header.Extra), a.beaconCfg.MaxExtraDataBytes)
+	}
+	if header.BaseFee == nil {
+		return nil, fmt.Errorf("%w: nil base fee", ErrInvalidResult)
+	}
+	if header.WithdrawalsHash == nil {
+		return nil, fmt.Errorf("%w: nil withdrawals root", ErrInvalidResult)
+	}
+	if header.BlobGasUsed == nil {
+		return nil, fmt.Errorf("%w: nil blob gas used", ErrInvalidResult)
+	}
+	if header.ExcessBlobGas == nil {
+		return nil, fmt.Errorf("%w: nil excess blob gas", ErrInvalidResult)
+	}
+	if header.ParentBeaconBlockRoot == nil {
+		return nil, fmt.Errorf("%w: nil parent beacon block root", ErrInvalidResult)
+	}
+	if header.RequestsHash == nil {
+		return nil, fmt.Errorf("%w: nil requests hash", ErrInvalidResult)
+	}
+	if result.Block.Requests == nil {
+		return nil, fmt.Errorf("%w: nil execution requests", ErrInvalidResult)
+	}
+	if requestsHash := result.Block.Requests.Hash(); requestsHash == nil || *requestsHash != *header.RequestsHash {
+		return nil, fmt.Errorf("%w: execution requests hash mismatch", ErrInvalidResult)
+	}
 
-	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
+	transactions := block.Transactions()
+	if uint64(len(transactions)) > a.beaconCfg.MaxTransactionsPerPayload {
+		return nil, fmt.Errorf("%w: transaction count %d exceeds limit %d", ErrInvalidResult, len(transactions), a.beaconCfg.MaxTransactionsPerPayload)
+	}
+	for i, transaction := range transactions {
+		if transaction == nil {
+			return nil, fmt.Errorf("%w: nil transaction at index %d", ErrInvalidResult, i)
+		}
+	}
+
+	encodedTransactions, err := types.MarshalTransactionsBinary(transactions)
 	if err != nil {
 		return nil, fmt.Errorf("eladapter: marshal transactions: %w", err)
 	}
+	for i, transaction := range encodedTransactions {
+		if uint64(len(transaction)) > a.beaconCfg.MaxBytesPerTransaction {
+			return nil, fmt.Errorf("%w: transaction %d length %d exceeds limit %d", ErrInvalidResult, i, len(transaction), a.beaconCfg.MaxBytesPerTransaction)
+		}
+	}
 
-	payload := cltypes.NewEth1Block(a.version, a.beaconCfg)
+	withdrawals := block.Withdrawals()
+	if uint64(len(withdrawals)) > a.beaconCfg.MaxWithdrawalsPerPayload {
+		return nil, fmt.Errorf("%w: withdrawal count %d exceeds limit %d", ErrInvalidResult, len(withdrawals), a.beaconCfg.MaxWithdrawalsPerPayload)
+	}
+	for i, withdrawal := range withdrawals {
+		if withdrawal == nil {
+			return nil, fmt.Errorf("%w: nil withdrawal at index %d", ErrInvalidResult, i)
+		}
+	}
+
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, a.beaconCfg)
 	payload.ParentHash = header.ParentHash
 	payload.FeeRecipient = header.Coinbase
 	payload.StateRoot = header.Root
@@ -103,14 +159,14 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	payload.Time = header.Time
 	payload.Extra = solid.NewExtraData()
 	payload.Extra.SetBytes(header.Extra)
-	if header.BaseFee != nil {
-		_, _ = header.BaseFee.MarshalSSZAppend(payload.BaseFeePerGas[:0])
+	if _, err := header.BaseFee.MarshalSSZAppend(payload.BaseFeePerGas[:0]); err != nil {
+		return nil, fmt.Errorf("eladapter: encode base fee: %w", err)
 	}
 	payload.BlockHash = block.Hash()
 	payload.Transactions = solid.NewTransactionsSSZFromTransactions(encodedTransactions)
 
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(a.beaconCfg.MaxWithdrawalsPerPayload), 44)
-	for _, withdrawal := range block.Withdrawals() {
+	for _, withdrawal := range withdrawals {
 		payload.Withdrawals.Append(&cltypes.Withdrawal{
 			Amount:    withdrawal.Amount,
 			Address:   withdrawal.Address,
@@ -118,38 +174,28 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 			Validator: withdrawal.Validator,
 		})
 	}
-	if header.ExcessBlobGas != nil {
-		payload.ExcessBlobGas = *header.ExcessBlobGas
+	payload.ExcessBlobGas = *header.ExcessBlobGas
+	payload.BlobGasUsed = *header.BlobGasUsed
+	if header.SlotNumber == nil {
+		return nil, fmt.Errorf("%w: nil slot number", ErrInvalidResult)
 	}
-	if header.BlobGasUsed != nil {
-		payload.BlobGasUsed = *header.BlobGasUsed
+	if header.BlockAccessListHash == nil {
+		return nil, fmt.Errorf("%w: nil block access list hash", ErrInvalidResult)
 	}
-
-	if a.version >= clparams.GloasVersion {
-		if header.SlotNumber == nil {
-			return nil, fmt.Errorf("%w: nil slot number", ErrInvalidResult)
-		}
-		if header.BlockAccessListHash == nil {
-			return nil, fmt.Errorf("%w: nil block access list hash", ErrInvalidResult)
-		}
-		payload.SlotNumber = *header.SlotNumber
-		if err := setBlockAccessList(payload, block.BlockAccessListSidecar(), *header.BlockAccessListHash); err != nil {
-			return nil, err
-		}
+	payload.SlotNumber = *header.SlotNumber
+	if err := setBlockAccessList(payload, block.BlockAccessListSidecar(), *header.BlockAccessListHash); err != nil {
+		return nil, err
 	}
 
-	engineBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
+	engineBundle, err := engine_types.BlobsBundleFromTransactions(transactions)
 	if err != nil {
 		return nil, fmt.Errorf("eladapter: blob bundle: %w", err)
 	}
 	blobsBundle := convertBlobsBundle(engineBundle)
 
-	var requestsBundle *typesproto.RequestsBundle
-	if result.Block.Requests != nil {
-		requestsBundle = &typesproto.RequestsBundle{}
-		for _, request := range result.Block.Requests {
-			requestsBundle.Requests = append(requestsBundle.Requests, request.Encode())
-		}
+	requestsBundle := &typesproto.RequestsBundle{Requests: make([][]byte, 0, len(result.Block.Requests))}
+	for _, request := range result.Block.Requests {
+		requestsBundle.Requests = append(requestsBundle.Requests, request.Encode())
 	}
 
 	return &AssembledPayload{
