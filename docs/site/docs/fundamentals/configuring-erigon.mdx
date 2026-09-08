@@ -496,7 +496,7 @@ These flags control the block synchronization and data downloading process, incl
 
 The two flags below are registered but hidden, so they do not appear in `erigon --help`, and neither changes any behaviour. They are listed here so their presence in an old command line is not mistaken for a working setting.
 
-* `--torrent.staticpeers value`: Accepted but inert — the binary marks it *"Currently unused"* and nothing reads the value.
+* `--torrent.staticpeers value`: Accepted but currently unused — nothing in the binary reads the value.
 * `--torrent.download.slots value`: Accepted but inert — the binary marks it deprecated; it no longer affects how many files download in parallel. Unlike `--torrent.staticpeers`, setting it logs a `[DEPRECATED]` warning on every startup.
   * Default: `32`
 
