@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 )
 
@@ -303,6 +304,28 @@ func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 		require.True(t, cfg.NoDiscovery)
 		require.False(t, cfg.DiscoveryV5)
 	})
+}
+
+// The spec states column retention in epochs, so its slot count depends on SLOTS_PER_EPOCH.
+// Zero is the pruner's signal to derive the window from the active chain config, so an unset
+// flag must stay zero rather than pin one chain's slot count.
+func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
+	parse := func(args ...string) uint64 {
+		keepSlots := CaplinColumnKeepSlotsFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&keepSlots},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg.CaplinConfig.ColumnKeepSlots
+	}
+
+	require.Zero(t, parse(), "unset must defer to the chain config, not pin mainnet's slot count")
+	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
