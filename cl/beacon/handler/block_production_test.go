@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
@@ -718,6 +719,50 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
 	require.Nil(t, body)
 	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
 	require.ErrorContains(t, err, "missing blobs bundle")
+}
+
+func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) (*cltypes.BeaconBody, *tests.MockBlockReader, error) {
+	t.Helper()
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, version, log.Root(), true)
+	reader := h.blockReader.(*tests.MockBlockReader)
+
+	// The engine adapter leaves Withdrawals nil when the response omits the field.
+	payload := cltypes.NewEth1Block(version, h.beaconChainCfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, version).
+		Return(payload, &engine_types.BlobsBundle{}, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+	return body, reader, err
+}
+
+func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {
+	body, reader, err := produceBodyWithNilWithdrawals(t, clparams.CapellaVersion)
+
+	require.Nil(t, body)
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.ErrorContains(t, err, "missing withdrawals")
+	require.Empty(t, reader.CachedBodies)
+}
+
+func TestProduceBeaconBodyAcceptsMissingWithdrawalsBeforeCapella(t *testing.T) {
+	body, _, err := produceBodyWithNilWithdrawals(t, clparams.BellatrixVersion)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Zero(t, body.ExecutionPayload.Withdrawals.Len())
 }
 
 func TestSelectHigherGloasP2PBidValueUsesWei(t *testing.T) {

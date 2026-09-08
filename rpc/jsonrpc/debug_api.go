@@ -700,7 +700,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, n)
+	err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, n)
 	if err != nil {
 		return nil, err
 	}
@@ -815,7 +815,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}

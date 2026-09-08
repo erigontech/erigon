@@ -25,12 +25,7 @@ type witnessMemBatch struct {
 	// extra or missing write is a correctness bug that commitment-off replay,
 	// which validates neither receipts nor trie root, otherwise cannot see).
 	writes map[kv.Domain]map[string]struct{}
-	// hasStorage is the fixture's captured per-address HasStorage answer. The
-	// witness seeds only the storage slots that were read, so a prefix scan cannot
-	// reproduce HasStorage (storage may live in unseeded slots); the recorded
-	// answer is authoritative for the ReaderV3.HasStorage prefix check.
-	hasStorage map[[20]byte]bool
-	sealed     bool
+	sealed bool
 }
 
 func newWitnessMemBatch(delegate kv.TemporalMemBatch) *witnessMemBatch {
@@ -137,42 +132,6 @@ func (w *witnessMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv
 		}
 	}
 	return nil
-}
-
-func (w *witnessMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	// ReaderV3.HasStorage queries HasPrefix(StorageDomain, addr) and uses only the
-	// bool. Serve the captured answer — the seeded slots alone underreport it.
-	if domain == kv.StorageDomain && len(prefix) == 20 {
-		if has, ok := w.hasStorage[[20]byte(prefix)]; ok {
-			return nil, nil, has, nil
-		}
-	}
-	keys, err := w.prefixKeys(domain, prefix, roTx)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	if len(keys) == 0 {
-		return nil, nil, false, nil
-	}
-	v, _, _ := w.GetLatest(domain, []byte(keys[0]))
-	return []byte(keys[0]), v, true, nil
-}
-
-func (w *witnessMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
-	if w.TemporalMemBatch.HasPrefixInRAM(domain, prefix) {
-		return true
-	}
-	if m := w.witness[domain]; m != nil {
-		p := string(prefix)
-		for k := range m {
-			if strings.HasPrefix(k, p) {
-				if v, _, ok := w.GetLatest(domain, []byte(k)); ok && len(v) > 0 {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 // writeSetDiff reports extra STATE the replay produced that the reference output
