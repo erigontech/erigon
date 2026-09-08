@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/builder"
@@ -81,6 +82,8 @@ func TestAdapterPreservesBlockAccessList(t *testing.T) {
 	wantAccessList, err := accessListSidecar.Bytes()
 	require.NoError(t, err)
 	require.Equal(t, wantAccessList, payload.Eth1Block.BlockAccessList.Bytes())
+	_, err = execution_client.DecodeAndValidateBlockAccessList(payload.Eth1Block)
+	require.NoError(t, err)
 
 	decodedAccessList, err := types.DecodeBlockAccessListSidecarOwned(bytes.Clone(payload.Eth1Block.BlockAccessList.Bytes()))
 	require.NoError(t, err)
@@ -99,6 +102,22 @@ func TestAdapterPayloadRoundTripsStrictSSZ(t *testing.T) {
 	decoded := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
 	require.Equal(t, payload.Eth1Block.BlockHash, decoded.BlockHash)
+	_, err = execution_client.DecodeAndValidateBlockAccessList(decoded)
+	require.NoError(t, err)
+}
+
+func TestAdapterRejectsBlockAccessListOverGasLimit(t *testing.T) {
+	result := validAssembledResult()
+	accessList := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{19: 1})}})
+	accessListHash, err := accessList.Hash()
+	require.NoError(t, err)
+	header := result.Block.Block.Header()
+	header.GasLimit = 0
+	header.BlockAccessListHash = &accessListHash
+	result.Block.Block = types.NewBlock(header, result.Block.Block.Transactions(), nil, nil, result.Block.Block.Withdrawals(), accessList)
+
+	_, err = NewAdapter(assembledBlockModule{assembled: result}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
+	require.ErrorIs(t, err, ErrInvalidResult)
 }
 
 func TestAdapterClassifiesUnavailablePayloads(t *testing.T) {
@@ -173,6 +192,12 @@ func TestAdapterRejectsInvalidPayloadBoundaries(t *testing.T) {
 		"requests hash mismatch": func(result *execmodule.AssembledBlockResult) {
 			result.Block.Block.HeaderNoCopy().RequestsHash = new(common.Hash)
 		},
+		"transactions root mismatch": func(result *execmodule.AssembledBlockResult) {
+			result.Block.Block.HeaderNoCopy().TxHash = common.Hash{}
+		},
+		"withdrawals root mismatch": func(result *execmodule.AssembledBlockResult) {
+			result.Block.Block.HeaderNoCopy().WithdrawalsHash = new(common.Hash)
+		},
 		"nil transaction": func(result *execmodule.AssembledBlockResult) {
 			result.Block.Block.Transactions()[0] = nil
 		},
@@ -187,6 +212,36 @@ func TestAdapterRejectsInvalidPayloadBoundaries(t *testing.T) {
 				_, err := NewAdapter(assembledBlockModule{assembled: result}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
 				require.ErrorIs(t, err, ErrInvalidResult)
 			})
+		})
+	}
+}
+
+func TestAdapterRejectsExtraDataBeyondRepresentationLimit(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.MaxExtraDataBytes = 33
+	result := validAssembledResult()
+	result.Block.Block.HeaderNoCopy().Extra = make([]byte, 33)
+
+	_, err := NewAdapter(assembledBlockModule{assembled: result}, &config).GetPayload(t.Context(), 1)
+	require.ErrorIs(t, err, ErrInvalidResult)
+}
+
+func TestAdapterRejectsMalformedExecutionRequests(t *testing.T) {
+	for name, requests := range map[string]types.FlatRequests{
+		"empty request data":   {{Type: types.DepositRequestType}},
+		"unknown request type": {{Type: 0xff, RequestData: []byte{1}}},
+		"duplicate request type": {
+			{Type: types.DepositRequestType, RequestData: []byte{1}},
+			{Type: types.DepositRequestType, RequestData: []byte{1}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := validAssembledResult()
+			result.Block.Requests = requests
+			result.Block.Block.HeaderNoCopy().RequestsHash = requests.Hash()
+
+			_, err := NewAdapter(assembledBlockModule{assembled: result}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
+			require.ErrorIs(t, err, ErrInvalidResult)
 		})
 	}
 }

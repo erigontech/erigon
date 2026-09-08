@@ -10,9 +10,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -88,8 +90,9 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	if !header.Number.IsUint64() {
 		return nil, fmt.Errorf("%w: block number overflows uint64", ErrInvalidResult)
 	}
-	if uint64(len(header.Extra)) > a.beaconCfg.MaxExtraDataBytes {
-		return nil, fmt.Errorf("%w: extra data length %d exceeds limit %d", ErrInvalidResult, len(header.Extra), a.beaconCfg.MaxExtraDataBytes)
+	extraDataLimit := min(a.beaconCfg.MaxExtraDataBytes, params.MaximumExtraDataSize)
+	if uint64(len(header.Extra)) > extraDataLimit {
+		return nil, fmt.Errorf("%w: extra data length %d exceeds limit %d", ErrInvalidResult, len(header.Extra), extraDataLimit)
 	}
 	if header.BaseFee == nil {
 		return nil, fmt.Errorf("%w: nil base fee", ErrInvalidResult)
@@ -114,6 +117,13 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	}
 	if requestsHash := result.Block.Requests.Hash(); requestsHash == nil || *requestsHash != *header.RequestsHash {
 		return nil, fmt.Errorf("%w: execution requests hash mismatch", ErrInvalidResult)
+	}
+	encodedRequests := make([]hexutil.Bytes, len(result.Block.Requests))
+	for i := range result.Block.Requests {
+		encodedRequests[i] = result.Block.Requests[i].Encode()
+	}
+	if _, err := cltypes.DecodeExecutionRequestsList(a.beaconCfg, encodedRequests, clparams.GloasVersion); err != nil {
+		return nil, fmt.Errorf("%w: decode execution requests: %w", ErrInvalidResult, err)
 	}
 
 	transactions := block.Transactions()
@@ -186,6 +196,9 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	if err := setBlockAccessList(payload, block.BlockAccessListSidecar(), *header.BlockAccessListHash); err != nil {
 		return nil, err
 	}
+	if _, err := payload.RlpHeader(header.ParentBeaconBlockRoot, *header.RequestsHash, block.BlockAccessListSidecar()); err != nil {
+		return nil, fmt.Errorf("%w: reconstruct execution header: %w", ErrInvalidResult, err)
+	}
 
 	engineBundle, err := engine_types.BlobsBundleFromTransactions(transactions)
 	if err != nil {
@@ -193,9 +206,9 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	}
 	blobsBundle := convertBlobsBundle(engineBundle)
 
-	requestsBundle := &typesproto.RequestsBundle{Requests: make([][]byte, 0, len(result.Block.Requests))}
-	for _, request := range result.Block.Requests {
-		requestsBundle.Requests = append(requestsBundle.Requests, request.Encode())
+	requestsBundle := &typesproto.RequestsBundle{Requests: make([][]byte, len(encodedRequests))}
+	for i := range encodedRequests {
+		requestsBundle.Requests[i] = encodedRequests[i]
 	}
 
 	return &AssembledPayload{
@@ -211,7 +224,7 @@ func setBlockAccessList(payload *cltypes.Eth1Block, sidecar *types.BlockAccessLi
 		if expectedHash != empty.BlockAccessListHash {
 			return fmt.Errorf("%w: block access list hash mismatch", ErrInvalidResult)
 		}
-		return nil
+		sidecar = types.NewBlockAccessListSidecar(types.BlockAccessList{})
 	}
 	actualHash, err := sidecar.Hash()
 	if err != nil {
@@ -219,6 +232,9 @@ func setBlockAccessList(payload *cltypes.Eth1Block, sidecar *types.BlockAccessLi
 	}
 	if actualHash != expectedHash {
 		return fmt.Errorf("%w: block access list hash mismatch", ErrInvalidResult)
+	}
+	if err := sidecar.ValidateForBlock(payload.GasLimit); err != nil {
+		return fmt.Errorf("%w: validate block access list: %w", ErrInvalidResult, err)
 	}
 	encoded, err := sidecar.Bytes()
 	if err != nil {
