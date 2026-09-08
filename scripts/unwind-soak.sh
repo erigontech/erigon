@@ -37,6 +37,13 @@ RECOVERY_TIMEOUT_SEC="${RECOVERY_TIMEOUT_SEC:-1800}"   # default 30 min; scenari
 SETHEAD_BUSY_TIMEOUT_SEC="${SETHEAD_BUSY_TIMEOUT_SEC:-1800}" # 30 min upper bound on retries-while-busy
 SETHEAD_CALL_TIMEOUT_SEC="${SETHEAD_CALL_TIMEOUT_SEC:-1800}" # 30 min per curl call (synchronous setHead)
 
+# Log lines that abort an iteration. The first group is a wedged or
+# halted node; the last three are snapshot files whose content does not
+# match the range their name claims — corruption that retire/merge
+# reports but recovers from, so head keeps advancing and no other gate
+# would notice.
+FORBIDDEN_PATTERNS="parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment|negative txs count|sparse in requested range|unexpected amount after segments merge"
+
 # recovery_timeout_for_depth scales the scenario-3 recovery window with
 # unwind depth. Empirically (2026-06-28 hoodi soaks) the post-setHead
 # recovery splits roughly into:
@@ -523,7 +530,7 @@ scenario_test() {
             # surfaces the wedge in <30s instead of waiting hours
             # for the hard timeout.
             soft_wedge_errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
-                | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment")
+                | grep -cE "$FORBIDDEN_PATTERNS")
             if [[ ${soft_wedge_errors:-0} -gt 0 ]]; then
                 echo "  SOFT-WEDGE: ${soft_wedge_errors} forbidden error line(s) detected — declaring stuck"
                 break
@@ -541,7 +548,7 @@ scenario_test() {
     PHASE_POST_HEAD=$post_head
     duration=$(( $(date +%s) - start_ts ))
     errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
-        | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment" \
+        | grep -cE "$FORBIDDEN_PATTERNS" \
         || true)
     # Let background retire+merge finish before measuring inventory —
     # otherwise a merge that Inventory has already registered but whose
