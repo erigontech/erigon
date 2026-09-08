@@ -512,7 +512,8 @@ func testResetNextSaltRebuilds(t *testing.T, ver version.DataStructureVersion, l
 		defer idx.Close()
 		reader := NewIndexReader(idx)
 		for i := range N {
-			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+			e, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+			require.True(t, ok)
 			require.Equal(t, uint64(i), e)
 			require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
 		}
