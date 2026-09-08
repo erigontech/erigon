@@ -70,8 +70,18 @@ func (i *HistoryValueIndex) Lookup(keyOrdinal, rank, txNum uint64, key []byte) (
 }
 
 func (i *HistoryValueIndex) Empty() bool {
-	return i == nil || (i.legacy == nil && i.paged.Empty())
+	if i == nil {
+		return true
+	}
+	if i.legacy != nil {
+		return i.legacy.Empty() // Lookup panics on a keyless recsplit index
+	}
+	return i.paged.Empty()
 }
+
+// Positional reports whether Lookup addresses by (keyOrdinal, rank). A
+// positional index only answers for the .ef file it was built from.
+func (i *HistoryValueIndex) Positional() bool { return i != nil && i.paged != nil }
 
 func (i *HistoryValueIndex) FilePath() string { return i.filePath }
 
