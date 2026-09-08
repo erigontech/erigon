@@ -639,15 +639,16 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 		return
 	}
 	dropped := map[string]struct{}{}
-	if err := s.stateSn.RemoveOverlaps(func(l []string) error {
-		for _, name := range l {
-			dropped[filepath.Base(name)] = struct{}{}
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error {
+			for _, name := range l {
+				dropped[filepath.Base(name)] = struct{}{}
+			}
+			return s.downloader.Delete(ctx, l)
 		}
-		if s.downloader == nil {
-			return nil
-		}
-		return s.downloader.Delete(ctx, l)
-	}); err != nil {
+	}
+	if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
 		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 	}
 	if dumpedTo == 0 || s.downloader == nil {

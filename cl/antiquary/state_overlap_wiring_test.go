@@ -19,6 +19,7 @@ package antiquary
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -229,4 +230,17 @@ func TestIncrementBeaconStateRemovesOverlapsWithSnapgenOff(t *testing.T) {
 
 	require.NotEmpty(t, d.deleted, "removal must run from IncrementBeaconState with snapgen off")
 	require.NoFileExists(t, subSeg, "the covered subset must be unlinked")
+}
+
+func TestRemoveStateOverlapsWithoutDownloaderStillUnlinksSubsetAndTorrent(t *testing.T) {
+	stateSn, dirs, subSeg := overlapStateSnapshots(t)
+	subTorrent := subSeg + ".torrent"
+	require.NoError(t, os.WriteFile(subTorrent, []byte("x"), 0o644))
+
+	a := &Antiquary{stateSn: stateSn, logger: log.New(), dirs: dirs}
+
+	a.removeStateOverlapsAndSeed(context.Background(), 150_000)
+
+	require.NoFileExists(t, subSeg, "removal must not depend on a seeder")
+	require.NoFileExists(t, subTorrent, "the .torrent goes with the .seg, not via the callback")
 }
