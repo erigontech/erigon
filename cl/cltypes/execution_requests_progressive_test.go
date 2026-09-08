@@ -91,3 +91,53 @@ func appendN[T solid.EncodableHashableSSZ](n int, list *solid.ListSSZ[T], value 
 		list.Append(value)
 	}
 }
+
+// The guard is a resource bound, so it must sit at one req/resp chunk, not the
+// two the progressive constructors would give it unadjusted.
+func TestExecutionRequestsGloasRejectsAboveOneChunk(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	perChunk := int(clparams.MaxChunkSize) / solid.SizeDepositRequest
+
+	for _, tc := range []struct {
+		name    string
+		count   int
+		wantErr bool
+	}{
+		{name: "at the chunk bound", count: perChunk},
+		{name: "above the chunk bound", count: perChunk + 1, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+			appendN(tc.count, requests.Deposits, &solid.DepositRequest{})
+			encoded, err := requests.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			decoded := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+			err = decoded.DecodeSSZ(encoded, int(clparams.GloasVersion))
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.count, decoded.Deposits.Len())
+		})
+	}
+}
+
+// DecodeSSZ keeps whatever lists the object already holds, so a JSON-built one
+// must carry the same guards as a freshly constructed one.
+func TestExecutionRequestsGloasJSONKeepsProgressiveLimits(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	want := int(cfg.MaxDepositRequestsPerPayload)*2 + 1
+
+	fromJSON := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	require.NoError(t, fromJSON.UnmarshalJSON([]byte(`{"deposits":[]}`)))
+
+	requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	appendN(want, requests.Deposits, &solid.DepositRequest{})
+	encoded, err := requests.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	require.NoError(t, fromJSON.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	require.Equal(t, want, fromJSON.Deposits.Len())
+}
