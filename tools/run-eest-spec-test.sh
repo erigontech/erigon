@@ -8,6 +8,8 @@
 #   statetests-stable-{sequential,parallel}    state tests vs. eest_stable
 #   statetests-devnet-{sequential,parallel}    state tests vs. eest_devnet
 #   statetests-legacy-{sequential,parallel}    complete legacy Cancun state tests
+#   transactiontests-stable-race               transaction tests vs. eest_stable
+#   transactiontests-devnet-race               transaction tests vs. eest_devnet
 #   rlptests-legacy-race                      complete legacy RLP tests
 #   transactiontests-legacy-race              complete legacy transaction tests
 #   difficultytests-legacy-race               complete legacy difficulty tests
@@ -150,6 +152,8 @@ paths=()
 case "$shard_route" in
 	statetests-stable | statetests-devnet)
 		cmd=statetest;   paths=("$base/state_tests") ;;
+	transactiontests-stable-race | transactiontests-devnet-race)
+		cmd=transactiontest;   paths=("$base/transaction_tests") ;;
 	statetests-legacy)
 		cmd=statetest;   paths=("$base/Cancun/GeneralStateTests") ;;
 	rlptests-legacy-*)
@@ -201,6 +205,11 @@ evm_bin="${EVM_BIN:-build/bin/evm}"
 # instead of growing the process into the CI runner's OOM range.
 if [[ "$shard" == *-race* ]]; then
 	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
+# 150M-gas blocks peak near 18GB RSS and get OOM-killed on a 16GB runner.
+if [[ "$shard" == *-benchmark-150m-* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-12GiB}"
 fi
 
 if [[ ! -x "$evm_bin" ]]; then

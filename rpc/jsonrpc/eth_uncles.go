@@ -31,7 +31,7 @@ import (
 
 // GetUncleByBlockNumberAndIndex implements eth_getUncleByBlockNumberAndIndex. Returns information about an uncle given a block's number and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rpc.BlockNumber, index hexutil.Uint) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -64,13 +64,13 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
 
 // GetUncleByBlockHashAndIndex implements eth_getUncleByBlockHashAndIndex. Returns information about an uncle given a block's hash and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
@@ -109,7 +109,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return &n, err
 	}
@@ -139,7 +139,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 // GetUncleCountByBlockHash implements eth_getUncleCountByBlockHash. Returns the number of uncles in the block, if any.
 func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return &n, err
 	}

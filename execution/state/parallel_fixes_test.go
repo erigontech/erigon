@@ -23,7 +23,6 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -454,7 +453,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 
-	ibs.CreateAccount(addr, true)
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 

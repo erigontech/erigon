@@ -41,6 +41,11 @@ func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, err
 	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
 }
 
+// ProgressiveByteListRoot computes the EIP-7916 root of data.
+func ProgressiveByteListRoot(data []byte) ([32]byte, error) {
+	return ProgressiveListRoot(packBits(data), uint64(len(data)))
+}
+
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
 	if len(chunks) == 0 {
 		return [32]byte{}, nil

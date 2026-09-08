@@ -118,6 +118,17 @@ func createLog() *notifications.LogNotification {
 	}
 }
 
+func TestLogNotificationToProtoIncludesBlockTimestamp(t *testing.T) {
+	log := createLog()
+	log.BlockTimestamp = 123
+
+	converted := logNotificationToProto(log)
+
+	if converted.BlockTimestamp != 123 {
+		t.Fatalf("expected block timestamp 123, got %d", converted.BlockTimestamp)
+	}
+}
+
 func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)

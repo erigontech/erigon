@@ -28,8 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// tracePrefix tags each line (including interior lines) with its prefix and
-// leaves the final trailing newline alone.
 func TestTracePrefix_TagsWholeLines(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -44,9 +42,6 @@ func TestTracePrefix_NilDisables(t *testing.T) {
 	require.Nil(t, tracePrefix(nil, "[x] "))
 }
 
-// Concurrent fold workers (the parallel trie) each own a prefixWriter
-// over one shared syncWriter; every emitted line must stay whole and carry its
-// worker tag — never interleaved or corrupted mid-line.
 func TestSyncWriter_ConcurrentLinesStayAttributed(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -75,7 +70,6 @@ type shortWriter struct{}
 
 func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
 
-// prefixWriter must not silently accept a short underlying write.
 func TestPrefixWriter_ShortWrite(t *testing.T) {
 	t.Parallel()
 	pw := &prefixWriter{w: shortWriter{}, prefix: []byte("[x] ")}

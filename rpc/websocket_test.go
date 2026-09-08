@@ -359,8 +359,8 @@ func TestWebsocketNonBlockingAcquire(t *testing.T) {
 	if callErr == nil {
 		t.Fatal("expected -32005 error but Call succeeded")
 	}
-	rpcErr, ok := callErr.(Error)
-	if !ok {
+	var rpcErr Error
+	if !errors.As(callErr, &rpcErr) {
 		t.Fatalf("expected rpc.Error, got %T: %v", callErr, callErr)
 	}
 	if rpcErr.ErrorCode() != ErrCodeServerOverloaded {

@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -51,20 +49,15 @@ type pendingPayloadAttestationKey struct {
 	messageRoot    common.Hash
 }
 
-// pendingPayloadAttestationJob represents a pending attestation waiting for its block.
-type pendingPayloadAttestationJob struct {
-	msg          *cltypes.PayloadAttestationMessage
-	creationTime time.Time
-}
-
 const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize        = 2048
-	pendingPayloadAttestationExpiry        = 30 * time.Second
-	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
-	maxPendingAttestations                 = 2048
+	seenPayloadAttestationCacheSize            = 2048
+	pendingPayloadAttestationExpiry            = 30 * time.Second
+	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
+	maxPendingAttestations                     = 2048
+	maxConcurrentPayloadAttestationValidations = clparams.PtcSize
 )
 
 type payloadAttestationService struct {
@@ -76,10 +69,9 @@ type payloadAttestationService struct {
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
 
-	// Pending attestations waiting for block to arrive
-	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
-	pendingCount        atomic.Int32
-	pendingCond         *sync.Cond
+	// Pending attestations waiting for block to arrive.
+	pending             *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage]
+	validationAdmission chan struct{}
 }
 
 // NewPayloadAttestationService creates a new payload attestation service.
@@ -101,10 +93,19 @@ func NewPayloadAttestationService(
 		netCfg:                netCfg,
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
-		pendingCond:           sync.NewCond(&sync.Mutex{}),
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
-	go s.loop(ctx)
+	s.pending = s.newPendingQueue()
+	go s.pending.loop(ctx)
 	return s
+}
+
+func (s *payloadAttestationService) newPendingQueue() *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
+	return newPendingJobQueue(maxPendingAttestations, pendingPayloadAttestationExpiry, pendingPayloadAttestationCheckInterval,
+		s.tryProcessPendingAttestation,
+		func(key pendingPayloadAttestationKey) {
+			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
+		})
 }
 
 func (s *payloadAttestationService) Names() []string {
@@ -166,16 +167,22 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if blockHeader.Slot != slot {
 		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
+	select {
+	case s.validationAdmission <- struct{}{}:
+		defer func() { <-s.validationAdmission }()
+	case <-ctx.Done():
+		return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
+	}
 
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
-	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
+	if err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
-		if errors.Is(err, forkchoice.ErrIgnore) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: forkchoice.ErrIgnore must not stay matchable
 		}
 		return fmt.Errorf("forkchoice rejected payload attestation: %w", err)
 	}
@@ -198,23 +205,9 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	if s.pendingCount.Add(1) > maxPendingAttestations {
-		s.pendingCount.Add(-1)
-		return
-	}
-
-	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-
-	if _, loaded := s.pendingAttestations.LoadOrStore(key, &pendingPayloadAttestationJob{
-		msg:          msg,
-		creationTime: time.Now(),
-	}); loaded {
-		s.pendingCount.Add(-1)
-	} else {
-		s.pendingCond.L.Lock()
-		s.pendingCond.Signal()
-		s.pendingCond.L.Unlock()
-	}
+	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
+	})
 }
 
 func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
@@ -226,80 +219,21 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 	}
 }
 
-// loop is the background goroutine that processes pending attestations.
-func (s *payloadAttestationService) loop(ctx context.Context) {
-	// Wake any blocked Wait() on context cancellation to prevent deadlock.
-	go func() {
-		<-ctx.Done()
-		s.pendingCond.L.Lock()
-		s.pendingCond.Broadcast()
-		s.pendingCond.L.Unlock()
-	}()
-
-	for {
-		// Wait until there are pending attestations
-		s.pendingCond.L.Lock()
-		for s.pendingCount.Load() == 0 {
-			select {
-			case <-ctx.Done():
-				s.pendingCond.L.Unlock()
-				return
-			default:
-			}
-			s.pendingCond.Wait()
-		}
-		s.pendingCond.L.Unlock()
-
-		// Poll until all pending attestations are processed
-		ticker := time.NewTicker(pendingPayloadAttestationCheckInterval)
-		for s.pendingCount.Load() > 0 {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				s.processPendingAttestations(ctx)
-			}
-		}
-		ticker.Stop()
+// tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,
+// dropping attestations that are no longer for the current slot.
+func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
+		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
+		return nil, true
 	}
-}
 
-// processPendingAttestations checks and processes any pending attestations whose blocks have arrived.
-func (s *payloadAttestationService) processPendingAttestations(ctx context.Context) {
-	s.pendingAttestations.Range(func(key, value any) bool {
-		pendingKey := key.(pendingPayloadAttestationKey)
-		job := value.(*pendingPayloadAttestationJob)
+	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
+		return nil, false
+	}
 
-		// Check expiry
-		if time.Since(job.creationTime) > pendingPayloadAttestationExpiry {
-			s.pendingAttestations.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending payload attestation expired", "blockRoot", pendingKey.blockRoot)
-			return true
+	return func() {
+		if err := s.ProcessMessage(ctx, nil, msg); err != nil {
+			log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
 		}
-
-		// Check if attestation is still for current slot (with clock disparity allowance)
-		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(job.msg.Data.Slot) {
-			s.pendingAttestations.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending payload attestation slot mismatch", "blockRoot", pendingKey.blockRoot)
-			return true
-		}
-
-		// Check if block has arrived
-		if _, ok := s.forkchoiceStore.GetHeader(pendingKey.blockRoot); !ok {
-			return true // Block still not here, keep waiting
-		}
-
-		// Block arrived, remove from pending and process
-		s.pendingAttestations.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
-		// Re-run validation via ProcessMessage
-		if err := s.ProcessMessage(ctx, nil, job.msg); err != nil {
-			log.Trace("Failed to process pending payload attestation", "blockRoot", pendingKey.blockRoot, "err", err)
-		}
-		return true
-	})
+	}, true
 }

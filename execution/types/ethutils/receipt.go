@@ -70,7 +70,7 @@ func MarshalReceipt(
 		if receipt.Logs != nil {
 			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
 			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
 			}
 			logsToMarshal = rpcLogs
 		} else {
@@ -100,13 +100,13 @@ func MarshalReceipt(
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
 	} else {
 		baseFee := header.BaseFee
 		effectiveTip := txn.GetEffectiveGasTip(baseFee)
 		var gasPrice uint256.Int
 		gasPrice.Add(baseFee, &effectiveTip)
-		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice.ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.U256)(&gasPrice)
 	}
 
 	// Assign status if postState is empty.
@@ -132,7 +132,7 @@ func MarshalReceipt(
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
+			fields["blobGasPrice"] = (*hexutil.U256)(&blobGasPrice)
 			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}
@@ -209,7 +209,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 
 	if protoReceipt.BaseFee != nil {
 		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
-		receipt["effectiveGasPrice"] = (*hexutil.Big)(baseFee.ToBig())
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
 	}
 
 	if protoReceipt.BlobGasUsed > 0 {
@@ -217,7 +217,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	}
 	if protoReceipt.BlobGasPrice != nil {
 		blobGasPrice := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BlobGasPrice)
-		receipt["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
+		receipt["blobGasPrice"] = (*hexutil.U256)(blobGasPrice)
 	}
 
 	return receipt

@@ -421,10 +421,6 @@ func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint6
 	return addresses
 }
 
-type IsMiningMock struct{}
-
-func (*IsMiningMock) IsMining() bool { return false }
-
 func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -437,9 +433,9 @@ func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (con
 	server := grpc.NewServer()
 
 	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
-		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
+		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, privateapi.NoMining{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {

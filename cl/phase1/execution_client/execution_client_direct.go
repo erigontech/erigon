@@ -69,7 +69,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return PayloadStatusInvalidated, err
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
@@ -80,11 +85,6 @@ func (cc *ExecutionClientDirect) NewPayload(
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
-	}
-
-	var bal []byte
-	if payload.Version() >= clparams.GloasVersion && payload.BlockAccessList != nil {
-		bal = payload.BlockAccessList.Bytes()
 	}
 
 	startInsertBlock := time.Now()
@@ -150,6 +150,16 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, err
 	}
+	binary.LittleEndian.PutUint64(idBytes, id)
+	return idBytes, nil
+}
+
+func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+	id, err := startPayloadBuild(ctx, cc.chainRW, head, attributes)
+	if err != nil {
+		return nil, err
+	}
+	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes, nil
 }

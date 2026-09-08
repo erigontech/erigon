@@ -44,7 +44,7 @@ func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query b
 func parseResponse(resp any) (string, error) {
 	result, err := json.Marshal(resp)
 	if err != nil {
-		return "", fmt.Errorf("error trying to marshal response: %v", err)
+		return "", fmt.Errorf("error trying to marshal response: %w", err)
 	}
 
 	return string(result), nil

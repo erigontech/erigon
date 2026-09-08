@@ -63,7 +63,8 @@ func Verify(
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
 	defer func() {
-		items.Wait()
+		// The early-return err takes priority; the normal path already returns items.Wait().
+		_ = items.Wait()
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
@@ -280,7 +281,7 @@ func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64, onReadN fu
 			n, err := io.CopyN(h, r, pieceLength)
 			onReadN(n)
 			if err != nil {
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					yield(result.Err[metainfo.Hash](err))
 					return
 				}

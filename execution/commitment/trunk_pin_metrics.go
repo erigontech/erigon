@@ -22,9 +22,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// Per-contract labels omitted to keep cardinality bounded; per-contract
-// detail is in the [adaptive-pin] structured log line.
-
+// No per-contract labels (Prometheus cardinality); detail in [adaptive-pin] log.
 var (
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
@@ -39,9 +37,6 @@ var (
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
 
-// recordPreload accounts one preload step: the wall time it took and the bytes
-// it newly pinned. Bytes are passed in rather than read back off the preloader
-// so a rolled-back step can report the time it cost without the pins it lost.
 func recordPreload(started time.Time, bytesPinned int) {
 	mxPreloadDurationSecondsTotal.Add(time.Since(started).Seconds())
 	if bytesPinned > 0 {
@@ -49,8 +44,6 @@ func recordPreload(started time.Time, bytesPinned int) {
 	}
 }
 
-// PublishMetrics emits counter deltas (last-published tracked internally) and
-// sets gauges absolute. Call once per SD.Flush — once-per-batch avoids hot-path cost.
 func (c *BranchCache) PublishMetrics() {
 	hits := c.pinnedHits.Load()
 	misses := c.pinnedMisses.Load()

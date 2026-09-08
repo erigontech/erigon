@@ -186,7 +186,9 @@ func newStateTestEnv() (*stateTestEnv, error) {
 
 func (e *stateTestEnv) Close() {
 	e.db.Close()
-	dir.RemoveAll(e.tmpDir)
+	if err := dir.RemoveAll(e.tmpDir); err != nil {
+		log.Warn("failed to remove temp dir", "dir", e.tmpDir, "err", err)
+	}
 }
 
 func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, files []string, workers uint64, filter testFilter) ([]testResult, error) {

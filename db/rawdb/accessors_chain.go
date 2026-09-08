@@ -24,6 +24,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -98,19 +99,23 @@ var (
 	bheapMu    sync.RWMutex
 )
 
-func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
-	bheapMu.RLock()
-	needsInit := bheapCache == nil
-	bheapMu.RUnlock()
+// ErrBadBlockCacheEmptyAfterReset is returned when a just-completed reset finds bheapCache nil
+// again by the time it re-reads it: a concurrent ResetBadBlockCache call raced in and cleared it
+// on its own failure first. Retrying (a fresh call) resolves it; it is not expected to recur.
+var ErrBadBlockCacheEmptyAfterReset = errors.New("bad block cache: reset reported success but cache is still empty")
 
-	if needsInit {
-		ResetBadBlockCache(tx, 100)
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	cache, err := latestBadBlockCache(tx)
+	if err != nil {
+		return nil, err
 	}
 
+	// cache is not immutable once published: TruncateCanonicalHash pushes into the
+	// live bheapCache under bheapMu.Lock(), so SortedValues' iteration over the
+	// heap's slice needs the same lock held to avoid racing that mutation.
 	bheapMu.RLock()
-	blockIds := bheapCache.SortedValues()
+	blockIds := cache.SortedValues()
 	bheapMu.RUnlock()
-
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
@@ -119,18 +124,51 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 	return blocks, nil
 }
 
+// latestBadBlockCache returns the loaded heap, initializing it first if needed.
+// The returned reference stays valid even if a concurrent ResetBadBlockCache
+// call later replaces or clears bheapCache.
+func latestBadBlockCache(tx kv.Tx) (utils.ExtendedHeap, error) {
+	bheapMu.RLock()
+	cache := bheapCache
+	bheapMu.RUnlock()
+	if cache != nil {
+		return cache, nil
+	}
+
+	if err := ResetBadBlockCache(tx, 100); err != nil {
+		return nil, err
+	}
+
+	bheapMu.RLock()
+	cache = bheapCache
+	bheapMu.RUnlock()
+	if cache == nil {
+		return nil, ErrBadBlockCacheEmptyAfterReset
+	}
+	return cache, nil
+}
+
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
-	bheapMu.Lock()
-	bheapCache = utils.NewBlockMaxHeap(limit)
-	bheapMu.Unlock()
-	// load the heap
-	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
-		bheapMu.Lock()
-		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
-		bheapMu.Unlock()
+	// Built privately so a concurrent GetLatestBadBlocks never observes a
+	// partially-loaded heap; bheapCache is only ever touched once, atomically,
+	// once the load has fully succeeded or failed.
+	newCache := utils.NewBlockMaxHeap(limit)
+	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(newCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		return nil
-	})
+	}); err != nil {
+		// drop the stale cache, otherwise a reader would see the old value as still fresh
+		bheapMu.Lock()
+		bheapCache = nil
+		bheapMu.Unlock()
+		return err
+	}
+
+	bheapMu.Lock()
+	bheapCache = newCache
+	bheapMu.Unlock()
+	return nil
 }
 
 /* latest bad blocks end */
@@ -283,6 +321,18 @@ func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
 	}
 
 	return common.BytesToHash(data)
+}
+
+func ReadForkchoiceFinalizedNum(db kv.Getter) uint64 {
+	h := ReadForkchoiceFinalized(db)
+	if h == (common.Hash{}) {
+		return 0
+	}
+	n := ReadHeaderNumber(db, h)
+	if n == nil {
+		return 0
+	}
+	return *n
 }
 
 // WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
@@ -460,9 +510,9 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
-			return decodeErr
+		var err error
+		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
+			return err
 		}
 		i++
 		return nil
@@ -609,6 +659,15 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 	return data, nil
 }
 
+// ReadBlockAccessList reads and decodes the block access list sidecar.
+func ReadBlockAccessList(db kv.Getter, hash common.Hash, number uint64) (types.BlockAccessList, error) {
+	data, err := ReadBlockAccessListBytes(db, hash, number)
+	if err != nil || len(data) == 0 {
+		return nil, err
+	}
+	return types.DecodeBlockAccessListBytes(data)
+}
+
 // WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
 // a block. This is secondary storage (serving, backfill, unwind); the primary
 // carry into execution is Block.BlockAccessList(), written via the block overlay
@@ -711,7 +770,7 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
-func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
+func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 	nextBaseTxNum := 0
 	if from > 0 {
 		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(context.Background(), tx, from-1)
@@ -794,13 +853,7 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-// ReadBlock retrieves an entire block corresponding to the hash, assembling it
-// back from the stored header and body. If either the header or body could not
-// be retrieved nil is returned.
-//
-// Note, due to concurrent download of header and block body the header and thus
-// canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
+func readBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil
@@ -809,15 +862,13 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	var bal []byte
-	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
-	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
-	if header.HasBAL() {
-		if data, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(data) > 0 {
-			bal = bytes.Clone(data)
-		}
-	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, nil)
+}
+
+// ReadBlock retrieves an entire block corresponding to the hash, assembling it
+// back from the stored header and body. If either part is unavailable, it returns nil.
+func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
+	return readBlock(tx, hash, number)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -828,7 +879,7 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	block := ReadBlock(db, hash, number)
+	block := readBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
 	}

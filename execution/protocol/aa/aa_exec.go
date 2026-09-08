@@ -181,7 +181,7 @@ func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraB
 	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
-			"error getting code for sender:%s err:%s",
+			"error getting code for sender:%s err:%w",
 			tx.SenderAddress.String(), err,
 		))
 	}
@@ -445,8 +445,7 @@ func newValidationPhaseError(
 	revertEntityName string,
 	frameReverted bool,
 ) *ValidationPhaseError {
-	var vpeCast *ValidationPhaseError
-	if errors.As(innerErr, &vpeCast) {
+	if vpeCast, ok := errors.AsType[*ValidationPhaseError](innerErr); ok {
 		return vpeCast
 	}
 	var errorMessage string

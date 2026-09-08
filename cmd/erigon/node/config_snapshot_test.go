@@ -80,8 +80,6 @@ type configSnapshot struct {
 	NoDownloader   bool `json:"no_downloader"`
 
 	// Consensus
-	HeimdallURL     string `json:"heimdall_url"`
-	WithoutHeimdall bool   `json:"without_heimdall"`
 }
 
 func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
@@ -102,8 +100,6 @@ func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 		SnapProduceE2:       cfg.Snapshot.ProduceE2,
 		SnapProduceE3:       cfg.Snapshot.ProduceE3,
 		NoDownloader:        cfg.Snapshot.NoDownloader,
-		HeimdallURL:         cfg.HeimdallURL,
-		WithoutHeimdall:     cfg.WithoutHeimdall,
 	}
 }
 
@@ -163,13 +159,6 @@ func TestConfigWithFlags(t *testing.T) {
 			args: []string{"--snap.stop"},
 			check: func(t *testing.T, snap configSnapshot) {
 				require.False(t, snap.SnapProduceE2)
-			},
-		},
-		{
-			name: "without heimdall",
-			args: []string{"--bor.withoutheimdall"},
-			check: func(t *testing.T, snap configSnapshot) {
-				require.True(t, snap.WithoutHeimdall)
 			},
 		},
 		{

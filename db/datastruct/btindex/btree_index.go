@@ -24,14 +24,12 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-	"unsafe"
-
-	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -137,8 +135,8 @@ func (c *Cursor) next() bool {
 }
 
 func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
-	if c.d >= c.ef.Count() {
-		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	if di >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, di, c.ef.Count())
 	}
 
 	c.d = di
@@ -365,7 +363,7 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m        mmap.MMap
+	m        mmap.Ro
 	data     []byte
 	ef       *eliasfano32.EliasFano
 	file     *os.File
@@ -505,10 +503,14 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		return idx, nil
 	}
 
-	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
+	idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
 	if err != nil {
 		return nil, err
 	}
+	// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+	// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+	_ = mmap.MadviseSequential(idx.m)
+	defer func() { _ = mmap.MadviseRandom(idx.m) }()
 	idx.data = idx.m[:idx.size]
 
 	var nodeOfftEF *eliasfano32.EliasFano
@@ -618,10 +620,6 @@ func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
 	return c
 }
 
-func (b *BtIndex) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&b.data[0])
-}
-
 func (b *BtIndex) Size() int64 { return b.size }
 
 func (b *BtIndex) ModTime() time.Time { return b.modTime }
@@ -664,7 +662,7 @@ func (b *BtIndex) Close() {
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
+func (b *BtIndex) Get(lookup, buf []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
@@ -683,7 +681,7 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	// weak assumption that k will be ignored and used lookup instead.
 	// since fetching k and v from data file is required to use Getter.
 	// Why to do Getter.Reset twice when we can get kv right there.
-	v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
+	v, found, offsetInFile, err = b.bplus.Get(gr, lookup, buf)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, offsetInFile, false, nil

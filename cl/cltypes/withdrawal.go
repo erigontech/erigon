@@ -43,7 +43,7 @@ func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return fmt.Errorf("[Withdrawal] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[Withdrawal] err: %w", ssz.ErrLowBufferSize)
 	}
 	obj.Index = ssz.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
@@ -83,6 +83,17 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	ret := make([]*Withdrawal, len(executionWithdrawal))
 	for i, w := range executionWithdrawal {
 		ret[i] = convertExecutionWithdrawalToConsensusWithdrawal(w)
+	}
+	return ret
+}
+
+// ConvertConsensusWithdrawalsToExecutionWithdrawals converts a withdrawal list to its execution
+// representation, in order and with no shared pointers. The result is never nil, which matters
+// because the execution layer rejects a nil list and an empty one under opposite conditions.
+func ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals []*Withdrawal) []*types.Withdrawal {
+	ret := make([]*types.Withdrawal, len(consensusWithdrawals))
+	for i, w := range consensusWithdrawals {
+		ret[i] = convertConsensusWithdrawalToExecutionWithdrawal(w)
 	}
 	return ret
 }

@@ -311,6 +311,10 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
+	// GasChangeCallStateGasReturned is EIP-8037 state gas moving out of the reservoir back into gas_left, after a
+	// child frame refilled a slot this frame had spilled gas_left to allocate. This value is always positive. It is
+	// not GasChangeCallLeftOverRefunded: no gas crosses a frame boundary, it changes dimension within one frame.
+	GasChangeCallStateGasReturned GasChangeReason = 16
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

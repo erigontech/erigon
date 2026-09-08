@@ -173,8 +173,7 @@ func WrapStreamError(err error, typ reflect.Type) error {
 }
 
 func addErrorContext(err error, ctx string) error {
-	var decErr *decodeError
-	if errors.As(err, &decErr) {
+	if decErr, ok := errors.AsType[*decodeError](err); ok {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
@@ -354,7 +353,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 			val.SetLen(i + 1)
 		}
 		// decode into element
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); err == EOL { //nolint:errorlint // intentional bare sentinel check
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -373,7 +372,7 @@ func decodeListArray(s *Stream, val reflect.Value, elemdec decoder) error {
 	vlen := val.Len()
 	i := 0
 	for ; i < vlen; i++ {
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); err == EOL { //nolint:errorlint // intentional bare sentinel check
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -445,7 +444,7 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		}
 		for i, f := range fields {
 			err := f.info.decoder(s, val.Field(f.index))
-			if err == EOL {
+			if err == EOL { //nolint:errorlint // intentional bare sentinel check
 				if f.optional {
 					// The field is optional, so reaching the end of the list before
 					// reaching the last field is acceptable. All remaining undecoded
@@ -789,14 +788,7 @@ func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
 		return append(dst, s.byteval), nil
 	case String:
 		cur := len(dst)
-		need := cur + int(size)
-		if cap(dst) < need {
-			grown := make([]byte, need)
-			copy(grown, dst)
-			dst = grown
-		} else {
-			dst = dst[:need]
-		}
+		dst = slices.Grow(dst, int(size))[:cur+int(size)]
 		if err := s.readFull(dst[cur:]); err != nil {
 			return dst, err
 		}

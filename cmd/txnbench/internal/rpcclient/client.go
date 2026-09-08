@@ -32,16 +32,6 @@ type rpcReq struct {
 	Params  any    `json:"params"`
 }
 
-type rpcResp[T any] struct {
-	JsonRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
-	Result  T      `json:"result"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
 	body, err := json.Marshal(rpcReq{JsonRPC: "2.0", ID: 1, Method: method, Params: params})
 	if err != nil {

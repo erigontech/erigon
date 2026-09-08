@@ -224,6 +224,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob wrapper list: %s", ErrParseTxn, err) //nolint
 		}
+		if wrapperListPos+wrapperListLen != len(txBytes) {
+			return 0, fmt.Errorf("%w: trailing bytes after blobs wrapper", ErrParseTxn)
+		}
 
 		// Parse the inner tx_payload_body (first element of the wrapper list).
 		innerBodyPos, innerBodyLen, err := rlp.ParseList(txBytes, wrapperListPos)
