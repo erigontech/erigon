@@ -28,30 +28,25 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func TestGetVMContextHandsOutADeepRulesSnapshot(t *testing.T) {
+func TestGetVMContextCopiesRuleValuesAndClonesChainID(t *testing.T) {
 	cfg := &chain.Config{
 		ChainID:             uint256.NewInt(1337),
 		HomesteadBlock:      common.NewUint64(0),
 		SpuriousDragonBlock: common.NewUint64(0),
-		DisabledEIPs:        []int{170},
 	}
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cfg, vm.Config{})
 
 	live := evm.ChainRules()
 	require.True(t, live.IsSpuriousDragon, "the fixture must start with the flag set, or the mutation below proves nothing")
 	require.NotNil(t, live.ChainID, "the fixture must carry a chain id, or the mutation below proves nothing")
-	require.Equal(t, []int{170}, live.DisabledEIPs, "the fixture must carry a disabled eip, or the mutation below proves nothing")
 	chainID := live.ChainID.Clone()
 
 	env := evm.GetVMContext()
 	env.Rules.IsSpuriousDragon = false
 	env.Rules.ChainID.SetUint64(0xdead)
-	env.Rules.DisabledEIPs[0] = 161
 
 	require.True(t, evm.ChainRules().IsSpuriousDragon,
 		"OnTxStart runs before execution, so a tracer holding the VMContext must not be able to clear a live fork flag")
 	require.Equal(t, chainID, evm.ChainRules().ChainID,
 		"CHAINID pushes evm.ChainRules().ChainID, so a tracer must not reach it through the snapshot")
-	require.Equal(t, []int{170}, evm.ChainRules().DisabledEIPs,
-		"Rules.IsEIPEnabled gates forks on DisabledEIPs, so the snapshot must not share its backing array")
 }

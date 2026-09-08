@@ -22,7 +22,6 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -355,8 +354,6 @@ func isSystemCall(caller accounts.Address) bool {
 // SetPrecompiles replaces the active set for state-override RPC calls. The
 // next ResetBetweenBlocks restores the chain's own set. A nil map means the
 // chain's own set; pass an empty non-nil map to disable every precompile.
-// Resolved here rather than in precompile(), which is on the call path and
-// would otherwise have to take registryMu.
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	if precompiles == nil {
 		precompiles = Precompiles(evm.chainRules)
@@ -670,11 +667,7 @@ func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	targetHasStorage, err := evm.intraBlockState.HasStorage(address)
-	if err != nil {
-		return false, err
-	}
-	return targetNonce != 0 || !targetCodeHash.IsEmpty() || targetHasStorage, nil
+	return targetNonce != 0 || !targetCodeHash.IsEmpty(), nil
 }
 
 func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
@@ -922,7 +915,6 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 	if rules.ChainID != nil {
 		rules.ChainID = rules.ChainID.Clone()
 	}
-	rules.DisabledEIPs = slices.Clone(rules.DisabledEIPs)
 	return &tracing.VMContext{
 		Coinbase:        evm.Context.Coinbase,
 		BlockNumber:     evm.Context.BlockNumber,

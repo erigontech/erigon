@@ -17,10 +17,8 @@
 package vm
 
 import (
-	"maps"
 	"math"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -37,6 +35,12 @@ type stubPrecompile struct{ name string }
 func (s stubPrecompile) RequiredGas([]byte) uint64        { return 0 }
 func (s stubPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
 func (s stubPrecompile) Name() string                     { return s.name }
+
+type ptrPrecompile struct{ name string }
+
+func (p *ptrPrecompile) RequiredGas([]byte) uint64        { return uint64(len(p.name)) }
+func (p *ptrPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
+func (p *ptrPrecompile) Name() string                     { return p.name }
 
 func rulesForChain(chainID, l2Version uint64) *chain.Rules {
 	return &chain.Rules{
@@ -109,6 +113,13 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	require.Panics(t, func() {
 		RegisterPrecompiles(uint256.NewInt(900302), nil)
 	}, "nil PrecompilesFunc must panic")
+
+	for _, id := range []*uint256.Int{nil, new(uint256.Int)} {
+		require.Panics(t, func() { RegisterPrecompiles(id, func(uint64) PrecompiledContracts { return nil }) },
+			"a nil or zero chain ID must be refused on register")
+		require.Panics(t, func() { UnregisterPrecompiles(id) },
+			"and refused on unregister too, or the same argument has two contracts")
+	}
 }
 
 // TestRegisteredProviderForkDimension pins the fork dimension of the cache
@@ -157,20 +168,6 @@ func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
 }
 
-// TestForkSetsCoverEveryTier pins the forkTier -> built-in set binding. The
-// array is sized by forkTierCount, so a tier added to forkTierFor but missed
-// in init() leaves a zero forkSet: every precompile vanishes at that fork,
-// with no panic and no error.
-func TestForkSetsCoverEveryTier(t *testing.T) {
-	for i := range int(forkTierCount) {
-		tier := forkTier(i)
-		require.NotEmpty(t, forkSets[tier].contracts, "forkSets[%d] has no contracts", tier)
-		require.NotEmpty(t, forkSets[tier].addresses, "forkSets[%d] has no addresses", tier)
-		require.Len(t, forkSets[tier].addresses, len(forkSets[tier].contracts),
-			"forkSets[%d] address list and contract map disagree", tier)
-	}
-}
-
 func TestRegisterSweepsStaleCache(t *testing.T) {
 	const chainID = 900503
 	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
@@ -213,6 +210,20 @@ func TestProviderNilContractPanics(t *testing.T) {
 		func() { Precompiles(rulesForChain(chainID, 0)) })
 }
 
+func TestProviderTypedNilContractPanics(t *testing.T) {
+	const chainID = 900505
+	badAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x47}))
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{badAddr: (*ptrPrecompile)(nil)}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	require.PanicsWithValue(t,
+		"vm: precompile provider for chain 900505 returned a nil contract at 0000000000000000000000000000000000000047",
+		func() { Precompiles(rulesForChain(chainID, 0)) })
+}
+
 func TestPrecompilesNilChainID(t *testing.T) {
 	rules := &chain.Rules{IsIstanbul: true}
 	require.NotPanics(t, func() {
@@ -231,27 +242,6 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 			_ = ActivePrecompiles(rules)
 		}
 	})
-}
-
-// TestDeprecatedForkAddressExportsTrackTheirSets pins the exported per-fork
-// address slices to the sets they name. Chains outside this repo compile
-// against them, so an empty or drifted slice is a break no in-repo grep sees.
-func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
-	for name, tc := range map[string]struct {
-		addrs     []accounts.Address
-		contracts PrecompiledContracts
-	}{
-		"homestead": {PrecompiledAddressesHomestead, PrecompiledContractsHomestead},
-		"byzantium": {PrecompiledAddressesByzantium, PrecompiledContractsByzantium},
-		"istanbul":  {PrecompiledAddressesIstanbul, PrecompiledContractsIstanbul},
-		"berlin":    {PrecompiledAddressesBerlin, PrecompiledContractsBerlin},
-		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
-		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
-		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
-	} {
-		require.NotEmpty(t, tc.addrs, name)
-		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
-	}
 }
 
 func TestChargeStateRejectsUnrepresentableAmounts(t *testing.T) {

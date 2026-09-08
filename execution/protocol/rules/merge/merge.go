@@ -451,7 +451,9 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 		if parent.Time < *config.BalancerTime { // first Balancer HF block
 			for address, rewrittenCode := range config.BalancerRewriteBytecode {
-				state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified)
+				if err := state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+					return err
+				}
 			}
 		}
 	}

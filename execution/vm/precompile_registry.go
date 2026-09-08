@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -85,8 +86,8 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 // UnregisterPrecompiles removes a chain's provider and its cached merged
 // sets; for tests and controlled teardown of an embedded chain.
 func UnregisterPrecompiles(chainID *uint256.Int) {
-	if chainID == nil {
-		return
+	if chainID == nil || chainID.IsZero() {
+		panic("vm: UnregisterPrecompiles: chain ID 0")
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -111,11 +112,6 @@ type precompileCacheKey struct {
 	chainID   uint256.Int
 	fork      forkTier
 	l2Version uint64
-}
-
-type mergedPrecompileSet struct {
-	contracts PrecompiledContracts
-	addresses []accounts.Address
 }
 
 // rulesChainID tolerates a nil ChainID (bare Rules values are used on
@@ -151,7 +147,7 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 
 	overlay := provider(rules.L2Version)
 	for addr, p := range overlay {
-		if p == nil {
+		if isNilContract(p) {
 			panic(fmt.Sprintf("vm: precompile provider for chain %s returned a nil contract at %x", &chainID, addr))
 		}
 	}
@@ -444,4 +440,16 @@ func (NoStatelessRun) RequiredGas([]byte) uint64 { return 0 }
 
 func (NoStatelessRun) Run([]byte) ([]byte, error) {
 	return nil, errors.New("vm: stateful precompile reached the stateless Run path")
+}
+
+func isNilContract(p PrecompiledContract) bool {
+	if p == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(p); v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
