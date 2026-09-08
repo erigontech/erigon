@@ -1046,10 +1046,6 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
-}
-
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
