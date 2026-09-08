@@ -668,7 +668,7 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 		return
 	}
 	if err := s.downloader.Seed(ctx, names); err != nil {
-		s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		s.logger.Warn("[Antiquary] Failed to add items to bittorrent", "err", err)
 	}
 }
 

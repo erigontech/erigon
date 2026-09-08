@@ -980,22 +980,28 @@ func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
 // one costs an fd and a mapping per rescan for as long as the pin lasts. Needs dirtyLock.
 func (s *BaseRoSnapshots) pendingUnlinkNames() map[string]struct{} {
 	var names map[string]struct{}
+	s.forEachRetired(func(sn *DirtySegment) {
+		if !sn.canDelete.Load() {
+			return // already gone from disk; nothing to reopen
+		}
+		if names == nil {
+			names = make(map[string]struct{})
+		}
+		names[sn.FileName()] = struct{}{}
+	})
+	return names
+}
+
+func (s *BaseRoSnapshots) forEachRetired(fn func(*DirtySegment)) {
 	cur := s.visible.Load()
 	for h := s.oldestVisible; h != nil; h = h.next {
 		for _, sn := range h.retired {
-			if !sn.canDelete.Load() {
-				continue // already gone from disk; nothing to reopen
-			}
-			if names == nil {
-				names = make(map[string]struct{})
-			}
-			names[sn.FileName()] = struct{}{}
+			fn(sn)
 		}
 		if h == cur {
 			break
 		}
 	}
-	return names
 }
 
 // reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
@@ -1693,15 +1699,7 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 			return true
 		})
 	}
-	cur := s.visible.Load()
-	for h := s.oldestVisible; h != nil; h = h.next {
-		for _, sn := range h.retired {
-			hold(sn)
-		}
-		if h == cur {
-			break
-		}
-	}
+	s.forEachRetired(hold)
 
 	orphans := make([]string, 0, len(superseded))
 	for i := range superseded {

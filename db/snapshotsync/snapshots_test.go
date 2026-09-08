@@ -659,6 +659,53 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 
 }
 
+func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	from, to := uint64(0), uint64(500_000)
+
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+	createTestSegmentOnlyFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_1, logger)
+	newIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, from, to, snaptype2.Enums.Transactions.String()))
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     dir,
+		IndexFile:  newIdx,
+		LeafSize:   8,
+	}, logger)
+	require.NoError(t, err)
+	defer idx.Close()
+	idx.DisableFsync()
+	require.NoError(t, idx.AddKey([]byte{1}, 0))
+	require.NoError(t, idx.Build(t.Context()))
+
+	oldSeg := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, snaptype2.Enums.Transactions))
+	oldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Enums.Transactions.String()))
+	oldToBlock := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name))
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Transactions}, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, oldSeg)
+	require.NoFileExists(t, oldIdx, "superseded by the v1.1 index and held by no segment")
+	require.FileExists(t, newIdx, "the retired segment resolved its first slot to the survivor's index")
+	require.FileExists(t, oldToBlock, "the only match for the survivor's second slot")
+
+	var survivor *DirtySegment
+	s.WalkDirtySegments(snaptype2.Enums.Transactions, func(seg *DirtySegment) bool {
+		survivor = seg
+		return false
+	})
+	require.NotNil(t, survivor)
+	require.Equal(t, version.V1_1, survivor.Version())
+	require.True(t, survivor.IsIndexed())
+	require.Equal(t, oldToBlock, survivor.Index(snaptype2.Indexes.TxnHash2BlockNum).FilePath())
+}
+
 func TestCanRetire(t *testing.T) {
 	cases := []struct {
 		inFrom, inTo, outFrom, outTo, retireStep uint64
