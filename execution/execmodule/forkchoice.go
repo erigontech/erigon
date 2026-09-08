@@ -48,15 +48,14 @@ type forkchoiceOutcome struct {
 	err    error
 }
 
-func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) error {
+func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) {
 	if alreadySent {
-		return nil
+		return
 	}
 	select {
 	case ch <- forkchoiceOutcome{result: result}:
 	default:
 	}
-	return nil
 }
 
 func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutcome, err error, alreadySent bool) error {
@@ -357,7 +356,7 @@ func (e *ExecModule) unwindIfNeeded(
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
-		_ = sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusBusy,
 		}, false)
@@ -518,7 +517,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if result != nil {
-		return sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
+		sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
+		return nil
 	}
 	if isDomainAheadOfBlocks {
 		// Open a brief RwTx to flush accumulated overlay + SD state atomically.
@@ -530,11 +530,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusTooFarAway,
 			ValidationError: "domain ahead of blocks",
 		}, false)
+		return nil
 	}
 
 	// Set Progress for headers and bodies accordingly.
@@ -557,7 +558,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
 			// Send forkchoice early (We already know the fork is valid)
-			_ = sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: blockHash,
 				Status:          ExecutionStatusSuccess,
 				ValidationError: validationError,
@@ -639,11 +640,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
 				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
 			}, stateFlushingInParallel)
+			return nil
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
@@ -685,10 +687,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if !valid {
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusInvalidForkchoice,
 				LatestValidHash: common.Hash{},
 			}, stateFlushingInParallel)
+			return nil
 		}
 		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -765,11 +768,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.logTimings("Timings: Forkchoice", commitTimings)
 	}
 
-	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+	sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 		LatestValidHash: headHash,
 		Status:          status,
 		ValidationError: validationError,
 	}, stateFlushingInParallel)
+	return nil
 }
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the

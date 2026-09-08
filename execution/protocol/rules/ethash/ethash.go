@@ -326,7 +326,7 @@ func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 // finalizer unmaps the memory and closes the file.
 func (c *cache) finalizer() {
 	if c.mmap != nil {
-		_ = c.mmap.Unmap()
+		c.mmap.Unmap() //nolint:errcheck
 		c.dump.Close()
 		c.mmap, c.dump = nil, nil
 	}
@@ -422,7 +422,7 @@ func (d *dataset) generated() bool {
 // finalizer closes any file handlers and memory maps open.
 func (d *dataset) finalizer() {
 	if d.mmap != nil {
-		_ = d.mmap.Unmap()
+		d.mmap.Unmap() //nolint:errcheck
 		d.dump.Close()
 		d.mmap, d.dump = nil, nil
 	}

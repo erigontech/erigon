@@ -64,7 +64,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	if err := se.resetWorkers(ctx, se.rs, se.applyTx); err != nil {
-		return nil, nil, err
+		return nil, rwTx, err
 	}
 
 	havePartialBlock := false
