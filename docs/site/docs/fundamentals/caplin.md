@@ -30,7 +30,7 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `(MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS + 1) × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131104 slots, ~18 days). The extra epoch is a safety margin: the spec window starts at an epoch boundary, so retaining exactly `MIN_EPOCHS × SLOTS_PER_EPOCH` slots would drop columns the node must still serve whenever the head sits inside an epoch. Increase this value for DA oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
