@@ -312,7 +312,7 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 		return true
 	})
 	block.Block.Body.AttesterSlashings.Range(func(idx int, a *cltypes.AttesterSlashing, total int) bool {
-		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil {
+		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
 			log.Debug("bad attester slashing received", "err", err)
 		}
 		return true

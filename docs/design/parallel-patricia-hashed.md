@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Component | `execution/commitment` |
-| Stability | Experimental — `--experimental.parallel-commitment`, default off |
+| Stability | Default on — `--experimental.parallel-commitment=false` selects the sequential trie |
 | Implements | `commitment.Trie` |
 | Audience | Contributors to commitment / state-root computation |
 
@@ -268,7 +268,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 | parameter | default | effect |
 | --- | --- | --- |
-| `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`) |
+| `--experimental.parallel-commitment` | on | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`); `=false`, or `COMMITMENT_PARALLEL=false`, selects `VariantHexPatriciaTrie` |
 | `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
 | `deepStorageThreshold` | 1000 | compile-time const (not a runtime flag): per-account touched-storage-key count above which the storage subtree folds concurrently (§4.1.1); mitigates the whale bottleneck of §11 |
 | `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
@@ -300,7 +300,7 @@ in scheduling.
 
 | | `HexPatriciaHashed` | `ParallelPatriciaHashed` |
 | --- | --- | --- |
-| flag | (default) | `--experimental.parallel-commitment` |
+| flag | `--experimental.parallel-commitment=false` | (default) |
 | `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
 | parallel unit | none | one worker per **touched** top nibble (≤16), plus one per first-storage nibble inside a big-storage account |
 | split granularity | none | touched top nibbles at depth 1, and first-storage nibbles at depth 64 for big-storage accounts (§4.1.1) |

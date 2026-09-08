@@ -38,7 +38,7 @@ import (
 func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root common.Hash, httpStatusErr int, err error) {
 	switch {
 	case stateId.Head():
-		root, _, httpStatusErr, err = a.getHead()
+		root, _, httpStatusErr, err = a.getStateHead()
 		return
 	case stateId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
@@ -376,7 +376,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		// get the validator index of the committee
 		validatorIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(publicKey)
 		if err != nil {
-			return nil, fmt.Errorf("could not read validator index: %x. %s", publicKey, err)
+			return nil, fmt.Errorf("could not read validator index: %x. %w", publicKey, err)
 		}
 		idx := strconv.FormatInt(int64(validatorIndex), 10)
 		response.Validators[i] = idx

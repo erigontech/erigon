@@ -22,9 +22,6 @@ import (
 	"time"
 )
 
-// A Metrics object enabled for CSV then re-applied with an empty prefix (as
-// happens when a pooled HexPatriciaHashed is reused with default config) must
-// stop writing CSV, otherwise it keeps appending to a stale file.
 func TestMetrics_SetCsvMetricsClearsStaleState(t *testing.T) {
 	m := NewMetrics("")
 	m.EnableCsvMetrics("/tmp/erigon-commitment-metrics-test")
@@ -46,8 +43,6 @@ func TestMetrics_SetCsvMetricsClearsStaleState(t *testing.T) {
 	}
 }
 
-// Concurrent sub-tries share a single Metrics object, so the duration
-// accumulators must be safe under concurrent writes (run with -race).
 func TestMetrics_ConcurrentDurationAccumulation(t *testing.T) {
 	m := NewMetrics("")
 	m.collectCommitmentMetrics = true

@@ -199,12 +199,12 @@ var (
 	}
 	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxaddresses",
-		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Usage: "Maximum number of addresses accepted per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
 	}
 	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxtopics",
-		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Usage: "Maximum number of topic alternatives accepted across all positions per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
 	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
@@ -225,6 +225,7 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 }
 
 // ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+//
 // Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)
@@ -442,6 +443,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
+		HttpURL:                  ctx.String(utils.HTTPURLFlag.Name),
+		SocketServerEnabled:      ctx.Bool(utils.SocketEnabledFlag.Name),
+		SocketListenUrl:          ctx.String(utils.SocketURLFlag.Name),
+		HttpsServerEnabled:       ctx.Bool(utils.HTTPSEnabledFlag.Name),
+		HttpsListenAddress:       ctx.String(utils.HTTPSListenAddrFlag.Name),
+		HttpsPort:                ctx.Int(utils.HTTPSPortFlag.Name),
+		HttpsURL:                 ctx.String(utils.HTTPSURLFlag.Name),
+		HttpsCertfile:            ctx.String(utils.HTTPSCertFlag.Name),
+		HttpsKeyFile:             ctx.String(utils.HTTPSKeyFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
 		AuthRpcPort:              int(ctx.Uint(utils.AuthRpcPort.Name)),
 		JWTSecretPath:            jwtSecretPath,

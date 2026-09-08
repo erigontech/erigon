@@ -17,6 +17,8 @@
 package privateapi
 
 import (
+	"context"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -25,12 +27,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,
-	miningServer txpoolproto.MiningServer, bridgeServer *bridge.BackendServer, heimdallServer *heimdall.BackendServer,
+func StartGrpc(ctx context.Context, kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,
+	miningServer txpoolproto.MiningServer,
 	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.Logger) (*grpc.Server, error) {
 	logger.Info("Starting private RPC server", "on", addr)
 
@@ -42,15 +42,9 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	if miningServer != nil {
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
-	if bridgeServer != nil {
-		remoteproto.RegisterBridgeBackendServer(grpcServer, bridgeServer)
-	}
-	if heimdallServer != nil {
-		remoteproto.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
-	}
 	remoteproto.RegisterKVServer(grpcServer, kv)
 
-	if err := grpcutil.StartServer(grpcServer, addr, healthCheck, logger, "private RPC server fail"); err != nil {
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, healthCheck, logger, "private RPC server fail"); err != nil {
 		return nil, err
 	}
 	return grpcServer, nil

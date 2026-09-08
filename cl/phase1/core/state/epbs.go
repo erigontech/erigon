@@ -59,7 +59,7 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 }
 
 // IsBuilderWithdrawalCredential checks if the withdrawal credentials belong to a builder.
-// Builder withdrawal credentials have the BUILDER_WITHDRAWAL_PREFIX (0x03) as the first byte.
+// Builder withdrawal credentials start with the configured builder prefix.
 func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig *clparams.BeaconChainConfig) bool {
 	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
 }
@@ -93,19 +93,19 @@ func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltyp
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
 	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	// Compute signing root
 	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	// Verify aggregate signature
 	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")
@@ -377,6 +377,9 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 }
 
 func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) error {
+	if !IsBuilderWithdrawalCredential(request.WithdrawalCredentials, s.BeaconConfig()) {
+		return nil
+	}
 	builders := s.GetBuilders()
 	builderIndex := -1
 	if builders != nil {
@@ -397,7 +400,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return AddBuilderToRegistry(
 			s,
 			request.PubKey,
-			request.WithdrawalCredentials[0],
+			s.BeaconConfig().PayloadBuilderVersion,
 			common.BytesToAddress(request.WithdrawalCredentials[12:]),
 			request.Amount,
 			s.Slot(),
@@ -409,7 +412,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return nil
 	}
 	newBuilder := *builder
-	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch {
+	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch && newBuilder.Balance == 0 {
 		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
 	}
 	if request.Amount > math.MaxUint64-newBuilder.Balance {

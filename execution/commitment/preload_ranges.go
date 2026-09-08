@@ -10,8 +10,6 @@ package commitment
 
 import "github.com/erigontech/erigon/execution/commitment/nibbles"
 
-// NextSubtree: exclusive upper bound of a prefix-range scan over `in`. Returns
-// nil if `in` is all 0xff. Mirrors db/kv.NextSubtree (inlined to keep imports minimal).
 func NextSubtree(in []byte) []byte {
 	r := make([]byte, len(in))
 	copy(r, in)
@@ -24,17 +22,7 @@ func NextSubtree(in []byte) []byte {
 	return nil
 }
 
-// ContractTrunkKeyRanges returns the two CommitmentDomain key ranges that
-// together cover every branch node of a contract's storage subtree.
-//
-// The commitment domain keys branches by HexToCompact(nibblePath); HexToCompact's
-// flag byte differs by the parity of the path length, so a contract's storage
-// branches (path = keccak256(addr)'s 64 nibbles ++ k slot-path nibbles, total
-// 64+k) split into two non-adjacent byte ranges:
-//   - even total length (k even, incl. the depth-64 subtree root):
-//     key = 0x00 || H || <k/2 packed slot bytes>  ⇒  prefix 0x00||H (33 bytes)
-//   - odd total length (k odd):
-//     all such keys lie in [HexToCompact(H||0), NextSubtree(HexToCompact(H||15))).
+// Splits by parity: even path length ⟷ odd (see HexToCompact for the split).
 func ContractTrunkKeyRanges(contractNibbles []byte) (evenFrom, evenTo, oddFrom, oddTo []byte) {
 	evenFrom = nibbles.HexToCompact(contractNibbles) // 0x00 || H, 33 bytes
 	evenTo = NextSubtree(evenFrom)
@@ -48,7 +36,6 @@ func ContractTrunkKeyRanges(contractNibbles []byte) (evenFrom, evenTo, oddFrom, 
 	return evenFrom, evenTo, oddFrom, oddTo
 }
 
-// ContractNibbles expands a 32-byte hash to its 64-nibble path (high nibble first).
 func ContractNibbles(contractHash []byte) []byte {
 	out := make([]byte, len(contractHash)*2)
 	for i, b := range contractHash {

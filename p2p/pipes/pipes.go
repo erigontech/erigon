@@ -25,7 +25,7 @@ import (
 
 // TCPPipe creates an in process full duplex pipe based on a localhost TCP socket
 func TCPPipe() (_ net.Conn, _ net.Conn, err error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		return nil, nil, err
 	}
@@ -40,7 +40,7 @@ func TCPPipe() (_ net.Conn, _ net.Conn, err error) {
 	}()
 
 	var dconn net.Conn
-	if dconn, err = net.Dial("tcp", l.Addr().String()); err != nil {
+	if dconn, err = net.Dial("tcp", l.Addr().String()); err != nil { //nolint:noctx
 		<-aerr
 		return nil, nil, err
 	}

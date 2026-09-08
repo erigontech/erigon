@@ -29,13 +29,11 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -75,7 +73,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum, false)
+		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +205,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -243,16 +241,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]any)
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, b.NumberU64(), b.Hash())
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, additionalFields)
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -276,7 +265,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	hash := *numberOrHash.BlockHash
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -303,16 +292,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -400,7 +380,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +400,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -450,19 +430,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if borTx != nil {
-		txCount++
-	}
-
 	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
@@ -470,7 +437,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -488,22 +455,12 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if borTx != nil {
-		txCount++
+	if body == nil {
+		return nil, nil
 	}
 
 	numOfTx := hexutil.Uint(txCount)
@@ -511,26 +468,9 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	return &numOfTx, nil
 }
 
-// lookupBorTx checks whether the given block has a Bor state-sync transaction.
-// Returns the synthetic transaction and its hash, or (nil, Hash{}, nil) if none.
-func (api *APIImpl) lookupBorTx(ctx context.Context, chainConfig *chain.Config, blockNum uint64, blockHash common.Hash) (types.Transaction, common.Hash, error) {
-	if chainConfig.Bor == nil {
-		return nil, common.Hash{}, nil
-	}
-	borTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-	_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borTxHash)
-	if err != nil {
-		return nil, common.Hash{}, err
-	}
-	if !ok {
-		return nil, common.Hash{}, nil
-	}
-	return bortypes.NewBorTransaction(), borTxHash, nil
-}
-
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if blockNumber != rpc.PendingBlockNumber {
-		return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+		return api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNumber.Uint64())
 	}
 
 	if block := api.pendingBlock(); block != nil {

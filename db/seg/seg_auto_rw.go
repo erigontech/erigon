@@ -30,9 +30,6 @@ import (
 //Reader and Writer - decorators on Getter and Compressor - which
 //can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
-// Maybe in future will add support of io.Reader/Writer interfaces to this decorators
-// Maybe in future will merge decorators into it's parents
-
 type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
@@ -241,10 +238,13 @@ func Decompressor2bufio(d *Decompressor) (*bufio.Reader, func()) {
 				return
 			}
 		}
-		wr.Flush()
-		pw.Close()
+		if err := wr.Flush(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close() //nolint:errcheck
 	}()
-	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { pr.Close() }
+	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { _ = pr.Close() }
 }
 
 // Bufio2compressor reads uvarint-length-prefixed words from src and writes them to a Writer.

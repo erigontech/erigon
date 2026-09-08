@@ -82,8 +82,8 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 		CodeHash:    empty.CodeHash,
 		Incarnation: 1,
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -122,8 +122,8 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 		CodeHash:    empty.CodeHash,
 		Incarnation: 0,
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -156,8 +156,8 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 		CodeHash:    empty.CodeHash,
 		Incarnation: 1, // bumped during CREATE2 frame, retained through revert
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -188,8 +188,8 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 		Nonce:    7,
 		CodeHash: codeHashArr,
 		Deleted:  false,
-		dirty:    true,
 	}
+	cs.markDirty(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -264,6 +264,126 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 	assert.Equal(t, uint64(42), acc.Balance.Uint64())
 }
 
+// countingBaselineReader counts calcState's baseline reads.
+type countingBaselineReader struct {
+	reads int
+	acc   *accounts.Account
+}
+
+func (r *countingBaselineReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	r.reads++
+	return r.acc, nil
+}
+
+// TestApplyWrites_SkipsBaselineReadWhenWritesCoverAccount: writes carrying
+// balance, nonce and codeHash overwrite every field the baseline read supplies.
+func TestApplyWrites_SkipsBaselineReadWhenWritesCoverAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	codeHash := accounts.InternCodeHash(common.Hash{0xab})
+	writes := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(5)).
+		nonce(addr, state.Version{}, 3).
+		codeHash(addr, state.Version{}, codeHash).
+		build()
+	cs.ApplyWrites(writes, false)
+
+	assert.Equal(t, 0, reader.reads, "writes cover balance/nonce/codeHash — the baseline read is dead")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64())
+	assert.Equal(t, uint64(3), acc.Nonce)
+	assert.Equal(t, [32]byte(common.Hash{0xab}), acc.CodeHash)
+}
+
+// TestApplyWrites_ReadsBaselineWhenWritesIncomplete: a missing field must still
+// load, else it would flush as zero.
+func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	writes := newWS().bal(addr, state.Version{}, *uint256.NewInt(5)).build()
+	cs.ApplyWrites(writes, false)
+
+	assert.Equal(t, 1, reader.reads, "nonce and codeHash are not in the writes — they must come from the domain")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
+	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
+}
+
+// TestApplyWrites_ReadsBaselineForSelfDestruct: Normalize drops the SD'd
+// address's nonce/codeHash, and an EIP-8246 residual balance revives the
+// account — which then flushes those baseline fields.
+func TestApplyWrites_ReadsBaselineForSelfDestruct(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe3})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	writes := newWS().
+		selfDestruct(addr, state.Version{}, true).
+		bal(addr, state.Version{}, *uint256.NewInt(42)).
+		build()
+	cs.ApplyWrites(writes, true /*eip8246*/)
+
+	assert.Equal(t, 1, reader.reads, "a self-destructed address has no nonce/codeHash write to cover it")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.False(t, acc.Deleted, "a non-zero residual balance revives the account")
+	assert.Equal(t, uint64(7), acc.Nonce, "the revived account keeps its baseline nonce")
+}
+
+// TestNormalizeCoversBaseline pins the coupling the skip relies on: Normalize
+// fills all three fields whatever the raw write set held. If this stops
+// holding, the skip silently stops firing.
+func TestNormalizeCoversBaseline(t *testing.T) {
+	balanceOnly := accounts.InternAddress([20]byte{0xf1})
+	storageOnly := accounts.InternAddress([20]byte{0xf2})
+	slot := accounts.InternKey(common.Hash{0x01})
+
+	raw := newWS().
+		bal(balanceOnly, state.Version{}, *uint256.NewInt(11)).
+		stor(storageOnly, slot, state.Version{}, *uint256.NewInt(22)).
+		build()
+
+	// Non-empty pre-block account, else EIP-161 removal strips the fields.
+	reader := &everyAddrReader{acc: &accounts.Account{Nonce: 7}}
+	norm, err := raw.Normalize(state.NewVersionMap(nil), 0, 0, reader, nil,
+		true /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	require.NoError(t, err)
+
+	assert.True(t, writesCoverBaseline(norm, balanceOnly), "a balance-only write comes out with nonce and codeHash filled")
+	assert.True(t, writesCoverBaseline(norm, storageOnly), "a storage-only address gets its account fields filled too")
+}
+
+// everyAddrReader serves the same pre-block account for every address.
+type everyAddrReader struct {
+	preBlockReader
+	acc *accounts.Account
+}
+
+func (r *everyAddrReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return r.acc, nil
+}
+
 // preBlockReader is a minimal StateReader stub for the integration test
 // below — returns the configured pre-block account for a single address.
 type preBlockReader struct {
@@ -283,7 +403,6 @@ func (r *preBlockReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Ac
 func (r *preBlockReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *preBlockReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -586,6 +705,21 @@ func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string)
 	return found
 }
 
+func emittedUpdates(t *testing.T, updates *commitment.Updates) map[string]commitment.Update {
+	t.Helper()
+	got := map[string]commitment.Update{}
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		got[string(k)] = *u
+		return nil
+	}))
+	return got
+}
+
+func plainKeyOf(addr accounts.Address) string {
+	v := addr.Value()
+	return string(v[:])
+}
+
 // TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount pins that emptyRemoval=false
 // retains an empty account as a full UPDATE rather than emitting SelfDestructPath.
 func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
@@ -874,4 +1008,89 @@ func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testin
 	expected.Balance = postSDBalance
 	assert.Equal(t, accounts.SerialiseV3(&expected), enc,
 		"record must be balance-only: nonce, code hash and incarnation cleared")
+}
+
+func TestFlushToUpdates_EmitsOnlyAccountsWrittenSinceReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xa1})
+	b := accounts.InternAddress(common.Address{0xb2})
+
+	cs.ApplyWrites(newWS().
+		bal(a, state.Version{}, *uint256.NewInt(1)).
+		bal(b, state.Version{}, *uint256.NewInt(2)).
+		build(), false)
+	first := newTestUpdates()
+	cs.FlushToUpdates(first)
+	require.Len(t, emittedUpdates(t, first), 2)
+	cs.ResetBlockFlags()
+
+	cs.ApplyWrites(newWS().nonce(b, state.Version{}, 7).build(), false)
+	second := newTestUpdates()
+	cs.FlushToUpdates(second)
+	got := emittedUpdates(t, second)
+	require.Len(t, got, 1, "an account untouched since ResetBlockFlags must not be re-emitted")
+	u, ok := got[plainKeyOf(b)]
+	require.True(t, ok)
+	require.Equal(t, uint64(2), u.Balance.Uint64(), "the accumulated balance must survive the reset")
+	require.Equal(t, uint64(7), u.Nonce)
+}
+
+func TestApplyWrites_EveryPathListsTheAccountAfterReset(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0xc3})
+	cases := map[string]func(*wsb) *wsb{
+		"balance": func(w *wsb) *wsb { return w.bal(addr, state.Version{}, *uint256.NewInt(5)) },
+		"nonce":   func(w *wsb) *wsb { return w.nonce(addr, state.Version{}, 5) },
+		"codeHash": func(w *wsb) *wsb {
+			return w.codeHash(addr, state.Version{}, accounts.InternCodeHash(common.Hash{0x11}))
+		},
+		"code":         func(w *wsb) *wsb { return w.code(addr, state.Version{}, accounts.NewCode([]byte{0x60, 0x00})) },
+		"incarnation":  func(w *wsb) *wsb { return w.inc(addr, state.Version{}, 1) },
+		"selfDestruct": func(w *wsb) *wsb { return w.selfDestruct(addr, state.Version{}, true) },
+	}
+	for name, write := range cases {
+		t.Run(name, func(t *testing.T) {
+			cs := newTestCalcState()
+			cs.ApplyWrites(newWS().bal(addr, state.Version{}, *uint256.NewInt(1)).build(), false)
+			cs.ResetBlockFlags()
+			cs.ApplyWrites(write(newWS()).build(), false)
+			updates := newTestUpdates()
+			cs.FlushToUpdates(updates)
+			_, ok := emittedUpdates(t, updates)[plainKeyOf(addr)]
+			require.True(t, ok, "a %s write after ResetBlockFlags must list the account for the next flush", name)
+		})
+	}
+}
+
+func TestApplyWrites_RepeatedWritesListTheAccountOnce(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress(common.Address{0xd4})
+	for i := uint64(1); i <= 3; i++ {
+		cs.ApplyWrites(newWS().
+			bal(addr, state.Version{}, *uint256.NewInt(i)).
+			nonce(addr, state.Version{}, i).
+			build(), false)
+	}
+	require.Len(t, cs.dirtyAccounts, 1)
+	cs.ResetBlockFlags()
+	require.Empty(t, cs.dirtyAccounts)
+}
+
+func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xe5})
+	b := accounts.InternAddress(common.Address{0xf6})
+
+	cs.ApplyWrites(newWS().bal(a, state.Version{}, *uint256.NewInt(1)).build(), false)
+	checkpoint := newTestUpdates()
+	cs.FlushToUpdates(checkpoint)
+	require.Len(t, emittedUpdates(t, checkpoint), 1)
+
+	cs.ApplyWrites(newWS().bal(b, state.Version{}, *uint256.NewInt(2)).build(), false)
+	blockEnd := newTestUpdates()
+	cs.FlushToUpdates(blockEnd)
+	got := emittedUpdates(t, blockEnd)
+	require.Len(t, got, 2, "a flush without ResetBlockFlags must keep earlier dirty accounts for the block-end flush")
+	require.Contains(t, got, plainKeyOf(a))
+	require.Contains(t, got, plainKeyOf(b))
+	require.Len(t, cs.dirtyAccounts, 2, "a mid-block flush must not list an account twice")
 }

@@ -53,7 +53,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	}
 	validationErr := payloadStatus.ValidationError
 	if validationErr != nil {
-		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+		return fmt.Errorf("engine payload status error: %w", validationErr.Error())
 	}
 	return nil
 }
@@ -193,14 +193,20 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil, nil
+		if isDeadlineExceeded(err) {
+			return nil, fmt.Errorf("%w: %w", ErrForkChoiceUpdateTimeout, err)
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
@@ -209,18 +215,18 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
+	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
-func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
+func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlock(ctx, block, bal)
+	return cc.chainRW.InsertBlock(ctx, block)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {
@@ -320,7 +326,7 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
+		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
 	}
 
 	// GetPayload versions advance with the response fields introduced by each fork.
@@ -345,7 +351,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
 	}
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
 	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
@@ -365,7 +374,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 // block-production values.
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 	if cc.beaconCfg == nil {
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")

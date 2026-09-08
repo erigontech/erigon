@@ -80,7 +80,7 @@ func TestCapabilities(t *testing.T) {
 
 		// Generate and insert blocks so Execution stage progress is set.
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -127,7 +127,7 @@ func TestCapabilities(t *testing.T) {
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -137,6 +137,9 @@ func TestCapabilities(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
+		// The prune mode alone no longer declares chain history expiry: the boundary is
+		// resolved from the block data on disk, so the fixture has to have its shape.
+		dropTransactions(t, m.DB, 1, mergeAt)
 		ctx := t.Context()
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -222,11 +225,13 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --prune.include-receipts: receipts and logs available from genesis, not limited by state prune window.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// --prune.include-receipts without a window of its own: the cache is retired
+		// alongside state history, so receipts and logs follow that window instead of
+		// reaching genesis, and they advertise it.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		// state still respects history prune distance
 		require.Equal(t, pruned, oldest(t, result.State))
 	})
@@ -369,9 +374,11 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// The merge point and the history window bound the same block here, but only
+		// the window moves with the head, so it is the one that describes the retention.
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	t.Run("wire_format", func(t *testing.T) {
@@ -663,7 +670,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {

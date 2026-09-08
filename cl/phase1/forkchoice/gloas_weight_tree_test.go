@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -89,6 +90,83 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
+func TestGetHeadPublishesCachedSelection(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	manager.OnSelectedHead(common.Hash{0xaa}, 100)
+	store := &ForkChoiceStore{
+		headHash:          common.Hash{0xbb},
+		headSlot:          99,
+		syncedDataManager: manager,
+	}
+
+	root, slot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{0xbb}, root)
+	require.Equal(t, uint64(99), slot)
+	selectedRoot, selectedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, slot, selectedSlot)
+}
+
+func TestGetHeadPublishesAnchorFallback(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	anchorRoot := common.Hash{0xaa}
+	store := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		forkGraph:         &getFinalizedExecutionHashForkGraph{anchorRoot: anchorRoot, anchorSlot: 10},
+		syncedDataManager: manager,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.Hash{0xbb}})
+
+	root, slot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, root)
+	require.Equal(t, uint64(10), slot)
+	selectedRoot, selectedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, slot, selectedSlot)
+}
+
+func TestGetHeadPublishesGloasSelection(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	selectedRoot, selectedSlot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, uint64(10), selectedSlot)
+	publishedRoot, publishedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, selectedRoot, publishedRoot)
+	require.Equal(t, selectedSlot, publishedSlot)
+}
+
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
@@ -103,14 +181,68 @@ func TestGrowGloasContributionsGrowsAmortized(t *testing.T) {
 	applied := growGloasContributions(nil, 1)
 	require.Len(t, applied, 1)
 	require.Equal(t, 1, cap(applied))
+	applied[0] = gloasVoteContribution{contribution: 42, set: true}
 
 	applied = growGloasContributions(applied, 2)
 	require.Len(t, applied, 2)
 	require.Equal(t, 2, cap(applied))
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
 
 	applied = growGloasContributions(applied, 3)
 	require.Len(t, applied, 3)
 	require.Greater(t, cap(applied), len(applied))
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsReusesCapacity(t *testing.T) {
+	applied := make([]gloasVoteContribution, 1, 3)
+	applied[0] = gloasVoteContribution{contribution: 42, set: true}
+	first := &applied[0]
+
+	applied = growGloasContributions(applied, 3)
+
+	require.Len(t, applied, 3)
+	require.Equal(t, 3, cap(applied))
+	require.Same(t, first, &applied[0])
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsClearsReexposedCapacity(t *testing.T) {
+	backing := []gloasVoteContribution{
+		{contribution: 42, set: true},
+		{contribution: 64, set: true},
+		{contribution: 128, set: true},
+	}
+	applied := backing[:1]
+	first := &applied[0]
+
+	applied = growGloasContributions(applied, len(backing))
+
+	require.Same(t, first, &applied[0])
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsNoGrowth(t *testing.T) {
+	require.Nil(t, growGloasContributions(nil, 0))
+
+	applied := []gloasVoteContribution{{contribution: 42, set: true}, {contribution: 64}}
+	first := &applied[0]
+
+	unchanged := growGloasContributions(applied, len(applied))
+	require.Len(t, unchanged, len(applied))
+	require.Same(t, first, &unchanged[0])
+	require.Equal(t, applied, unchanged)
+
+	notShrunk := growGloasContributions(applied, 1)
+	require.Len(t, notShrunk, len(applied))
+	require.Same(t, first, &notShrunk[0])
+	require.Equal(t, applied, notShrunk)
 }
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
@@ -216,7 +348,7 @@ func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
 	v.SetActivationEpoch(0)
 	v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 	v.SetEffectiveBalance(32_000_000_000)
-	s.AddValidator(v, 32_000_000_000)
+	require.NoError(t, s.AddValidator(v, 32_000_000_000))
 
 	votes := f.computeVotes(solid.Checkpoint{}, nil, s)
 

@@ -25,7 +25,7 @@ func BenchmarkSnailtracer(b *testing.B) {
 
 	vmenv := benchConfig(b, 1_000_000_000)
 	statedb := vmenv.IntraBlockState()
-	deployContract(statedb, addrContract, code)
+	deployContract(b, statedb, addrContract, code)
 
 	// callComplete checks the call did work; only this benchmark also has a
 	// rendered frame to check.
@@ -37,23 +37,4 @@ func BenchmarkSnailtracer(b *testing.B) {
 	for b.Loop() {
 		callComplete(b, vmenv, addrContract, input)
 	}
-}
-
-// TestSnailtracerPathsAgree pins that the parallel path the benchmark measures
-// renders the same frame as the materializing path, so a timing comparison
-// between the two is comparing the same work.
-func TestSnailtracerPathsAgree(t *testing.T) {
-	code := common.FromHex(strings.TrimSpace(snailtracerHex))
-	input := common.FromHex(snailtracerSelector)
-
-	render := func(noMaterialize bool) []byte {
-		vmenv := newBenchEnv(t, 1_000_000_000, noMaterialize)
-		deployContract(vmenv.IntraBlockState(), addrContract, code)
-		ret, _, err := prepareAndCall(vmenv, addrContract, input)
-		require.NoError(t, err)
-		require.NotEmpty(t, ret)
-		return ret
-	}
-
-	require.Equal(t, render(false), render(true))
 }

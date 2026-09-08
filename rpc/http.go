@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon/common"
@@ -45,8 +46,12 @@ import (
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
-	contentType             = "application/json"
-	jwtTokenExpiry          = 60 * time.Second
+	// maxBodySizeHint bounds the buffer sized from Content-Length, so a request
+	// that declares a large body and sends none cannot make the server allocate
+	// it up front. A body above this just grows into.
+	maxBodySizeHint = int64(1 * datasize.MB)
+	contentType     = "application/json"
+	jwtTokenExpiry  = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -214,7 +219,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		json.NewEncoder(buf).Encode(jsonrpcMessage{
+		_ = json.NewEncoder(buf).Encode(jsonrpcMessage{ //nolint:errchkjson
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,
@@ -224,7 +229,45 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 		// it's a post request or whatever, so just process it like normal
 		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
 	}
-	return NewCodec(conn)
+	// The body holds one message, so it can be read in one go and checked once.
+	readFrame := func() ([]byte, error) {
+		hint := 0
+		if r.ContentLength > 0 {
+			hint = int(min(r.ContentLength, maxBodySizeHint))
+		}
+		frame, err := readAllBody(conn, hint)
+		if err != nil {
+			return nil, err
+		}
+		if skipJSONSpace(frame, 0) == len(frame) {
+			// An empty body carries no message, which is not an error. The decoder
+			// used to report this as EOF and callers rely on that.
+			return nil, io.EOF
+		}
+		return frame, nil
+	}
+	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
+}
+
+// readAllBody reads r to the end, sizing the buffer from the hint when there is
+// one so that a large body does not have to be grown into.
+func readAllBody(r io.Reader, hint int) ([]byte, error) {
+	// A byte past the hint, so a body of exactly hint bytes sees EOF without the
+	// buffer doubling right at the end.
+	buf := make([]byte, 0, max(hint+1, 512))
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return buf, nil
+			}
+			return buf, err
+		}
+	}
 }
 
 // Close does nothing and always returns nil.
@@ -241,29 +284,6 @@ func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 // httpOverloadedKey signals that the inner DB gate (kv.ErrReadTxLimitExceeded) rejected this request.
 // ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
 type httpOverloadedKey struct{}
-
-// httpFlusherContextKey carries a gzip-activation hook for the current request.
-// It must only be set by the gzip middleware (not by a generic http.Flusher check),
-// so that it is absent when gzip is disabled and cannot prematurely commit HTTP headers.
-type httpFlusherContextKey struct{}
-
-// WithGzipStreamingHook stores hook in ctx so that runMethod will call it before
-// writing the first byte of a streamable response, switching the gzip middleware from
-// one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
-func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
-	if hook == nil {
-		panic("rpc: WithGzipStreamingHook called with a nil hook")
-	}
-	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
-}
-
-// withoutGzipStreamingHook masks any gzip-streaming hook set on an ancestor context. Batch
-// sub-calls write into a private per-item buffer rather than the HTTP response writer, so
-// the hook must not fire for them; calling it concurrently from multiple batch goroutines is
-// unsafe, since the underlying gzip.Writer it activates is not safe for concurrent use.
-func withoutGzipStreamingHook(ctx context.Context) context.Context {
-	return context.WithValue(ctx, httpFlusherContextKey{}, nil)
-}
 
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
 	flag := new(bool)
@@ -315,9 +335,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 	ctx, overloaded := withOverloadedFlag(ctx)
-	// Note: the gzip-streaming hook (httpFlusherContextKey) is injected by the gzip
-	// middleware via WithGzipStreamingHook, not here, to avoid prematurely committing
-	// HTTP headers when gzip is disabled.
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -342,7 +359,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer codec.Close()
 	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsonstream.New(w)
+		stream = jsonstream.Get(w)
+		defer jsonstream.Put(stream)
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
@@ -359,7 +377,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		stream.Flush()
+		if err := stream.Flush(); err != nil {
+			// The status is already sent, so this is the only place a truncated
+			// reply can show up.
+			undeliveredGauge.Inc()
+			if common.FastContextErr(ctx) != nil {
+				s.logger.Trace("rpc: client stopped reading", "url", r.URL.String())
+			} else {
+				s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+			}
+		}
 	}
 }
 

@@ -36,22 +36,22 @@ func TestUpdateForkChoiceNotifiesSyncStateWhenBehind(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 
 	const chainLen = 12 // beyond the reorg range (8) used by the syncing heuristic
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {})
+	chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {})
 	require.NoError(t, err)
 
-	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
 	tip := chainPack.Blocks[chainLen-1].Header()
-	vr, err := validateChain(ctx, m.ExecModule, tip)
+	vr, err := m.ValidateChain(ctx, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
 
 	ch, unsubscribe := m.Notifications.Events.AddSyncStateSubscription()
 	defer unsubscribe()
 
-	ur, err := updateForkChoice(ctx, m.ExecModule, tip)
+	ur, err := m.UpdateForkChoice(ctx, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
 	m.ExecModule.WaitIdle(ctx)

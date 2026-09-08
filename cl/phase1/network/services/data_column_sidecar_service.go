@@ -163,7 +163,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 
 	blockRoot, err := blockHeader.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("failed to get block root: %v", err)
+		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
@@ -174,7 +174,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %v", err)
+			return fmt.Errorf("failed to get my custody columns: %w", err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -209,7 +209,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 
 	// [REJECT] The proposer signature is valid
 	if pass, err := s.verifyProposerSignature(blockHeader.ProposerIndex, msg.SignedBlockHeader); err != nil {
-		return fmt.Errorf("invalid proposer signature for data column sidecar: %v", err)
+		return fmt.Errorf("invalid proposer signature for data column sidecar: %w", err)
 	} else if !pass {
 		return errors.New("invalid proposer signature for data column sidecar")
 	}
@@ -243,7 +243,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %v", err)
+		return fmt.Errorf("failed to write data column sidecar: %w", err)
 	}
 	s.seenSidecar.Add(seenKey, struct{}{})
 
@@ -289,7 +289,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %v", err)
+			return fmt.Errorf("failed to get my custody columns: %w", err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -339,7 +339,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %v", err)
+		return fmt.Errorf("failed to write data column sidecar: %w", err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
 
@@ -359,17 +359,17 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	err := s.syncDataManager.ViewHeadState(func(state *st.CachingBeaconState) error {
 		proposer, err := state.ValidatorForValidatorIndex(int(proposerIndex))
 		if err != nil {
-			return fmt.Errorf("unable to retrieve state: %v", err)
+			return fmt.Errorf("unable to retrieve state: %w", err)
 		}
 
 		domain, err := state.GetDomain(s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot))
 		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
+			return fmt.Errorf("unable to get domain: %w", err)
 		}
 		pk = proposer.PublicKey()
 		signingRoot, err = computeSigningRoot(signedBlockHeader.Header, domain)
 		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
+			return fmt.Errorf("unable to compute signing root: %w", err)
 		}
 		return nil
 	})
@@ -378,7 +378,7 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	}
 	valid, err = blsVerify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
 	if err != nil {
-		return false, fmt.Errorf("unable to verify signature: %v", err)
+		return false, fmt.Errorf("unable to verify signature: %w", err)
 	}
 	return valid, nil
 }

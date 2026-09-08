@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -94,7 +93,7 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, false, err
 	}
@@ -120,7 +119,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error)
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -143,15 +142,19 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
 		return nil, err
 	}
 
@@ -199,7 +202,7 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		}
 		if txType == types.BlobTxType {
 			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction["maxFeePerBlobGas"] = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
+				transaction["maxFeePerBlobGas"] = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
 			}
 		}
 		transaction["accessList"] = txn.GetAccessList()
@@ -211,9 +214,9 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td.ToBig())
+		getBlockRes["totalDifficulty"] = (*hexutil.U256)(td)
 	} else {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))
+		getBlockRes["totalDifficulty"] = new(hexutil.U256)
 	}
 
 	response := map[string]any{}
@@ -236,13 +239,21 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	return response, nil
 }
 
-func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// once and uses the same one for everything it derives from the block.
+func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	// Gate here rather than in the caller: a pruned body reads back as nil, which
+	// the caller reports as "not found" before any gate downstream could fire.
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
 		return nil, nil, err
 	}
 
@@ -381,21 +392,15 @@ func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hex
 
 func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -406,7 +411,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		args.Gas = (*hexutil.Uint64)(&api.gasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +423,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

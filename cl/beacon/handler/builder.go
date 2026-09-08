@@ -43,9 +43,21 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if blockId.Head() {
+		response, _, err := a.memoizedExpectedWithdrawals(nil)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
 	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
+	}
+	if response, matched, err := a.memoizedExpectedWithdrawals(&root); err != nil {
+		return nil, err
+	} else if matched {
+		return response, nil
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
@@ -57,25 +69,6 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	}
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
-	}
-	headRoot, _, statusCode, err := a.getHead()
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(statusCode, err)
-	}
-
-	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
-	}
-	if root == headRoot {
-		var expectedWithdrawals *cltypes.ExpectedWithdrawals
-		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			var err error
-			expectedWithdrawals, err = state.GetExpectedWithdrawals(headState, state.Epoch(headState))
-			return err
-		}); err != nil {
-			return nil, err
-		}
-		return newBeaconResponse(expectedWithdrawals.Withdrawals).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
@@ -101,6 +94,29 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	}
 
 	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
+}
+
+func (a *ApiHandler) memoizedExpectedWithdrawals(requestedRoot *common.Hash) (*beaconhttp.BeaconResponse, bool, error) {
+	var response *beaconhttp.BeaconResponse
+	matched := false
+	err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
+		if requestedRoot != nil && *requestedRoot != root {
+			return nil
+		}
+		matched = true
+		if a.beaconChainCfg.GetCurrentStateVersion(slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
+			return beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
+		}
+		expectedWithdrawals, err := state.GetExpectedWithdrawals(headState, state.Epoch(headState))
+		if err != nil {
+			return err
+		}
+		response = newBeaconResponse(expectedWithdrawals.Withdrawals).
+			WithFinalized(false).
+			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root))
+		return nil
+	})
+	return response, matched, err
 }
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

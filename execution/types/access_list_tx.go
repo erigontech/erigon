@@ -291,7 +291,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return fmt.Errorf("open accessTuple: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {

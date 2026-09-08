@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mdbx
+package mdbx_test
 
 import (
 	"bytes"
@@ -22,12 +22,15 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/erigontech/erigon/db/kv/mdbx"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
@@ -44,7 +47,7 @@ func clusteredKey(i int) []byte {
 
 func TestSplitBucketByCount(t *testing.T) {
 	const table, n, chunks = "T", 100_000, 16
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -91,7 +94,7 @@ func TestSplitBucketByCount(t *testing.T) {
 // the split must extract the raw cursor from either type instead of asserting one.
 func TestSplitBucketByCountDupSort(t *testing.T) {
 	const table, keys, dupsPerKey, chunks = "T", 50_000, 4, 16
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -141,7 +144,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 // positions", not propagated as an error.
 func TestSplitBucketByCountFewerPositions(t *testing.T) {
 	const table, n = "T", 200_000
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -179,7 +182,7 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 // deepness = full height + dup height, i.e. faulting the leaves this avoids.
 func TestSplitBucketByCountDupSortSkew(t *testing.T) {
 	const table, coldKeys, hotDups = "T", 1000, 200_000
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)

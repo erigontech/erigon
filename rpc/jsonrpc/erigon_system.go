@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -87,11 +88,16 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		if err != nil {
 			return 0, err
 		}
-	default:
+	case rpc.LatestExecutedBlockNumber, rpc.PendingBlockNumber:
 		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
+	default:
+		if rpcBlockNum < 0 {
+			return 0, fmt.Errorf("invalid block number %d", rpcBlockNum)
+		}
+		blockNum = uint64(rpcBlockNum)
 	}
 
 	return hexutil.Uint64(blockNum), nil

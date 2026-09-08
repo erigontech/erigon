@@ -17,6 +17,7 @@
 package raw
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,7 +37,7 @@ func TestBeaconState_SetVersion(t *testing.T) {
 func TestBeaconState_SetSlot(t *testing.T) {
 	state := GetTestState()
 	slot := uint64(12345)
-	state.SetSlot(slot)
+	require.NoError(t, state.SetSlot(slot))
 	assert.Equal(t, slot, state.slot)
 }
 
@@ -44,7 +45,7 @@ func TestBeaconState_SetBlockRootAt(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	root := common.HexToHash("0x1234567890abcdef")
-	state.SetBlockRootAt(index, root)
+	require.NoError(t, state.SetBlockRootAt(index, root))
 	assert.Equal(t, root, state.blockRoots.Get(index))
 }
 
@@ -52,7 +53,7 @@ func TestBeaconState_SetStateRootAt(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	root := common.HexToHash("0xabcdef1234567890")
-	state.SetStateRootAt(index, root)
+	require.NoError(t, state.SetStateRootAt(index, root))
 	assert.Equal(t, root, state.stateRoots.Get(index))
 }
 
@@ -60,7 +61,7 @@ func TestBeaconState_SetWithdrawalCredentialForValidatorAtIndex(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	creds := common.HexToHash("0xabcdef1234567890")
-	state.SetWithdrawalCredentialForValidatorAtIndex(index, creds)
+	require.NoError(t, state.SetWithdrawalCredentialForValidatorAtIndex(index, creds))
 	assert.Equal(t, creds, state.validators.Get(index).WithdrawalCredentials())
 }
 
@@ -68,7 +69,7 @@ func TestBeaconState_SetExitEpochForValidatorAtIndex(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	epoch := uint64(10)
-	state.SetExitEpochForValidatorAtIndex(index, epoch)
+	require.NoError(t, state.SetExitEpochForValidatorAtIndex(index, epoch))
 	assert.Equal(t, epoch, state.validators.Get(index).ExitEpoch())
 }
 
@@ -93,7 +94,7 @@ func TestBeaconState_SetEffectiveBalanceForValidatorAtIndex(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	balance := uint64(1000)
-	state.SetEffectiveBalanceForValidatorAtIndex(index, balance)
+	require.NoError(t, state.SetEffectiveBalanceForValidatorAtIndex(index, balance))
 	assert.Equal(t, balance, state.validators.Get(index).EffectiveBalance())
 }
 
@@ -101,7 +102,7 @@ func TestBeaconState_SetActivationEpochForValidatorAtIndex(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	epoch := uint64(5)
-	state.SetActivationEpochForValidatorAtIndex(index, epoch)
+	require.NoError(t, state.SetActivationEpochForValidatorAtIndex(index, epoch))
 	assert.Equal(t, epoch, state.validators.Get(index).ActivationEpoch())
 }
 
@@ -109,7 +110,7 @@ func TestBeaconState_SetActivationEligibilityEpochForValidatorAtIndex(t *testing
 	state := GetTestState()
 	index := 0
 	epoch := uint64(10)
-	state.SetActivationEligibilityEpochForValidatorAtIndex(index, epoch)
+	require.NoError(t, state.SetActivationEligibilityEpochForValidatorAtIndex(index, epoch))
 	assert.Equal(t, epoch, state.validators.Get(index).ActivationEligibilityEpoch())
 }
 
@@ -136,8 +137,8 @@ func TestBeaconState_AddEth1DataVote(t *testing.T) {
 		DepositCount: 200,
 		BlockHash:    common.HexToHash("0xabcdef1234567890"),
 	}
-	state.AddEth1DataVote(vote1)
-	state.AddEth1DataVote(vote2)
+	require.NoError(t, state.AddEth1DataVote(vote1))
+	require.NoError(t, state.AddEth1DataVote(vote2))
 	assert.Equal(t, 2, state.Eth1DataVotes().Len())
 }
 
@@ -148,7 +149,7 @@ func TestBeaconState_ResetEth1DataVotes(t *testing.T) {
 		DepositCount: 100,
 		BlockHash:    common.HexToHash("0x1234567890abcdef"),
 	}
-	state.AddEth1DataVote(vote1)
+	require.NoError(t, state.AddEth1DataVote(vote1))
 	state.ResetEth1DataVotes()
 	assert.Zero(t, state.eth1DataVotes.Len())
 }
@@ -336,7 +337,7 @@ func TestBeaconState_AddValidator(t *testing.T) {
 	state := GetTestState()
 	validator := solid.NewValidator()
 	balance := uint64(1000)
-	state.AddValidator(validator, balance)
+	require.NoError(t, state.AddValidator(validator, balance))
 	assert.Equal(t, state.balances.Length(), state.validators.Length())
 }
 
@@ -344,7 +345,7 @@ func TestBeaconState_SetRandaoMixAt(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	mix := common.HexToHash("0xabcdef1234567890")
-	state.SetRandaoMixAt(index, mix)
+	require.NoError(t, state.SetRandaoMixAt(index, mix))
 	assert.Equal(t, mix, state.randaoMixes.Get(index))
 }
 
@@ -352,7 +353,7 @@ func TestBeaconState_SetSlashingSegmentAt(t *testing.T) {
 	state := GetTestState()
 	index := 0
 	segment := uint64(100)
-	state.SetSlashingSegmentAt(index, segment)
+	require.NoError(t, state.SetSlashingSegmentAt(index, segment))
 	assert.Equal(t, segment, state.slashings.Get(index))
 }
 
@@ -370,4 +371,110 @@ func TestBeaconState_SetValidatorAtIndex(t *testing.T) {
 	validator := solid.NewValidator()
 	state.SetValidatorAtIndex(index, validator)
 	assert.Equal(t, validator, state.validators.Get(index))
+}
+
+// TestValidatorSetterLeavesLeafCleanOnHookError pins that a setter which aborts
+// on an event-hook error does not leave ValidatorsLeafIndex dirty: the state
+// would then re-hash the whole validators subtree for a write that never landed.
+func TestValidatorSetterLeavesLeafCleanOnHookError(t *testing.T) {
+	hookErr := errors.New("hook failed")
+	cases := []struct {
+		name   string
+		events Events
+		set    func(*BeaconState) error
+	}{
+		{
+			name:   "WithdrawalCredential",
+			events: Events{OnNewValidatorWithdrawalCredentials: func(int, []byte) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetWithdrawalCredentialForValidatorAtIndex(0, common.Hash{1}) },
+		},
+		{
+			name:   "ExitEpoch",
+			events: Events{OnNewValidatorExitEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetExitEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "WithdrawableEpoch",
+			events: Events{OnNewValidatorWithdrawableEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetWithdrawableEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "EffectiveBalance",
+			events: Events{OnNewValidatorEffectiveBalance: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetEffectiveBalanceForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "ActivationEpoch",
+			events: Events{OnNewValidatorActivationEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetActivationEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "ActivationEligibilityEpoch",
+			events: Events{OnNewValidatorActivationEligibilityEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetActivationEligibilityEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "Slashed",
+			events: Events{OnNewValidatorSlashed: func(int, bool) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetValidatorSlashed(0, true) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := GetTestState()
+			_, err := state.HashSSZ()
+			require.NoError(t, err)
+			require.False(t, state.isLeafDirty(ValidatorsLeafIndex))
+
+			state.SetEvents(tc.events)
+			require.ErrorIs(t, tc.set(state), hookErr)
+			assert.False(t, state.isLeafDirty(ValidatorsLeafIndex))
+		})
+	}
+}
+
+// TestBeaconState_SetSlot_HookErrorLeavesStateUnchanged pins that an
+// OnEpochBoundary failure rolls back the slot write instead of leaving b.slot
+// updated with SlotLeafIndex undirtied, which would desync the cached hash
+// from the actual slot value.
+func TestBeaconState_SetSlot_HookErrorLeavesStateUnchanged(t *testing.T) {
+	state := GetTestState()
+	_, err := state.HashSSZ()
+	require.NoError(t, err)
+	require.False(t, state.isLeafDirty(SlotLeafIndex))
+
+	oldSlot := state.slot
+	epochBoundarySlot := (oldSlot/state.beaconConfig.SlotsPerEpoch + 1) * state.beaconConfig.SlotsPerEpoch
+
+	hookErr := errors.New("hook failed")
+	state.SetEvents(Events{OnEpochBoundary: func(uint64) error { return hookErr }})
+
+	require.ErrorIs(t, state.SetSlot(epochBoundarySlot), hookErr)
+	assert.Equal(t, oldSlot, state.slot)
+	assert.False(t, state.isLeafDirty(SlotLeafIndex))
+}
+
+// TestBeaconState_ResetEpochParticipation_HookErrorLeavesStateUnchanged pins
+// that an OnResetParticipation failure leaves both participation lists as
+// they were, rather than aliasing previousEpochParticipation to
+// currentEpochParticipation without completing the reset.
+func TestBeaconState_ResetEpochParticipation_HookErrorLeavesStateUnchanged(t *testing.T) {
+	state := GetTestState()
+	_, err := state.HashSSZ()
+	require.NoError(t, err)
+	require.False(t, state.isLeafDirty(CurrentEpochParticipationLeafIndex))
+	require.False(t, state.isLeafDirty(PreviousEpochParticipationLeafIndex))
+
+	oldCurrent := state.currentEpochParticipation
+	oldPrevious := state.previousEpochParticipation
+
+	hookErr := errors.New("hook failed")
+	state.SetEvents(Events{OnResetParticipation: func(*solid.ParticipationBitList) error { return hookErr }})
+
+	require.ErrorIs(t, state.ResetEpochParticipation(), hookErr)
+	assert.Same(t, oldCurrent, state.currentEpochParticipation)
+	assert.Same(t, oldPrevious, state.previousEpochParticipation)
+	assert.False(t, state.isLeafDirty(CurrentEpochParticipationLeafIndex))
+	assert.False(t, state.isLeafDirty(PreviousEpochParticipationLeafIndex))
 }

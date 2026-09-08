@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
@@ -199,8 +199,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 // Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
-	start := b.slotToDownload.Load() - count + 1
-	if start > b.slotToDownload.Load() { // overflow check
+	start, underflow := math.SafeSub(b.slotToDownload.Load(), count-1)
+	if underflow {
 		start = 0
 	}
 
@@ -273,7 +273,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 		requestSent.Store(false)
 		return
 	}
-	if blocks == nil || len(blocks) == 0 {
+	if len(blocks) == 0 {
 		b.rpc.BanPeer(peerId)
 		requestSent.Store(false)
 		return
@@ -610,7 +610,9 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			continue
 		}
 		for i := *newSlot + 1; i < *slot; i++ {
-			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i)); err != nil {
+				return err
+			}
 		}
 	}
 

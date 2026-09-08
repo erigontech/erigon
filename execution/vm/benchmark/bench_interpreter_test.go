@@ -22,7 +22,7 @@ func BenchmarkPureArithmetic(b *testing.B) {
 			b.ReportAllocs()
 			vmenv := benchConfig(b, gas)
 			statedb := vmenv.IntraBlockState()
-			deployContract(statedb, addrContract, code)
+			deployContract(b, statedb, addrContract, code)
 			// Warmup
 			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
@@ -38,7 +38,7 @@ func BenchmarkPureArithmetic(b *testing.B) {
 		b.ReportAllocs()
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
-		deployContract(statedb, addrContract, mulCode)
+		deployContract(b, statedb, addrContract, mulCode)
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
 			callOOG(b, vmenv, addrContract)
@@ -60,7 +60,7 @@ func BenchmarkStackOps(b *testing.B) {
 		b.ReportAllocs()
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
-		deployContract(statedb, addrContract, code)
+		deployContract(b, statedb, addrContract, code)
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
 			callOOG(b, vmenv, addrContract)
@@ -80,7 +80,7 @@ func BenchmarkMemoryOps(b *testing.B) {
 		b.ReportAllocs()
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
-		deployContract(statedb, addrContract, code)
+		deployContract(b, statedb, addrContract, code)
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
 			callOOG(b, vmenv, addrContract)
@@ -104,7 +104,7 @@ func BenchmarkMemoryOps(b *testing.B) {
 		b.ReportAllocs()
 		vmenv := benchConfig(b, 10_000_000)
 		statedb := vmenv.IntraBlockState()
-		deployContract(statedb, addrContract, growCode)
+		deployContract(b, statedb, addrContract, growCode)
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
 			callOOG(b, vmenv, addrContract)
@@ -123,7 +123,7 @@ func BenchmarkKeccak256(b *testing.B) {
 			b.ReportAllocs()
 			vmenv := benchConfig(b, 100_000_000)
 			statedb := vmenv.IntraBlockState()
-			deployContract(statedb, addrContract, code)
+			deployContract(b, statedb, addrContract, code)
 			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
 				callOOG(b, vmenv, addrContract)
@@ -153,7 +153,7 @@ func BenchmarkMixedCompute(b *testing.B) {
 		b.ReportAllocs()
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
-		deployContract(statedb, addrContract, code)
+		deployContract(b, statedb, addrContract, code)
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
 			callOOG(b, vmenv, addrContract)

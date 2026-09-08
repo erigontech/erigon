@@ -343,7 +343,9 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 					allTopics := g.subscriptions.AllTopics()
 					for _, topic := range allTopics {
 						if strings.Contains(topic, oldForkDigest) {
-							g.subscriptions.Unsubscribe(topic)
+							if err := g.subscriptions.Unsubscribe(topic); err != nil {
+								log.Warn("[GossipManager] failed to unsubscribe from old topic", "topic", topic, "err", err)
+							}
 							if err := g.subscriptions.Remove(topic); err != nil {
 								log.Warn("[GossipManager] failed to remove old topic", "topic", topic, "err", err)
 							}
@@ -495,7 +497,9 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 			for _, p := range peersToBan {
 				//g.p2p.Peers().SetBanStatus(p, true)
 				host.Peerstore().RemovePeer(p)
-				host.Network().ClosePeer(p)
+				if err := host.Network().ClosePeer(p); err != nil {
+					log.Debug("[GossipManager] failed to close bandwidth-banned peer", "peer", p, "err", err)
+				}
 			}
 		}
 	}

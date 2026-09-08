@@ -180,7 +180,7 @@ func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	bodies := bodiesResponse.Data
 	blocks := make([]*types.Block, len(headers))
 	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i], nil)
 	}
 
 	response := FetcherResponse[[]*types.Block]{

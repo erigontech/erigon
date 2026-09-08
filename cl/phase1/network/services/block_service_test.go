@@ -17,7 +17,9 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,14 +30,25 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+type attesterSlashingErrorStore struct {
+	forkchoice.ForkChoiceStorage
+	err error
+}
+
+func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
+	return s.err
+}
+
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -61,7 +74,7 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
 
@@ -75,7 +88,7 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -91,7 +104,7 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -106,7 +119,7 @@ func TestBlockServiceYoungerThanParent(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -123,7 +136,7 @@ func TestBlockServiceInvalidCommitmentsPerBlock(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -143,7 +156,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -151,6 +164,35 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+}
+
+func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantLogged bool
+	}{
+		{name: "ignored", err: forkchoice.ErrIgnore},
+		{name: "rejected", err: errors.New("invalid attester slashing"), wantLogged: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := log.Root()
+			previousHandler := logger.GetHandler()
+			logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+			t.Cleanup(func() { logger.SetHandler(previousHandler) })
+
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Body.AttesterSlashings.Append(&cltypes.AttesterSlashing{})
+			service := blockService{forkchoiceStore: attesterSlashingErrorStore{err: tc.err}}
+
+			service.importBlockOperations(block)
+
+			require.Equal(t, tc.wantLogged, bytes.Contains(output.Bytes(), []byte("bad attester slashing received")))
+		})
+	}
 }
 
 // ==================== GLOAS (EIP-7732/ePBS) Tests ====================

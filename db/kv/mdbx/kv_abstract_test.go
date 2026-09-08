@@ -50,7 +50,7 @@ func TestSequence(t *testing.T) {
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		i, err := tx.ReadSequence(kv.ChaindataTables[0])
 		require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestManagedTx(t *testing.T) {
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		c, err := tx.RwCursor(bucket1) //nolint:gocritic
 		require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -203,7 +203,7 @@ func TestRemoteKvRange(t *testing.T) {
 	ctx := t.Context()
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
-		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
+		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, logger)
 		remoteproto.RegisterKVServer(grpcServer, kvServer)
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
@@ -335,15 +335,15 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 	writeDBs = []kv.TemporalRwDB{
 		temporaltest.NewTestDB(t, dirs1),
 		temporaltest.NewTestDB(t, dirs2),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
+		//mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(),
+		//mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
 
 	grpcServer := grpc.NewServer()
 	f2 := func() {
-		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}

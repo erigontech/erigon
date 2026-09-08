@@ -18,6 +18,7 @@ type Stat struct {
 	MaxTxNum         uint64
 	PruneCountTx     uint64
 	PruneCountValues uint64
+	ScanCountKeys    uint64
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
 	LastPrunedKey    []byte
@@ -58,6 +59,8 @@ const (
 	StepKeyStorageMode
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
 )
+
+const logPollEvery = 1024
 
 func HashSeekingPrune(
 	ctx context.Context,
@@ -146,13 +149,15 @@ func HashSeekingPrune(
 		}
 		stat.PruneCountValues++
 
-		select {
-		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
-			logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
-				"prunedValues", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
-		default:
+		if stat.PruneCountValues%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				txNum := binary.BigEndian.Uint64(txnm)
+				logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
+					"prunedValues", stat.PruneCountValues,
+					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
+			default:
+			}
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
@@ -325,6 +330,7 @@ func tableScanningPrune(
 	if err != nil {
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
+	var polls int
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -333,6 +339,7 @@ func tableScanningPrune(
 		if ctx.Err() != nil {
 			return bytes.Clone(val), nil
 		}
+		stat.ScanCountKeys++
 
 		// Different storage modes have different dup-iteration orders:
 		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
@@ -432,15 +439,18 @@ func tableScanningPrune(
 		}
 	nextKey:
 
-		select {
-		case <-logEvery.C:
-			args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
-			if keysCursor != nil {
-				args = append(args, "pruned tx", stat.PruneCountTx)
+		polls++
+		if polls%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				args := []any{"name", filenameBase, "scanned keys", stat.ScanCountKeys, "pruned values", stat.PruneCountValues}
+				if keysCursor != nil {
+					args = append(args, "pruned tx", stat.PruneCountTx)
+				}
+				args = append(args, "val status", stat.ValueProgress.String())
+				logger.Info("[snapshots] prune index", args...)
+			default:
 			}
-			args = append(args, "val status", stat.ValueProgress.String())
-			logger.Info("[snapshots] prune index", args...)
-		default:
 		}
 	}
 

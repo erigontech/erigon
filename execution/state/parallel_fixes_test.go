@@ -23,7 +23,6 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -48,7 +47,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	readVal := *balance // Same value
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, // value tiebreaker
+		readVal, liveBalance, eqUint256, absentUint256, recordBalance, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -69,7 +68,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	readVal := *uint256.NewInt(500)
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256,
+		readVal, liveBalance, eqUint256, absentUint256, recordBalance,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -87,14 +86,14 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 
 	// Same nonce from storage → valid
 	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42), liveNonce, eqUint64,
+		uint64(42), liveNonce, eqUint64, absentUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
 	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41), liveNonce, eqUint64,
+		uint64(41), liveNonce, eqUint64, absentUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
@@ -454,7 +453,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 
-	ibs.CreateAccount(addr, true)
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 

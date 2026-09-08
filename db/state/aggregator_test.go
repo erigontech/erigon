@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -169,12 +170,12 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -264,14 +265,14 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	defer aggTx.Close()
@@ -308,7 +309,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 
 	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 	aggTx = agg.BeginFilesRo()
 	defer aggTx.Close()
 
@@ -326,7 +327,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	// 	stepSize:                         10,
 	// 	disableCommitmentBranchTransform: false,
 	// })
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
 	require.NotNil(t, agg.d[kv.StorageDomain].checker)
@@ -338,7 +339,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	defer aggTx.Close()
@@ -368,7 +369,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		fullpath := filepath.Join(dirs.SnapDomain, file)
 		ofile, err := os.Create(fullpath)
 		require.NoError(t, err)
-		ofile.Close()
+		require.NoError(t, ofile.Close())
 	}
 
 	t.Run("v1.0 files", func(t *testing.T) {
@@ -380,13 +381,13 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.0-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -406,13 +407,13 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.1-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -432,13 +433,13 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v2.0-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -458,9 +459,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -591,7 +592,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
 	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
 	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	// Establish the "MDBX only has step 10" side of the gap.
 	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 100, []byte("k"))
@@ -599,7 +600,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	// Ask the aggregator to build up through step 11.
 	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
 	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(11*stepSize))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
 
 	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
@@ -628,7 +629,7 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
-	require.NoError(t, agg.BuildFiles(2*stepSize))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
@@ -649,7 +650,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// MergeRange, causing "failed to create commitment value transformer: file
 	// v2.0-storage.0-0.kv was not found".
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	dirs := agg.Dirs()
 
@@ -662,7 +663,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Commitment history+index: unmerged {0,1},{1,2} — history.needMerge will be true.
 	generateCommitmentHistoryAndIndexFiles(t, dirs, []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	r := aggTx.findMergeRange(2*stepSize, stepSize, 32)
@@ -753,7 +754,7 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 	check := func(t *testing.T, ver version.Version, want bool) {
 		t.Helper()
 		stepSize := uint64(10)
-		_, agg := testDbAndAggregatorv3(t, stepSize)
+		db, agg := testDbAndAggregatorv3(t, stepSize)
 		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 		dirs := agg.Dirs()
 		ranges := []testFileRange{{0, 2}}
@@ -761,7 +762,7 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 		generateStorageFile(t, dirs, ranges)
 		generateCodeFile(t, dirs, ranges)
 		generateCommitmentFile(t, dirs, ranges)
-		require.NoError(t, agg.OpenFolder())
+		require.NoError(t, agg.OpenFolder(db))
 
 		// Drive the verdict by version+range: set the version directly on the dirty FilesItem
 		// (visibleFile.Version reads it live through src), independent of the generated file name.
@@ -807,4 +808,25 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
+}
+
+// TestRunningMergesGaugeIgnoresEmptyStep pins that domain_running_merges counts merges
+// and not merge polls: mergeLoopStep still runs findMergeRange and cleanAfterMerge when
+// there is no range, and a scrape landing there used to read one merge in flight.
+// mxRunningMerges is process-global, so this test must stay non-parallel - Go suspends
+// the t.Parallel() mergers in this package while it runs.
+func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, 10)
+
+	var duringCleanup float64
+	var cleanupRan bool
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		duringCleanup = mxRunningMerges.GetValue()
+		cleanupRan = true
+	})
+
+	before := mxRunningMerges.GetValue()
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
+	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
 }

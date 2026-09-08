@@ -545,3 +545,90 @@ func TestReceiptEncode(t *testing.T) {
 		require.Equal(t, len(r1.Logs[0].Topics), len(r2.Logs[0].Topics))
 	})
 }
+
+// TestAccountAbstractionReceiptStaysUnencoded pins type 5 out of the consensus
+// receipt paths: giving it an encoding it never had moves the receipts root of
+// an RIP-7560 block. Storage is the exception, and already round-trips type 5.
+func TestAccountAbstractionReceiptStaysUnencoded(t *testing.T) {
+	t.Parallel()
+
+	r := &Receipt{
+		Type:              AccountAbstractionTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Logs: []*Log{{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead")},
+			Data:    []byte{0xff},
+		}},
+	}
+	r.Bloom = CreateBloom(Receipts{r})
+
+	_, err := r.MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP(new(bytes.Buffer)), ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP69(new(bytes.Buffer)), ErrTxTypeNotSupported)
+
+	var buf bytes.Buffer
+	Receipts{r}.EncodeIndex(0, &buf)
+	require.Empty(t, buf.Bytes())
+
+	// The empty-leaf root main derives for the same receipt.
+	require.Equal(t, common.HexToHash("0x01d05430bbe453102aa0430967e6389b1083ce3e3c04b5653034be32d99e00b6"), DeriveSha(Receipts{r}))
+
+	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
+	require.NoError(t, err)
+	unstored := new(ReceiptForStorage)
+	require.NoError(t, rlp.DecodeBytes(stored, unstored))
+	require.Equal(t, r.Type, unstored.Type)
+	require.Equal(t, r.CumulativeGasUsed, unstored.CumulativeGasUsed)
+}
+
+// TestTypedReceiptDecodersAgree pins UnmarshalBinary and DecodeRLP to the same
+// verdict on a typed envelope. They are separate implementations over the same
+// bytes, so a guard added to one and not the other is a decoder split: the same
+// receipt is accepted on one path and rejected on the other.
+func TestTypedReceiptDecodersAgree(t *testing.T) {
+	t.Parallel()
+
+	envelope := func(t *testing.T, b []byte) []byte {
+		t.Helper()
+		enveloped, err := rlp.EncodeToBytes(b)
+		require.NoError(t, err)
+		return enveloped
+	}
+
+	t.Run("a bare type byte is too short on both", func(t *testing.T) {
+		b := []byte{DynamicFeeTxType}
+		require.ErrorIs(t, new(Receipt).UnmarshalBinary(b), errShortTypedReceipt)
+		// Hand-built: EncodeToBytes collapses a single sub-0x80 byte to itself,
+		// which the stream reads as rlp.Byte and never offers to DecodeRLP.
+		require.ErrorIs(t, rlp.DecodeBytes([]byte{0x81, DynamicFeeTxType}, new(Receipt)), errShortTypedReceipt)
+	})
+
+	t.Run("an out-of-range status is rejected on both", func(t *testing.T) {
+		payload, err := rlp.EncodeToBytes(&receiptRLP{[]byte{1, 2, 3, 4, 5}, 21000, Bloom{}, nil})
+		require.NoError(t, err)
+		b := append([]byte{DynamicFeeTxType}, payload...)
+
+		require.ErrorContains(t, new(Receipt).UnmarshalBinary(b), "invalid receipt status")
+		require.ErrorContains(t, rlp.DecodeBytes(envelope(t, b), new(Receipt)), "invalid receipt status")
+	})
+
+	t.Run("a rejected type leaves the receipt untouched on both", func(t *testing.T) {
+		const unsupported = 0x7f
+		payload, err := rlp.EncodeToBytes(&receiptRLP{[]byte{1}, 21000, Bloom{}, nil})
+		require.NoError(t, err)
+		b := append([]byte{unsupported}, payload...)
+
+		for _, decode := range []func(*Receipt) error{
+			func(r *Receipt) error { return r.UnmarshalBinary(b) },
+			func(r *Receipt) error { return rlp.DecodeBytes(envelope(t, b), r) },
+		} {
+			r := &Receipt{Type: BlobTxType, CumulativeGasUsed: 7}
+			require.ErrorIs(t, decode(r), ErrTxTypeNotSupported)
+			require.Equal(t, byte(BlobTxType), r.Type, "a rejected decode must not half-overwrite the target")
+			require.Equal(t, uint64(7), r.CumulativeGasUsed)
+		}
+	})
+}

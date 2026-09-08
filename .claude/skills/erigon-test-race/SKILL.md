@@ -14,6 +14,7 @@ Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that n
 Use the dedicated EEST race shards:
 
 ```bash
+make eest-spec-transactiontests-{stable,devnet}-race
 make eest-spec-{rlptests,transactiontests,difficultytests}-legacy-race
 make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}
 make eest-spec-blocktests-devnet-race-amsterdam-{sequential,parallel}

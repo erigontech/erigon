@@ -48,8 +48,13 @@ func witnessCacheMaxBytes(mb uint) int {
 // mode, so the builder and serve paths read one source of truth for both. The
 // embedded pointer promotes Get/Contains/Len; Add is overridden here to keep the
 // resident-bytes accounting in sync.
+//
+// It also carries the push feed: a non-nil cache always has a non-nil feed, and
+// store is the only build-path insert, so every built witness is also published.
 type witnessResultCache struct {
 	*lru.Cache[common.Hash, *ExecutionWitnessResult]
+
+	feed *witnessFeed
 
 	// headCapture builds each head witness from a pinned parent snapshot instead of
 	// commitment history; cacheOnly makes a serve miss return out-of-window instead
@@ -75,6 +80,7 @@ func WitnessCacheCapacity(blocks uint) uint {
 
 func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly bool) *witnessResultCache {
 	c := &witnessResultCache{
+		feed:        newWitnessFeed(),
 		headCapture: headCapture,
 		cacheOnly:   cacheOnly,
 		maxBytes:    maxBytes,
@@ -100,6 +106,15 @@ func (c *witnessResultCache) ResidentBytes() int {
 	defer c.mu.Unlock()
 	return c.residentBytes
 }
+
+// store is the build paths' insert: it caches the pre-marshaled witness and publishes it.
+func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
+	c.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+}
+
+func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
+func (c *witnessResultCache) unsubscribe(ch chan witnessPush) { c.feed.unsubscribe(ch) }
 
 // Add stores a result keyed by hash and keeps resident-bytes accounting in sync,
 // evicting oldest entries when either the count cap or the byte cap would be exceeded.

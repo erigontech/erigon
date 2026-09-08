@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -43,6 +44,7 @@ type voluntaryExitService struct {
 	beaconCfg              *clparams.BeaconChainConfig
 	ethClock               eth_clock.EthereumClock
 	batchSignatureVerifier *BatchSignatureVerifier
+	seen                   *lru.Cache[uint64, struct{}]
 }
 
 // SignedVoluntaryExitForGossip type represents SignedVoluntaryExit with the gossip data where it's coming from.
@@ -60,6 +62,10 @@ func NewVoluntaryExitService(
 	ethClock eth_clock.EthereumClock,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) VoluntaryExitService {
+	seen, err := lru.New[uint64, struct{}]("voluntary_exit_seen", operationSeenCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	return &voluntaryExitService{
 		operationsPool:         operationsPool,
 		emitters:               emitters,
@@ -67,6 +73,7 @@ func NewVoluntaryExitService(
 		beaconCfg:              beaconCfg,
 		ethClock:               ethClock,
 		batchSignatureVerifier: batchSignatureVerifier,
+		seen:                   seen,
 	}
 }
 
@@ -90,12 +97,18 @@ func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, ver
 }
 
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedVoluntaryExitForGossip) error {
+	if msg == nil || msg.SignedVoluntaryExit == nil || msg.SignedVoluntaryExit.VoluntaryExit == nil {
+		return errors.New("invalid voluntary exit")
+	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
+	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
+		return ErrIgnore
+	}
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return nil
+		return ErrIgnore
 	}
 
 	var (
@@ -167,8 +180,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		Pks:         [][]byte{pk[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
-			s.emitters.Operation().SendVoluntaryExit(msg.SignedVoluntaryExit)
+			s.storeVerifiedExit(msg.SignedVoluntaryExit)
 		},
 	}
 
@@ -184,4 +196,12 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return nil
+}
+
+func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {
+	if seen, _ := s.seen.ContainsOrAdd(exit.VoluntaryExit.ValidatorIndex, struct{}{}); seen {
+		return
+	}
+	s.operationsPool.VoluntaryExitsPool.Insert(exit.VoluntaryExit.ValidatorIndex, exit)
+	s.emitters.Operation().SendVoluntaryExit(exit)
 }

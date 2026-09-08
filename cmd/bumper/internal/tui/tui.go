@@ -413,10 +413,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			m.edit = cCurrent
-			return m, m.beginEdit()
+			cmd := m.beginEdit()
+			return m, cmd
 		case "m":
 			m.edit = cMin
-			return m, m.beginEdit()
+			cmd := m.beginEdit()
+			return m, cmd
 		case ".":
 			m.bump(minor)
 			return m, nil

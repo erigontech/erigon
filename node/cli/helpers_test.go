@@ -25,7 +25,29 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
+
+// buildHttpCfg runs the full node flag pipeline (ApplyFlagsForNodeConfig) with
+// the given CLI args and returns the resulting embedded HTTP config.
+func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
+	t.Helper()
+
+	var result nodecfg.Config
+	app := &cli.Command{}
+	app.Flags = DefaultFlags
+	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
+		cfg := nodecfg.Config{}
+		cfg.Dirs.DataDir = t.TempDir()
+		ApplyFlagsForNodeConfig(ctx, &cfg, log.New())
+		result = cfg
+		return nil
+	}
+	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
+	return result
+}
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler
 // prints the error and help hint when called directly

@@ -83,25 +83,4 @@ func TestAdditiveTouch(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, seqRoot, parRoot, "additive partial touches must fold to the merged root")
 	})
-
-	t.Run("streaming", func(t *testing.T) {
-		keys, partials, merged := additiveCorpus()
-		seqRoot, _ := sequentialRoot(t, keys, merged)
-
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, merged))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		defer sc.Release()
-		sc.SetNumWorkers(2)
-		for i, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][0])
-			sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][1])
-		}
-
-		root, err := sc.Process(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, seqRoot, root, "streaming additive touches must fold to the merged root")
-	})
 }

@@ -5,7 +5,7 @@ set -e # Enable exit on error
 if [ -z "$1" ] || [ -z "$2" ]; then
   echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE] [TRANSPORT_TYPES]"
   echo
-  echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
+  echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis)"
   echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
   echo "  DISABLED_TESTS:        Comma-separated list of disabled tests (optional, default: empty)"
   echo "  WORKSPACE:             Workspace directory where repository checkout will happen (optional, default: /tmp)"
@@ -49,7 +49,7 @@ fi
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     if [ -n "$REFERENCE_HOST" ]; then
-        NUM_OF_RETRIES=3
+        NUM_OF_RETRIES=5
     fi
 fi
 

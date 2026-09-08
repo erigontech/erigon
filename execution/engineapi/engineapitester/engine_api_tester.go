@@ -41,11 +41,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -233,13 +235,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// happy path the http server's Shutdown closes the listener first and the
 	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
 	// assigned port directly via its config below, so no pre-bind there.
-	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen json-rpc: %w", err)
 	}
 	addCleanup(closeListenerCleanup(jsonRpcListener))
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
-	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen engine-api: %w", err)
 	}
@@ -247,6 +249,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
+	httpAPIs := []string{"eth"}
+	if args.EnableTestingAPI {
+		httpAPIs = append(httpAPIs, "testing")
+	}
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
@@ -255,7 +261,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
-		API:                      []string{"eth"},
+		API:                      httpAPIs,
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              engineApiPort,
 		AuthRpcListener:          engineApiListener,
@@ -267,7 +273,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
-
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
 	if err != nil {
@@ -349,7 +354,17 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("obtain jwt secret: %w", err)
 	}
-	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	ethBackend, err := eth.New(
+		ctx,
+		ethNode,
+		&ethConfig,
+		logger,
+		nil,
+		eth.WithStateTransitionObserver(args.StateTransitionObserver),
+		eth.WithRPCStateCacheDecorator(func(cache kvcache.Cache) kvcache.Cache {
+			return withRPCViewObserver(cache, args.StateTransitionObserver)
+		}),
+	)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
@@ -433,17 +448,19 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 }
 
 type EngineApiTesterInitArgs struct {
-	Logger                 log.Logger
-	DataDir                string
-	Genesis                *types.Genesis
-	CoinbaseKey            *ecdsa.PrivateKey
-	EthConfigTweaker       func(*ethconfig.Config)
-	MockClState            *MockClState
-	NoEmptyBlock1          bool
-	EngineApiClientTimeout *time.Duration
-	DisableTxPool          bool
-	DisableSentry          bool
-	MdbxDBSizeLimit        datasize.ByteSize
+	Logger                  log.Logger
+	DataDir                 string
+	Genesis                 *types.Genesis
+	CoinbaseKey             *ecdsa.PrivateKey
+	EthConfigTweaker        func(*ethconfig.Config)
+	MockClState             *MockClState
+	NoEmptyBlock1           bool
+	EngineApiClientTimeout  *time.Duration
+	DisableTxPool           bool
+	DisableSentry           bool
+	MdbxDBSizeLimit         datasize.ByteSize
+	StateTransitionObserver execmodule.StateTransitionObserver
+	EnableTestingAPI        bool
 }
 
 type EngineApiTester struct {

@@ -61,7 +61,7 @@ type PrivateDebugAPI interface {
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
@@ -70,6 +70,7 @@ type PrivateDebugAPI interface {
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
+	ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
 	FreeOSMemory()
 	SetGCPercent(v int) int
@@ -160,11 +161,14 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, err := api.resolveCommittedBlockNumber(ctx, tx, blockNrOrHash)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil
 		}
+		return StorageRangeResult{}, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return StorageRangeResult{}, err
 	}
 
@@ -204,7 +208,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		var err error
 		startBytes, err = hexutil.Decode(v)
 		if err != nil {
-			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %v", err)
+			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %w", err)
 		}
 
 	case []byte:
@@ -237,29 +241,20 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	}
 	defer tx.Rollback()
 
-	var blockNumber uint64
-
 	if number, ok := blockNrOrHash.Number(); ok {
-		if number == rpc.PendingBlockNumber {
+		switch number {
+		case rpc.PendingBlockNumber:
 			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
+		case rpc.LatestBlockNumber:
+			blockNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 		}
-		if number == rpc.LatestBlockNumber {
-			var err error
-
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
-			}
-		} else {
-			blockNumber = uint64(number)
-		}
-
-	} else if _, ok := blockNrOrHash.Hash(); ok {
-		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-		if err2 != nil {
-			return state.IteratorDump{}, err2
-		}
-		blockNumber = bn
+	}
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return state.IteratorDump{}, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -318,8 +313,10 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, err
 	}
 
-	// forces negative numbers to fail (too large) but allows zero
-	startNum := uint64(startNumber.Int64())
+	startNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(startNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
 	if startNum > latestBlock {
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
@@ -341,7 +338,10 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	}
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
-	endNum := uint64(endNumber.Int64()) // forces negative numbers to fail (too large)
+	endNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(*endNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
 	if endNum > latestBlock {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
@@ -524,6 +524,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
+	}
 
 	if endHash == nil {
 		// Single param: cover exactly block startNum.
@@ -579,36 +582,42 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	header, err := api.headerByHash(ctx, blockHash, tx)
+	// Committed view: the canonical-hash check and the GetAsOf reads below all
+	// go through this plain tx.
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
-		return &AccountResult{}, err
+		return nil, err
 	}
-	if header == nil {
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
+		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
+	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
+		return nil, err
+	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	ttx := tx
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], minTxNum+txIndex+1)
+	asOfTxNum := minTxNum + txIndex + 1
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -621,11 +630,11 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 	result := &AccountResult{}
-	result.Balance.ToInt().Set(a.Balance.ToBig())
+	result.Balance = hexutil.U256(a.Balance)
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -634,20 +643,25 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big    `json:"balance"`
+	Balance  hexutil.U256   `json:"balance"`
 	Nonce    hexutil.Uint64 `json:"nonce"`
 	Code     hexutil.Bytes  `json:"code"`
 	CodeHash common.Hash    `json:"codeHash"`
 }
 
-// GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
+// GetRawHeader implements debug_getRawHeader and returns an RLP-encoded header for a block number or hash.
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if api.pendingBlock() != nil {
+			return nil, nil
+		}
+	}
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -666,12 +680,17 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if api.pendingBlock() != nil {
+			return nil, nil
+		}
+	}
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -679,7 +698,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, n)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, n)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +715,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 
 // GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
 func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +729,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -722,16 +741,9 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(ctx, tx)
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
-	}
-	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
-	if err != nil {
-		return nil, err
-	}
-	if borReceipt != nil {
-		receipts = append(receipts, borReceipt)
 	}
 
 	result := make([]hexutil.Bytes, len(receipts))
@@ -785,15 +797,11 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 
 // GetRawTransaction implements debug_getRawTransaction - Returns an array of EIP-2718 binary-encoded transactions
 func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.Hash) (hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -803,24 +811,12 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-	}
-
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTx)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}

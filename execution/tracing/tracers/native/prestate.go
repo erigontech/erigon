@@ -39,8 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-//go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
-
 func init() {
 	register("prestateTracer", newPrestateTracer)
 }
@@ -48,10 +46,10 @@ func init() {
 type state = map[accounts.Address]*account
 
 type account struct {
-	Balance *big.Int `json:"balance,omitempty"`
+	Balance *hexutil.Big `json:"balance,omitempty"`
 	// Code is a pointer so omitempty can omit unchanged code (nil) while
 	// still emitting "0x" when code is cleared (e.g. EIP-7702 deauth).
-	Code     *[]byte                     `json:"code,omitempty"`
+	Code     *hexutil.Bytes              `json:"code,omitempty"`
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
@@ -62,12 +60,7 @@ type account struct {
 }
 
 func (a *account) exists() bool {
-	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
-}
-
-type accountMarshaling struct {
-	Balance *hexutil.Big
-	Code    *hexutil.Bytes
+	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && (*big.Int)(a.Balance).Sign() != 0)
 }
 
 type prestateTracer struct {
@@ -76,7 +69,6 @@ type prestateTracer struct {
 	post      state
 	create    bool
 	to        accounts.Address
-	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
@@ -230,17 +222,14 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(env.Coinbase)
 
 	// Add accounts with authorizations to the prestate before they get applied.
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
 	auths := tx.GetAuthorizations()
 	for i := range auths {
 		auth := &auths[i]
-		data.Reset()
-		addr, err := auth.RecoverSigner(data, b[:])
+		addr, err := auth.RecoverSigner()
 		if err != nil {
 			continue
 		}
-		t.lookupAccount(accounts.InternAddress(*addr))
+		t.lookupAccount(accounts.InternAddress(addr))
 	}
 
 	if t.create && t.config.DiffMode {
@@ -291,9 +280,9 @@ func (t *prestateTracer) processDiffState() {
 		newCodeHash := codeHash.Value()
 
 		newBalanceBig := newBalance.ToBig()
-		if newBalanceBig.Cmp(state.Balance) != 0 {
+		if newBalanceBig.Cmp((*big.Int)(state.Balance)) != 0 {
 			modified = true
-			postAccount.Balance = newBalanceBig
+			postAccount.Balance = (*hexutil.Big)(newBalanceBig)
 		}
 		if newNonce != state.Nonce {
 			modified = true
@@ -315,7 +304,7 @@ func (t *prestateTracer) processDiffState() {
 			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
-				postAccount.Code = &newCode
+				postAccount.Code = (*hexutil.Bytes)(&newCode)
 			}
 		}
 
@@ -388,12 +377,12 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	code, _ := t.env.IntraBlockState.GetCode(addr)
 
 	acc := &account{
-		Balance: balance.ToBig(),
+		Balance: (*hexutil.Big)(balance.ToBig()),
 		Nonce:   nonce,
 	}
 
 	if len(code) > 0 {
-		acc.Code = &code
+		acc.Code = (*hexutil.Bytes)(&code)
 		codeHash := crypto.Keccak256Hash(code)
 		acc.CodeHash = &codeHash
 	}

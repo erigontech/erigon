@@ -203,18 +203,41 @@ runs:
     - name: Install dependencies on Linux
       if: ${{ runner.os == 'Linux' }}
       shell: bash
-      # erigon only needs build-essential (gcc/make). The hosted runner image
-      # ships third-party apt repos (Google Chrome, Microsoft/azure-cli) whose
+      # erigon needs make and a C and C++ compiler: cgo builds C++ sources from
+      # go-libutp and evmone_precompiles. The hosted runner image ships third-party
+      # apt repos (Google Chrome, Microsoft/azure-cli) whose
       # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
       # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
-      # failing the whole job. Drop every source pointing at those CDNs before
-      # updating (we never install from them); the Ubuntu archive retries on blips.
-      # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
+      # failing the whole job. Drop every source pointing at those CDNs (we never
+      # install from them); the Ubuntu archive retries on blips. That runs even
+      # when the install below is skipped, so anything else in the job that
+      # reaches for apt does not trip over them.
+      #
+      # apt waits indefinitely for an unreachable mirror or for a lock held by
+      # the image's own unattended-upgrades, and -qq hides that it is waiting,
+      # so the step can consume the entire job budget in silence. Skip the
+      # install when the toolchain already builds, and bound whatever is left.
       run: |
         sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
           /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
-        sudo apt-get update -qq -o Acquire::Retries=3 \
-          && sudo apt-get install -qq -y build-essential 2>/dev/null
+        cc_bin=$(go env CC || true)
+        cxx_bin=$(go env CXX || true)
+        if command -v make >/dev/null 2>&1 &&
+           printf 'int main(void){return 0;}\n' | "$cc_bin" -x c -o /dev/null - 2>/dev/null &&
+           printf 'int main(){return 0;}\n' | "$cxx_bin" -x c++ -o /dev/null - 2>/dev/null; then
+          echo "C and C++ toolchains and make already usable; skipping apt"
+          exit 0
+        fi
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=15
+                  -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=60)
+        if ! sudo timeout --kill-after=10s 300 apt-get update -q "${apt_opts[@]}"; then
+          echo "::error::apt-get update failed or did not finish within 300s"
+          exit 1
+        fi
+        if ! sudo timeout --kill-after=10s 600 apt-get install -qq -y "${apt_opts[@]}" build-essential; then
+          echo "::error::apt-get install build-essential failed or did not finish within 600s"
+          exit 1
+        fi
 
     - name: Ensure make on Windows
       if: ${{ runner.os == 'Windows' }}

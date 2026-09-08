@@ -22,10 +22,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -43,8 +41,9 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltypes.BlobSidecar {
@@ -80,7 +79,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
@@ -96,7 +95,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, nil)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
@@ -138,10 +137,12 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
@@ -149,7 +150,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -174,11 +175,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 
@@ -204,7 +207,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -220,7 +223,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, ethClock)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
@@ -262,10 +265,12 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
@@ -273,7 +278,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -298,11 +303,13 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 

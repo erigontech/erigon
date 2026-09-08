@@ -375,7 +375,7 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		from, err := signer.SenderWithContext(cryptoContext, job.txn)
 		if err != nil {
-			job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %v",
+			job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %w",
 				rules.ErrInvalidBlock, job.txn.Hash(), err)
 		} else {
 			job.from = from

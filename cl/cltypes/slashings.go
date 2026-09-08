@@ -90,3 +90,15 @@ func (a *AttesterSlashing) EncodingSizeSSZ() int {
 func (a *AttesterSlashing) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Attestation_1, a.Attestation_2)
 }
+
+func (a *AttesterSlashing) HashSSZProgressive() ([32]byte, error) {
+	first, err := a.Attestation_1.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	second, err := a.Attestation_2.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.HashTreeRoot(first[:], second[:])
+}

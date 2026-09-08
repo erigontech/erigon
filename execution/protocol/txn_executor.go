@@ -20,7 +20,6 @@
 package protocol
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -305,7 +305,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			return upfrontTxnFees{}, &nonceError{err: ErrNonceTooHigh, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce > msgNonce {
 			return upfrontTxnFees{}, &nonceError{err: ErrNonceTooLow, from: from, txNonce: msgNonce, stateNonce: stNonce}
-		} else if stNonce+1 < stNonce {
+		} else if _, overflow := math.SafeAdd(stNonce, 1); overflow {
 			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
 		}
@@ -562,7 +562,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer func() {
 			if r := recover(); r != nil {
 				// Recover from dependency panic and retry the execution.
-				if r != state.ErrDependency {
+				if err, ok := r.(error); !ok || !errors.Is(err, state.ErrDependency) {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
@@ -864,11 +864,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
 	for i := range auths {
 		auth := &auths[i]
-		data.Reset()
 
 		// 1. chainId check
 		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(chainID) {
@@ -877,12 +874,12 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		authorityPtr, err := auth.RecoverSigner(data, b[:])
+		recovered, err := auth.RecoverSigner()
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(*authorityPtr)
+		authority := accounts.InternAddress(recovered)
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)

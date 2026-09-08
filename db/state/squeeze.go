@@ -488,7 +488,7 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx kv.FinalityContext, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
@@ -600,7 +600,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
+		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -863,7 +863,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Warn("[rebuild_commitment_history] failed to reload folder after squeeze", "err", err)
 	}
 
-	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+	if err = rwDb.BuildMissedAccessors(ctx, 4); err != nil {
 		logger.Warn("[rebuild_commitment_history] failed to build missed accessors", "err", err)
 		return nil, err
 	}
@@ -959,11 +959,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			continue
 		}
 
-		roTx, err := a.db.BeginRo(ctx)
+		roTx, err := rwDb.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
-		defer roTx.Rollback()
+		defer roTx.Rollback() //nolint:gocritic
 
 		// count keys in accounts and storage domains
 		accKeys := acRo.KeyCountInFiles(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
@@ -1020,13 +1020,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		streaming := statecfg.ExperimentalStreamingCommitment
-		parallel := statecfg.ExperimentalParallelCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
-		switch {
-		case streaming:
-			trieVariant = commitment.VariantStreamingHexPatricia
-		case parallel:
+		if statecfg.ExperimentalParallelCommitment {
 			trieVariant = commitment.VariantParallelHexPatricia
 		}
 
@@ -1051,7 +1046,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if err != nil {
 				return nil, err
 			}
-			defer rwTx.Rollback()
+			defer rwTx.Rollback() //nolint:gocritic
 
 			iterTrieCfg := rebuildTrieCfg
 			iterTrieCfg.Variant = trieVariant
@@ -1063,7 +1058,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if parallel || streaming {
+			if statecfg.ExperimentalParallelCommitment {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
@@ -1088,6 +1083,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.recalcVisibleFiles(nil)
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
+
+			for {
+				smthDone, err := a.mergeCommitmentStep(ctx, rangeToTxNum)
+				if err != nil {
+					return nil, err
+				}
+				if !smthDone {
+					break
+				}
+			}
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
 				shardStepsSize /= 2
@@ -1155,7 +1160,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		logger.Warn("[squeeze] failed to reload folder after squeeze", "err", err)
 	}
 
-	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+	if err = rwDb.BuildMissedAccessors(ctx, 4); err != nil {
 		logger.Warn("[squeeze] failed to build missed accessors", "err", err)
 		return nil, err
 	}

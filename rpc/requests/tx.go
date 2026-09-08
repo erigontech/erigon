@@ -35,7 +35,7 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 
 	method, body := reqGen.txpoolContent()
 	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
-		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
+		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %w", res.Err)
 	}
 
 	if b.Error != nil {

@@ -7,7 +7,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -25,13 +24,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 // getGloasEthClockAndConfig returns an EthereumClock and BeaconChainConfig
 // with all fork epochs set to 0, so that GLOAS is active from the start.
 func getGloasEthClockAndConfig(t *testing.T) (eth_clock.EthereumClock, *clparams.BeaconChainConfig) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	cfg := s.BeaconConfig()
@@ -159,6 +159,8 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read response chunks
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < len(expEnvelopes); i++ {
 		// Read success byte
 		firstByte := make([]byte, 1)
@@ -185,7 +187,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -314,6 +316,8 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read response chunks
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < len(expEnvelopes); i++ {
 		firstByte := make([]byte, 1)
 		_, err = stream.Read(firstByte)
@@ -335,7 +339,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])

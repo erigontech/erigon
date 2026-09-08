@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -40,11 +39,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxMessageLength = 18 * datasize.MB
+
+const reqRespFallbackTimeout = 30 * time.Second
 
 var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
@@ -138,33 +140,68 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
+	response, pid, _, err := b.SendColumnSidecarsByRootIdentifierReqWithSnapshot(ctx, req)
+	return response, pid, err
+}
+
+func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
+	ctx context.Context,
+	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
+) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
 	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, nil, err
 	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
-		return nil, "", err
+		return nil, "", filteredReq, err
 	}
+	requestedColumnCount := uint64(0)
+	filteredReq.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+		requestedColumnCount += uint64(id.Columns.Length())
+		return true
+	})
 
 	data := buffer.Bytes()
-	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), uint64(filteredReq.Len())*b.beaconConfig.NumberOfColumns)
+	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), requestedColumnCount)
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, filteredReq, err
+	}
+	if uint64(len(responsePacket)) > requestedColumnCount {
+		b.BanPeer(pid)
+		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+			return nil, pid, filteredReq, err
+		}
+		var slot uint64
+		if data.version >= clparams.GloasVersion {
+			slot = columnSidecar.Slot
+		} else {
+			if columnSidecar.SignedBlockHeader == nil || columnSidecar.SignedBlockHeader.Header == nil {
+				b.BanPeer(pid)
+				return nil, pid, filteredReq, errors.New("column sidecar is missing its signed block header")
+			}
+			slot = columnSidecar.SignedBlockHeader.Header.Slot
+		}
+		expectedForkDigest, err := b.ethClock.ComputeForkDigest(slot / b.beaconConfig.SlotsPerEpoch)
+		if err != nil {
+			return nil, pid, filteredReq, err
+		}
+		if data.forkDigest != expectedForkDigest {
+			b.BanPeer(pid)
+			return nil, pid, filteredReq, fmt.Errorf("column sidecar fork digest %x disagrees with slot %d fork digest %x", data.forkDigest, slot, expectedForkDigest)
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, nil
+	return ColumnSidecars, pid, filteredReq, nil
 }
 
 // SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
@@ -331,20 +368,24 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 }
 
 func (b *BeaconRpcP2P) BanPeer(pid string) {
-	b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid})
+	if _, err := b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
+		log.Debug("failed to ban peer", "pid", pid, "err", err)
+	}
 }
 
-// responseData is a helper struct to store the version and the raw data of the response for each data container.
+// responseData stores decoded response metadata and raw container bytes.
 type responseData struct {
-	version clparams.StateVersion
-	raw     []byte
+	version    clparams.StateVersion
+	forkDigest common.Bytes4
+	raw        []byte
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
 func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
-		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
+		snappypool.PutReader(rd)
 		errMsg := string(errBytes)
 		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
 		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
@@ -352,6 +393,8 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 	responsePacket := []responseData{}
 	r := bytes.NewReader(message.Data)
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for {
 		forkDigest := make([]byte, 4)
 		if n, err := r.Read(forkDigest); err != nil {
@@ -375,7 +418,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
+		sr.Reset(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -390,13 +433,15 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
-		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
+		responseForkDigest := utils.Uint32ToBytes4(respForkDigest)
+		version, err := b.ethClock.StateVersionByForkDigest(responseForkDigest)
 		if err != nil {
 			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
 		}
 		responsePacket = append(responsePacket, responseData{
-			version: version,
-			raw:     raw,
+			version:    version,
+			forkDigest: responseForkDigest,
+			raw:        raw,
 		})
 
 		// read next result byte
@@ -417,9 +462,10 @@ func (b *BeaconRpcP2P) sendRequest(
 	reqPayload []byte,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	ctx, cn := context.WithTimeout(ctx, time.Second*2)
-	defer cn()
-	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
+	requestCtx, cancel := boundReqRespContext(ctx)
+	defer cancel()
+
+	message, err := b.sentinel.SendRequest(requestCtx, &sentinelproto.RequestData{
 		Data:             reqPayload,
 		Topic:            topic,
 		MaxResponseBytes: maxResponseBytes,
@@ -437,9 +483,10 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	peerId string,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	ctx, cn := context.WithTimeout(ctx, time.Second*2)
-	defer cn()
-	message, err := b.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
+	requestCtx, cancel := boundReqRespContext(ctx)
+	defer cancel()
+
+	message, err := b.sentinel.SendPeerRequest(requestCtx, &sentinelproto.RequestDataWithPeer{
 		Pid:              peerId,
 		Data:             reqPayload,
 		Topic:            topic,
@@ -449,4 +496,11 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 		return nil, "", err
 	}
 	return b.parseResponseData(message)
+}
+
+func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, reqRespFallbackTimeout)
 }

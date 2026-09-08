@@ -150,28 +150,3 @@ func (c *BeaconClient) postJSON(ctx context.Context, path string, body any, vers
 	}
 	return nil
 }
-
-// postSSZ performs a POST request with an SSZ body and Eth-Consensus-Version header.
-func (c *BeaconClient) postSSZ(ctx context.Context, path string, sszBody []byte, version string) error {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(sszBody)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	if version != "" {
-		req.Header.Set("Eth-Consensus-Version", version)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("beacon POST SSZ %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("beacon POST SSZ %s: status %d: %s", path, resp.StatusCode, string(body))
-	}
-	return nil
-}
