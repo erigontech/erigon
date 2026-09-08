@@ -45,3 +45,8 @@ func TestFixedMarginStrategyHandlesLargeValuesExactly(t *testing.T) {
 	expected := new(big.Int).Mul(big.NewInt(85), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil))
 	require.Equal(t, expected, strategy.Decide(42, value))
 }
+
+func TestFixedMarginStrategyNeverRoundsMarginUp(t *testing.T) {
+	strategy := FixedMarginStrategy{Margin: 0.9999999996}
+	require.Equal(t, big.NewInt(999_999_999), strategy.Decide(1, big.NewInt(1_000_000_000)))
+}
