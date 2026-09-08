@@ -366,18 +366,25 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 				require.NoError(os.WriteFile(d.cfg.Dirs.PreverifiedPath(), nil, 0o644))
 			}
 
-			_, _, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
-			require.NoError(err)
+			require.NoError(d.testStartSingleDownloadNoWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
 
 			if initialDownloadComplete {
 				require.FileExists(path)
 				require.NoFileExists(path+".part", "local data must survive once the initial download is complete")
+				require.Contains(activeSnapshotNames(d), name, "a kept snapshot must stay registered, or it is not seeded and not in the stats")
 			} else {
 				require.NoFileExists(path, "the manifest still outranks local data")
 				require.FileExists(path + ".part")
 			}
 		})
 	}
+}
+
+func activeSnapshotNames(d *Downloader) (names []string) {
+	for _, s := range d.allActiveSnapshots() {
+		names = append(names, s.Name)
+	}
+	return
 }
 
 // logBuffer is a log sink readable while the Downloader's goroutines write to it.

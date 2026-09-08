@@ -9,6 +9,8 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type downloadBatch struct {
@@ -38,12 +40,18 @@ func (me *downloadBatch) taskWaiter() {
 	}
 }
 
-func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
+func (me *downloadBatch) addDownload(ctx context.Context, item preverifiedSnapshot) error {
 	t, first, miOpt, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
 	if err != nil {
 		return err
 	}
-	if t == nil { // local data kept
+	// A nil torrent means the local data was kept, so no download registers it and the file would
+	// be neither seeded nor visible in the stats. Not done at the keep site: deriving the metainfo
+	// hashes the whole file, and d.lock is held there.
+	if t == nil {
+		if err := me.d.AddNewSeedableFile(ctx, item.Name); err != nil {
+			me.d.log(log.LvlWarn, "seeding kept local snapshot", "name", item.Name, "err", err)
+		}
 		return nil
 	}
 	me.torrents = append(me.torrents, t)
@@ -66,7 +74,7 @@ func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSna
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}
-		err := me.addDownload(it)
+		err := me.addDownload(ctx, it)
 		if err != nil {
 			err = fmt.Errorf("downloading snapshot %s (infohash %s): %w", it.Name, it.InfoHash.HexString(), err)
 			return err
