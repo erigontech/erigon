@@ -320,8 +320,6 @@ func isSystemCall(caller accounts.Address) bool {
 // SetPrecompiles replaces the active set for state-override RPC calls. The
 // next ResetBetweenBlocks restores the chain's own set. A nil map means the
 // chain's own set; pass an empty non-nil map to disable every precompile.
-// Resolved here rather than in precompile(), which is on the call path and
-// would otherwise have to take registryMu.
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	if precompiles == nil {
 		precompiles = Precompiles(evm.chainRules)

@@ -86,6 +86,11 @@ const (
 	forkTierCount
 )
 
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
 var forkSets [forkTierCount]mergedPrecompileSet
 
 func forkTierFor(chainRules *chain.Rules) forkTier {
@@ -107,22 +112,9 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 	}
 }
 
-// activeSet resolves the fork-selected built-ins for chainRules, overlaid with
-// any provider registered for chainRules.ChainID. With no registered provider
-// it is the built-in set itself.
-func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
-	fork := forkTierFor(chainRules)
-	chainID := rulesChainID(chainRules)
-	provider, ok := lookupProvider(chainID)
-	if !ok {
-		return &forkSets[fork]
-	}
-	return mergedSetFor(chainRules, fork, chainID, provider)
-}
-
 // Precompiles returns the precompiles active under chainRules.
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
-	return activeSet(chainRules).contracts
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -264,7 +256,7 @@ func init() {
 // ActivePrecompiles returns the addresses of the precompiles enabled with the
 // current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	return activeSet(rules).addresses
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
