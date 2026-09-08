@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -360,12 +359,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 			if err != nil {
 				return false, fmt.Errorf("failed to retrieve blobs: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUriBlob, stringifiedRoot))
 			}
-			if _, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
-				if header.Signature == currentBlock.Signature {
-					return nil
-				}
-				return errors.New("mismatched block header in blob sidecar")
-			}); err != nil {
+			if err := storeRemoteBlobs(ctx, blobDB, ids, blobs, currentBlock.Signature); err != nil {
 				return false, fmt.Errorf("failed to verify and store blobs: %w", err)
 			}
 		}
