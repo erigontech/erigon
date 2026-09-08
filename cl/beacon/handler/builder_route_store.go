@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ type builderRoute struct {
 	expiresAt time.Time
 	claimID   uint64
 	trusted   bool
+	cancel    context.CancelFunc
 }
 
 type builderRouteStore struct {
@@ -76,6 +78,10 @@ func (s *builderRouteStore) Add(root common.Hash, url string) bool {
 	key := builderRouteKey{root: root, url: url}
 	if route, ok := s.routes[key]; ok {
 		if !route.trusted {
+			if route.cancel != nil {
+				route.cancel()
+			}
+			route.cancel = nil
 			route.claimID = 0
 			route.state = builderRouteIdle
 			route.trusted = true
@@ -100,7 +106,9 @@ func (s *builderRouteStore) Reserve() bool {
 	if len(s.routes)+s.reserved >= s.capacity {
 		s.evictOldestSpent()
 		if len(s.routes)+s.reserved >= s.capacity {
-			return false
+			if !s.evictOldestUntrusted() {
+				return false
+			}
 		}
 	}
 	s.reserved++
@@ -119,6 +127,10 @@ func (s *builderRouteStore) CommitReservation(root common.Hash, url string) bool
 	key := builderRouteKey{root: root, url: url}
 	if route, ok := s.routes[key]; ok {
 		if !route.trusted {
+			if route.cancel != nil {
+				route.cancel()
+			}
+			route.cancel = nil
 			route.claimID = 0
 			route.state = builderRouteIdle
 			route.trusted = true
@@ -184,6 +196,17 @@ func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) (uint64, bo
 	return route.claimID, route.trusted, true
 }
 
+func (s *builderRouteStore) BindClaimCancellation(root common.Hash, url string, claimID uint64, cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	route, ok := s.routes[builderRouteKey{root: root, url: url}]
+	if !ok || route.state != builderRouteInFlight || route.claimID != claimID {
+		return false
+	}
+	route.cancel = cancel
+	return true
+}
+
 func (s *builderRouteStore) newClaimID() uint64 {
 	s.lastClaimID++
 	if s.lastClaimID == 0 {
@@ -208,12 +231,37 @@ func (s *builderRouteStore) evictOldestSpent() bool {
 	delete(s.routes, oldestKey)
 	return true
 }
+
+func (s *builderRouteStore) evictOldestUntrusted() bool {
+	var oldestKey builderRouteKey
+	var oldestRoute *builderRoute
+	for key, route := range s.routes {
+		if !route.trusted && (oldestRoute == nil || route.expiresAt.Before(oldestRoute.expiresAt) ||
+			route.expiresAt.Equal(oldestRoute.expiresAt) && builderRouteKeyLess(key, oldestKey)) {
+			oldestKey = key
+			oldestRoute = route
+		}
+	}
+	if oldestRoute == nil {
+		return false
+	}
+	if oldestRoute.cancel != nil {
+		oldestRoute.cancel()
+	}
+	delete(s.routes, oldestKey)
+	return true
+}
+
 func (s *builderRouteStore) Complete(root common.Hash, url string, claimID uint64, spent bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	route, ok := s.routes[builderRouteKey{root: root, url: url}]
 	if !ok || route.state != builderRouteInFlight || route.claimID != claimID {
 		return
+	}
+	if route.cancel != nil {
+		route.cancel()
+		route.cancel = nil
 	}
 	if spent {
 		route.state = builderRouteSpent

@@ -76,6 +76,55 @@ func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"slot":"64"`)
 }
 
+func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
+	const slot = uint64(64)
+	slotStart := time.Unix(1_700_000_000, 0)
+	payloadDue := 9 * time.Second
+
+	tests := []struct {
+		name      string
+		received  time.Time
+		persisted bool
+		want      bool
+	}{
+		{name: "accepted before data availability", received: slotStart.Add(payloadDue - time.Millisecond), want: true},
+		{name: "persisted after deadline", received: slotStart.Add(payloadDue + time.Millisecond), persisted: true},
+		{name: "persisted at deadline", received: slotStart.Add(payloadDue), persisted: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			handler.beaconChainCfg.GloasForkEpoch = 0
+			handler.beaconChainCfg.SecondsPerSlot = 12
+			handler.beaconChainCfg.PayloadDueBps = 7500
+			root := common.HexToHash("0x1234")
+			fcu.HeadSlotVal = slot
+			fcu.HeadVal = root
+			fcu.ExecutionPayloadReceivedAt = map[common.Hash]time.Time{root: test.received}
+			if test.persisted {
+				fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{}
+			}
+
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(slot).Return(slotStart).AnyTimes()
+			handler.ethClock = clock
+
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			var response struct {
+				Data cltypes.PayloadAttestationData `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, test.want, response.Data.PayloadPresent)
+		})
+	}
+}
+
 func TestGetPayloadAttestationDataSupportsSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2

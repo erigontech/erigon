@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -19,6 +20,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+const envelopeSubmissionRetryInterval = 500 * time.Millisecond
 
 // Service is the embedded dev validator. It runs as a goroutine inside
 // Caplin, producing blocks and attestations for all configured validators.
@@ -30,7 +33,10 @@ type Service struct {
 	genesisValidatorsRoot common.Hash
 	genesisTime           uint64
 	logger                log.Logger
+	lifecycleMu           sync.Mutex
+	lifecycleCtx          context.Context
 	cancel                context.CancelFunc
+	envelopeSubmissions   sync.Map
 }
 
 // NewService creates a dev validator service.
@@ -53,7 +59,8 @@ func NewService(beaconAPIURL string, seed string, validatorCount int,
 
 // Start begins the validator duty loop. It blocks until the context is cancelled.
 func (s *Service) Start(ctx context.Context) {
-	ctx, s.cancel = context.WithCancel(ctx)
+	ctx = s.beginLifecycle(ctx)
+	defer s.Stop()
 
 	// Wait for the beacon node to be ready.
 	s.waitForReady(ctx)
@@ -80,9 +87,34 @@ func (s *Service) Start(ctx context.Context) {
 
 // Stop cancels the validator service.
 func (s *Service) Stop() {
-	if s.cancel != nil {
-		s.cancel()
+	s.lifecycleMu.Lock()
+	cancel := s.cancel
+	s.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
+}
+
+func (s *Service) beginLifecycle(parent context.Context) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	s.lifecycleMu.Lock()
+	previous := s.cancel
+	s.lifecycleCtx = ctx
+	s.cancel = cancel
+	s.lifecycleMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+	return ctx
+}
+
+func (s *Service) retryOwnerContext() context.Context {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.lifecycleCtx == nil {
+		s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
+	}
+	return s.lifecycleCtx
 }
 
 // waitForReady polls the beacon node until it responds, then fetches
@@ -358,13 +390,78 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 			"Eth-Consensus-Version":  {versionStr},
 			"Eth-Blob-Data-Included": {"false"},
 		}
-		if err := s.client.postJSONWithHeaders(ctx, "/eth/v1/beacon/execution_payload_envelopes", signedEnvelope, headers); err != nil {
-			return fmt.Errorf("submit execution payload envelope: %w", err)
-		}
+		s.submitExecutionPayloadEnvelope(ctx, slot, signedEnvelope, headers)
 	}
 
 	s.logger.Info("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
 	return nil
+}
+
+func (s *Service) submitExecutionPayloadEnvelope(
+	ctx context.Context,
+	slot uint64,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	headers http.Header,
+) {
+	root := common.Hash(envelope.Message.BeaconBlockRoot)
+	if _, loaded := s.envelopeSubmissions.LoadOrStore(root, struct{}{}); loaded {
+		return
+	}
+	deadline := s.executionPayloadEnvelopeDeadline(slot)
+	initialCtx, cancel := context.WithDeadline(ctx, deadline)
+	err := s.client.postJSONWithHeaders(initialCtx, "/eth/v1/beacon/execution_payload_envelopes", envelope, headers)
+	cancel()
+	if err == nil {
+		s.expireEnvelopeSubmission(root, deadline)
+		return
+	}
+	if !time.Now().Before(deadline) {
+		s.envelopeSubmissions.Delete(root)
+		return
+	}
+	retryOwner := s.retryOwnerContext()
+	go func() {
+		retryCtx, cancel := context.WithDeadline(retryOwner, deadline)
+		defer cancel()
+		for {
+			timer := time.NewTimer(min(envelopeSubmissionRetryInterval, time.Until(deadline)))
+			select {
+			case <-timer.C:
+			case <-retryCtx.Done():
+				timer.Stop()
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+			if retryCtx.Err() != nil {
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+			if err := s.client.postJSONWithHeaders(retryCtx, "/eth/v1/beacon/execution_payload_envelopes", envelope, headers); err == nil {
+				s.expireEnvelopeSubmission(root, deadline)
+				return
+			}
+			if retryCtx.Err() != nil {
+				s.logger.Warn("[dev-validator] failed to submit execution payload envelope", "slot", slot)
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+		}
+	}()
+}
+
+func (s *Service) executionPayloadEnvelopeDeadline(slot uint64) time.Time {
+	slotDuration := time.Duration(s.cfg.SecondsPerSlot) * time.Second
+	slotStart := time.Unix(int64(s.genesisTime), 0).Add(time.Duration(slot) * slotDuration)
+	return slotStart.Add(slotDuration * time.Duration(s.cfg.PayloadDueBps) / time.Duration(clparams.BpsFactor))
+}
+
+func (s *Service) expireEnvelopeSubmission(root common.Hash, deadline time.Time) {
+	delay := time.Until(deadline)
+	if delay <= 0 {
+		s.envelopeSubmissions.Delete(root)
+		return
+	}
+	time.AfterFunc(delay, func() { s.envelopeSubmissions.Delete(root) })
 }
 
 func (s *Service) signExecutionPayloadEnvelope(block *cltypes.BeaconBlock, data json.RawMessage, key *ValidatorKey) (*cltypes.SignedExecutionPayloadEnvelope, error) {

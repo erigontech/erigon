@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
@@ -56,6 +55,7 @@ type pendingEnvelopeKey struct {
 type pendingEnvelopeJob struct {
 	envelope   *cltypes.SignedExecutionPayloadEnvelope
 	ownedBytes uint64
+	receivedAt time.Time
 	processing atomic.Bool
 }
 
@@ -81,6 +81,7 @@ type executionPayloadService struct {
 	pending      *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
 	pendingBytes atomic.Uint64
 	pendingMu    sync.Mutex
+	now          func() time.Time
 }
 
 // NewExecutionPayloadService creates a new execution payload service
@@ -99,6 +100,7 @@ func NewExecutionPayloadService(
 		beaconCfg:          beaconCfg,
 		emitters:           emitters,
 		seenEnvelopesCache: seenEnvelopesCache,
+		now:                time.Now,
 	}
 	s.pending = s.newPendingQueue()
 	go s.pending.loop(ctx)
@@ -136,7 +138,11 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#execution_payload
 // [New in Gloas:EIP7732]
 func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	err := s.processMessage(ctx, signedEnvelope)
+	receivedAt := time.Now()
+	if s.now != nil {
+		receivedAt = s.now()
+	}
+	err := s.processMessage(ctx, signedEnvelope, receivedAt)
 	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
@@ -144,7 +150,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return err
 }
 
-func (s *executionPayloadService) processMessage(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (s *executionPayloadService) processMessage(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
@@ -174,7 +180,7 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	// [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue payload for processing once the block is retrieved.
 	if !blockKnown || block == nil {
-		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errEnvelopeBlockUnavailable, err)
 		}
@@ -202,9 +208,19 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
+	var err error
+	if store, ok := s.forkchoiceStore.(interface {
+		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
+	}); ok {
+		err = store.OnExecutionPayloadAt(ctx, signedEnvelope, true, true, receivedAt)
+	} else {
+		err = s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
+	}
+	if err != nil {
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			s.emitExecutionPayloadGossip(block, envelope)
+			s.seenEnvelopesCache.Add(seenKey, struct{}{})
+			return nil
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
@@ -214,18 +230,6 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
 	s.emitExecutionPayloadGossip(block, envelope)
-	s.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
-		Slot: block.Block.Slot, BuilderIndex: builderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: beaconBlockRoot,
-		ExecutionOptimistic: s.forkchoiceStore.IsRootOptimistic(beaconBlockRoot),
-	})
-	s.emitFullHeadUpdate(block, beaconBlockRoot)
-
-	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
-	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot:      block.Block.Slot,
-		BlockRoot: beaconBlockRoot,
-	})
-
 	log.Trace("Processed execution payload via gossip",
 		"slot", block.Block.Slot,
 		"beaconBlockRoot", beaconBlockRoot,
@@ -259,40 +263,7 @@ func (s *executionPayloadService) emitExecutionPayloadGossip(block *cltypes.Sign
 	})
 }
 
-func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
-	headRoot, headSlot, err := s.forkchoiceStore.GetHead(nil)
-	if err != nil || headRoot != blockRoot || s.beaconCfg.SlotsPerEpoch == 0 {
-		return
-	}
-	var headEvent *beaconevents.HeadV2Data
-	err = s.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
-		headEvent, err = beaconevents.BuildHeadV2Data(
-			s.beaconCfg,
-			headState,
-			headSlot,
-			headRoot,
-			block.Block.StateRoot,
-			"full",
-			s.forkchoiceStore.IsRootOptimistic(blockRoot),
-		)
-		return err
-	})
-	if err != nil || headEvent == nil {
-		return
-	}
-	s.emitters.WithHeadEventLock(func() {
-		currentHeadRoot, currentHeadSlot, err := s.forkchoiceStore.GetHead(nil)
-		currentPayloadStatus := beaconevents.PayloadStatusName(s.forkchoiceStore.GetHeadPayloadStatus())
-		currentOptimistic := s.forkchoiceStore.IsRootOptimistic(currentHeadRoot)
-		if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot ||
-			currentPayloadStatus != headEvent.Data.PayloadStatus || currentOptimistic != headEvent.Data.ExecutionOptimistic {
-			return
-		}
-		s.emitters.State().SendHeadV2(headEvent)
-	})
-}
-
-func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) (bool, error) {
 	envelopeHash, err := envelope.HashSSZ()
 	if err != nil {
 		return false, fmt.Errorf("failed to hash envelope for pending queue: %w", err)
@@ -321,7 +292,7 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 		return false, errors.New("pending execution payload envelope capacity reached")
 	}
 	s.pendingBytes.Store(currentBytes + ownedBytes64)
-	s.pending.storeReserved(key, &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes64})
+	s.pending.storeReserved(key, &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes64, receivedAt: receivedAt})
 	return true, nil
 }
 
@@ -342,7 +313,7 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
 		return nil, false
 	}
-	err := s.processMessage(ctx, job.envelope)
+	err := s.processMessage(ctx, job.envelope, job.receivedAt)
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
 		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&

@@ -640,6 +640,12 @@ func TestBlockServiceGossipAcceptsVerifiedFullParentPayload(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
+func TestBlockServiceGossipAcceptsOptimisticFullParentPayload(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusNotValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
 func TestBlockServiceGossipFirstValidReservationIsAtomic(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated

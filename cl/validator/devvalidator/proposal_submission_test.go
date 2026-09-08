@@ -19,9 +19,12 @@ package devvalidator
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,9 +86,96 @@ func TestGloasProposalPublishesBlockThenSignedEnvelope(t *testing.T) {
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	service := &Service{client: NewBeaconClient(server.URL), cfg: cfg, genesisValidatorsRoot: genesisRoot, logger: log.New()}
+	genesisTime := uint64(time.Now().Unix()) - slot*cfg.SecondsPerSlot
+	service := &Service{client: NewBeaconClient(server.URL), cfg: cfg, genesisTime: genesisTime, genesisValidatorsRoot: genesisRoot, logger: log.New()}
 	require.NoError(t, service.proposeBlock(context.Background(), slot, key))
 	require.Equal(t, []string{"block", "envelope"}, submitted)
+}
+
+func TestGloasProposalRetriesSameEnvelopeWithoutRepublishingBlock(t *testing.T) {
+	cfg, key, block, envelope := proposalFixture(t, clparams.GloasVersion)
+	var blockPosts atomic.Int32
+	var envelopePosts atomic.Int32
+	envelopeBodies := make(chan []byte, 2)
+	firstEnvelopeStarted := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+	})
+	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {
+		blockPosts.Add(1)
+	})
+	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		envelopeBodies <- body
+		if envelopePosts.Add(1) == 1 {
+			close(firstEnvelopeStarted)
+			<-r.Context().Done()
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	service := &Service{
+		client:                NewBeaconClient(server.URL),
+		cfg:                   cfg,
+		genesisTime:           uint64(time.Now().Unix()) - block.Slot*cfg.SecondsPerSlot,
+		genesisValidatorsRoot: common.Hash{3},
+		logger:                log.New(),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	proposalDone := make(chan error, 1)
+	go func() { proposalDone <- service.proposeBlock(ctx, block.Slot, key) }()
+	<-firstEnvelopeStarted
+	cancel()
+	require.NoError(t, <-proposalDone)
+	var bodies [][]byte
+	for range 2 {
+		select {
+		case body := <-envelopeBodies:
+			bodies = append(bodies, body)
+		case <-time.After(time.Second):
+			t.Fatal("signed envelope retry did not complete")
+		}
+	}
+	require.Equal(t, int32(1), blockPosts.Load())
+	require.Equal(t, int32(2), envelopePosts.Load())
+	require.Equal(t, bodies[0], bodies[1])
+}
+
+func TestGloasProposalStopsEnvelopeRetryWithService(t *testing.T) {
+	cfg, key, block, envelope := proposalFixture(t, clparams.GloasVersion)
+	var envelopePosts atomic.Int32
+	firstEnvelopeDone := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+	})
+	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, _ *http.Request) {
+		if envelopePosts.Add(1) == 1 {
+			close(firstEnvelopeDone)
+		}
+		http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	_, serviceCancel := context.WithCancel(t.Context())
+	service := &Service{
+		client:                NewBeaconClient(server.URL),
+		cfg:                   cfg,
+		genesisTime:           uint64(time.Now().Unix()) - block.Slot*cfg.SecondsPerSlot,
+		genesisValidatorsRoot: common.Hash{3},
+		logger:                log.New(),
+		cancel:                serviceCancel,
+	}
+
+	require.NoError(t, service.proposeBlock(t.Context(), block.Slot, key))
+	<-firstEnvelopeDone
+	service.Stop()
+	time.Sleep(envelopeSubmissionRetryInterval + 150*time.Millisecond)
+	require.Equal(t, int32(1), envelopePosts.Load())
 }
 
 func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
@@ -174,7 +264,7 @@ func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
 }
 
 func TestProposalSubmissionPreservesForkAndErrorBoundaries(t *testing.T) {
-	for _, name := range []string{"fulu", "external builder", "block failure", "envelope failure then retry"} {
+	for _, name := range []string{"fulu", "external builder", "block failure"} {
 		t.Run(name, func(t *testing.T) {
 			version := clparams.GloasVersion
 			if name == "fulu" {
@@ -230,18 +320,12 @@ func TestProposalSubmissionPreservesForkAndErrorBoundaries(t *testing.T) {
 			defer server.Close()
 			service := &Service{client: NewBeaconClient(server.URL), cfg: cfg, logger: log.New()}
 			err := service.proposeBlock(context.Background(), 1, key)
-			if name == "block failure" || name == "envelope failure then retry" {
+			if name == "block failure" {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 			}
-			if name == "envelope failure then retry" {
-				require.Equal(t, []string{"template", "block", "envelope"}, requests)
-				require.NoError(t, service.proposeBlock(context.Background(), 1, key))
-				require.Equal(t, []string{"template", "block", "envelope", "template", "block", "envelope"}, requests)
-			} else {
-				require.Equal(t, []string{"template", "block"}, requests)
-			}
+			require.Equal(t, []string{"template", "block"}, requests)
 		})
 	}
 }

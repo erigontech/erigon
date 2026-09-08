@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	statelru "github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
@@ -205,11 +207,16 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu        sync.Mutex
-	pendingELPayloads          []PendingELPayload
-	payloadValidationOnce      sync.Once
-	payloadValidationAdmission chan struct{}
-	envelopeIndexWrites        sync.Map
+	pendingELPayloadsMu         sync.Mutex
+	pendingELPayloads           []PendingELPayload
+	payloadValidationOnce       sync.Once
+	payloadValidationAdmission  chan struct{}
+	envelopeIndexWrites         sync.Map
+	executionPayloadFirstSeenMu sync.Mutex
+	executionPayloadFirstSeen   map[common.Hash]executionPayloadArrival
+	pendingEnvelopeArrivalOnce  sync.Once
+	pendingEnvelopeArrivalMu    sync.Mutex
+	pendingEnvelopeArrival      *statelru.Cache[pendingEnvelopeArrivalKey, time.Time]
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -221,6 +228,16 @@ type envelopeIndexWrite struct {
 	done     chan struct{}
 	err      error
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+type pendingEnvelopeArrivalKey struct {
+	root     common.Hash
+	envelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+type executionPayloadArrival struct {
+	receivedAt time.Time
+	slot       uint64
 }
 
 // PendingELPayload holds a block+envelope pair that needs to be fed to the EL.

@@ -562,7 +562,7 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		parentIsFull = hasParentBid && gloasBid.ParentBlockHash == parentBidBlockHash
 		if parentIsFull {
 			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
-			if !seen || status != execution_client.PayloadStatusValidated {
+			if !seen || (status != execution_client.PayloadStatusValidated && status != execution_client.PayloadStatusNotValidated) {
 				if schedule != nil {
 					schedule()
 				}

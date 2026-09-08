@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 
@@ -80,10 +81,12 @@ type ForkChoiceStorageMock struct {
 	Headers                             map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                              map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                           map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	ExecutionPayloadReceivedAt          map[common.Hash]time.Time
 	VerifiedPayloads                    map[common.Hash]bool
 	OnBlockErr                          error
 	OnExecutionPayloadErr               error
 	OnExecutionPayloadFn                func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+	OnExecutionPayloadAtFn              func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	ValidateBlockForPublishingFn        func(*cltypes.SignedBeaconBlock, bool) error
 	OnTickFn                            func(uint64)
 	ValidateExecutionPayloadEnvelopeErr error
@@ -226,6 +229,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Headers:                     make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		Blocks:                      make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		ExecutionPayloadReceivedAt:  make(map[common.Hash]time.Time),
 		GetBeaconCommitteeMock:      nil,
 		Eth1Hashes:                  make(map[common.Hash]common.Hash),
 		ShouldExtendPayloadVal:      true,
@@ -426,6 +430,13 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	return f.OnExecutionPayloadErr
 }
 
+func (f *ForkChoiceStorageMock) OnExecutionPayloadAt(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, receivedAt time.Time) error {
+	if f.OnExecutionPayloadAtFn != nil {
+		return f.OnExecutionPayloadAtFn(ctx, signedEnvelope, checkBlobData, validatePayload, receivedAt)
+	}
+	return f.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, validatePayload)
+}
+
 func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	return f.ValidateExecutionPayloadEnvelopeErr
 }
@@ -538,6 +549,11 @@ func (f *ForkChoiceStorageMock) GetBlock(
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 	_, ok := f.Envelopes[blockRoot]
 	return ok
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
+	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
+	return ok && receivedAt.Before(deadline)
 }
 
 func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {

@@ -90,7 +90,10 @@ const (
 	caplinClientName = "caplin"
 )
 
-const minPayloadPollingWindow = 100 * time.Millisecond
+const (
+	minPayloadPollingWindow     = 100 * time.Millisecond
+	builderHandoffRetryInterval = 500 * time.Millisecond
+)
 
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
@@ -2096,9 +2099,11 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	waitForIntegration := apiVersion == 2
-	if err := a.broadcastBlockWithIntegrationWait(ctx, block.SignedBlock, validation, waitForIntegration); err != nil {
+	forwardToBuilder := func() {
+		a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
+	}
+	if err := a.broadcastBlockWithIntegrationWaitAndPublication(ctx, block.SignedBlock, validation, waitForIntegration, forwardToBuilder); err != nil {
 		if errors.Is(err, errPublishedBlockAccepted) {
-			a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
 			return beaconhttp.NewAcceptedResponse(), nil
 		}
 		if errors.Is(err, errPublishedBlockValidation) {
@@ -2106,7 +2111,6 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
 	return newBeaconResponse(nil), nil
 }
 
@@ -2118,21 +2122,43 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 	if err != nil {
 		return
 	}
+	deadline := a.builderHandoffDeadline(block.Block.Slot)
+	if !time.Now().Before(deadline) {
+		return
+	}
 	claimID, trustedRoute, claimed := a.builderRoutes.ClaimOrAdd(root, builderURL)
 	if !claimed {
 		return
 	}
+	handoffCtx, cancel := context.WithDeadline(context.Background(), deadline)
+	if !a.builderRoutes.BindClaimCancellation(root, builderURL, claimID, cancel) {
+		cancel()
+		return
+	}
 	go func() {
 		var err error
-		for range 2 {
+		for time.Now().Before(deadline) {
 			if trustedRoute {
-				err = a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
+				err = a.builderClient.SubmitSignedBeaconBlock(handoffCtx, builderURL, block)
 			} else {
-				err = a.builderClient.SubmitSignedBeaconBlockPublic(context.Background(), builderURL, block)
+				err = a.builderClient.SubmitSignedBeaconBlockPublic(handoffCtx, builderURL, block)
 			}
 			if err == nil {
 				a.builderRoutes.Complete(root, builderURL, claimID, true)
 				return
+			}
+			if handoffCtx.Err() != nil {
+				break
+			}
+			retryDelay := min(builderHandoffRetryInterval, time.Until(deadline))
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-timer.C:
+			case <-handoffCtx.Done():
+				timer.Stop()
+			}
+			if handoffCtx.Err() != nil {
+				break
 			}
 		}
 		if trustedRoute {
@@ -2142,6 +2168,15 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 		}
 		a.logger.Warn("Failed to forward signed block to builder", "err", err)
 	}()
+}
+
+func (a *ApiHandler) builderHandoffDeadline(slot uint64) time.Time {
+	if a.ethClock == nil || a.beaconChainCfg == nil || a.beaconChainCfg.SecondsPerSlot == 0 {
+		return time.Now()
+	}
+	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
+	payloadDue := slotDuration * time.Duration(a.beaconChainCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	return a.ethClock.GetSlotTime(slot).Add(payloadDue)
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -2462,6 +2497,16 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 }
 
 func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
+	return a.broadcastBlockWithIntegrationWaitAndPublication(ctx, blk, validation, waitForIntegration, nil)
+}
+
+func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
+	ctx context.Context,
+	blk *cltypes.SignedBeaconBlock,
+	validation BlockPublishingValidation,
+	waitForIntegration bool,
+	onBlockPublished func(),
+) error {
 	if a.blockService == nil {
 		return errors.New("block integration service unavailable")
 	}
@@ -2618,6 +2663,9 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk 
 	// Broadcast the block and its blobs
 	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		return err
+	}
+	if onBlockPublished != nil {
+		onBlockPublished()
 	}
 	if validation == BlockPublishingValidationGossip {
 		a.blockService.CommitGossipReservation(blk)

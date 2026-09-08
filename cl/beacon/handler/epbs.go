@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -223,8 +224,9 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 		return beaconhttp.NewNoContentResponse(), nil
 	}
 
-	// Check payload status: has the execution payload envelope been received?
-	payloadPresent := a.forkchoiceStore.HasEnvelope(headRoot)
+	payloadDueMs := a.beaconChainCfg.SecondsPerSlot * a.beaconChainCfg.PayloadDueBps / (clparams.BpsFactor / 1000)
+	payloadDeadline := a.ethClock.GetSlotTime(slot).Add(time.Duration(payloadDueMs) * time.Millisecond)
+	payloadPresent := a.forkchoiceStore.ExecutionPayloadReceivedBefore(headRoot, payloadDeadline)
 
 	// Check blob data availability independently via PeerDAS.
 	// blob_data_available is true when the envelope exists AND either:
@@ -966,7 +968,13 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			})
 		}
 	}
-	if emitIntegrationEvents && a.emitters != nil {
+	storeEmitsIntegrationEvents := false
+	if owner, ok := a.forkchoiceStore.(interface {
+		EmitsExecutionPayloadIntegrationEvents() bool
+	}); ok {
+		storeEmitsIntegrationEvents = owner.EmitsExecutionPayloadIntegrationEvents()
+	}
+	if emitIntegrationEvents && !storeEmitsIntegrationEvents && a.emitters != nil {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if ok && block != nil && block.Block != nil && signedEnvelope.Message.Payload != nil {
 			a.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
@@ -980,7 +988,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.emitFullHeadV2(block, signedEnvelope.Message.BeaconBlockRoot)
 		}
 	}
-
 	if gossipValidated && (canonical || a.sentinel != nil) {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {

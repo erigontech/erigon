@@ -560,8 +560,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	f.mu.Unlock()
 
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
+	var envelopeApplied bool
 	if pendingEnvelopeFound {
-		appliedEnvelope = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
+		appliedEnvelope, envelopeApplied = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
 	}
 	f.mu.Lock()
 	blockData := &beaconevents.BlockData{
@@ -576,7 +577,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Write execution payload envelope indices outside f.mu to avoid deadlock
 	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	if appliedEnvelope != nil {
-		f.writePendingEnvelopeIndices(ctx, common.Hash(blockRoot), pendingEnvelope, appliedEnvelope, pendingEnvelopeLocal)
+		f.writePendingEnvelopeIndices(ctx, common.Hash(blockRoot), pendingEnvelope, appliedEnvelope, pendingEnvelopeLocal, envelopeApplied)
 	}
 
 	return nil
@@ -597,21 +598,21 @@ func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, 
 	if !found {
 		return
 	}
-	appliedEnvelope := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
+	appliedEnvelope, envelopeApplied := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
 	if appliedEnvelope != nil {
-		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local)
+		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local, envelopeApplied)
 	}
 }
 
-func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, appliedEnvelope *cltypes.ExecutionPayloadEnvelope, local bool) {
-	if f.db == nil {
-		return
-	}
+func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, appliedEnvelope *cltypes.ExecutionPayloadEnvelope, local, envelopeApplied bool) {
 	if pending == nil || pending.Message != appliedEnvelope {
 		pending = &cltypes.SignedExecutionPayloadEnvelope{Message: appliedEnvelope}
 	}
-	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, blockRoot, pending, true)
+	indexEnvelope, notify, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, blockRoot, pending, envelopeApplied)
 	if err == nil {
+		if notify {
+			f.emitExecutionPayloadIntegrationEvents(blockRoot, indexEnvelope)
+		}
 		return
 	}
 	if local {
@@ -654,7 +655,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 	}
 }
 
-func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) *cltypes.ExecutionPayloadEnvelope {
+func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
 	if pending == nil {
 		if !f.forkGraph.HasEnvelope(blockRoot) {
 			if local {
@@ -664,11 +665,11 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 			} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == nil {
 				f.pendingEnvelopes.Remove(blockRoot)
 			}
-			return nil
+			return nil, false
 		}
 		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil || persisted == nil || persisted.Message == nil {
-			return nil
+			return nil, false
 		}
 		if local {
 			if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == nil {
@@ -677,18 +678,22 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == nil {
 			f.pendingEnvelopes.Remove(blockRoot)
 		}
-		return persisted.Message
+		return persisted.Message, false
 	}
 	var applied bool
 	var err error
 	if local {
 		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending, retryQueuedEnvelope)
 	} else {
-		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, retryQueuedEnvelope)
+		receivedAt := f.pendingEnvelopeReceivedAt(pending, time.Now())
+		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, retryQueuedEnvelope, receivedAt)
 	}
 	if err != nil {
 		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 		if !f.retryPendingEnvelopeError(err, pending) {
+			if !local {
+				f.forgetPendingEnvelopeArrival(pending)
+			}
 			if local {
 				if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
 					f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
@@ -697,17 +702,17 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 				f.pendingEnvelopes.Remove(blockRoot)
 			}
 		}
-		return nil
+		return nil, false
 	}
 	completedByAnother := !applied && f.forkGraph.HasEnvelope(blockRoot)
 	if !applied && !completedByAnother {
-		return nil
+		return nil, false
 	}
 	completedSameEnvelope := applied
 	if completedByAnother {
 		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
-			return nil
+			return nil, false
 		}
 		if persisted != nil && persisted.Message != nil {
 			persistedRoot, persistedErr := persisted.Message.HashSSZ()
@@ -723,9 +728,12 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		f.pendingEnvelopes.Remove(blockRoot)
 	}
 	if !completedSameEnvelope {
-		return nil
+		return nil, false
 	}
-	return pending.Message
+	if !local {
+		f.forgetPendingEnvelopeArrival(pending)
+	}
+	return pending.Message, applied
 }
 
 func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.SignedExecutionPayloadEnvelope) bool {
