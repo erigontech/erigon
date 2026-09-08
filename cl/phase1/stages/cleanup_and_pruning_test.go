@@ -17,6 +17,7 @@
 package stages
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,5 +85,46 @@ func TestSpecColumnKeepSlotsNeverCutsAboveTheEpochBoundary(t *testing.T) {
 		required := (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
 		require.LessOrEqual(t, head-keep, required,
 			"head %d cuts above the first slot the node must still serve", head)
+	}
+}
+
+// Both inputs arrive as plain uint64 from --caplin.custom-config, so the derived distance must
+// not wrap. A distance of zero is the dangerous outcome: it makes Prune delete every bucket
+// below the head and advertise nothing as available, so anything unrepresentable has to
+// saturate towards retaining instead.
+func TestSpecColumnKeepSlotsSaturatesInsteadOfWrapping(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		minEpochs     uint64
+		slotsPerEpoch uint64
+	}{
+		{name: "epoch count at the limit", minEpochs: math.MaxUint64, slotsPerEpoch: 32},
+		{name: "product overflows", minEpochs: math.MaxUint64 / 32, slotsPerEpoch: 32},
+		{name: "no slots per epoch", minEpochs: 4096, slotsPerEpoch: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.MinEpochsForDataColumnSidecarsRequests = test.minEpochs
+			beaconCfg.SlotsPerEpoch = test.slotsPerEpoch
+
+			require.Equal(t, uint64(math.MaxUint64), specColumnKeepSlots(&beaconCfg),
+				"an unrepresentable window must retain everything, never prune everything")
+		})
+	}
+}
+
+// The distance reaches PeerDas.Prune directly, where zero means "keep nothing", so no config
+// may produce it.
+func TestSpecColumnKeepSlotsIsNeverZero(t *testing.T) {
+	for _, minEpochs := range []uint64{0, 1, 4096, math.MaxUint64 - 1, math.MaxUint64} {
+		for _, slotsPerEpoch := range []uint64{0, 1, 12, 16, 32, math.MaxUint64} {
+			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.MinEpochsForDataColumnSidecarsRequests = minEpochs
+			beaconCfg.SlotsPerEpoch = slotsPerEpoch
+
+			require.NotZero(t, specColumnKeepSlots(&beaconCfg),
+				"MIN_EPOCHS=%d SLOTS_PER_EPOCH=%d resolved to a destructive zero distance",
+				minEpochs, slotsPerEpoch)
+		}
 	}
 }

@@ -520,7 +520,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
-  * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
+  * Default: `0` — uses the chain's spec window plus one epoch of alignment margin, `(MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS + 1) × SLOTS_PER_EPOCH` (131104 slots on Ethereum mainnet)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.snapgen`: Enables snapshot generation.
