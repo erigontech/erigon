@@ -293,18 +293,6 @@ const swarPad = 8 // tail slack in wideByte so the last word load stays in bound
 // predictable iterations instead of one data-dependent branch per label.
 // labels carries eight bytes of tail padding to keep the last word in bounds;
 // a hit in that padding, or in the next state's labels, lands at k >= hi.
-// wmul, wadd and wsub are this package's deliberately modular arithmetic. The
-// wraparound is load-bearing, so it is expressed here once rather than at each
-// use — the same operations Rust spells wrapping_mul/wrapping_add/wrapping_sub.
-// Package-level -overflowdetect exemption does not cover these, because they
-// are inlined into instrumented callers.
-
-// overflow_false_positive
-func wmul(a, b uint64) uint64 { return a * b }
-
-// overflow_false_positive
-func wsub(a, b uint64) uint64 { return a - b }
-
 func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	pat := bitutil.Broadcast(b)
 	for i := lo; i < hi; i += 8 {
