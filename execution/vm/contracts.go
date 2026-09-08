@@ -591,24 +591,31 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 }
 
 // modexpBigIntFaster reports whether math/big beats evmone for these operand
-// widths. math/big only takes its windowed Montgomery path once the exponent
-// exceeds one word, so the modulus width at which it overtakes evmone differs
-// sharply either side of that. Both widths are per-target: math/big's inner loop
-// is hand-written assembly, so where it wins depends on the target's assembly.
+// widths. math/big takes its windowed Montgomery path only once the exponent
+// exceeds one word, and the window only repays its table once the exponent is
+// long, so the modulus width at which math/big overtakes evmone is not monotonic
+// in the exponent: it is lowest for a sub-word exponent, highest for one just
+// above a word, and drops again once the exponent is wide. Hence three bands
+// rather than a boolean. The widths are per-target: math/big's inner loop is
+// hand-written assembly, so where it wins depends on the target's assembly.
 //
 // Both operands are measured on their significant bytes: neither backend works
 // on a leading zero, so a narrow value in a wide field costs what its own width
 // costs, and classifying it by the declared field would route it as if wide.
 func modexpBigIntFaster(exp, mod []byte) bool {
 	const wordBytes = bits.UintSize / 8 // a math/big Word, so the bound tracks the platform
+	const wideExpBytes = 32
 	modLen := uint64(len(bytes.TrimLeft(mod, "\x00")))
-	if modLen < min(modexpBigIntMinModLenWideExp, modexpBigIntMinModLenNarrowExp) {
-		return false // below both bounds, so skip the scan of a up-to-1KB exponent
+	if modLen < min(modexpBigIntMinModLenNarrowExp, modexpBigIntMinModLenMidExp, modexpBigIntMinModLenWideExp) {
+		return false // below every bound, so skip the scan of an up-to-1KB exponent
 	}
-	if len(exp) > wordBytes && bitutil.TestBytes(exp[:len(exp)-wordBytes]) {
-		return modLen >= modexpBigIntMinModLenWideExp
+	if len(exp) <= wordBytes || !bitutil.TestBytes(exp[:len(exp)-wordBytes]) {
+		return modLen >= modexpBigIntMinModLenNarrowExp
 	}
-	return modLen >= modexpBigIntMinModLenNarrowExp
+	if len(exp) <= wideExpBytes || !bitutil.TestBytes(exp[:len(exp)-wideExpBytes]) {
+		return modLen >= modexpBigIntMinModLenMidExp
+	}
+	return modLen >= modexpBigIntMinModLenWideExp
 }
 
 // modexpU256Applicable reports whether modexpU256 may be used for these operands,

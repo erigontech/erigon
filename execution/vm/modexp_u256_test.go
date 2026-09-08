@@ -177,8 +177,8 @@ func packModexpInput(base, exp, mod []byte) []byte {
 // exponent, so the modulus width at which it overtakes evmone differs sharply
 // either side of that; the widths themselves are a per-target measurement.
 func TestModexpBigIntFaster(t *testing.T) {
-	if modexpBigIntMinModLenWideExp <= 32 || modexpBigIntMinModLenNarrowExp <= 32 {
-		t.Fatal("both bounds must stay above 32 bytes, or math/big shadows the uint256 route")
+	if min(modexpBigIntMinModLenNarrowExp, modexpBigIntMinModLenMidExp, modexpBigIntMinModLenWideExp) <= 32 {
+		t.Fatal("every bound must stay above 32 bytes, or math/big shadows the uint256 route")
 	}
 	exp := func(n int) []byte {
 		b := make([]byte, n)
@@ -191,25 +191,26 @@ func TestModexpBigIntFaster(t *testing.T) {
 		return b
 	}
 	cases := []struct {
-		name string
-		exp  []byte
-		wide bool
+		name  string
+		exp   []byte
+		bound uint64
 	}{
-		{"empty exponent", nil, false},
-		{"one-byte exponent", exp(1), false},
-		{"65537", []byte{0x01, 0x00, 0x01}, false},
-		{"one-word exponent", exp(8), false},
-		{"one word in a padded field", padded(9), false},
-		{"one word in a 1024-byte field", padded(1024), false},
-		{"exponent just over one word", exp(9), true},
-		{"two-word exponent", exp(16), true},
-		{"full-length exponent", exp(1024), true},
+		{"empty exponent", nil, modexpBigIntMinModLenNarrowExp},
+		{"one-byte exponent", exp(1), modexpBigIntMinModLenNarrowExp},
+		{"65537", []byte{0x01, 0x00, 0x01}, modexpBigIntMinModLenNarrowExp},
+		{"one-word exponent", exp(8), modexpBigIntMinModLenNarrowExp},
+		{"one word in a padded field", padded(9), modexpBigIntMinModLenNarrowExp},
+		{"one word in a 1024-byte field", padded(1024), modexpBigIntMinModLenNarrowExp},
+		// math/big turns on its window here but barely uses it, and evmone stays
+		// ahead far longer than either neighbouring band.
+		{"exponent just over one word", exp(9), modexpBigIntMinModLenMidExp},
+		{"two-word exponent", exp(16), modexpBigIntMinModLenMidExp},
+		{"exponent at the wide boundary", exp(32), modexpBigIntMinModLenMidExp},
+		{"exponent just over the wide boundary", exp(33), modexpBigIntMinModLenWideExp},
+		{"full-length exponent", exp(1024), modexpBigIntMinModLenWideExp},
 	}
 	for _, c := range cases {
-		bound := uint64(modexpBigIntMinModLenNarrowExp)
-		if c.wide {
-			bound = modexpBigIntMinModLenWideExp
-		}
+		bound := c.bound
 		for _, modLen := range []uint64{1, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 192, 256, 1024} {
 			want := modLen >= bound
 			if got := modexpBigIntFaster(c.exp, exp(int(modLen))); got != want {

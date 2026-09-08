@@ -50,19 +50,34 @@ func benchModexpCases() []benchModexpCase {
 	base32, base1024 := fill(32), fill(1024)
 	mod256, mod512, mod768 := fill(32), fill(64), fill(96)
 	mod1024, mod1536, mod2048 := fill(128), fill(192), fill(256)
+	// EIP-7823 caps an operand at 1024 bytes, so the sweep has to reach it: the
+	// crossover can sit above the widest modulus the earlier ladder measured.
+	mod4096, mod8192 := fill(512), fill(1024)
 	exp65537, exp64 := []byte{0x01, 0x00, 0x01}, fill(8)
+	// math/big only takes its windowed Montgomery path above one word, so the
+	// crossover is sampled immediately either side of each word boundary, dense
+	// and sparse: a sparse exponent costs far fewer multiplies than its width.
+	sparse := func(bits uint) []byte {
+		v := new(big.Int).Add(bigLsh(bits-1), big.NewInt(1)) // 2^(bits-1) + 1
+		return v.Bytes()
+	}
 	exps := []struct {
 		name string
 		b    []byte
 	}{
 		{"exp65537", exp65537},
 		{"exp64bit", exp64},
+		{"exp65bitDense", fill(9)},
+		{"exp65bitSparse", sparse(65)},
+		{"exp128bit", fill(16)},
+		{"exp129bitDense", fill(17)},
+		{"exp129bitSparse", sparse(129)},
 		{"exp256bit", fill(32)},
 		{"exp2048bit", fill(256)},
 	}
 
 	var cases []benchModexpCase
-	for _, mod := range [][]byte{mod256, mod512, mod768, mod1024, mod1536, mod2048} {
+	for _, mod := range [][]byte{mod256, mod512, mod768, mod1024, mod1536, mod2048, mod4096, mod8192} {
 		for _, odd := range []bool{true, false} {
 			parity := "odd"
 			if !odd {
@@ -83,6 +98,11 @@ func benchModexpCases() []benchModexpCase {
 		benchModexpCase{"mod128bit/exp64bit", base32, exp64, widthIn(32, 128)},
 		benchModexpCase{"mod64bit/exp64bit", base32, exp64, widthIn(32, 64)},
 		benchModexpCase{"base1024/mod256odd/exp65537", base1024, exp65537, oddMod256},
+		// Both backends ignore leading zero modulus bytes, so a narrow modulus in
+		// a wide field must be routed by what it costs, not by its declared width.
+		benchModexpCase{"padded/mod256in2048/exp65bitSparse", base32, sparse(65), widthIn(256, 256)},
+		benchModexpCase{"padded/mod256in2048/exp65bitDense", base32, fill(9), widthIn(256, 256)},
+		benchModexpCase{"padded/mod512in2048/exp65bitSparse", base32, sparse(65), widthIn(256, 512)},
 	)
 }
 
