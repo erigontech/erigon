@@ -259,6 +259,47 @@ func TestGetHeadNodeCachesHeaderOnlyAnchorFallback(t *testing.T) {
 	require.Equal(t, uint64(42), store.headSlot)
 }
 
+func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
+	anchorRoot := common.HexToHash("0xa1")
+	store := &ForkChoiceStore{
+		forkGraph: headerOnlyAnchorForkGraph{root: anchorRoot, slot: 42},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
+	require.NoError(t, func() error {
+		_, err := store.GetHeadNode()
+		return err
+	}())
+
+	stop := make(chan struct{})
+	var invalidators sync.WaitGroup
+	for range 16 {
+		invalidators.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				store.mu.Lock()
+				store.headHash = common.Hash{}
+				store.headPayloadStatus = cltypes.PayloadStatusPending
+				store.mu.Unlock()
+			}
+		})
+	}
+	t.Cleanup(func() {
+		close(stop)
+		invalidators.Wait()
+	})
+
+	for range 1_000 {
+		node, err := store.GetHeadNode()
+		require.NoError(t, err)
+		require.Equal(t, anchorRoot, node.Root)
+	}
+}
+
 func TestGetFinalizedExecutionHash(t *testing.T) {
 	cache, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)

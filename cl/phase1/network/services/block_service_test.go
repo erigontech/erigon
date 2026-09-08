@@ -171,7 +171,10 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	blocks, _, post := tests.GetBellatrixRandom()
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
 
 	svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	require.NoError(t, syncedData.OnHeadState(post))
@@ -179,14 +182,18 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
 	fcu.OnBlockErr = fmt.Errorf("%w: execution client is down", forkchoice.ErrNewPayloadNoStatus)
 
-	err := svc.ProcessMessage(context.Background(), nil, blocks[1])
+	err = svc.ProcessMessage(context.Background(), nil, blocks[1])
 	require.ErrorIs(t, err, ErrIgnore)
 
 	blockRoot, err := blocks[1].Block.HashSSZ()
 	require.NoError(t, err)
-	_, scheduled := svc.(*blockService).blocksScheduledForLaterExecution.Load(blockRoot)
+	impl := svc.(*blockService)
+	queuedValue, scheduled := impl.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, scheduled, "the block must be queued for a retry")
 
 	// The block is already on disk, so a retry must cost one newPayload and no
@@ -196,8 +203,17 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 		return beacon_indicies.WriteHeaderSlot(tx, blockRoot, sentinelSlot)
 	}))
 
-	err = svc.ProcessMessage(context.Background(), nil, blocks[1])
-	require.ErrorIs(t, err, ErrIgnore)
+	job := queuedValue.(*blockJob)
+	job.mu.Lock()
+	attempt := job.attempt
+	job.mu.Unlock()
+	impl.processScheduledBlock(t.Context(), blockRoot, job, time.Now())
+	select {
+	case <-attempt.done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scheduled block retry")
+	}
+	require.ErrorIs(t, attempt.err, forkchoice.ErrNewPayloadNoStatus)
 
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)

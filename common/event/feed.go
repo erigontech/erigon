@@ -36,11 +36,10 @@ var errBadChannel = errors.New("event: Subscribe argument does not have sendable
 //
 // The zero value is ready to use.
 type Feed struct {
-	once        sync.Once     // ensures that init only runs once
-	sendLock    chan struct{} // sendLock has a one-element buffer and is empty when held.It protects sendCases.
-	trySendLock chan struct{}
-	removeSub   chan any // interrupts Send
-	sendCases   caseList // the active set of select cases used by Send
+	once      sync.Once     // ensures that init only runs once
+	sendLock  chan struct{} // sendLock has a one-element buffer and is empty when held.It protects sendCases.
+	removeSub chan any      // interrupts Send
+	sendCases caseList      // the active set of select cases used by Send
 
 	// The inbox holds newly subscribed channels until they are added to sendCases.
 	mu    sync.Mutex
@@ -69,8 +68,6 @@ func (f *Feed) init(etype reflect.Type) {
 	f.removeSub = make(chan any)
 	f.sendLock = make(chan struct{}, 1)
 	f.sendLock <- struct{}{}
-	f.trySendLock = make(chan struct{}, 1)
-	f.trySendLock <- struct{}{}
 	f.sendCases = caseList{{Chan: reflect.ValueOf(f.removeSub), Dir: reflect.SelectRecv}}
 	f.subscribers = make(map[*feedSub]struct{})
 }
@@ -204,16 +201,7 @@ func (f *Feed) TrySend(value any) (nsent int) {
 	if f.etype != rvalue.Type() {
 		panic(feedTypeError{op: "TrySend", got: rvalue.Type(), want: f.etype})
 	}
-	select {
-	case <-f.trySendLock:
-	default:
-		return 0
-	}
-	defer func() { f.trySendLock <- struct{}{} }()
-
-	if !f.subscribersMu.TryRLock() {
-		return 0
-	}
+	f.subscribersMu.RLock()
 	defer f.subscribersMu.RUnlock()
 	for sub := range f.subscribers {
 		if sub.channel.TrySend(rvalue) {

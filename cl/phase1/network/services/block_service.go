@@ -254,7 +254,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			return nil
 		}
 		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
-			b.scheduleBlockForLaterProcessing(msg)
+			b.ScheduleBlockForLaterProcessing(msg)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return err

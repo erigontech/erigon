@@ -229,7 +229,7 @@ func TestFeedTrySendStaleSubscriptionDoesNotSendAfterUnsubscribe(t *testing.T) {
 	}
 }
 
-func TestFeedConcurrentTrySendPreservesSubscriberOrder(t *testing.T) {
+func TestFeedConcurrentTrySendDeliversEveryEventToReadySubscribers(t *testing.T) {
 	const subscribers = 20_000
 	var feed Feed
 	channels := make([]chan int, subscribers)
@@ -237,31 +237,76 @@ func TestFeedConcurrentTrySendPreservesSubscriberOrder(t *testing.T) {
 		channels[i] = make(chan int, 2)
 		feed.Subscribe(channels[i])
 	}
+
 	start := make(chan struct{})
-	done := make(chan struct{}, 2)
+	delivered := make(chan int, 2)
 	for value := 1; value <= 2; value++ {
 		go func() {
 			<-start
-			feed.TrySend(value)
-			done <- struct{}{}
+			delivered <- feed.TrySend(value)
 		}()
 	}
 	close(start)
-	<-done
-	<-done
 
-	var first int
-	for _, ch := range channels {
-		if len(ch) == 0 {
-			continue
+	for range 2 {
+		if got := <-delivered; got != subscribers {
+			t.Fatalf("TrySend delivered %d times, want %d", got, subscribers)
 		}
-		value := <-ch
-		if first == 0 {
-			first = value
+	}
+	for i, ch := range channels {
+		if len(ch) != 2 {
+			t.Fatalf("subscriber %d received %d events, want 2", i, len(ch))
 		}
-		if value != first {
-			t.Fatalf("subscribers observed different event orders: %d then %d", first, value)
+	}
+}
+
+func TestFeedTrySendDeliversToReadySubscriberDuringSubscriptionChanges(t *testing.T) {
+	const (
+		changes = 4
+		events  = 5_000
+	)
+	var feed Feed
+	ready := make(chan int, events)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	stop := make(chan struct{})
+	started := make(chan struct{}, changes)
+	var workers sync.WaitGroup
+	for range changes {
+		workers.Go(func() {
+			first := true
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				ch := make(chan int, 1)
+				sub := feed.Subscribe(ch)
+				sub.Unsubscribe()
+				if first {
+					started <- struct{}{}
+					first = false
+				}
+			}
+		})
+	}
+	defer func() {
+		close(stop)
+		workers.Wait()
+	}()
+	for range changes {
+		<-started
+	}
+
+	for value := range events {
+		if delivered := feed.TrySend(value); delivered == 0 {
+			t.Fatalf("TrySend dropped event %d while a ready subscriber was available", value)
 		}
+	}
+	if len(ready) != events {
+		t.Fatalf("ready subscriber received %d events, want %d", len(ready), events)
 	}
 }
 

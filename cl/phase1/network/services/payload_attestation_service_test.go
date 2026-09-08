@@ -528,21 +528,85 @@ func TestPayloadAttestationServiceDuplicateValidator(t *testing.T) {
 	require.Contains(t, err.Error(), "already seen payload attestation")
 }
 
-func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
+func TestPayloadAttestationServiceGossipQueuesUntilBlockArrives(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
 
 	blockRoot := common.HexToHash("0x1234")
 	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
 
-	// Block not in forkchoice - should ignore without retaining unauthenticated input.
 	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
-	require.NotErrorIs(t, err, ErrAttestationQueued)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAttestationQueued)
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.pending.processPending(context.Background())
+
 	require.Zero(t, service.pending.count.Load())
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
+}
+
+func TestPayloadAttestationServiceGossipPendingDeduplicates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	consumeOnce := &consumeOncePayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	service.forkchoiceStore = consumeOnce
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrAttestationQueued)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrAttestationQueued)
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+	require.Equal(t, int32(1), consumeOnce.calls.Load())
+}
+
+func TestPayloadAttestationServiceGossipPendingCapacity(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	service.pending.count.Store(maxPendingAttestations)
+	blockRoot := common.HexToHash("0xffff")
+	msg := newTestPayloadAttestationMessage(100, 999, blockRoot)
+
+	err := service.ProcessMessage(t.Context(), nil, msg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAttestationCapacity)
+	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(pendingPayloadAttestationKeyFor(blockRoot, msg))
+	require.False(t, exists)
+}
+
+func TestPayloadAttestationServiceGossipPendingDropsAfterCurrentSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	consumeOnce := &consumeOncePayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	service.forkchoiceStore = consumeOnce
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrAttestationQueued)
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	service.now = func() time.Time { return time.Unix(101*12, 0).Add(gloasMaximumClockDisparity + time.Millisecond) }
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+	require.Zero(t, consumeOnce.calls.Load())
+	require.False(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 }
 
 func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t *testing.T) {
