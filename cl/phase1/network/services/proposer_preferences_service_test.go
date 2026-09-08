@@ -135,6 +135,53 @@ func TestProposerPreferencesServiceGloasForkBoundary(t *testing.T) {
 	}
 }
 
+func TestProposerPreferencesServiceShufflingDependentSlot(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		proposalSlot  uint64
+		stateSlot     uint64
+		dependentSlot uint64
+		valid         bool
+	}{
+		{name: "genesis epoch genesis root", proposalSlot: 1, valid: true},
+		{name: "genesis epoch later root", proposalSlot: 2, dependentSlot: 1},
+		{name: "last genesis lookahead epoch genesis root", proposalSlot: 32, valid: true},
+		{name: "last genesis lookahead epoch later root", proposalSlot: 32, dependentSlot: 1},
+		{name: "later epoch boundary root", proposalSlot: 64, stateSlot: 32, dependentSlot: 31, valid: true},
+		{name: "later epoch root at lookahead start", proposalSlot: 64, stateSlot: 32, dependentSlot: 32},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _, clock, epbsPool, fc := setupProposerPreferencesService(t, gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(test.stateSlot)
+			depState := newProposerPreferencesState(service.beaconCfg, nil)
+			require.NoError(t, depState.SetSlot(test.stateSlot))
+			depState.GetProposerLookahead().Set(int(test.proposalSlot-test.stateSlot), 42)
+			fc.StateAtBlockRootVal[testDependentRoot] = depState
+			fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: test.dependentSlot}
+			msg := newTestSignedProposerPreferences(test.proposalSlot, 42)
+			verified := 0
+			blsVerify = func(_ []byte, _ []byte, _ []byte) (bool, error) {
+				verified++
+				return true, nil
+			}
+
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			stored, ok := epbsPool.GetPreference(test.proposalSlot, testDependentRoot)
+			if !test.valid {
+				require.ErrorContains(t, err, "after shuffling dependent slot")
+				require.NotErrorIs(t, err, ErrIgnore)
+				require.False(t, ok)
+				require.Zero(t, verified)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Same(t, msg, stored)
+			require.Equal(t, 1, verified)
+		})
+	}
+}
+
 func TestProposerPreferencesServiceNilMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

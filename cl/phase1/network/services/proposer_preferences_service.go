@@ -103,10 +103,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if proposalEpoch < s.beaconCfg.GloasForkEpoch {
 		return fmt.Errorf("%w: proposal epoch %d is pre-Gloas", ErrIgnore, proposalEpoch)
 	}
-	if proposalEpoch < s.beaconCfg.MinSeedLookahead {
-		return fmt.Errorf("%w: proposal epoch %d before min seed lookahead %d", ErrIgnore, proposalEpoch, s.beaconCfg.MinSeedLookahead)
-	}
-	lookaheadEpoch := proposalEpoch - s.beaconCfg.MinSeedLookahead
+	lookaheadEpoch := s.shufflingDependentEpoch(proposalEpoch)
 	lookaheadEpochStartSlot, ok := safeMultiplyUint64(lookaheadEpoch, s.beaconCfg.SlotsPerEpoch)
 	if !ok {
 		return fmt.Errorf("%w: proposer lookahead slot is not representable", ErrIgnore)
@@ -136,8 +133,12 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if err != nil || depState == nil {
 		return fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, preferences.DependentRoot)
 	}
-	if dependentHeader.Slot >= lookaheadEpochStartSlot {
-		return fmt.Errorf("dependent root slot %d is not before proposer lookahead slot %d", dependentHeader.Slot, lookaheadEpochStartSlot)
+	dependentSlot := lookaheadEpochStartSlot
+	if dependentSlot > 0 {
+		dependentSlot--
+	}
+	if dependentHeader.Slot > dependentSlot {
+		return fmt.Errorf("dependent root slot %d is after shuffling dependent slot %d", dependentHeader.Slot, dependentSlot)
 	}
 	if !s.isValidDependentRoot(preferences.DependentRoot, lookaheadEpochStartSlot) {
 		return fmt.Errorf("%w: dependent root is not a possible dependent block", ErrIgnore)
@@ -204,11 +205,15 @@ func (s *proposerPreferencesService) isValidDependentRoot(root common.Hash, epoc
 	return err == nil && root == headRoot
 }
 
-func (s *proposerPreferencesService) proposerPreferencesValidationState(depState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {
-	if proposalEpoch < s.beaconCfg.MinSeedLookahead {
-		return nil, fmt.Errorf("proposal epoch %d before min seed lookahead %d", proposalEpoch, s.beaconCfg.MinSeedLookahead)
+func (s *proposerPreferencesService) shufflingDependentEpoch(proposalEpoch uint64) uint64 {
+	if proposalEpoch <= s.beaconCfg.MinSeedLookahead {
+		return 0
 	}
-	dependentEpoch := proposalEpoch - s.beaconCfg.MinSeedLookahead
+	return proposalEpoch - s.beaconCfg.MinSeedLookahead
+}
+
+func (s *proposerPreferencesService) proposerPreferencesValidationState(depState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {
+	dependentEpoch := s.shufflingDependentEpoch(proposalEpoch)
 	validationSlot, ok := safeMultiplyUint64(dependentEpoch, s.beaconCfg.SlotsPerEpoch)
 	if !ok {
 		return nil, fmt.Errorf("dependent validation slot is not representable")
