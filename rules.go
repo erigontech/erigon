@@ -18,7 +18,7 @@
 
 package gorules
 
-// to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
+// golangci-lint caches compiled rules; clear the cache after editing this file.
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
 )
