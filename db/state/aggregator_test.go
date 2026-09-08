@@ -830,3 +830,33 @@ func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
 	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
 	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
 }
+
+func TestGetStateIndicesSaltRewritesMalformedFile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		rewrite bool
+	}{
+		{name: "empty", content: []byte{}, rewrite: true},
+		{name: "too short", content: []byte("bad"), rewrite: true},
+		{name: "too long", content: []byte("toolong"), rewrite: true},
+		{name: "valid", content: []byte{1, 2, 3, 4}, rewrite: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+			require.NoError(t, os.WriteFile(fpath, tc.content, os.ModePerm))
+
+			salt, err := GetStateIndicesSalt(dirs, true, log.New())
+			require.NoError(t, err)
+
+			saltBytes, err := os.ReadFile(fpath)
+			require.NoError(t, err)
+			require.Len(t, saltBytes, 4)
+			require.Equal(t, binary.BigEndian.Uint32(saltBytes), *salt)
+			if !tc.rewrite {
+				require.Equal(t, tc.content, saltBytes, "a valid salt file must not be rewritten")
+			}
+		})
+	}
+}

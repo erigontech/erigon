@@ -51,7 +51,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 	ctx := context.Background()
 
 	// Populate MaxTxNum table
-	require.NoError(b, db.Update(ctx, func(tx kv.RwTx) error {
+	err := db.Update(ctx, func(tx kv.RwTx) error {
 		var maxTxNum uint64
 		for blockNum := range uint64(numBlocks) {
 			maxTxNum += txPerBlock
@@ -60,11 +60,12 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 			}
 		}
 		return nil
-	}))
+	})
+	require.NoError(b, err)
 
 	// Worst case: one txNum per block — every Next() changes block — maximum cursor opens
 	txNumsPerBlock := make([]uint64, numBlocks)
-	require.NoError(b, db.View(ctx, func(tx kv.Tx) error {
+	err = db.View(ctx, func(tx kv.Tx) error {
 		for blockNum := range uint64(numBlocks) {
 			min, err := TxNums.Min(ctx, tx, blockNum)
 			if err != nil {
@@ -73,7 +74,8 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 			txNumsPerBlock[blockNum] = min
 		}
 		return nil
-	}))
+	})
+	require.NoError(b, err)
 
 	tx, err := db.BeginRo(ctx)
 	require.NoError(b, err)

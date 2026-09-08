@@ -95,18 +95,20 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if _, err := writer.Write(k); err != nil {
-			return err
-		}
-		_, err := writer.Write(v)
-		return err
+		_, err = writer.Write(k)
+		require.NoError(tb, err)
+		_, err = writer.Write(v)
+		require.NoError(tb, err)
+		return nil
 	}
 
-	require.NoError(tb, collector.Load(nil, "", loader, etl.TransformArgs{}))
+	err = collector.Load(nil, "", loader, etl.TransformArgs{})
+	require.NoError(tb, err)
 
 	collector.Close()
 
-	require.NoError(tb, comp.Compress())
+	err = comp.Compress()
+	require.NoError(tb, err)
 	comp.Close()
 
 	decomp, err := seg.NewDecompressor(dataPath)

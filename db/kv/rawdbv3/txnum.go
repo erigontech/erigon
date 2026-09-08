@@ -87,7 +87,7 @@ func (d *DefaultTxBlockIndex) MaxTxNum(_ context.Context, tx kv.Tx, c kv.Cursor,
 	return binary.BigEndian.Uint64(v), true, nil
 }
 
-func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
+func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, false, err
@@ -138,17 +138,16 @@ func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum u
 	}
 	secondBlockNum := binary.BigEndian.Uint64(_blk)
 
-	var searchErr error
-	blockNum := uint64(sort.Search(int(lastBlockNum+1), func(sblk int) bool {
-		if searchErr != nil {
+	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(sblk int) bool {
+		if err != nil {
 			return true
 		}
 		if secondBlockNum > uint64(sblk) {
 			return false
 		}
-		maxTxNum, ok, err := d.MaxTxNum(ctx, tx, c, uint64(sblk))
+		var maxTxNum uint64
+		maxTxNum, ok, err = d.MaxTxNum(ctx, tx, c, uint64(sblk))
 		if err != nil {
-			searchErr = err
 			return true
 		}
 
@@ -159,13 +158,13 @@ func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum u
 			lt := binary.BigEndian.Uint64(_lt)
 			ft := binary.BigEndian.Uint64(_ft)
 			lb := binary.BigEndian.Uint64(_lb)
-			searchErr = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", sblk, txNum, maxTxNum, fb, ft, lb, lt)
+			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", sblk, txNum, maxTxNum, fb, ft, lb, lt)
 			return true
 		}
 		return maxTxNum >= txNum
 	}))
-	if searchErr != nil {
-		return 0, false, searchErr
+	if err != nil {
+		return 0, false, err
 	}
 	return blockNum, true, nil
 }
