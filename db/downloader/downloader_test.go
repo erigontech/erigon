@@ -69,7 +69,7 @@ func TestConcurrentDownload(t *testing.T) {
 	test.downloader.Close()
 	for w := range waits {
 		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
-		w(t.Context())
+		_ = w(t.Context())
 	}
 }
 
@@ -214,7 +214,7 @@ func TestVerifyData(t *testing.T) {
 	}
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644))
 	err := test.downloader.AddNewSeedableFile(t.Context(), "a")
 	require.NoError(err)
 	err = test.downloader.VerifyData(test.downloader.ctx, nil, false)
@@ -1173,8 +1173,8 @@ func TestEndIsIdempotent(t *testing.T) {
 	_, batch.cancel = context.WithCancelCause(d.ctx)
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
-	batch.end(t.Context(), errors.New("first end"))
-	batch.end(t.Context(), errors.New("second end"))
+	_ = batch.end(t.Context(), errors.New("first end"))
+	_ = batch.end(t.Context(), errors.New("second end"))
 
 	d.activeDownloadRequestsLock.Lock()
 	defer d.activeDownloadRequestsLock.Unlock()

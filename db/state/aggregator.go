@@ -2744,7 +2744,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	}
 	var found bool
 	var fileStartTxNum, fileEndTxNum uint64
-	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxStep)
+	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, nil, maxStep)
 	if !found {
 		return nil, 0, false, err
 	}

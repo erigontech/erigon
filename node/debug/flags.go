@@ -143,6 +143,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	flags := cmd.Flags()
 
 	logger := logging.SetupLoggerCmd(filePrefix, cmd)
+	SetGoMemLimit(logger)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -248,6 +249,7 @@ func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix strin
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err
