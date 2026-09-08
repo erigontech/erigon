@@ -1658,8 +1658,6 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		s.recalcVisibleFiles(s.alignMin, retired)
 	}()
 
-	// No segment resolves to the older index of an equal-range pair, so reclamation never
-	// reaches it.
 	s.removeOrphanedIdx(supersededIdx)
 
 	// remove .tmp files
@@ -1703,6 +1701,9 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 
 	orphans := make([]string, 0, len(superseded))
 	for i := range superseded {
+		if !s.HasType(superseded[i].Type) {
+			continue
+		}
 		if _, ok := held[superseded[i].Path]; ok {
 			continue
 		}

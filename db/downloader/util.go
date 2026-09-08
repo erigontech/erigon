@@ -84,7 +84,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
 		// A bit hacky but whatever... basically caplin is incompatible with enums.
-		if strings.HasSuffix(fPath, path.Join("caplin", name)) {
+		if strings.HasSuffix(filepath.ToSlash(fPath), path.Join("caplin", name)) {
 			res = append(res, path.Join("caplin", name))
 			continue
 		}
