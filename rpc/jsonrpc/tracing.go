@@ -271,17 +271,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
-	if txnIndex > 0 {
-		at := txNum
-		if rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
-			at++
-		}
-		_, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, at)
-		if err != nil {
-			return err
-		}
-		ibs.SetFirstLogIndex(firstLogIndex)
+	firstLogIndex, err := rawtemporaldb.FirstLogIndex(tx, txNum, txnIndex)
+	if err != nil {
+		return err
 	}
+	ibs.ResumeLogIndexAt(firstLogIndex)
 
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
@@ -503,10 +497,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
-		// A bundle is a block of its own, so its logs number from zero.
-		ibs.SetFirstLogIndex(0)
-		// do not reset ibs, because we want to keep the overrides and state change
-		// ibs.Reset()
+		// A bundle is a block of its own, so its logs number from zero. Only the
+		// logs are reset: the overrides and state changes have to survive.
+		ibs.ResetLogs()
 		for txnIndex := range bundle.Transactions {
 			txn := &bundle.Transactions[txnIndex]
 			if txn.Gas == nil || *txn.Gas == 0 {

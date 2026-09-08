@@ -175,3 +175,47 @@ func uvarint(in []byte) (res uint64) {
 	res, _ = binary.Uvarint(in)
 	return res
 }
+
+// TestFirstLogIndex pins the two things the callers must not re-derive: the
+// first txn of a block gets 0 rather than the previous block's tail count, and
+// a txNum the receipt domain has no record for is an error, not a silent 0.
+func TestFirstLogIndex(t *testing.T) {
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
+	require.False(rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
+
+	// block1: txn0 at txNum 1 emits 1 log, txn1 at txNum 2 emits 2.
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 1, 10, 0, 1))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 3, 20, 0, 2))
+	// block2: txn0 at txNum 5 emits 2 logs, txn1 at txNum 6 emits none.
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 2, 30, 0, 5))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 2, 40, 0, 6))
+	require.NoError(doms.Flush(t.Context(), tx))
+
+	first, err := rawtemporaldb.FirstLogIndex(tx, 1, 0)
+	require.NoError(err)
+	require.Equal(uint32(0), first)
+
+	first, err = rawtemporaldb.FirstLogIndex(tx, 2, 1)
+	require.NoError(err)
+	require.Equal(uint32(1), first)
+
+	first, err = rawtemporaldb.FirstLogIndex(tx, 5, 0)
+	require.NoError(err)
+	require.Equal(uint32(0), first)
+
+	first, err = rawtemporaldb.FirstLogIndex(tx, 6, 1)
+	require.NoError(err)
+	require.Equal(uint32(2), first)
+
+	_, err = rawtemporaldb.FirstLogIndex(tx, 1, 1)
+	require.Error(err)
+}
