@@ -525,6 +525,11 @@ type iiSeekResult struct {
 	txNum      uint64
 	keyOrdinal uint64
 	rank       uint64
+	// srcStartTxNum/srcEndTxNum name the .ef file keyOrdinal and rank index
+	// into. A v2 .vi is addressed by that position alone, so it answers
+	// correctly only for the .v file built from this exact range.
+	srcStartTxNum uint64
+	srcEndTxNum   uint64
 }
 
 func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, res iiSeekResult, err error) {
@@ -552,7 +557,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if ok && fromCache.requested <= txNum {
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
-				return true, iiSeekResult{txNum: fromCache.found, keyOrdinal: fromCache.keyOrdinal, rank: fromCache.rank}, nil
+				return true, iiSeekResult{txNum: fromCache.found, keyOrdinal: fromCache.keyOrdinal, rank: fromCache.rank,
+					srcStartTxNum: fromCache.srcStartTxNum, srcEndTxNum: fromCache.srcEndTxNum}, nil
 			} else if fromCache.found == 0 { //not found
 				iit.seekInFilesCache.hit++
 				return false, res, nil
@@ -586,9 +592,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			return false, iiSeekResult{txNum: equalOrHigherTxNum}, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
-			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank})
+			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank,
+				srcStartTxNum: iit.files[i].startTxNum, srcEndTxNum: iit.files[i].endTxNum})
 		}
-		return true, iiSeekResult{txNum: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank}, nil
+		return true, iiSeekResult{txNum: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank,
+			srcStartTxNum: iit.files[i].startTxNum, srcEndTxNum: iit.files[i].endTxNum}, nil
 	}
 
 	if iit.seekInFilesCache != nil {

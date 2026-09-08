@@ -556,6 +556,20 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 
 // visibleFile is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
 // it's ok to store visibleFile in array
+// LookupHistoryValue resolves a value's offset in this item's .v file. srcStart
+// and srcEnd name the .ef range keyOrdinal and rank were taken from; the II and
+// history file lists are chosen independently and can diverge after a merge or
+// a recovery, and a positional index would answer such a mismatch with another
+// key's offset instead of failing.
+func (i *FilesItem) LookupHistoryValue(srcStart, srcEnd, keyOrdinal, rank, txNum uint64, key []byte) (uint64, bool, error) {
+	if i.vi.Positional() && (srcStart != i.startTxNum || srcEnd != i.endTxNum) {
+		return 0, false, fmt.Errorf("history value index %s is addressed by position, but the .ef it was located in covers %d-%d",
+			i.vi.FilePath(), srcStart, srcEnd)
+	}
+	offset, ok := i.vi.Lookup(keyOrdinal, rank, txNum, key)
+	return offset, ok, nil
+}
+
 type visibleFile struct {
 	getter     *seg.Getter
 	reader     *recsplit.IndexReader

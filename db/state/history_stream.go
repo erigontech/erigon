@@ -844,7 +844,10 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				compressedPageValuesCount,
 				true,
 			)
-			offset, ok := historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank, txNum, ht.key)
+			offset, ok, err := historyItem.src.LookupHistoryValue(item.startTxNum, item.endTxNum, ht.keyOrdinal, ht.rank, txNum, ht.key)
+			if err != nil {
+				return err
+			}
 			if !ok { // shouldn't since key/txNum in ef
 				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}

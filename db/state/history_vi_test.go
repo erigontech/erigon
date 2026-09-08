@@ -115,3 +115,30 @@ func TestHistoryValueIndexV1Empty(t *testing.T) {
 	defer idx.Close()
 	require.True(t, idx.Empty())
 }
+
+// The II and history file lists are chosen independently, so a positional .vi
+// can be paired with a .v built from another range. Answering that with an
+// offset would return a different key's value; it has to fail instead.
+func TestLookupHistoryValueRejectsUnpairedRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.vi")
+	w, err := pagedidx.NewWriter(path, 2, 2, 4, 40)
+	require.NoError(t, err)
+	w.NoFsync()
+	w.AddRun(2)
+	w.AddRun(2)
+	w.AddPage(0)
+	w.AddPage(40)
+	require.NoError(t, w.Build())
+
+	vi, err := OpenHistoryValueIndex(path, version.V2_0)
+	require.NoError(t, err)
+	defer vi.Close()
+	item := &FilesItem{vi: vi, startTxNum: 128, endTxNum: 192}
+
+	_, ok, err := item.LookupHistoryValue(128, 192, 0, 0, 130, []byte("k"))
+	require.NoError(t, err)
+	require.True(t, ok, "the paired range still resolves")
+
+	_, _, err = item.LookupHistoryValue(128, 256, 0, 0, 130, []byte("k"))
+	require.Error(t, err, "an .ef covering a different range must not be answered positionally")
+}

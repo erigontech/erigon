@@ -1092,7 +1092,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, nil
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
-	offset, ok := vi.Lookup(seek.keyOrdinal, seek.rank, histTxNum, key)
+	offset, ok, err := historyItem.src.LookupHistoryValue(seek.srcStartTxNum, seek.srcEndTxNum, seek.keyOrdinal, seek.rank, histTxNum, key)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1405,7 +1408,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
 				}
 
-				vOffset, ok := viFile.src.vi.Lookup(keyOrdinal, rank, txNum, key)
+				vOffset, ok, err := viFile.src.LookupHistoryValue(item.startTxNum, item.endTxNum, keyOrdinal, rank, txNum, key)
+				if err != nil {
+					return err
+				}
 				if !ok {
 					return fmt.Errorf("HistoryDump: failed to resolve offset in %s for key [%x]", viFile.Fullpath(), key)
 				}

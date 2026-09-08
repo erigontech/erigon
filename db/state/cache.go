@@ -105,6 +105,9 @@ type iiSeekInFilesCacheItem struct {
 	// position of the key in the .ef file and of `found` in that key's txNum
 	// list - the history value index is addressed by the pair
 	keyOrdinal, rank uint64
+	// the .ef range that pair indexes into, so a cached hit can still be
+	// checked against the .v file it will be used on
+	srcStartTxNum, srcEndTxNum uint64
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
