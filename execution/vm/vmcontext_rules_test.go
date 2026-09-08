@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func TestGetVMContextHandsOutADeepRulesSnapshot(t *testing.T) {
+func TestGetVMContextCopiesRuleValuesAndClonesChainID(t *testing.T) {
 	cfg := &chain.Config{
 		ChainID:             uint256.NewInt(1337),
 		HomesteadBlock:      common.NewUint64(0),

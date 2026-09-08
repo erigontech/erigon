@@ -221,10 +221,6 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
-// Deprecated: prefer ActivePrecompiles, which reflects a registered provider's
-// overlay. These are the built-in address sets for a fork and nothing else, and
-// are kept because they are exported API that chains outside this repo compile
-// against.
 var (
 	PrecompiledAddressesHomestead []accounts.Address
 	PrecompiledAddressesByzantium []accounts.Address
