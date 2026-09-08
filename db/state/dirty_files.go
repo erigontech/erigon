@@ -149,23 +149,20 @@ func (i *FilesItem) BtIndex() *btindex.BtIndex { return i.bindex }
 func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
-	if i.index != nil {
-		i.index.MadvNormal()
-	}
+	i.index.MadvNormal()
+	i.vi.MadvNormal()
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
-	if i.index != nil {
-		i.index.MadvSequential()
-	}
+	i.index.MadvSequential()
+	i.vi.MadvSequential()
 }
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
-	if i.index != nil {
-		i.index.DisableReadAhead()
-	}
+	i.index.DisableReadAhead()
+	i.vi.DisableReadAhead()
 	//i.bindex.DisableReadAhead()
 	//i.existence.DisableReadAhead()
 }

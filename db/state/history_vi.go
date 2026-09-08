@@ -81,6 +81,30 @@ func (i *HistoryValueIndex) Empty() bool {
 
 func (i *HistoryValueIndex) FilePath() string { return i.filePath }
 
+func (i *HistoryValueIndex) MadvNormal() {
+	if i == nil {
+		return
+	}
+	i.legacy.MadvNormal()
+	i.paged.MadvNormal()
+}
+
+func (i *HistoryValueIndex) MadvSequential() {
+	if i == nil {
+		return
+	}
+	i.legacy.MadvSequential()
+	i.paged.MadvSequential()
+}
+
+func (i *HistoryValueIndex) DisableReadAhead() {
+	if i == nil {
+		return
+	}
+	i.legacy.DisableReadAhead()
+	i.paged.DisableReadAhead()
+}
+
 func (i *HistoryValueIndex) Close() {
 	if i == nil {
 		return

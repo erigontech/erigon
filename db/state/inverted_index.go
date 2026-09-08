@@ -551,13 +551,17 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.total++
 		fromCache, ok := iit.seekInFilesCache.Get(hi)
+		// A miss is stored as found=0, and a hit is only stored when found>txNum,
+		// so found=0 is unambiguous. It has to be tested first: txNum=0 also
+		// satisfies txNum<=found and would turn the miss into a hit.
 		if ok && fromCache.lo == lo && fromCache.requested <= txNum {
+			if fromCache.found == 0 {
+				iit.seekInFilesCache.hit++
+				return false, res, nil
+			}
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
 				return true, iiSeekResult{txNum: fromCache.found, keyOrdinal: fromCache.keyOrdinal, rank: fromCache.rank, fileIdx: fromCache.fileIdx}, nil
-			} else if fromCache.found == 0 { //not found
-				iit.seekInFilesCache.hit++
-				return false, res, nil
 			}
 		}
 	}

@@ -921,7 +921,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if vi, err = OpenHistoryValueIndex(idxPath, version.V2_0); err != nil {
+		if vi, err = OpenHistoryValueIndex(idxPath, ht.h.FileVersion.AccessorVI.Current); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
 		historyIn = newFilesItem(r.history.from, r.history.to)

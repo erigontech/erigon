@@ -147,7 +147,8 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			continue
+			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.vi.FilePath(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -475,7 +476,8 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			continue
+			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.vi.FilePath(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()

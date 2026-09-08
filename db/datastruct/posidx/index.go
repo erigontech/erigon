@@ -39,9 +39,8 @@
 //	starts[r] = items before run r     -> ordinal = starts[r] + item
 //	pages[p]  = value of page p        -> value   = pages[ordinal / pageSize]
 //
-// Both are monotone, so starts answers by access and by predecessor search:
-// Get and Run. starts counts items, pages holds the values themselves, and the
-// two have different lengths. Paging drops the
+// starts counts items, pages holds the values themselves, and the two have
+// different lengths. Paging drops the
 // stored count by pageSize, and Elias-Fano then encodes what is left in the
 // bits its gaps need: 8 billion items at 64 per page keep 125 million values.
 package posidx
@@ -51,6 +50,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/mmap"
@@ -88,6 +88,8 @@ type Index struct {
 	pages     *eliasfano32.EliasFano
 	pageSize  uint64
 	itemCount uint64
+
+	readAheadRefcnt atomic.Int32
 }
 
 func Open(path string) (*Index, error) {
@@ -190,22 +192,35 @@ func (i *Index) runEnd(run uint64) uint64 {
 	return i.itemCount
 }
 
-// Run returns the run owning the item at ordinal, and false when the index
-// holds no such item. An empty run owns nothing, so the search looks for the
-// first run starting after the ordinal and steps back one.
-func (i *Index) Run(ordinal uint64) (uint64, bool) {
-	if i.starts == nil || ordinal >= i.itemCount {
-		return 0, false
+func (i *Index) Empty() bool { return i == nil || i.pages == nil }
+
+// DisableReadAhead - usage: `defer i.MadvSequential().DisableReadAhead()`.
+func (i *Index) DisableReadAhead() {
+	if i == nil || i.m == nil {
+		return
 	}
-	last := i.starts.Count() - 1
-	if ordinal >= i.starts.Get(last) {
-		return last, true
+	if left := i.readAheadRefcnt.Add(-1); left == 0 {
+		_ = mmap.MadviseRandom(i.m)
 	}
-	_, pos, _ := i.starts.Seek(ordinal + 1)
-	return pos - 1, true
 }
 
-func (i *Index) Empty() bool { return i == nil || i.pages == nil }
+func (i *Index) MadvSequential() *Index {
+	if i == nil || i.m == nil {
+		return i
+	}
+	i.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseSequential(i.m)
+	return i
+}
+
+func (i *Index) MadvNormal() *Index {
+	if i == nil || i.m == nil {
+		return i
+	}
+	i.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseNormal(i.m)
+	return i
+}
 
 func (i *Index) Close() {
 	if i == nil {
@@ -248,8 +263,11 @@ func NewWriter(path, tmpDir string, pageSize, runCount, itemCount, maxValue uint
 	if pageSize == 0 {
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
 	}
+	if (runCount == 0) != (itemCount == 0) {
+		return nil, fmt.Errorf("%s: paged index sized for %d runs and %d items", path, runCount, itemCount)
+	}
 	w := &Writer{path: path, pageSize: pageSize, runCount: runCount, itemCount: itemCount}
-	if runCount == 0 || itemCount == 0 { // nothing to address: header only
+	if runCount == 0 { // nothing to address: header only
 		return w, nil
 	}
 	var err error

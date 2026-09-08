@@ -90,36 +90,6 @@ func TestOutOfRange(t *testing.T) {
 	_, ok = idx.Get(0, 1<<40)
 	require.False(t, ok, "item past the end")
 }
-
-// Run is the reverse of Get's first half: which run owns an ordinal.
-func TestRun(t *testing.T) {
-	// run 0 holds ordinals 0-2, run 1 holds 3, run 2 holds 4-5
-	idx := build(t, "run", 2, []uint64{3, 1, 2}, []uint64{0, 37, 74})
-
-	for ordinal, wantRun := range []uint64{0, 0, 0, 1, 2, 2} {
-		r, ok := idx.Run(uint64(ordinal))
-		require.True(t, ok, "ordinal %d", ordinal)
-		require.Equal(t, wantRun, r, "ordinal %d", ordinal)
-	}
-
-	_, ok := idx.Run(6)
-	require.False(t, ok, "one past the last item")
-	_, ok = idx.Run(1 << 40)
-	require.False(t, ok, "far past the last item")
-}
-
-// An empty run owns no ordinal, so the search has to skip past it.
-func TestRunSkipsEmpty(t *testing.T) {
-	// runs 1 and 3 are empty; ordinals 0-2 are run 0, ordinal 3 is run 2
-	idx := build(t, "empty-runs", 2, []uint64{3, 0, 1, 0, 2}, []uint64{0, 37, 74})
-
-	for ordinal, wantRun := range []uint64{0, 0, 0, 2, 4, 4} {
-		r, ok := idx.Run(uint64(ordinal))
-		require.True(t, ok, "ordinal %d", ordinal)
-		require.Equal(t, wantRun, r, "ordinal %d", ordinal)
-	}
-}
-
 func TestEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty")
 	w, err := NewWriter(path, t.TempDir(), 64, 0, 0, 0)
@@ -134,8 +104,6 @@ func TestEmpty(t *testing.T) {
 
 	require.True(t, idx.Empty())
 	_, ok := idx.Get(0, 0)
-	require.False(t, ok)
-	_, ok = idx.Run(0)
 	require.False(t, ok)
 }
 
@@ -214,16 +182,18 @@ func FuzzOpen(f *testing.F) {
 		if err := os.WriteFile(path, b, 0o644); err != nil {
 			t.Skip()
 		}
-		// Open must reject a malformed file rather than crash on it. Decoding
-		// what it accepts is deliberately not asserted: a lookup starts from
-		// the sequence's jump table, and validating that costs as much as
-		// rebuilding it, so Open checks the layout and the bit count instead -
-		// which is what truncation and partial writes actually break.
+		// Open must reject a malformed file rather than crash on it, and must
+		// not accept one that a lookup then crashes on.
 		idx, err := Open(path)
 		if err != nil {
 			return
 		}
-		idx.Close()
+		defer idx.Close()
+		for run := range uint64(4) {
+			for item := range uint64(4) {
+				idx.Get(run, item)
+			}
+		}
 	})
 }
 
@@ -271,4 +241,49 @@ func TestOpenRejectsBitStreamNotMatchingHeader(t *testing.T) {
 		return
 	}
 	t.Fatal("no byte of the sequence was load-bearing")
+}
+
+// Open must not accept a file that a lookup then walks off the end of. One bit
+// at a time over a whole index covers what a partial write or a bad block does
+// to the layout, without the header stopping being plausible.
+func TestNoAcceptedMutationPanics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seed.vi")
+	w, err := NewWriter(path, t.TempDir(), 2, 3, 6, 90)
+	require.NoError(t, err)
+	defer w.Close()
+	w.NoFsync()
+	for _, n := range []uint64{3, 1, 2} {
+		w.AddRun(n)
+	}
+	for _, v := range []uint64{0, 40, 90} {
+		w.AddPage(v)
+	}
+	require.NoError(t, w.Build())
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	accepted := 0
+	for i := range body {
+		for bit := range 8 {
+			mutated := append([]byte(nil), body...)
+			mutated[i] ^= 1 << bit
+			mutatedPath := filepath.Join(dir, "mutated.vi")
+			require.NoError(t, os.WriteFile(mutatedPath, mutated, 0o644))
+			idx, err := Open(mutatedPath)
+			if err != nil {
+				continue
+			}
+			accepted++
+			require.NotPanics(t, func() {
+				for run := range uint64(4) {
+					for item := range uint64(4) {
+						idx.Get(run, item)
+					}
+				}
+			}, "byte %d bit %d", i, bit)
+			idx.Close()
+		}
+	}
+	require.NotZero(t, accepted, "nothing was accepted, the survey proves nothing")
 }

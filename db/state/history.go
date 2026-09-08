@@ -810,7 +810,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
 	}
 
-	if historyIdx, err = OpenHistoryValueIndex(historyIdxPath, version.V2_0); err != nil {
+	if historyIdx, err = OpenHistoryValueIndex(historyIdxPath, h.FileVersion.AccessorVI.Current); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
 	closeComp = false
@@ -1105,7 +1105,8 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	historyKey := ht.encodeTs(histTxNum, key)
 	offset, ok := historyItem.src.vi.Lookup(seek.keyOrdinal, seek.rank, histTxNum, key)
 	if !ok {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+			historyItem.src.vi.FilePath(), key, histTxNum, ht.iit.files[seek.fileIdx].src.decompressor.FileName())
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
