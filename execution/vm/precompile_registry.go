@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // PrecompilesFunc builds a chain's precompile overlay at an L2 version. It is
@@ -108,11 +107,6 @@ type precompileCacheKey struct {
 	chainID   uint256.Int
 	fork      forkTier
 	l2Version uint64
-}
-
-type mergedPrecompileSet struct {
-	contracts PrecompiledContracts
-	addresses []accounts.Address
 }
 
 // rulesChainID tolerates a nil ChainID (bare Rules values are used on

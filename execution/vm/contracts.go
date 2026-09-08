@@ -86,6 +86,11 @@ const (
 	forkTierCount
 )
 
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
 var forkSets [forkTierCount]mergedPrecompileSet
 
 func forkTierFor(chainRules *chain.Rules) forkTier {

@@ -32,7 +32,6 @@ const (
 	KV_IndexRange_FullMethodName              = "/remote.KV/IndexRange"
 	KV_HistoryRange_FullMethodName            = "/remote.KV/HistoryRange"
 	KV_RangeAsOf_FullMethodName               = "/remote.KV/RangeAsOf"
-	KV_HasPrefix_FullMethodName               = "/remote.KV/HasPrefix"
 	KV_HistoryStartFrom_FullMethodName        = "/remote.KV/HistoryStartFrom"
 	KV_CurrentDomainVersion_FullMethodName    = "/remote.KV/CurrentDomainVersion"
 	KV_StepSize_FullMethodName                = "/remote.KV/StepSize"
@@ -68,7 +67,6 @@ type KVClient interface {
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 	HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc.CallOption) (*Pairs, error)
-	HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error)
 	HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error)
 	CurrentDomainVersion(ctx context.Context, in *CurrentDomainVersionReq, opts ...grpc.CallOption) (*CurrentDomainVersionReply, error)
 	StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.CallOption) (*StepSizeReply, error)
@@ -205,16 +203,6 @@ func (c *kVClient) RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc
 	return out, nil
 }
 
-func (c *kVClient) HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HasPrefixReply)
-	err := c.cc.Invoke(ctx, KV_HasPrefix_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *kVClient) HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HistoryStartFromReply)
@@ -284,7 +272,6 @@ type KVServer interface {
 	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
 	HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error)
 	RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error)
-	HasPrefix(context.Context, *HasPrefixReq) (*HasPrefixReply, error)
 	HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error)
 	CurrentDomainVersion(context.Context, *CurrentDomainVersionReq) (*CurrentDomainVersionReply, error)
 	StepSize(context.Context, *StepSizeReq) (*StepSizeReply, error)
@@ -331,9 +318,6 @@ func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*P
 }
 func (UnimplementedKVServer) RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error) {
 	return nil, status.Error(codes.Unimplemented, "method RangeAsOf not implemented")
-}
-func (UnimplementedKVServer) HasPrefix(context.Context, *HasPrefixReq) (*HasPrefixReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method HasPrefix not implemented")
 }
 func (UnimplementedKVServer) HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method HistoryStartFrom not implemented")
@@ -548,24 +532,6 @@ func _KV_RangeAsOf_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KV_HasPrefix_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HasPrefixReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KVServer).HasPrefix(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KV_HasPrefix_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KVServer).HasPrefix(ctx, req.(*HasPrefixReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _KV_HistoryStartFrom_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HistoryStartFromReq)
 	if err := dec(in); err != nil {
@@ -680,10 +646,6 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RangeAsOf",
 			Handler:    _KV_RangeAsOf_Handler,
-		},
-		{
-			MethodName: "HasPrefix",
-			Handler:    _KV_HasPrefix_Handler,
 		},
 		{
 			MethodName: "HistoryStartFrom",

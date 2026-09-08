@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"math/bits"
 	"math/rand"
 	"testing"
 
@@ -373,6 +374,49 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
 	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
+}
+
+func TestDeepStorageThresholdFor(t *testing.T) {
+	require.Equal(t, 128, deepStorageThresholdFor(0))
+	require.Equal(t, 128, deepStorageThresholdFor(2_000))
+	require.Equal(t, 128, deepStorageThresholdFor(8_192))
+	require.Equal(t, 156, deepStorageThresholdFor(10_000))
+	require.Equal(t, 7_812, deepStorageThresholdFor(500_000))
+}
+
+func TestDeepFold_BulkRoundKeepsMediumAccountsOnWorker(t *testing.T) {
+	rnd := rand.New(rand.NewSource(20260902))
+	ub := NewUpdateBuilder()
+	for range 100 {
+		addRandomAccount(ub, rnd, 200)
+	}
+	keys, upds := ub.Build()
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	require.Equal(t, seqRoot, parRoot)
+	require.Zero(t, deepFolds, "200-slot accounts in a 20k-key round are no straggler and must stay on their worker")
+}
+
+func TestDeepFold_SmallRoundDetachesStraggler(t *testing.T) {
+	rnd := rand.New(rand.NewSource(20260903))
+	ub := NewUpdateBuilder()
+	addRandomAccount(ub, rnd, 200)
+	k1, u1 := ub.Build()
+	fk, fu := buildMixedCorpus(557, 300)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	require.Equal(t, seqRoot, parRoot)
+	require.Equal(t, uint64(1), deepFolds, "one 200-slot account in a 500-key round is the straggler and must deep-fold")
 }
 
 func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
@@ -1028,4 +1072,54 @@ func TestDeepFold_StorageOnlyWhaleFoldsParallel(t *testing.T) {
 	require.Equal(t, seqRoot, parRoot)
 	require.Equal(t, uint64(1), deepFolds,
 		"an account whose record is not in the round must still deep-fold its storage")
+}
+
+func buildStorageSubtree(t *testing.T, withAccount bool, slots int) *prefixNode {
+	t.Helper()
+	tr := newPrefixTrie()
+	acct := make([]byte, 20)
+	acct[19] = 0xAB
+	addrNibbles := make([]byte, 64)
+	for i := range addrNibbles {
+		addrNibbles[i] = byte(i % 16)
+	}
+	if withAccount {
+		tr.Insert(addrNibbles, acct, nil)
+	}
+	for i := range slots {
+		slot := make([]byte, 64)
+		slot[0] = byte(i % 16)
+		slot[1] = byte((i / 16) % 16)
+		slot[2] = byte((i / 256) % 16)
+		key := append(append([]byte{}, addrNibbles...), slot...)
+		tr.Insert(key, append(append([]byte{}, acct...), byte(i)), nil)
+	}
+	node, depth := tr.root, 0
+	for node != nil && depth < 64 {
+		depth += len(node.ext)
+		if depth >= 64 {
+			break
+		}
+		nib := addrNibbles[depth]
+		if node.bitmap&(1<<nib) == 0 {
+			return nil
+		}
+		idx := bits.OnesCount16(node.bitmap & ((1 << nib) - 1))
+		node = node.children[idx]
+		depth++
+	}
+	require.NotNil(t, node)
+	return node
+}
+
+func TestDeepFold_ThresholdCountsStorageSlotsOnly(t *testing.T) {
+	const threshold = 8
+	for _, slots := range []int{threshold, threshold + 1} {
+		withAcct := buildStorageSubtree(t, true, slots)
+		without := buildStorageSubtree(t, false, slots)
+		require.Equal(t,
+			isDeepStorageSubtree(without, 64, threshold),
+			isDeepStorageSubtree(withAcct, 64, threshold),
+			"%d touched slots must pick the same path whether or not the account record is touched", slots)
+	}
 }

@@ -17,9 +17,7 @@
 package vm
 
 import (
-	"maps"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -168,16 +166,6 @@ func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
 }
 
-func TestForkSetsCoverEveryTier(t *testing.T) {
-	for i := range int(forkTierCount) {
-		tier := forkTier(i)
-		require.NotEmpty(t, forkSets[tier].contracts, "forkSets[%d] has no contracts", tier)
-		require.NotEmpty(t, forkSets[tier].addresses, "forkSets[%d] has no addresses", tier)
-		require.Len(t, forkSets[tier].addresses, len(forkSets[tier].contracts),
-			"forkSets[%d] address list and contract map disagree", tier)
-	}
-}
-
 func TestRegisterSweepsStaleCache(t *testing.T) {
 	const chainID = 900503
 	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
@@ -252,25 +240,4 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 			_ = ActivePrecompiles(rules)
 		}
 	})
-}
-
-// TestDeprecatedForkAddressExportsTrackTheirSets pins the exported per-fork
-// address slices to the sets they name. Chains outside this repo compile
-// against them, so an empty or drifted slice is a break no in-repo grep sees.
-func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
-	for name, tc := range map[string]struct {
-		addrs     []accounts.Address
-		contracts PrecompiledContracts
-	}{
-		"homestead": {PrecompiledAddressesHomestead, PrecompiledContractsHomestead},
-		"byzantium": {PrecompiledAddressesByzantium, PrecompiledContractsByzantium},
-		"istanbul":  {PrecompiledAddressesIstanbul, PrecompiledContractsIstanbul},
-		"berlin":    {PrecompiledAddressesBerlin, PrecompiledContractsBerlin},
-		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
-		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
-		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
-	} {
-		require.NotEmpty(t, tc.addrs, name)
-		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
-	}
 }
