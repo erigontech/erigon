@@ -20,11 +20,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -223,4 +227,43 @@ func TestBackwardBeaconDownloaderHTTPPreferredEmptyResponseFallsBack(t *testing.
 	if downloader.httpPreferred.Load() {
 		t.Fatal("httpPreferred remained true after empty HTTP response")
 	}
+}
+
+type emptyResponseBanRecordingSentinel struct {
+	sentinelproto.SentinelClient
+	banned chan string
+}
+
+func (s *emptyResponseBanRecordingSentinel) SendRequest(_ context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+}
+
+func (s *emptyResponseBanRecordingSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	select {
+	case s.banned <- peer.Pid:
+	default:
+	}
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func TestSendBlockRequestDoesNotBanOnEmptyResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	sentinel := &emptyResponseBanRecordingSentinel{banned: make(chan string, 1)}
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	b := NewBackwardBeaconDownloader(ctx, rpcClient, nil, nil, nil, cfg)
+
+	var requestSent atomic.Bool
+	requestSent.Store(true)
+	received := make(chan []*cltypes.SignedBeaconBlock, 1)
+	b.sendBlockRequest(ctx, 100, 10, received, &requestSent)
+
+	select {
+	case pid := <-sentinel.banned:
+		t.Fatalf("peer %s banned for a protocol-legal empty response", pid)
+	default:
+	}
+	assert.False(t, requestSent.Load(), "an empty response must release the in-flight flag so the request retries")
+	assert.Empty(t, received, "an empty response must not be delivered as a batch")
 }
