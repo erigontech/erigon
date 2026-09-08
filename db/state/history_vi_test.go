@@ -96,3 +96,22 @@ func TestHistoryValueIndexV1(t *testing.T) {
 		require.Equal(t, uint64(i)*100, off)
 	}
 }
+
+// An empty v1 index has no keys, and its Lookup panics. Empty has to say so.
+func TestHistoryValueIndexV1Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "empty.vi")
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount: 0, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: path, LeafSize: 8, NoFsync: true,
+	}, log.New())
+	require.NoError(t, err)
+	defer rs.Close()
+	require.NoError(t, rs.Build(t.Context()))
+
+	idx, err := OpenHistoryValueIndex(path, version.V1_0)
+	require.NoError(t, err)
+	defer idx.Close()
+	require.True(t, idx.Empty())
+}

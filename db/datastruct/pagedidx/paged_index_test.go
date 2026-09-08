@@ -17,6 +17,7 @@
 package pagedidx
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -159,4 +160,38 @@ func TestEmpty(t *testing.T) {
 func TestPageSizeZeroRejected(t *testing.T) {
 	_, err := NewWriter(filepath.Join(t.TempDir(), "bad"), 0, 1, 1, 1)
 	require.Error(t, err)
+}
+
+// An item past its own run belongs to no run, even when the ordinal it lands on
+// is a valid position in the next one.
+func TestItemPastRunEnd(t *testing.T) {
+	idx := build(t, "past-run", 2, []uint64{3, 1}, []uint64{0, 37})
+	_, ok := idx.Get(0, 3) // ordinal 3 is run 1's only item
+	require.False(t, ok)
+	_, ok = idx.Get(1, 1)
+	require.False(t, ok, "one past the last item of the last run")
+}
+
+// A truncated or forged file must be reported, not panicked on: openDirtyAccessor
+// rebuilds an accessor it cannot open.
+func TestOpenCorrupt(t *testing.T) {
+	good := filepath.Join(t.TempDir(), "good")
+	w, err := NewWriter(good, 2, 2, 4, 100)
+	require.NoError(t, err)
+	w.NoFsync()
+	w.AddRun(3)
+	w.AddRun(1)
+	w.AddPage(0)
+	w.AddPage(100)
+	require.NoError(t, w.Build())
+	full, err := os.ReadFile(good)
+	require.NoError(t, err)
+
+	for _, size := range []int{headerLen + 1, headerLen + 16, len(full) - 1} {
+		path := filepath.Join(t.TempDir(), "trunc")
+		require.NoError(t, os.WriteFile(path, full[:size], 0o644))
+		idx, err := Open(path)
+		require.Error(t, err, "size %d", size)
+		require.Nil(t, idx, "size %d", size)
+	}
 }

@@ -36,6 +36,7 @@ package pagedidx
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 
@@ -67,7 +68,7 @@ func Open(path string) (*Index, error) {
 	}
 	idx := &Index{f: f}
 	defer func() {
-		if idx.m == nil {
+		if idx.m == nil && idx.f != nil { // Close already took it on the error paths below
 			f.Close()
 		}
 	}()
@@ -94,11 +95,37 @@ func Open(path string) (*Index, error) {
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
 	}
 	if fi.Size() > headerLen {
-		starts, n := eliasfano32.ReadEliasFano(m[headerLen:])
-		idx.starts = starts
-		idx.pages, _ = eliasfano32.ReadEliasFano(m[headerLen+n:])
+		starts, n, err := readEliasFano(m[headerLen:])
+		if err != nil {
+			idx.Close()
+			return nil, fmt.Errorf("%s: starts: %w", path, err)
+		}
+		pages, _, err := readEliasFano(m[headerLen+n:])
+		if err != nil {
+			idx.Close()
+			return nil, fmt.Errorf("%s: pages: %w", path, err)
+		}
+		idx.starts, idx.pages = starts, pages
 	}
 	return idx, nil
+}
+
+// readEliasFano rejects a sequence that does not fit in what is left of the
+// file. ReadEliasFano itself reads a 16-byte header unchecked, and silently
+// re-allocates off the mapping when the header asks for more words than are
+// there.
+func readEliasFano(b []byte) (*eliasfano32.EliasFano, int, error) {
+	if len(b) <= 16 {
+		return nil, 0, fmt.Errorf("truncated: %d bytes", len(b))
+	}
+	ef, n := eliasfano32.ReadEliasFano(b)
+	if n > len(b) {
+		return nil, 0, fmt.Errorf("needs %d bytes, %d left", n, len(b))
+	}
+	if ef.Count() == 0 {
+		return nil, 0, errors.New("empty sequence")
+	}
+	return ef, n, nil
 }
 
 // Get returns the value of a run's item, and false when the index holds no such
@@ -108,11 +135,20 @@ func (i *Index) Get(run, item uint64) (uint64, bool) {
 	if i.pages == nil || run >= i.starts.Count() {
 		return 0, false
 	}
-	page := (i.starts.Get(run) + item) / i.pageSize
-	if page >= i.pages.Count() {
+	ordinal := i.starts.Get(run) + item
+	if ordinal >= i.runEnd(run) {
 		return 0, false
 	}
-	return i.pages.Get(page), true
+	return i.pages.Get(ordinal / i.pageSize), true
+}
+
+// runEnd is where run's items stop: the next run's start, or the item count for
+// the last run.
+func (i *Index) runEnd(run uint64) uint64 {
+	if run+1 < i.starts.Count() {
+		return i.starts.Get(run + 1)
+	}
+	return i.itemCount
 }
 
 // Run returns the run owning the item at ordinal, and false when the index
