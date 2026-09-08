@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -40,6 +41,19 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 // exact epochs * SLOTS_PER_EPOCH distance cuts above that boundary whenever the head sits inside
 // an epoch. The extra epoch keeps the cut at or below it, which matters because this distance also
 // sets the earliest slot we advertise as servable.
+//
+// A custom chain config supplies both inputs unchecked, and zero here means "keep nothing", so
+// anything unrepresentable saturates to keeping everything rather than wrapping into a distance
+// that prunes the whole store.
 func specColumnKeepSlots(beaconCfg *clparams.BeaconChainConfig) uint64 {
-	return (beaconCfg.MinEpochsForDataColumnSidecarsRequests + 1) * beaconCfg.SlotsPerEpoch
+	epochs := beaconCfg.MinEpochsForDataColumnSidecarsRequests
+	slotsPerEpoch := beaconCfg.SlotsPerEpoch
+	if slotsPerEpoch == 0 || epochs == math.MaxUint64 {
+		return math.MaxUint64
+	}
+	epochs++
+	if epochs > math.MaxUint64/slotsPerEpoch {
+		return math.MaxUint64
+	}
+	return epochs * slotsPerEpoch
 }
