@@ -19,6 +19,7 @@ package vm
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -147,7 +148,7 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 
 	overlay := provider(rules.L2Version)
 	for addr, p := range overlay {
-		if p == nil {
+		if isNilContract(p) {
 			panic(fmt.Sprintf("vm: precompile provider for chain %s returned a nil contract at %x", &chainID, addr))
 		}
 	}
@@ -162,4 +163,16 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 	}
 	mergedCache[key] = set
 	return set
+}
+
+func isNilContract(p PrecompiledContract) bool {
+	if p == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(p); v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
