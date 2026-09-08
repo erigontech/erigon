@@ -155,7 +155,9 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 		}
 	}
 
-	t.setTypeConverters()
+	if err := t.setTypeConverters(); err != nil {
+		return nil, err
+	}
 	t.setBuiltinFunctions()
 	ret, err := vm.RunString("(" + code + ")")
 	if err != nil {
@@ -434,7 +436,7 @@ func wrapError(context string, err error) error {
 func (t *jsTracer) setBuiltinFunctions() {
 	vm := t.vm
 	// TODO: load console from goja-nodejs
-	vm.Set("toHex", func(v goja.Value) string {
+	_ = vm.Set("toHex", func(v goja.Value) string {
 		b, err := t.fromBuf(vm, v, false)
 		if err != nil {
 			vm.Interrupt(err)
@@ -442,7 +444,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		return hexutil.Encode(b)
 	})
-	vm.Set("toWord", func(v goja.Value) goja.Value {
+	_ = vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32
 		b, err := t.fromBuf(vm, v, true)
 		if err != nil {
@@ -458,7 +460,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		return res
 	})
-	vm.Set("toAddress", func(v goja.Value) goja.Value {
+	_ = vm.Set("toAddress", func(v goja.Value) goja.Value {
 		a, err := t.fromBuf(vm, v, true)
 		if err != nil {
 			vm.Interrupt(err)
@@ -473,7 +475,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		return res
 	})
-	vm.Set("toContract", func(from goja.Value, nonce uint) goja.Value {
+	_ = vm.Set("toContract", func(from goja.Value, nonce uint) goja.Value {
 		a, err := t.fromBuf(vm, from, true)
 		if err != nil {
 			vm.Interrupt(err)
@@ -489,7 +491,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		return res
 	})
-	vm.Set("toContract2", func(from goja.Value, salt string, initcode goja.Value) goja.Value {
+	_ = vm.Set("toContract2", func(from goja.Value, salt string, initcode goja.Value) goja.Value {
 		a, err := t.fromBuf(vm, from, true)
 		if err != nil {
 			vm.Interrupt(err)
@@ -512,7 +514,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		return res
 	})
-	vm.Set("isPrecompiled", func(v goja.Value) bool {
+	_ = vm.Set("isPrecompiled", func(v goja.Value) bool {
 		a, err := t.fromBuf(vm, v, true)
 		if err != nil {
 			vm.Interrupt(err)
@@ -521,7 +523,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		addr := accounts.InternAddress(common.BytesToAddress(a))
 		return slices.Contains(t.activePrecompiles, addr)
 	})
-	vm.Set("slice", func(slice goja.Value, start, end int) goja.Value {
+	_ = vm.Set("slice", func(slice goja.Value, start, end int) goja.Value {
 		b, err := t.fromBuf(vm, slice, false)
 		if err != nil {
 			vm.Interrupt(err)
@@ -593,9 +595,9 @@ func (o *opObj) IsPush() bool {
 
 func (o *opObj) setupObject() *goja.Object {
 	obj := o.vm.NewObject()
-	obj.Set("toNumber", o.vm.ToValue(o.ToNumber))
-	obj.Set("toString", o.vm.ToValue(o.ToString))
-	obj.Set("isPush", o.vm.ToValue(o.IsPush))
+	_ = obj.Set("toNumber", o.vm.ToValue(o.ToNumber))
+	_ = obj.Set("toString", o.vm.ToValue(o.ToString))
+	_ = obj.Set("isPush", o.vm.ToValue(o.IsPush))
 	return obj
 }
 
@@ -663,9 +665,9 @@ func (mo *memoryObj) Length() int {
 
 func (m *memoryObj) setupObject() *goja.Object {
 	o := m.vm.NewObject()
-	o.Set("slice", m.vm.ToValue(m.Slice))
-	o.Set("getUint", m.vm.ToValue(m.GetUint))
-	o.Set("length", m.vm.ToValue(m.Length))
+	_ = o.Set("slice", m.vm.ToValue(m.Slice))
+	_ = o.Set("getUint", m.vm.ToValue(m.GetUint))
+	_ = o.Set("length", m.vm.ToValue(m.Length))
 	return o
 }
 
@@ -703,8 +705,8 @@ func (s *stackObj) Length() int {
 
 func (s *stackObj) setupObject() *goja.Object {
 	o := s.vm.NewObject()
-	o.Set("peek", s.vm.ToValue(s.Peek))
-	o.Set("length", s.vm.ToValue(s.Length))
+	_ = o.Set("peek", s.vm.ToValue(s.Peek))
+	_ = o.Set("length", s.vm.ToValue(s.Length))
 	return o
 }
 
@@ -810,11 +812,11 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 
 func (do *dbObj) setupObject() *goja.Object {
 	o := do.vm.NewObject()
-	o.Set("getBalance", do.vm.ToValue(do.GetBalance))
-	o.Set("getNonce", do.vm.ToValue(do.GetNonce))
-	o.Set("getCode", do.vm.ToValue(do.GetCode))
-	o.Set("getState", do.vm.ToValue(do.GetState))
-	o.Set("exists", do.vm.ToValue(do.Exists))
+	_ = o.Set("getBalance", do.vm.ToValue(do.GetBalance))
+	_ = o.Set("getNonce", do.vm.ToValue(do.GetNonce))
+	_ = o.Set("getCode", do.vm.ToValue(do.GetCode))
+	_ = o.Set("getState", do.vm.ToValue(do.GetState))
+	_ = o.Set("exists", do.vm.ToValue(do.Exists))
 	return o
 }
 
@@ -867,10 +869,10 @@ func (co *contractObj) GetInput() goja.Value {
 
 func (c *contractObj) setupObject() *goja.Object {
 	o := c.vm.NewObject()
-	o.Set("getCaller", c.vm.ToValue(c.GetCaller))
-	o.Set("getAddress", c.vm.ToValue(c.GetAddress))
-	o.Set("getValue", c.vm.ToValue(c.GetValue))
-	o.Set("getInput", c.vm.ToValue(c.GetInput))
+	_ = o.Set("getCaller", c.vm.ToValue(c.GetCaller))
+	_ = o.Set("getAddress", c.vm.ToValue(c.GetAddress))
+	_ = o.Set("getValue", c.vm.ToValue(c.GetValue))
+	_ = o.Set("getInput", c.vm.ToValue(c.GetInput))
 	return o
 }
 
@@ -939,12 +941,12 @@ func (f *callframe) GetValue() goja.Value {
 
 func (f *callframe) setupObject() *goja.Object {
 	o := f.vm.NewObject()
-	o.Set("getType", f.vm.ToValue(f.GetType))
-	o.Set("getFrom", f.vm.ToValue(f.GetFrom))
-	o.Set("getTo", f.vm.ToValue(f.GetTo))
-	o.Set("getInput", f.vm.ToValue(f.GetInput))
-	o.Set("getGas", f.vm.ToValue(f.GetGas))
-	o.Set("getValue", f.vm.ToValue(f.GetValue))
+	_ = o.Set("getType", f.vm.ToValue(f.GetType))
+	_ = o.Set("getFrom", f.vm.ToValue(f.GetFrom))
+	_ = o.Set("getTo", f.vm.ToValue(f.GetTo))
+	_ = o.Set("getInput", f.vm.ToValue(f.GetInput))
+	_ = o.Set("getGas", f.vm.ToValue(f.GetGas))
+	_ = o.Set("getValue", f.vm.ToValue(f.GetValue))
 	return o
 }
 
@@ -979,9 +981,9 @@ func (r *callframeResult) GetError() goja.Value {
 
 func (r *callframeResult) setupObject() *goja.Object {
 	o := r.vm.NewObject()
-	o.Set("getGasUsed", r.vm.ToValue(r.GetGasUsed))
-	o.Set("getOutput", r.vm.ToValue(r.GetOutput))
-	o.Set("getError", r.vm.ToValue(r.GetError))
+	_ = o.Set("getGasUsed", r.vm.ToValue(r.GetGasUsed))
+	_ = o.Set("getOutput", r.vm.ToValue(r.GetOutput))
+	_ = o.Set("getError", r.vm.ToValue(r.GetError))
 	return o
 }
 
@@ -1017,16 +1019,16 @@ func (l *steplog) GetError() goja.Value {
 func (l *steplog) setupObject() *goja.Object {
 	o := l.vm.NewObject()
 	// Setup basic fields.
-	o.Set("getPC", l.vm.ToValue(l.GetPC))
-	o.Set("getGas", l.vm.ToValue(l.GetGas))
-	o.Set("getCost", l.vm.ToValue(l.GetCost))
-	o.Set("getDepth", l.vm.ToValue(l.GetDepth))
-	o.Set("getRefund", l.vm.ToValue(l.GetRefund))
-	o.Set("getError", l.vm.ToValue(l.GetError))
+	_ = o.Set("getPC", l.vm.ToValue(l.GetPC))
+	_ = o.Set("getGas", l.vm.ToValue(l.GetGas))
+	_ = o.Set("getCost", l.vm.ToValue(l.GetCost))
+	_ = o.Set("getDepth", l.vm.ToValue(l.GetDepth))
+	_ = o.Set("getRefund", l.vm.ToValue(l.GetRefund))
+	_ = o.Set("getError", l.vm.ToValue(l.GetError))
 	// Setup nested objects.
-	o.Set("op", l.op.setupObject())
-	o.Set("stack", l.stack.setupObject())
-	o.Set("memory", l.memory.setupObject())
-	o.Set("contract", l.contract.setupObject())
+	_ = o.Set("op", l.op.setupObject())
+	_ = o.Set("stack", l.stack.setupObject())
+	_ = o.Set("memory", l.memory.setupObject())
+	_ = o.Set("contract", l.contract.setupObject())
 	return o
 }
