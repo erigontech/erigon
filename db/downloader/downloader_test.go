@@ -1406,3 +1406,26 @@ func TestVerifyDataFailFastClosesFiles(t *testing.T) {
 	}
 	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
 }
+
+func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	d := test.downloader
+
+	corruptName := "0-corrupt.seg.torrent"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, corruptName), []byte("not a torrent"), 0o644))
+
+	segName := "v1-000000-001000-headers.seg"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, segName), []byte("headers data"), 0o644))
+	ok, err := BuildTorrentIfNeed(t.Context(), segName, test.dirs.Snap, d.torrentFS)
+	require.NoError(err)
+	require.True(ok)
+
+	incomplete, err := d.AddTorrentsFromDisk(t.Context())
+	require.NoError(err)
+	require.Zero(incomplete)
+
+	torrents := d.torrentClient.Torrents()
+	require.Len(torrents, 1)
+	require.Equal(segName, torrents[0].Name())
+}
