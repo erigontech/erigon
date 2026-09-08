@@ -27,7 +27,7 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20260904084650-2287d597ee4d
+	github.com/anacrolix/torrent v1.61.1-0.20260908035318-5561014ea28f
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -155,7 +155,8 @@ require (
 	github.com/anacrolix/btree v0.1.1 // indirect
 	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.1-0.20260525063928-ec3a9bd99456 // indirect
-	github.com/anacrolix/go-libutp v1.5.2-0.20260904083039-aaba75968f23 // indirect
+	github.com/anacrolix/go-libutp v1.5.2-0.20260908013213-836dd42cdde6 // indirect
+	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/mmsg v1.0.1 // indirect

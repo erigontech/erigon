@@ -831,6 +831,12 @@ var (
 		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
+
+	DisableTCP = cli.BoolFlag{
+		Name:  "downloader.disable.tcp",
+		Usage: "Turns off TCP for the downloader, leaving uTP as the only BitTorrent transport",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -2146,6 +2152,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
 				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				DisableTCP:               boolFlagOpt(ctx, &DisableTCP),
 				Verify:                   ctx.Bool(DownloaderVerifyFlag.Name),
 				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
 				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
