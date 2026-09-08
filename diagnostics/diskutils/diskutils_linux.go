@@ -28,6 +28,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -47,27 +49,22 @@ func MountPointForDirPath(dirPath string) string {
 	if err != nil {
 		return ""
 	}
+	devIDStr := fmt.Sprintf("%d:%d", unix.Major(devID), unix.Minor(devID))
 
-	// Open /proc/self/mountinfo
 	mountsFile, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		return ""
 	}
 	defer mountsFile.Close()
 
-	// Read mountinfo to find matching device ID
 	scanner := bufio.NewScanner(mountsFile)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fields := strings.Split(line, " ")
+		fields := strings.Fields(line)
 		if len(fields) < 5 {
 			continue
 		}
-
-		// Extract device ID from the mountinfo line
-		var deviceID uint64
-		_, _ = fmt.Sscanf(fields[4], "%d", &deviceID)
-		if deviceID == devID {
+		if fields[2] == devIDStr {
 			return fields[4]
 		}
 	}
