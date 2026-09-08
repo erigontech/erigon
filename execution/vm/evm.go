@@ -39,12 +39,7 @@ import (
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
-	// Precompiled contracts can be overridden, otherwise determine the active set based on chain rules
-	precompiles := evm.precompiles
-	if precompiles == nil {
-		precompiles = Precompiles(evm.chainRules)
-	}
-	p, ok := precompiles[addr]
+	p, ok := evm.precompiles[addr]
 	return p, ok
 }
 
@@ -83,7 +78,8 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
-	// optional overridden set of precompiled contracts
+	// precompiles is the active set: resolved from the chain rules on reset,
+	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
 
 	readOnly   bool   // Whether to throw on stateful modifications
@@ -238,6 +234,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
+	evm.precompiles = Precompiles(evm.chainRules)
 
 	return evm
 }
@@ -267,6 +264,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.depth = 0
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
+	evm.precompiles = Precompiles(chainRules)
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -319,8 +317,13 @@ func isSystemCall(caller accounts.Address) bool {
 	return caller == params.SystemAddress
 }
 
-// SetPrecompiles sets the precompiles for the EVM
+// SetPrecompiles replaces the active set for state-override RPC calls. The
+// next ResetBetweenBlocks restores the chain's own set. A nil map means the
+// chain's own set; pass an empty non-nil map to disable every precompile.
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
+	if precompiles == nil {
+		precompiles = Precompiles(evm.chainRules)
+	}
 	evm.precompiles = precompiles
 }
 
@@ -838,6 +841,10 @@ func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 // GetVMContext provides context about the block being executed as well as state
 // to the tracers.
 func (evm *EVM) GetVMContext() *tracing.VMContext {
+	rules := *evm.chainRules
+	if rules.ChainID != nil {
+		rules.ChainID = rules.ChainID.Clone()
+	}
 	return &tracing.VMContext{
 		Coinbase:        evm.Context.Coinbase,
 		BlockNumber:     evm.Context.BlockNumber,
@@ -846,6 +853,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 		GasPrice:        evm.TxContext.GasPrice,
 		ChainConfig:     evm.ChainConfig(),
 		IntraBlockState: evm.IntraBlockState(),
+		Rules:           &rules,
 		TxHash:          evm.TxHash,
 	}
 }
