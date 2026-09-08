@@ -107,11 +107,11 @@ type iiSeekInFilesCacheItem struct {
 	// rather than to a miss
 	lo uint64
 	// position of the key in the .ef file and of `found` in that key's txNum
-	// list - the history value index is addressed by the pair
+	// list - the history value index is addressed by the pair - and the file
+	// they came from. Caching a file index is safe because newIIVisible builds
+	// each cache pool together with the one file list it serves.
 	keyOrdinal, rank uint64
-	// the .ef range that pair indexes into, so a cached hit can still be
-	// checked against the .v file it will be used on
-	srcStartTxNum, srcEndTxNum uint64
+	fileIdx          int
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {

@@ -39,9 +39,9 @@
 //	starts[r] = items before run r     -> ordinal = starts[r] + item
 //	pages[p]  = value of page p        -> value   = pages[ordinal / pageSize]
 //
-// Both are monotone, so both answer by access and by predecessor search: Get
-// and Run on starts, Get and Page on pages. starts counts items, pages holds
-// the values themselves, and the two have different lengths. Paging drops the
+// Both are monotone, so starts answers by access and by predecessor search:
+// Get and Run. starts counts items, pages holds the values themselves, and the
+// two have different lengths. Paging drops the
 // stored count by pageSize, and Elias-Fano then encodes what is left in the
 // bits its gaps need: 8 billion items at 64 per page keep 125 million values.
 package posidx
@@ -202,20 +202,6 @@ func (i *Index) Run(ordinal uint64) (uint64, bool) {
 		return last, true
 	}
 	_, pos, _ := i.starts.Seek(ordinal + 1)
-	return pos - 1, true
-}
-
-// Page returns the page holding value, and false when value falls before the
-// first page.
-func (i *Index) Page(value uint64) (uint64, bool) {
-	if i.pages == nil || value < i.pages.Get(0) {
-		return 0, false
-	}
-	last := i.pages.Count() - 1
-	if value >= i.pages.Get(last) {
-		return last, true
-	}
-	_, pos, _ := i.pages.Seek(value + 1)
 	return pos - 1, true
 }
 

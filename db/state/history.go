@@ -1094,20 +1094,16 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, nil
 	}
 	histTxNum := seek.txNum
-	historyItem, ok := ht.getFile(histTxNum)
+	historyItem, ok := ht.pairedFile(ht.iit.files[seek.fileIdx])
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.stepSize)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
 	}
-	vi := ht.files[historyItem.i].src.vi
-	if vi.Empty() {
+	if historyItem.src.vi.Empty() {
 		return nil, false, nil
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
-	offset, ok, err := historyItem.src.LookupHistoryValue(seek.srcStartTxNum, seek.srcEndTxNum, seek.keyOrdinal, seek.rank, histTxNum, key)
-	if err != nil {
-		return nil, false, err
-	}
+	offset, ok := historyItem.src.vi.Lookup(seek.keyOrdinal, seek.rank, histTxNum, key)
 	if !ok {
 		return nil, false, nil
 	}
@@ -1395,6 +1391,11 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 			break
 		}
 
+		viFile, ok := ht.pairedFile(item)
+		if !ok {
+			return fmt.Errorf("HistoryDump: no .v file paired with %s", item.src.decompressor.FileName())
+		}
+
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
 
@@ -1412,14 +1413,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 			for rank := uint64(0); ss.HasNext(); rank++ {
 				txNum, _ := ss.Next()
 
-				viFile, ok := ht.getFile(txNum)
-				if !ok {
-					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
-				}
-				vOffset, ok, err := viFile.src.LookupHistoryValue(item.startTxNum, item.endTxNum, keyOrdinal, rank, txNum, key)
-				if err != nil {
-					return err
-				}
+				vOffset, ok := viFile.src.vi.Lookup(keyOrdinal, rank, txNum, key)
 				if !ok {
 					return fmt.Errorf("HistoryDump: failed to resolve offset in %s for key [%x]", viFile.Fullpath(), key)
 				}

@@ -69,13 +69,13 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 		g := hi.hc.iit.dataReader(item.src.decompressor)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
-		var offset uint64
+		var offset, keyOrdinal uint64
 		if len(hi.from) > 0 {
 			n := item.src.decompressor.Count() / 2
 			var ok bool
-			offset, ok = g.BinarySearch(hi.from, n, idx.OrdinalLookup)
+			offset, keyOrdinal, ok = g.BinarySearch(hi.from, n, idx.OrdinalLookup)
 			if !ok {
-				offset = 0
+				offset, keyOrdinal = 0, 0
 			}
 		}
 		g.Reset(offset)
@@ -84,13 +84,6 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			var val []byte
 			if g.HasNext() {
 				val, _ = g.Next(nil)
-			}
-			var keyOrdinal uint64
-			if offset != 0 {
-				var ok bool
-				if _, keyOrdinal, ok = idx.TwoLayerLookupWithOrdinal(key); !ok {
-					return fmt.Errorf("%s: no ordinal for first key [%x]", hi.hc.h.FilenameBase, key)
-				}
 			}
 			histFileIdx := -1
 			if f, ok := hi.hc.pairedFile(item); ok {
@@ -794,7 +787,8 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			idxReader := ht.hc.iit.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.iit.statelessGetter(ht.fileIdx)
 
-			offset, keyOrdinal, ok := idxReader.TwoLayerLookupWithOrdinal(ht.key)
+			hi, lo := idxReader.Sum(ht.key)
+			offset, keyOrdinal, ok := idxReader.TwoLayerLookupByHashWithOrdinal(hi, lo)
 			if !ok {
 				ht.logger.Debug("weird thing - no offset found", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
@@ -845,10 +839,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				compressedPageValuesCount,
 				true,
 			)
-			offset, ok, err := historyItem.src.LookupHistoryValue(item.startTxNum, item.endTxNum, ht.keyOrdinal, ht.rank, txNum, ht.key)
-			if err != nil {
-				return err
-			}
+			offset, ok := historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank, txNum, ht.key)
 			if !ok { // shouldn't since key/txNum in ef
 				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}

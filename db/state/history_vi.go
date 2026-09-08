@@ -79,10 +79,6 @@ func (i *HistoryValueIndex) Empty() bool {
 	return i.paged.Empty()
 }
 
-// Positional reports whether Lookup addresses by (keyOrdinal, rank). A
-// positional index only answers for the .ef file it was built from.
-func (i *HistoryValueIndex) Positional() bool { return i != nil && i.paged != nil }
-
 func (i *HistoryValueIndex) FilePath() string { return i.filePath }
 
 func (i *HistoryValueIndex) Close() {

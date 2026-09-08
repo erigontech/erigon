@@ -120,24 +120,6 @@ func TestRunSkipsEmpty(t *testing.T) {
 	}
 }
 
-// Page is the reverse of Get's second half: which page holds a value.
-func TestPage(t *testing.T) {
-	idx := build(t, "page", 2, []uint64{3, 1, 2}, []uint64{10, 37, 74})
-
-	for _, tc := range []struct{ value, page uint64 }{
-		{10, 0}, {11, 0}, {36, 0},
-		{37, 1}, {73, 1},
-		{74, 2}, {1 << 40, 2}, // past the last page start, still the last page
-	} {
-		p, ok := idx.Page(tc.value)
-		require.True(t, ok, "value %d", tc.value)
-		require.Equal(t, tc.page, p, "value %d", tc.value)
-	}
-
-	_, ok := idx.Page(9)
-	require.False(t, ok, "before the first page")
-}
-
 func TestEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty")
 	w, err := NewWriter(path, t.TempDir(), 64, 0, 0, 0)
@@ -154,8 +136,6 @@ func TestEmpty(t *testing.T) {
 	_, ok := idx.Get(0, 0)
 	require.False(t, ok)
 	_, ok = idx.Run(0)
-	require.False(t, ok)
-	_, ok = idx.Page(0)
 	require.False(t, ok)
 }
 

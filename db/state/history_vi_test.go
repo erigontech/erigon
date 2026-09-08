@@ -118,29 +118,45 @@ func TestHistoryValueIndexV1Empty(t *testing.T) {
 }
 
 // The II and history file lists are chosen independently, so a positional .vi
-// can be paired with a .v built from another range. Answering that with an
-// offset would return a different key's value; it has to fail instead.
-func TestLookupHistoryValueRejectsUnpairedRange(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v2.vi")
-	w, err := posidx.NewWriter(path, t.TempDir(), 2, 2, 4, 40)
-	require.NoError(t, err)
-	defer w.Close()
-	w.NoFsync()
-	w.AddRun(2)
-	w.AddRun(2)
-	w.AddPage(0)
-	w.AddPage(40)
-	require.NoError(t, w.Build())
+// can be reached from an .ef built over another range. Answering that would
+// return a different key's value, so the .v file has to be found by pairing the
+// range rather than by covering the txNum.
+func TestPairedFileRejectsUnpairedRange(t *testing.T) {
+	ht := &HistoryRoTx{files: visibleFiles{
+		{startTxNum: 0, endTxNum: 128, i: 0},
+		{startTxNum: 128, endTxNum: 192, i: 1},
+	}}
 
-	vi, err := OpenHistoryValueIndex(path, version.V2_0)
-	require.NoError(t, err)
-	defer vi.Close()
-	item := &FilesItem{vi: vi, startTxNum: 128, endTxNum: 192}
+	f, ok := ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 192})
+	require.True(t, ok)
+	require.Equal(t, 1, f.i)
 
-	_, ok, err := item.LookupHistoryValue(128, 192, 0, 0, 130, []byte("k"))
-	require.NoError(t, err)
-	require.True(t, ok, "the paired range still resolves")
+	_, ok = ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 256})
+	require.False(t, ok, "an .ef covering a different range must not be answered positionally")
+}
 
-	_, _, err = item.LookupHistoryValue(128, 256, 0, 0, 130, []byte("k"))
-	require.Error(t, err, "an .ef covering a different range must not be answered positionally")
+// The check has to agree with buildVI on every offset of a real file set, and
+// has to reject a .vi whose page offsets do not describe its .v.
+func TestIntegrityHistoryValueIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+	require.NotEmpty(t, ht.files)
+
+	require.NoError(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+
+	// hand each file the neighbour's .vi: both open fine, and both then describe
+	// a .v they were not built from
+	require.GreaterOrEqual(t, len(ht.files), 2)
+	a, b := ht.files[0].src, ht.files[1].src
+	a.vi, b.vi = b.vi, a.vi
+	require.Error(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+	a.vi, b.vi = b.vi, a.vi
 }
