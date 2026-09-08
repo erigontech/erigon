@@ -57,6 +57,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -1000,6 +1001,17 @@ func (d *Downloader) testStartSingleDownloadNoWait(
 	return err
 }
 
+// Once preverified.toml is on disk the local files are what this node built or restored, so the
+// manifest no longer outranks them: data that is present is neither moved aside nor downloaded
+// over. Read every call, the snapshot stage writes the file mid-run.
+func (d *Downloader) keepLocalSnapshot(name snapshotName) (bool, error) {
+	complete, err := dir.FileExist(d.cfg.Dirs.PreverifiedPath())
+	if err != nil || !complete {
+		return false, err
+	}
+	return dir.FileExist(d.filePathForName(name))
+}
+
 func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
 	_, ok := d.torrentClient.Torrent(infoHash)
 	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
@@ -1008,10 +1020,17 @@ func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (
 	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
 	// to wait until another torrent is fetched, and then we mistake a non-partial file with
 	// the correct size as being complete.
-	err = os.Rename(d.filePathForName(name), d.filePathForName(name+".part"))
-	if err != nil && errors.Is(err, os.ErrNotExist) {
-		err = nil
+	from := d.filePathForName(name)
+	to := d.filePathForName(name + ".part")
+	err = os.Rename(from, to)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		return
 	}
+	d.log(log.LvlWarn, "invalidated local snapshot data, will re-download",
+		"name", name, "renamed_to", to, "preverified", infoHash)
 	return
 }
 
@@ -1056,8 +1075,10 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	}
 	// We can invalidate data if a torrent isn't yet loaded.
 	if !ok {
-		miOpt, err = d.loadMatchingMetainfoOrInvalidateData(infoHash, name)
-		if err != nil {
+		var keep bool
+		miOpt, keep, err = d.loadMatchingMetainfoOrInvalidateData(infoHash, name)
+		// A nil torrent tells the caller the local file was kept.
+		if err != nil || keep {
 			return
 		}
 		var new bool
@@ -1077,6 +1098,8 @@ func (d *Downloader) loadMatchingMetainfoOrInvalidateData(
 	name string,
 ) (
 	miOpt g.Option[*metainfo.MetaInfo],
+	// Local data was kept, so there is nothing to download.
+	keep bool,
 	err error,
 ) {
 	miOpt, err = d.maybeLoadMetainfoFromDisk(name)
@@ -1098,6 +1121,13 @@ func (d *Downloader) loadMatchingMetainfoOrInvalidateData(
 		miOpt.SetNone()
 	} else {
 		d.log(log.LvlDebug, "snapshot metainfo missing", "name", name)
+	}
+	keep, err = d.keepLocalSnapshot(name)
+	if err != nil || keep {
+		if keep {
+			d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		}
+		return
 	}
 	err = d.invalidateData(name, infoHash)
 	if err != nil {

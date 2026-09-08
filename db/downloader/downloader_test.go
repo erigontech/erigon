@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -305,6 +306,10 @@ type downloaderTest struct {
 // newDownloaderTest creates a Downloader with proper cleanup handling.
 // All resources (cfg.TorrentLogFile and downloader) are automatically cleaned up via t.Cleanup.
 func newDownloaderTest(t *testing.T) *downloaderTest {
+	return newDownloaderTestWithLogger(t, log.New())
+}
+
+func newDownloaderTestWithLogger(t *testing.T, logger log.Logger) *downloaderTest {
 	require := require.New(t)
 
 	dirs := datadir.New(t.TempDir())
@@ -328,7 +333,7 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg.ClientConfig.DisableUTP = true
 	}
 
-	d, err := New(t.Context(), cfg, log.New())
+	d, err := New(t.Context(), cfg, logger)
 	require.NoError(err)
 
 	// Register cleanup in reverse order (downloader closes before config file)
@@ -344,5 +349,73 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		dirs:       dirs,
 		cfg:        cfg,
 		downloader: d,
+	}
+}
+
+// Once preverified.toml is on disk the local file is what this node built or restored, so a
+// preverified download must not move it aside — whatever the manifest says its hash should be.
+func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
+	for _, initialDownloadComplete := range []bool{false, true} {
+		t.Run(fmt.Sprint("initialDownloadComplete=", initialDownloadComplete), func(t *testing.T) {
+			require := require.New(t)
+			d := newDownloaderTest(t).downloader
+			const name = "v1.0-000000-000500-headers.seg"
+			path := filepath.Join(d.snapDir(), name)
+			require.NoError(os.WriteFile(path, []byte("built here"), 0o644))
+			if initialDownloadComplete {
+				require.NoError(os.WriteFile(d.cfg.Dirs.PreverifiedPath(), nil, 0o644))
+			}
+
+			_, _, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
+			require.NoError(err)
+
+			if initialDownloadComplete {
+				require.FileExists(path)
+				require.NoFileExists(path+".part", "local data must survive once the initial download is complete")
+			} else {
+				require.NoFileExists(path, "the manifest still outranks local data")
+				require.FileExists(path + ".part")
+			}
+		})
+	}
+}
+
+// logBuffer is a log sink readable while the Downloader's goroutines write to it.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Renaming a snapshot away from completeness leaves a hole in the tier that surfaces much later
+// as a wrong read, so the operator has to be told which file it was.
+func TestInvalidatingLocalSnapshotIsLogged(t *testing.T) {
+	require := require.New(t)
+	logs := &logBuffer{}
+	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(logs, log.TerminalFormat())))
+	d := newDownloaderTestWithLogger(t, logger).downloader
+
+	const name = "v1.0-000000-000500-headers.seg"
+	path := filepath.Join(d.snapDir(), name)
+	require.NoError(os.WriteFile(path, []byte("built here"), 0o644))
+
+	_, _, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
+	require.NoError(err)
+	require.FileExists(path + ".part")
+
+	for _, want := range []string{"invalidated local snapshot data", name, ".part"} {
+		require.Contains(logs.String(), want)
 	}
 }

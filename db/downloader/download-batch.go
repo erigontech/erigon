@@ -43,6 +43,9 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 	if err != nil {
 		return err
 	}
+	if t == nil { // local data kept
+		return nil
+	}
 	me.torrents = append(me.torrents, t)
 	if !first {
 		return nil
