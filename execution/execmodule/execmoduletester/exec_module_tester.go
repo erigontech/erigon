@@ -173,7 +173,7 @@ func (emt *ExecModuleTester) Close() {
 		emt.ExecModule.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
-		dir.RemoveAll(emt.Dirs.DataDir)
+		_ = dir.RemoveAll(emt.Dirs.DataDir)
 	}
 }
 
@@ -498,7 +498,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		// we can't use tb.TempDir() here because some tests produce names long
 		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
-			dir.RemoveAll(tmpdir)
+			_ = dir.RemoveAll(tmpdir)
 		})
 	}
 	ctrl := gomock.NewController(tb)

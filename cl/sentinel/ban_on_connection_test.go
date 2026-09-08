@@ -18,6 +18,7 @@ package sentinel
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,10 +45,16 @@ func (s stubP2P) UDPv5Listener() *discover.UDPv5               { return nil }
 func (s stubP2P) UpdateENRAttSubnets(subnetIndex int, on bool) {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)   {}
 
+// testPeerPool is shared package-wide because every peers.NewPool starts two TTL-cache cleanup
+// goroutines that the upstream cache offers no way to stop. Sharing is safe because each test
+// creates its own hosts, so no two tests touch the same peer ID, and it carries no host because
+// nothing in this package reaches Pool.Request, the only method that needs one.
+var testPeerPool = sync.OnceValue(func() *peers.Pool { return peers.NewPool(nil) })
+
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()
 	return &Sentinel{
-		peers: peers.NewPool(h),
+		peers: testPeerPool(),
 		p2p:   stubP2P{host: h},
 		cfg:   &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
 	}
@@ -133,6 +140,13 @@ func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
 	require.False(t, s.handleNewConnection(remote.ID(), failing))
 	require.Equal(t, 3, validations, "a banned peer must not be handshaked again")
 	waitDisconnected(t, local, remote.ID())
+}
+
+// Each pool leaves two cleanup goroutines running for the rest of the process, so building one
+// per test makes the count grow with the size of the suite.
+func TestFixtureReusesOnePeerPool(t *testing.T) {
+	local, _ := connectedPair(t)
+	require.Same(t, testSentinel(t, local).peers, testSentinel(t, local).peers)
 }
 
 // A peer that is not banned still reaches its handshake and is kept.

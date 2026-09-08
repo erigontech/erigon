@@ -125,27 +125,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          diagnostics/diaglib\
-          |diagnostics/diskutils\
-          |execution/commitment\
-          |execution/commitment/trie\
-          |execution/exec\
-          |execution/execmodule\
-          |execution/execmodule/execmoduletester\
-          |execution/protocol\
-          |execution/protocol/aa\
-          |execution/protocol/misc\
-          |execution/protocol/rules/aura\
-          |execution/protocol/rules/ethash\
-          |execution/protocol/rules/merge\
-          |execution/rlp\
-          |execution/stagedsync\
-          |execution/tests\
-          |execution/tests/testutil\
-          |execution/tracing/tracers/js\
-          |execution/types\
-          |execution/types/accounts\
-          |node\
+          node\
           |node/app/component\
           |node/debug\
           |node/nodecfg\

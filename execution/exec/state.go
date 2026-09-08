@@ -597,7 +597,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			return
 		}
 		clearDone = true
-		g.Wait()
+		_ = g.Wait()
 		applyWorker.Close()
 		for _, w := range reconWorkers {
 			w.Close()
@@ -626,7 +626,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 				return reconWorkers[i].Run()
 			})
 		}
-		wait = func() { g.Wait() }
+		wait = func() { _ = g.Wait() }
 	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
