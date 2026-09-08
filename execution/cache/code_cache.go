@@ -52,10 +52,6 @@ const (
 	// it buys governs the hit rate, not how close it lands to any one workload.
 	// Sized to the LRU-resident mean of mainnet contract code.
 	avgCodeEntryBytes = 6554
-	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
-	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
-	// ceiling to an envelope byte budget.
-	codeSizeEntryBytes = 64
 )
 
 type versionedAddressID struct {
