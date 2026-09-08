@@ -748,53 +748,6 @@ func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.C
 	return readFloorLive(vm, addr, CodePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
-// storageWipedAt reports whether an in-block destruct erased addr's pre-block
-// slots, and the TxIndex it sits at.
-func (vm *VersionMap) storageWipedAt(addr accounts.Address, txIdx int) (int, bool) {
-	if vm == nil {
-		return 0, false
-	}
-	e := vm.load(addr)
-	if e == nil {
-		return 0, false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return selfDestructWipesLocked(e, StoragePath, UnknownDep, txIdx)
-}
-
-// hasLiveSlot reports whether addr holds a non-zero slot visible at txIdx that a
-// destruct at wipedAt did not erase. With no key to floor on it weighs the
-// values: a zero write above the destruct leaves the account with no storage
-// just as an erased slot. Only committed cells count — the caller records no
-// read, so an in-flight incarnation's slot would settle the EIP-684 collision
-// check with nothing to re-check it.
-func (vm *VersionMap) hasLiveSlot(addr accounts.Address, wipedAt int, wiped bool, txIdx int) bool {
-	if vm == nil {
-		return false
-	}
-	e := vm.load(addr)
-	if e == nil {
-		return false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, cells := range e.Storage {
-		live := false
-		cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
-			if v.flag != FlagDone {
-				return true
-			}
-			live = (!wiped || k > wipedAt) && !v.Value.IsZero()
-			return false
-		})
-		if live {
-			return true
-		}
-	}
-	return false
-}
-
 // selfDestructWipesLocked applies the per-path floor to the destruct scan and
 // reports the TxIndex the wiping destruct sits at.
 func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
