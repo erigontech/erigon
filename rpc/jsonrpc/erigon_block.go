@@ -48,7 +48,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 		return block.Header(), nil
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 
 // GetHeaderByHash implements erigon_getHeaderByHash. Returns a block's header given a block's hash.
 func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -86,16 +86,13 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 }
 
 func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	// Use one overlay view for the timestamp search and block assembly so the
-	// head, bounds, and lookups cannot switch generations.
-	overlayTx := api.filters.WithOverlay(tx)
 
-	blockNum, err := api.blockNumByTimestamp(ctx, overlayTx, timeStamp.TurnIntoUint64())
+	blockNum, err := api.blockNumByTimestamp(ctx, tx, timeStamp.TurnIntoUint64())
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +102,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 
-	return buildBlockResponse(ctx, api._blockReader, overlayTx, blockNum, fullTx)
+	return buildBlockResponse(ctx, api._blockReader, tx, blockNum, fullTx)
 }
 
 func (api *ErigonImpl) blockNumByTimestamp(ctx context.Context, tx kv.Tx, uintTimestamp uint64) (uint64, error) {
