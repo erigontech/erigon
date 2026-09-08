@@ -113,6 +113,9 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 
 	block := input.Block
 	header := block.Header()
+	if !header.Number.IsUint64() {
+		return nil, errors.New("block number does not fit uint64")
+	}
 	if header.BaseFee == nil {
 		return nil, errors.New("header is missing base fee")
 	}
@@ -131,6 +134,9 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	if header.BlockAccessListHash == nil {
 		return nil, errors.New("header is missing block access list hash")
 	}
+	if header.RequestsHash == nil {
+		return nil, errors.New("header is missing execution requests hash")
+	}
 	if len(header.Extra) > 32 {
 		return nil, fmt.Errorf("extra data length %d exceeds limit 32", len(header.Extra))
 	}
@@ -143,6 +149,10 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	if len(block.Transactions()) != len(input.Receipts) {
 		return nil, fmt.Errorf("transaction and receipt counts differ: %d != %d", len(block.Transactions()), len(input.Receipts))
 	}
+	requestsCommitment := input.Requests.Hash()
+	if *requestsCommitment != *header.RequestsHash {
+		return nil, fmt.Errorf("execution requests hash mismatch: header %x, computed %x", *header.RequestsHash, *requestsCommitment)
+	}
 
 	transactions, err := encodeTransactions(block.Transactions())
 	if err != nil {
@@ -151,6 +161,10 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	receipts, err := encodeReceipts(input.Receipts)
 	if err != nil {
 		return nil, err
+	}
+	receiptCommitment := types.DeriveSha(input.Receipts)
+	if receiptCommitment != header.ReceiptHash {
+		return nil, fmt.Errorf("receipt hash mismatch: header %x, computed %x", header.ReceiptHash, receiptCommitment)
 	}
 	withdrawals, err := encodeWithdrawals(block.Withdrawals())
 	if err != nil {

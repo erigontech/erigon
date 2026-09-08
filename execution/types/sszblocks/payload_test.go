@@ -17,6 +17,7 @@
 package sszblocks
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"testing"
@@ -78,22 +79,48 @@ func TestExecutionPayloadFromBlockRejectsMissingRequests(t *testing.T) {
 	require.EqualError(t, err, "block is missing execution requests")
 }
 
+func TestExecutionPayloadFromBlockRejectsMissingRequestsHash(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	header := block.Block.Header()
+	header.RequestsHash = nil
+	replaceBlockHeader(block, header)
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.EqualError(t, err, "header is missing execution requests hash")
+}
+
+func TestExecutionPayloadFromBlockRejectsRequestsHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	block.Requests = append(types.FlatRequests(nil), block.Requests...)
+	block.Requests[0].RequestData = bytes.Clone(block.Requests[0].RequestData)
+	block.Requests[0].RequestData[len(block.Requests[0].RequestData)-8]++
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.ErrorContains(t, err, "execution requests hash mismatch")
+}
+
 func TestExecutionPayloadFromBlockRejectsMissingSlotNumber(t *testing.T) {
 	t.Parallel()
 
 	block, cfg := payloadFixture(t)
 	header := block.Block.Header()
 	header.SlotNumber = nil
-	block.Block = types.NewBlock(
-		header,
-		block.Block.Transactions(),
-		nil,
-		block.Receipts,
-		block.Block.Withdrawals(),
-		block.Block.BlockAccessListSidecar(),
-	)
+	replaceBlockHeader(block, header)
 	_, err := ExecutionPayloadFromBlock(block, cfg)
 	require.EqualError(t, err, "header is missing slot number")
+}
+
+func TestExecutionPayloadFromBlockRejectsOversizedBlockNumber(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	header := block.Block.Header()
+	header.Number.Lsh(uint256.NewInt(1), 64)
+	replaceBlockHeader(block, header)
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.EqualError(t, err, "block number does not fit uint64")
 }
 
 func TestExecutionPayloadFromBlockRejectsReceiptCountMismatch(t *testing.T) {
@@ -103,6 +130,15 @@ func TestExecutionPayloadFromBlockRejectsReceiptCountMismatch(t *testing.T) {
 	block.Receipts = block.Receipts[:1]
 	_, err := ExecutionPayloadFromBlock(block, cfg)
 	require.EqualError(t, err, "transaction and receipt counts differ: 2 != 1")
+}
+
+func TestExecutionPayloadFromBlockRejectsReceiptHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	block.Receipts[0].Status = types.ReceiptStatusFailed
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.ErrorContains(t, err, "receipt hash mismatch")
 }
 
 func TestExecutionPayloadFromBlockRequiresRegularExcessGas(t *testing.T) {
@@ -138,6 +174,9 @@ func TestExecutionPayloadFromBlockRejectsDuplicateRequestType(t *testing.T) {
 
 	block, cfg := payloadFixture(t)
 	block.Requests = append(block.Requests, block.Requests[0])
+	header := block.Block.Header()
+	header.RequestsHash = block.Requests.Hash()
+	replaceBlockHeader(block, header)
 	_, err := ExecutionPayloadFromBlock(block, cfg)
 	require.EqualError(t, err, "decode execution requests: execution request type 1 is not strictly ascending")
 }
@@ -228,6 +267,17 @@ func payloadFixture(t *testing.T) (*types.BlockWithReceipts, BlockAdapterConfig)
 			BeaconConfig:     &beaconCfg,
 			RegularExcessGas: &regularExcessGas,
 		}
+}
+
+func replaceBlockHeader(block *types.BlockWithReceipts, header *types.Header) {
+	block.Block = types.NewBlock(
+		header,
+		block.Block.Transactions(),
+		nil,
+		block.Receipts,
+		block.Block.Withdrawals(),
+		block.Block.BlockAccessListSidecar(),
+	)
 }
 
 func referencePayloadRoot(t *testing.T, payload *ExecutionPayload) [32]byte {
