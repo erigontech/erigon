@@ -24,15 +24,6 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResource(
-		mcp.NewResource("erigon://chain/config",
-			"chain config",
-			mcp.WithResourceDescription("Get chain configuration"),
-			mcp.WithMIMEType("application/json"),
-		),
-		e.handleResourceChainConfig,
-	)
-
-	srv.AddResource(
 		mcp.NewResource("erigon://blocks/recent",
 			"recent blocks",
 			mcp.WithResourceDescription("Get recent blocks (default: last 10)"),
@@ -99,24 +90,6 @@ func (e *ErigonMCPServer) handleResourceNodeInfo(ctx context.Context, req mcp.Re
 			URI:      "erigon://node/info",
 			MIMEType: "application/json",
 			Text:     toJSONIndent(result),
-		},
-	}, nil
-}
-
-func (e *ErigonMCPServer) handleResourceChainConfig(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	var blockNum string
-	if err := e.client.CallContext(ctx, &blockNum, "eth_blockNumber"); err != nil {
-		return nil, fmt.Errorf("eth_blockNumber: %w", err)
-	}
-
-	return []mcp.ResourceContents{
-		mcp.TextResourceContents{
-			URI:      "erigon://chain/config",
-			MIMEType: "application/json",
-			Text: toJSONText(map[string]any{
-				"current_block": blockNum,
-				"note":          "Chain config details would come from Erigon's chain spec",
-			}),
 		},
 	}, nil
 }
