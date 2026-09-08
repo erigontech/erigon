@@ -8,7 +8,7 @@ pragma solidity >=0.7.0;
 // Proxy is a minimal Gnosis-Safe-style delegatecall proxy: it forwards every
 // call to the singleton held in slot 0. It carries no constructor arguments so
 // its CREATE2 init code is deterministic, letting a factory deploy it onto an
-// address that was already funded while empty (EIP-7610).
+// address that was already funded while empty.
 contract Proxy {
     address internal singleton;
 

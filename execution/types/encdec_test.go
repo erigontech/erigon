@@ -517,9 +517,10 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
@@ -534,10 +535,10 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
