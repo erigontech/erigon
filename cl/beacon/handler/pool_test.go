@@ -37,12 +37,14 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -246,9 +248,12 @@ func TestPoolVoluntaryExitsRejectIgnoredValidation(t *testing.T) {
 }
 
 func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
+	voluntaryExit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: 3}}
 	for _, tc := range []struct {
 		name          string
 		validationErr error
+		stored        *cltypes.SignedVoluntaryExit
+		storeNil      bool
 		status        int
 		publishes     int
 	}{
@@ -256,11 +261,21 @@ func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
 		{name: "invalid", validationErr: errors.New("invalid signature"), status: http.StatusBadRequest},
 		{name: "ignored", validationErr: services.ErrIgnore, status: http.StatusBadRequest},
 		{name: "wrapped ignore", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), status: http.StatusBadRequest},
+		{name: "retained duplicate", validationErr: services.ErrIgnore, stored: voluntaryExit, status: http.StatusOK, publishes: 1},
+		{name: "wrapped retained duplicate", validationErr: fmt.Errorf("validation: %w", services.ErrIgnore), stored: voluntaryExit, status: http.StatusOK, publishes: 1},
+		{name: "hard error with retained duplicate", validationErr: errors.New("invalid signature"), stored: voluntaryExit, status: http.StatusBadRequest},
+		{name: "nil retained exit", validationErr: services.ErrIgnore, storeNil: true, status: http.StatusBadRequest},
+		{name: "nil retained message", validationErr: services.ErrIgnore, stored: &cltypes.SignedVoluntaryExit{}, status: http.StatusBadRequest},
+		{name: "different signature", validationErr: services.ErrIgnore, stored: &cltypes.SignedVoluntaryExit{VoluntaryExit: voluntaryExit.VoluntaryExit, Signature: common.Bytes96{1}}, status: http.StatusBadRequest},
+		{name: "different epoch", validationErr: services.ErrIgnore, stored: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 2, ValidatorIndex: 3}}, status: http.StatusBadRequest},
+		{name: "different validator index", validationErr: services.ErrIgnore, stored: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: 4}}, status: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 			ctrl := gomock.NewController(t)
-			voluntaryExit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: 3}}
+			if tc.stored != nil || tc.storeNil {
+				handler.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.VoluntaryExit.ValidatorIndex, tc.stored)
+			}
 			service := mock_services.NewMockVoluntaryExitService(ctrl)
 			service.EXPECT().ProcessMessage(gomock.Any(), nil, &services.SignedVoluntaryExitForGossip{
 				SignedVoluntaryExit: voluntaryExit, ImmediateVerification: true,
@@ -278,13 +293,57 @@ func TestPoolVoluntaryExitsValidationResult(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.mux.ServeHTTP(response, req)
 			require.Equal(t, tc.status, response.Code)
-			if tc.validationErr != nil {
+			if tc.status == http.StatusBadRequest {
 				var endpointError beaconhttp.EndpointError
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &endpointError))
 				require.Equal(t, http.StatusBadRequest, endpointError.Code)
 				require.Equal(t, tc.validationErr.Error(), endpointError.Message)
 			}
 		})
+	}
+}
+
+func TestPoolVoluntaryExitsRetryFailedPublish(t *testing.T) {
+	_, _, _, _, head, handler, opPool, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	require.NoError(t, head.SetSlot(1000*cfg.SlotsPerEpoch))
+	key, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var publicKey common.Bytes48
+	copy(publicKey[:], bls.CompressPublicKey(key.PublicKey()))
+	head.ValidatorSet().Set(0, solid.NewValidatorFromParameters(publicKey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	require.NoError(t, syncedData.OnHeadState(head))
+	exit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1000, ValidatorIndex: 0}}
+	domain, err := head.GetDomain(cfg.DomainVoluntaryExit, exit.VoluntaryExit.Epoch)
+	require.NoError(t, err)
+	root, err := fork.ComputeSigningRoot(exit.VoluntaryExit, domain)
+	require.NoError(t, err)
+	copy(exit.Signature[:], key.Sign(root[:]).Bytes())
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(uint64(0)).Return(time.Unix(0, 0))
+	clock.EXPECT().GetSlotByTime(gomock.Any()).Return(1000 * cfg.SlotsPerEpoch)
+	clock.EXPECT().GetEpochAtSlot(1000 * cfg.SlotsPerEpoch).Return(1000)
+	handler.voluntaryExitService = services.NewVoluntaryExitService(opPool, beaconevents.NewEventEmitter(), syncedData, cfg, clock, services.NewBatchSignatureVerifier(t.Context(), nil))
+	encodedSSZ, err := exit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gomock.InOrder(
+		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(errors.New("temporary publish failure")),
+		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameVoluntaryExit, encodedSSZ).Return(nil),
+	)
+	handler.gossipManager = gossipManager
+	body, err := json.Marshal(exit)
+	require.NoError(t, err)
+	for attempt := range 2 {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.mux.ServeHTTP(response, req)
+		require.Equal(t, http.StatusOK, response.Code, "attempt %d: %s", attempt+1, response.Body.String())
+		stored, ok := opPool.VoluntaryExitsPool.Get(0)
+		require.True(t, ok)
+		require.Equal(t, exit, stored)
 	}
 }
 
