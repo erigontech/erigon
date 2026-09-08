@@ -121,7 +121,7 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -129,8 +129,13 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	fcu.OnBlockErr = fmt.Errorf("%w: execution client is down", forkchoice.ErrNewPayloadNoStatus)
 
-	err := blockService.ProcessMessage(context.Background(), nil, blocks[1])
+	err := svc.ProcessMessage(context.Background(), nil, blocks[1])
 	require.ErrorIs(t, err, ErrIgnore)
+
+	blockRoot, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
+	_, scheduled := svc.(*blockService).blocksScheduledForLaterExecution.Load(blockRoot)
+	require.True(t, scheduled, "the block must be queued for a retry")
 }
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {
