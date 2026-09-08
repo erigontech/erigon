@@ -282,7 +282,7 @@ func recoverableGloasColumns(t *testing.T, cfg *clparams.BeaconChainConfig, slot
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	columns, err := peerdasutils.GetDataColumnSidecarsGloas(slot, root, cellsAndProofs)
+	columns, err := peerdasutils.GetDataColumnSidecarsGloas(cfg, slot, root, cellsAndProofs)
 	require.NoError(t, err)
 	return block, root, columns
 }

@@ -209,7 +209,11 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 		return nil
 	}
 	var notified atomic.Int32
-	downloader.SetNotifyBlobBackfilled(func(bool) { notified.Add(1) })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
+		if completed {
+			notified.Add(1)
+		}
+	}))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Zero(t, notified.Load())
@@ -434,7 +438,7 @@ func TestBlobHistoryDownloaderCountEqualFuluSkipsDeepScanValidation(t *testing.T
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.True(t, downloader.backfillCompleted.Load())
@@ -703,7 +707,7 @@ func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.True(t, downloader.backfillCompleted.Load())
@@ -719,7 +723,7 @@ func TestBlobHistoryDownloaderFuluBlockWithoutBlobsIgnoresStaleMetadata(t *testi
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.True(t, downloader.backfillCompleted.Load())
@@ -892,7 +896,7 @@ func TestBlobHistoryDownloaderFailedDenebRequestWithholdsCompletionNotification(
 	downloader.rpc = client
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.False(t, notified)
@@ -908,7 +912,7 @@ func TestBlobHistoryDownloaderDenebWithoutBlobsIgnoresStaleStorage(t *testing.T)
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.True(t, downloader.backfillCompleted.Load())

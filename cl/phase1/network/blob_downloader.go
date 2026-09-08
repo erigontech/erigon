@@ -121,10 +121,25 @@ type BlobHistoryDownloader struct {
 	backfillCompleted atomic.Bool
 	logger            log.Logger
 
-	// notifyBlobBackfilled is called when blob backfilling completeness changes.
-	notifyBlobBackfilled func(bool)
+	notifyBlobBackfilled *BlobBackfilledNotifier
+	notifyPending        bool
+	notifyPendingValue   bool
+	notifyRunning        bool
 
 	mu sync.RWMutex
+}
+
+// BlobBackfilledNotifier identifies one blob backfill completion subscription.
+type BlobBackfilledNotifier struct {
+	notify func(bool)
+}
+
+// NewBlobBackfilledNotifier creates a blob backfill completion subscription.
+func NewBlobBackfilledNotifier(notify func(bool)) *BlobBackfilledNotifier {
+	if notify == nil {
+		return nil
+	}
+	return &BlobBackfilledNotifier{notify: notify}
 }
 
 // NewBlobHistoryDownloader creates a new BlobHistoryDownloader
@@ -169,21 +184,60 @@ func (b *BlobHistoryDownloader) SetHeadSlot(slot uint64) {
 }
 
 // SetNotifyBlobBackfilled sets the callback for blob backfilling completeness changes.
-func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify func(bool)) {
+func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify *BlobBackfilledNotifier) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	sameNotify := b.notifyBlobBackfilled == notify
 	b.notifyBlobBackfilled = notify
+	if notify == nil {
+		b.notifyPending = false
+	} else if !b.notifyRunning || !sameNotify {
+		b.notifyPending = true
+		b.notifyPendingValue = b.backfillCompleted.Load()
+	}
+	start := b.startNotifyDrainLocked()
+	b.mu.Unlock()
+	if start {
+		b.drainBlobBackfilledNotifications()
+	}
 }
 
 func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
 	if b.backfillCompleted.Swap(completed) == completed {
 		return
 	}
-	b.mu.RLock()
-	notify := b.notifyBlobBackfilled
-	b.mu.RUnlock()
-	if notify != nil {
-		notify(completed)
+	b.mu.Lock()
+	if b.notifyBlobBackfilled != nil {
+		b.notifyPending = true
+		b.notifyPendingValue = completed
+	}
+	start := b.startNotifyDrainLocked()
+	b.mu.Unlock()
+	if start {
+		b.drainBlobBackfilledNotifications()
+	}
+}
+
+func (b *BlobHistoryDownloader) startNotifyDrainLocked() bool {
+	if b.notifyRunning || !b.notifyPending || b.notifyBlobBackfilled == nil {
+		return false
+	}
+	b.notifyRunning = true
+	return true
+}
+
+func (b *BlobHistoryDownloader) drainBlobBackfilledNotifications() {
+	for {
+		b.mu.Lock()
+		if !b.notifyPending || b.notifyBlobBackfilled == nil {
+			b.notifyRunning = false
+			b.mu.Unlock()
+			return
+		}
+		notify := b.notifyBlobBackfilled
+		completed := b.notifyPendingValue
+		b.notifyPending = false
+		b.mu.Unlock()
+		notify.notify(completed)
 	}
 }
 

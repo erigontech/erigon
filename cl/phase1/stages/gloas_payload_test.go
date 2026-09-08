@@ -37,6 +37,27 @@ type selectedHeadEnvelopeTestStore struct {
 	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
 }
 
+type anchorEnvelopeTestStore struct {
+	root     common.Hash
+	state    *state2.CachingBeaconState
+	envelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
+	return s.root
+}
+
+func (s *anchorEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
+	return root == s.root && s.envelope != nil
+}
+
+func (s *anchorEnvelopeTestStore) GetStateAtBlockRoot(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	if root != s.root {
+		return nil, nil
+	}
+	return s.state, nil
+}
+
 func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,7 +118,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterLateResponse(t *testing.T) {
 				releaseSelectedHeadEnvelopeRequest(cfg, claim)
 				close(requestDone)
 			},
-			retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 		})
 	}()
 	<-requestStarted
@@ -130,7 +150,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
 			releaseSelectedHeadEnvelopeRequest(cfg, claim)
 			close(requestDone)
 		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 	})
 	<-requestDone
 
@@ -139,7 +158,7 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
 	require.True(t, wait)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterAttemptDeadline(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
@@ -160,7 +179,7 @@ func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
 func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T) {
@@ -193,7 +212,7 @@ func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T)
 	require.True(t, wait)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterApplyFailure(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
@@ -217,10 +236,10 @@ func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterEmptyResponse(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
@@ -240,7 +259,7 @@ func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
 func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
@@ -262,7 +281,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
 			releaseSelectedHeadEnvelopeRequest(cfg, claim)
 			close(requestDone)
 		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 	})
 	<-requestDone
 
@@ -306,6 +324,34 @@ func TestClaimedSelectedHeadEnvelopeRetriesTransientApplyFailure(t *testing.T) {
 	require.True(t, store.HasEnvelope(headRoot))
 }
 
+func TestClaimedSelectedHeadEnvelopeRetriesUntilSuccessAfterTwoEmptyResponses(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		if requestCalls < 3 {
+			return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}, nil
+		}
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}
+
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 3, requestCalls)
+	require.True(t, store.HasEnvelope(headRoot))
+}
+
 func TestSelectedHeadEnvelopeRequestReleasesUnusedClaim(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
@@ -343,7 +389,32 @@ func TestGloasRecoveryUsesTargetForkVersion(t *testing.T) {
 	require.True(t, shouldRecoverMissingEnvelopes(&cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
 }
 
-func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
+func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{root: anchorRoot, state: anchorState}
+	requests := 0
+	recoverAnchor := func(context.Context) error {
+		requests++
+		if requests == 2 {
+			store.envelope = envelope
+		}
+		return nil
+	}
+
+	require.False(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
+	require.False(t, store.HasEnvelope(anchorRoot))
+	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
+	require.True(t, store.HasEnvelope(anchorRoot))
+	require.Equal(t, 2, requests)
+}
+
+func TestSelectedHeadEnvelopeRequestCoalescesOnlyWhileRequestIsActive(t *testing.T) {
 	cfg := &Cfg{}
 	firstHead := common.HexToHash("0x1234")
 	secondHead := common.HexToHash("0x5678")
@@ -355,9 +426,10 @@ func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
 	require.False(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
-	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
-	require.False(t, ok)
-	require.False(t, wait)
+	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
 	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
 	observeSelectedHeadEnvelopeRequest(cfg, firstHead)
 	thirdAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
@@ -370,25 +442,152 @@ func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, secondHeadAttempt)
-	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	staleReleaseAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.True(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
 	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.False(t, ok)
 	require.True(t, wait)
-	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
+	releaseSelectedHeadEnvelopeRequest(cfg, staleReleaseAttempt)
 }
 
-func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
+func TestGloasRecoveryRetainsFailedRootAcrossCursorReset(t *testing.T) {
 	cfg := &Cfg{}
 	scanRoot := common.HexToHash("0x1234")
+	missingRoot := common.HexToHash("0x5678")
 
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, missingRoot))
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, false)
 	require.Equal(t, scanRoot, cfg.gloasEnvelopeRecoveryCursor)
 
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
 	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
+
+	roots := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.Equal(t, [][32]byte{missingRoot}, roots)
+	finishGloasEnvelopeRecoveryBatch(cfg, roots, func(common.Hash) bool { return false })
+	require.Equal(t, [][32]byte{missingRoot}, nextGloasEnvelopeRecoveryBatch(cfg))
+
+	finishGloasEnvelopeRecoveryBatch(cfg, roots, func(common.Hash) bool { return true })
+	require.Empty(t, nextGloasEnvelopeRecoveryBatch(cfg))
+}
+
+func TestGloasRecoveryPendingQueueAppliesBackpressureAndRotatesFailures(t *testing.T) {
+	cfg := &Cfg{}
+	for i := range maxGloasEnvelopeRecoveryPending {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
+	}
+	newRoot := common.HexToHash("0xffff")
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
+
+	first := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.Len(t, first, maxGloasAncestorVisitsPerCycle)
+	finishGloasEnvelopeRecoveryBatch(cfg, first, func(common.Hash) bool { return false })
+	second := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.NotEqual(t, first[0], second[0])
+	require.Equal(t, [32]byte{maxGloasAncestorVisitsPerCycle}, second[0])
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
+
+	finishGloasEnvelopeRecoveryBatch(cfg, second, func(common.Hash) bool { return true })
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending-maxGloasAncestorVisitsPerCycle)
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xfffe")))
+}
+
+func TestGloasRecoveryPendingReleasesOnlyRootsOutsideForkChoiceOwnership(t *testing.T) {
+	finalizedRoot := common.HexToHash("0x01")
+	missingRoot := common.HexToHash("0x02")
+	completeRoot := common.HexToHash("0x03")
+	activeRoot := common.HexToHash("0x04")
+	pending := []common.Hash{finalizedRoot, missingRoot, completeRoot, activeRoot}
+	known := map[common.Hash]bool{
+		finalizedRoot: true,
+		completeRoot:  true,
+		activeRoot:    true,
+	}
+
+	retained := retainActionableGloasEnvelopeRecoveryRoots(
+		pending,
+		func(root common.Hash) bool { return root == completeRoot },
+		func(root common.Hash) bool { return known[root] },
+	)
+
+	require.Equal(t, []common.Hash{finalizedRoot, activeRoot}, retained)
+	for i := len(retained); i < maxGloasEnvelopeRecoveryPending; i++ {
+		retained = append(retained, common.Hash{byte(i), byte(i >> 8)})
+	}
+	cfg := &Cfg{gloasEnvelopeRecoveryPending: retained}
+	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(
+		cfg.gloasEnvelopeRecoveryPending,
+		func(common.Hash) bool { return false },
+		func(root common.Hash) bool { return root == activeRoot },
+	)
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+}
+
+func TestGloasRecoveryPendingDoesNotEvictUnresolvedRoot(t *testing.T) {
+	cfg := &Cfg{}
+	for i := range maxGloasEnvelopeRecoveryPending {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
+	}
+	oldest := cfg.gloasEnvelopeRecoveryPending[0]
+	newRoot := common.HexToHash("0xffff")
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, oldest)
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
+}
+
+func TestGloasRecoveryScanRetainsFinalizedRootAtCapacity(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = 0
+	finalizedRoot := common.HexToHash("0x01")
+	headRoot := common.HexToHash("0x02")
+	parentExecutionHash := common.HexToHash("0x03")
+	parentBody := cltypes.NewBeaconBody(&beaconCfg, clparams.GloasVersion)
+	parentBody.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlockHash: parentExecutionHash,
+	}}
+	headBody := cltypes.NewBeaconBody(&beaconCfg, clparams.GloasVersion)
+	headBody.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentExecutionHash,
+	}}
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		finalizedRoot: {Block: &cltypes.BeaconBlock{Slot: 10, Body: parentBody}},
+		headRoot: {
+			Block: &cltypes.BeaconBlock{Slot: 11, ParentRoot: finalizedRoot, Body: headBody},
+		},
+	}
+	cfg := &Cfg{beaconCfg: &beaconCfg}
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, finalizedRoot))
+	for i := 1; i < maxGloasEnvelopeRecoveryPending; i++ {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i + 16), byte(i >> 8)}))
+	}
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
+
+	_, completed := scanGloasEnvelopeRecoveryAncestors(
+		cfg,
+		blocks[headRoot],
+		headRoot,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(common.Hash) bool { return false },
+	)
+
+	require.True(t, completed)
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
+	require.Contains(t, nextGloasEnvelopeRecoveryBatch(cfg), [32]byte(finalizedRoot))
 }
 
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
@@ -418,6 +617,14 @@ func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
 
 	require.Equal(t, 2, processed)
 	require.True(t, completeBatch)
+}
+
+func TestGloasEnvelopeRecoveryBudgetBoundsUnavailableFetch(t *testing.T) {
+	started := time.Now()
+	runGloasEnvelopeRecovery(t.Context(), 20*time.Millisecond, func(ctx context.Context) {
+		<-ctx.Done()
+	})
+	require.Less(t, time.Since(started), time.Second)
 }
 
 func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
@@ -508,6 +715,19 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 
 	require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
 
+	t.Run("different fee recipients", func(t *testing.T) {
+		cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+		env.Message.Payload.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
+		requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, env.Message.ExecutionRequests))
+		env.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, env.Message.Payload, env.Message.ParentBeaconBlockRoot, requestsHash)
+		bid.BlockHash = env.Message.Payload.BlockHash
+		privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+		require.NoError(t, err)
+		signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+
+		require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
+	})
+
 	tests := []struct {
 		name    string
 		mutate  func(*cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope)
@@ -556,11 +776,11 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 			wantErr: "prev randao mismatch",
 		},
 		{
-			name: "fee recipient mismatch",
+			name: "fee recipient mutation with stale block hash",
 			mutate: func(_ *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) {
 				env.Message.Payload.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
 			},
-			wantErr: "fee recipient mismatch",
+			wantErr: "payload header: cannot derive rlp header: mismatching hash",
 		},
 		{
 			name: "gas limit mismatch",

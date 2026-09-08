@@ -119,9 +119,11 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, shouldValidateForwardSyncPayload(cfg, shouldInsert)); fceErr != nil {
+				fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, shouldValidateForwardSyncPayload(cfg, shouldInsert))
+				if fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
-				} else if shouldInsert {
+				}
+				if shouldInsert && gloasEnvelopeAppliedForCollection(fceErr) {
 					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
 						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
 						return
@@ -174,6 +176,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 	}
 	return
+}
+
+func gloasEnvelopeAppliedForCollection(err error) bool {
+	return err == nil || errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending)
 }
 
 func shouldValidateForwardSyncPayload(cfg *Cfg, shouldInsert bool) bool {
@@ -481,9 +487,6 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 	}
 	if payload.PrevRandao != bid.PrevRandao {
 		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
-	}
-	if payload.FeeRecipient != bid.FeeRecipient {
-		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
 	}
 	if payload.GasLimit != bid.GasLimit {
 		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)

@@ -19,10 +19,12 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -45,7 +48,143 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+	}{
+		{name: "bellatrix", load: tests.GetBellatrixRandom},
+		{name: "capella", load: tests.GetCapellaRandom},
+		{name: "electra", load: tests.GetElectraRandom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, anchorState, _ := tc.load()
+			block := blocks[0]
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			executionHash := block.Block.Body.ExecutionPayload.BlockHash
+			encoded, err := block.EncodeSSZ(nil)
+			require.NoError(t, err)
+			invalid := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), block.Version())
+			require.NoError(t, invalid.DecodeSSZ(encoded, int(block.Version())))
+			invalid.Block.Body.ExecutionPayload.GasUsed++
+			if block.Version() >= clparams.DenebVersion {
+				invalid.Block.Body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+				invalid.Block.Body.ExecutionPayload.BlobGasUsed = 0
+				invalid.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+			}
+			invalidRoot, err := invalid.Block.HashSSZ()
+			require.NoError(t, err)
+			require.NotEqual(t, blockRoot, invalidRoot)
+			engine, err := execution_client.NewExecutionClientDirect(chainreader.ChainReaderWriterEth1{}, nil)
+			require.NoError(t, err)
+			mockEngine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(engine.NewPayload)
+			store := newBellatrixForkChoiceStore(t, anchorState, mockEngine)
+			store.OnTick(anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot)
+			require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+			store.MarkPayloadVerified(blockRoot, executionHash)
+			require.True(t, store.IsPayloadVerified(blockRoot))
+
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "OnBlock: invalid execution payload hash")
+
+			require.True(t, store.IsPayloadVerified(blockRoot))
+			require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
+
+			var requestsHash common.Hash
+			if block.Version() >= clparams.ElectraVersion {
+				requestsHash = cltypes.ComputeExecutionRequestHash(invalid.Block.Body.GetExecutionRequestsList())
+			}
+			invalid.Block.Body.ExecutionPayload.BlockHash, err = invalid.Block.Body.ExecutionPayload.ComputeBlockHash(&invalid.Block.ParentRoot, requestsHash, nil)
+			require.NoError(t, err)
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, nil)
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+		})
+	}
+}
+func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	injected := errors.New("injected validation error")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, injected)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	err = store.OnBlock(context.Background(), block, true, true, false)
+
+	require.ErrorIs(t, err, injected)
+	require.False(t, store.IsPayloadVerified(blockRoot))
+}
+
+func TestOnBlockRejectsKnownInvalidPayloadWithoutRepeatingEngineCall(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, errors.New("injected invalid payload"))
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+}
+
+func TestOnBlockKnownInvalidRetryClearsOptimisticCandidate(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	executionHash := block.Block.Body.ExecutionPayload.BlockHash
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusNotValidated, nil)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.True(t, store.IsRootOptimistic(blockRoot))
+	store.MarkPayloadInvalid(blockRoot, executionHash)
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.False(t, store.IsRootOptimistic(blockRoot))
+}
+
+func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		engine,
+		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		forkGraphDisk,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2000)
+	return store
+}
 
 //go:embed test_data/anchor_state.ssz_snappy
 var anchorStateEncoded []byte

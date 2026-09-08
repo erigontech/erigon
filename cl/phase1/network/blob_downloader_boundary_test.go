@@ -82,7 +82,7 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	downloader.sn = snapshot
 	downloader.addRetrySlot(1)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{1, 20, 19, 18, 17, 16, 15}, reader.slots)
@@ -123,7 +123,7 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	downloader.rpc = peers
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
@@ -154,35 +154,152 @@ func TestBlobHistoryDownloaderNewRetryRevokesPriorCompletionBeforeCancellationRe
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	downloader.backfillCompleted.Store(true)
 	var downstreamComplete atomic.Bool
-	var transitions atomic.Int32
+	var transitions []bool
 	downstreamComplete.Store(true)
-	downloader.SetNotifyBlobBackfilled(func(completed bool) {
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
 		downstreamComplete.Store(completed)
-		transitions.Add(1)
-	})
+		transitions = append(transitions, completed)
+	}))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.NotEmpty(t, downloader.retryRanges)
 	require.False(t, downloader.backfillCompleted.Load())
 	require.False(t, downstreamComplete.Load())
-	require.Equal(t, int32(1), transitions.Load())
+	require.Equal(t, []bool{true, false}, transitions)
 	downloader.addRetrySlot(block.GetSlot())
-	require.Equal(t, int32(1), transitions.Load(), "duplicate retry emitted another false transition")
+	require.Equal(t, []bool{true, false}, transitions, "duplicate retry emitted another false transition")
 }
 
 func TestBlobHistoryDownloaderCompletionCallbackCanReplaceItself(t *testing.T) {
 	downloader := &BlobHistoryDownloader{}
 	done := make(chan struct{})
-	downloader.SetNotifyBlobBackfilled(func(bool) {
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(bool) {
 		downloader.SetNotifyBlobBackfilled(nil)
 		close(done)
-	})
+	}))
 
 	go downloader.setBackfillCompleted(true)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("completion callback ran while the callback lock was held")
+	}
+}
+
+func TestBlobHistoryDownloaderLateCompletionCallbackReceivesCurrentState(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	var completed atomic.Bool
+	var notifications atomic.Int32
+
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) {
+		completed.Store(value)
+		notifications.Add(1)
+	}))
+
+	require.True(t, completed.Load())
+	require.Equal(t, int32(1), notifications.Load())
+}
+
+func TestBlobHistoryDownloaderCompletionCallbackCanReregisterItself(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	done := make(chan struct{})
+	var callback *BlobBackfilledNotifier
+	callback = NewBlobBackfilledNotifier(func(bool) { downloader.SetNotifyBlobBackfilled(callback) })
+
+	go func() {
+		downloader.SetNotifyBlobBackfilled(callback)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion callback re-registration did not finish")
+	}
+}
+
+func TestBlobHistoryDownloaderLateCompletionReplayPreservesNewerTransition(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	values := make(chan bool, 2)
+	done := make(chan struct{})
+
+	go func() {
+		downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
+			values <- completed
+			if completed {
+				close(started)
+				<-release
+			}
+		}))
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("completion replay did not start")
+	}
+	downloader.setBackfillCompleted(false)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion replay did not finish")
+	}
+
+	require.Equal(t, true, <-values)
+	require.Equal(t, false, <-values)
+}
+
+func TestBlobHistoryDownloaderReplacementReceivesTransitionQueuedDuringReplay(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	done := make(chan bool, 1)
+
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
+		if !completed {
+			return
+		}
+		downloader.setBackfillCompleted(false)
+		downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { done <- value }))
+	}))
+
+	select {
+	case completed := <-done:
+		require.False(t, completed)
+	case <-time.After(time.Second):
+		t.Fatal("replacement callback did not receive the queued transition")
+	}
+}
+
+func TestBlobHistoryDownloaderReplacementReceivesCurrentStateDuringReplay(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	replacementValues := make(chan bool, 1)
+
+	go downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(bool) {
+		close(started)
+		<-release
+	}))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial replay did not start")
+	}
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { replacementValues <- value }))
+	close(release)
+
+	select {
+	case value := <-replacementValues:
+		require.True(t, value)
+	case <-time.After(time.Second):
+		t.Fatal("replacement callback did not receive current state")
 	}
 }
 
@@ -327,7 +444,7 @@ func TestBlobHistoryDownloaderCancellationDuringRetryStopsBeforeRecentScan(t *te
 	downloader.ctx = ctx
 	downloader.addRetrySlot(retrySlot)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{retrySlot}, reader.slots)
@@ -356,7 +473,7 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanWithoutNotifying(t *tes
 	downloader.blobStorage = blobStorage
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, target, reader.slots[len(reader.slots)-1])

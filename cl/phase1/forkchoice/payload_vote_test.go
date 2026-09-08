@@ -396,6 +396,47 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 	require.Equal(t, root, invalidatedHeader)
 }
 
+func TestMarkPayloadInvalidPreservesEmptyPathExecutionHead(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	parentExecutionHash := common.HexToHash("0x1111")
+	invalidExecutionHash := common.HexToHash("0x2222")
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.eth2Roots.Add(root, parentExecutionHash)
+
+	f.MarkPayloadInvalid(root, invalidExecutionHash)
+
+	recorded, ok := f.eth2Roots.Get(root)
+	require.True(t, ok)
+	require.Equal(t, parentExecutionHash, recorded)
+	require.False(t, f.IsPayloadVerified(root))
+}
+
+func TestEmptyPathMappingDoesNotInheritPayloadInvalidation(t *testing.T) {
+	payloadRoot := common.HexToHash("0x1234")
+	emptyRoot := common.HexToHash("0x5678")
+	invalidExecutionHash := common.HexToHash("0x2222")
+	f := newPayloadVoteTestStore(t, payloadRoot, true, false)
+	f.MarkPayloadInvalid(payloadRoot, invalidExecutionHash)
+	f.eth2Roots.Add(emptyRoot, invalidExecutionHash)
+
+	require.False(t, f.payloadExecutionHashInvalidated(emptyRoot))
+}
+
+func TestMarkPayloadVerifiedReplacesEmptyPathExecutionHead(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	parentExecutionHash := common.HexToHash("0x1111")
+	payloadExecutionHash := common.HexToHash("0x2222")
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.eth2Roots.Add(root, parentExecutionHash)
+
+	f.MarkPayloadVerified(root, payloadExecutionHash)
+
+	recorded, ok := f.eth2Roots.Get(root)
+	require.True(t, ok)
+	require.Equal(t, payloadExecutionHash, recorded)
+	require.True(t, f.IsPayloadVerified(root))
+}
+
 func TestStoreAnchorEnvelopePersistsWithoutMarkingVerified(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	execHash := common.HexToHash("0xabcd")

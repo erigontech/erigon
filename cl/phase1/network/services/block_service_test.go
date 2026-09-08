@@ -19,6 +19,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -37,6 +38,58 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestBlockServiceGossipDecodeRejectsNonCanonicalParentExecutionRequests(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const requestOffsetsSize = 20
+	requestsStart := len(encoded) - requestOffsetsSize
+	for offset := requestsStart; offset < len(encoded); offset += 4 {
+		binary.LittleEndian.PutUint32(encoded[offset:], requestOffsetsSize+1)
+	}
+	encoded = append(encoded, 0)
+
+	ordinary := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	require.NoError(t, ordinary.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+
+	service := &blockService{beaconCfg: cfg}
+	_, err = service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestBlockServiceGossipDecodeRejectsNonCanonicalExecutionPayloadBid(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	commitment := new(cltypes.KZGCommitment)
+	commitment[0] = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(commitment)
+
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBid, err := block.Block.Body.SignedExecutionPayloadBid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bidStart := bytes.Index(encoded, encodedBid)
+	require.NotEqual(t, -1, bidStart)
+
+	const (
+		signedBidFixedSize = 100
+		bidOffsetPosition  = 188
+		bidFixedSize       = 224
+		commitmentSize     = 48
+	)
+	binary.LittleEndian.PutUint32(encoded[bidStart+signedBidFixedSize+bidOffsetPosition:], bidFixedSize+commitmentSize)
+
+	ordinary := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	require.NoError(t, ordinary.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	require.Zero(t, ordinary.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Len())
+
+	service := &blockService{beaconCfg: cfg}
+	_, err = service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.Error(t, err)
+}
 
 type attesterSlashingErrorStore struct {
 	forkchoice.ForkChoiceStorage

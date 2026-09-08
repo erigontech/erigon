@@ -45,10 +45,11 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
 	mockBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerEpoch:    32,
-		ElectraForkEpoch: math.MaxUint64,
-		FuluForkEpoch:    math.MaxUint64,
-		GloasForkEpoch:   math.MaxUint64,
+		SlotsPerEpoch:            32,
+		MaxWithdrawalsPerPayload: clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload,
+		ElectraForkEpoch:         math.MaxUint64,
+		FuluForkEpoch:            math.MaxUint64,
+		GloasForkEpoch:           math.MaxUint64,
 	}
 
 	//go:embed test_data/mock_blinded_block.json
@@ -260,7 +261,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 	ctx := context.Background()
 	expectMethod := http.MethodPost
 	expectPath := mockUrl.JoinPath("/eth/v1/builder/blinded_blocks").String()
-	mockBlindedBlock := &cltypes.SignedBlindedBeaconBlock{}
+	mockBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	err := json.Unmarshal(mockBlindedBlockBytes, mockBlindedBlock)
 	require.NoError(t, err)
 
