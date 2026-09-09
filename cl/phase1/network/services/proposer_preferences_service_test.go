@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,25 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
+
+type recordingValidatedPreferencesSink struct {
+	service  *proposerPreferencesService
+	pool     *pool.EpbsPool
+	calls    atomic.Int64
+	stored   atomic.Bool
+	unlocked atomic.Bool
+}
+
+func (s *recordingValidatedPreferencesSink) SubmitValidatedPreferences(preferences *cltypes.SignedProposerPreferences) {
+	s.calls.Add(1)
+	if _, ok := s.pool.GetPreference(preferences.Message.ProposalSlot, preferences.Message.DependentRoot); ok {
+		s.stored.Store(true)
+	}
+	if s.service.storeMu.TryLock() {
+		s.unlocked.Store(true)
+		s.service.storeMu.Unlock()
+	}
+}
 
 func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*proposerPreferencesService, *synced_data_mock.MockSyncedData, *eth_clock.MockEthereumClock, *pool.EpbsPool, *forkchoice_mock.ForkChoiceStorageMock) {
 	mockSyncedData := synced_data_mock.NewMockSyncedData(ctrl)
@@ -506,6 +526,31 @@ func TestProposerPreferencesServiceConcurrentFirstValidCommit(t *testing.T) {
 	stored, ok := epbsPool.GetPreference(100, testDependentRoot)
 	require.True(t, ok)
 	require.Same(t, msg, stored)
+}
+
+func TestProposerPreferencesServiceSubmitsFirstValidatedPreferenceAfterCommit(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, ethClock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+	sink := &recordingValidatedPreferencesSink{service: service, pool: epbsPool}
+	service.validatedPreferencesSink = sink
+	msg := newTestSignedProposerPreferences(100, 42)
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	require.EqualValues(t, 1, sink.calls.Load())
+	require.True(t, sink.stored.Load())
+	require.True(t, sink.unlocked.Load())
+}
+
+func TestProposerPreferencesServiceDoesNotSubmitInvalidPreference(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+	sink := &recordingValidatedPreferencesSink{service: service, pool: epbsPool}
+	service.validatedPreferencesSink = sink
+
+	require.Error(t, service.ProcessMessage(context.Background(), nil, nil))
+	require.Zero(t, sink.calls.Load())
 }
 
 func TestSeenProposerPreferencesKeyUsesRootAndSlot(t *testing.T) {

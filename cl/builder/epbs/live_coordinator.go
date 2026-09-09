@@ -34,6 +34,13 @@ func NewLiveCoordinator(coordinator *Coordinator, resolver SlotInputResolver, fr
 	return &LiveCoordinator{coordinator: coordinator, resolver: resolver, freshness: freshness}
 }
 
+func (c *LiveCoordinator) PruneExpiredBeforeSlot(slot uint64) int {
+	if c == nil || c.coordinator == nil {
+		return 0
+	}
+	return c.coordinator.PruneExpiredBeforeSlot(slot)
+}
+
 func (c *LiveCoordinator) HandleValidatedPreferences(
 	ctx context.Context,
 	preferences *cltypes.SignedProposerPreferences,
