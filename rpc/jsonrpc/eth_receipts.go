@@ -386,7 +386,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+			logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
 			if err != nil {
 				return nil, err
 			}
@@ -409,7 +409,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 
-		logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+		logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
 		if err != nil {
 			return nil, err
 		}
@@ -418,13 +418,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendRPCLogs(logs types.RPCLogs, filtered types.Logs, blockTime uint64, maxResults int) (types.RPCLogs, error) {
-	if maxResults != 0 && len(logs)+len(filtered) > maxResults {
+func appendRPCLogs(logs types.RPCLogs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.RPCLogs, error) {
+	logs = receiptLogs.AppendFilteredRPCLogs(logs, addrMap, topicMap, blockTime)
+	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 		}
 	}
-	return filtered.AppendRPCLogs(logs, blockTime), nil
+	return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
