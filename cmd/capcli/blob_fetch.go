@@ -68,6 +68,7 @@ type blobFetchTally struct {
 	filled     int
 	alreadyOk  int
 	noBlobs    int
+	missed     int
 	unserved   int
 	rootDiff   int
 	incomplete int
@@ -141,7 +142,7 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 			return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
 		}
 		if arc != nil {
-			if err := c.fillSlotFromArchive(ctx, tx, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
+			if err := c.fillSlotFromArchive(ctx, tx, snr, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
 				return err
 			}
 		} else if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
@@ -154,7 +155,7 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 
 	log.Info("Blob store gap fill finished",
 		"filled", tally.filled, "wouldFill", tally.wouldFill, "alreadyComplete", tally.alreadyOk,
-		"noBlobs", tally.noBlobs, "noEndpointHadThem", tally.unserved,
+		"noBlobs", tally.noBlobs, "missedSlots", tally.missed, "noEndpointHadThem", tally.unserved,
 		"rootMismatch", tally.rootDiff, "incompleteAnswer", tally.incomplete,
 		"rejected", tally.rejected, "commit", c.Commit)
 
@@ -176,8 +177,8 @@ func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblo
 		return err
 	}
 	if blockRoot == (common.Hash{}) {
-		log.Warn("Slot has no canonical root", "slot", slot)
-		tally.unserved++
+		// A slot with no proposed block has nothing to fetch; it is not a gap.
+		tally.missed++
 		return nil
 	}
 
