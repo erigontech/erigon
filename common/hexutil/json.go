@@ -454,8 +454,7 @@ func wrapTypeError(err error, typ reflect.Type) error {
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	//}
-	var dec *decError
-	if errors.As(err, &dec) {
+	if _, ok := errors.AsType[*decError](err); ok {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err

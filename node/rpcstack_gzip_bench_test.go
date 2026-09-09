@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -276,50 +275,10 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 
 // --- Test: handler-level compression (klauspost vs stdlib, payload from node) ---
 
-func TestGzipHandlerLatency(t *testing.T) {
-	for _, blk := range historicalBlocks {
-		t.Run(blk.desc, func(t *testing.T) {
-			payload := fetchPayload(t, blk.tag)
-			if payload == nil {
-				return
-			}
-			kp := measureHandlerLatency(t, payload, newGzipHandler)
-			std := measureHandlerLatency(t, payload, newStdlibGzipHandler)
-			t.Logf("klauspost  %s", kp)
-			t.Logf("stdlib     %s", std)
-			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(kp.p50), float64(std.p99)/float64(kp.p99))
-		})
-	}
-}
-
 // --- Test: end-to-end real rpcdaemon latency ---
 
 // resultsFile is where we persist rpcdaemon latency results across runs.
 const resultsFile = "/tmp/erigon_gzip_latency_results.txt"
-
-func TestRPCDaemonLatency(t *testing.T) {
-	var sb strings.Builder
-
-	for _, blk := range historicalBlocks {
-		t.Run(blk.desc, func(t *testing.T) {
-			stat := measureRPCLatency(t, rpcEndpoint, blk.tag)
-			line := fmt.Sprintf("%-52s  %s\n", blk.desc, stat)
-			t.Log(line)
-			sb.WriteString(line)
-		})
-	}
-
-	// Append results to file with a header so we can diff two runs.
-	f, err := os.OpenFile(resultsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		t.Logf("warning: could not write results file: %v", err)
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "\n=== %s ===\n", time.Now().Format("2006-01-02 15:04:05"))
-	f.WriteString(sb.String())
-	t.Logf("results appended to %s", resultsFile)
-}
 
 // --- Benchmarks ---
 

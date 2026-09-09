@@ -173,8 +173,7 @@ func WrapStreamError(err error, typ reflect.Type) error {
 }
 
 func addErrorContext(err error, ctx string) error {
-	var decErr *decodeError
-	if errors.As(err, &decErr) {
+	if decErr, ok := errors.AsType[*decodeError](err); ok {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
@@ -789,14 +788,7 @@ func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
 		return append(dst, s.byteval), nil
 	case String:
 		cur := len(dst)
-		need := cur + int(size)
-		if cap(dst) < need {
-			grown := make([]byte, need)
-			copy(grown, dst)
-			dst = grown
-		} else {
-			dst = dst[:need]
-		}
+		dst = slices.Grow(dst, int(size))[:cur+int(size)]
 		if err := s.readFull(dst[cur:]); err != nil {
 			return dst, err
 		}

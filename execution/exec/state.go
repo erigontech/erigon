@@ -439,7 +439,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	if background {
 		// Worker contexts are created (each with its own roTx via ResetState) but
 		// driven directly by the dispatcher (goroutine-per-task), not via a pull loop.
-		wait = func() { g.Wait() }
+		wait = func() { _ = g.Wait() }
 	}
 
 	var clearDone bool
@@ -448,7 +448,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			return
 		}
 		clearDone = true
-		g.Wait()
+		_ = g.Wait()
 		for _, w := range reconWorkers {
 			if err = w.ResetTx(nil); err != nil {
 				return

@@ -134,15 +134,15 @@ func (r *Ring) reset() {
 
 func (r *Ring) Close() {
 	if r.sqRing != nil {
-		unix.Munmap(r.sqRing)
+		_ = unix.Munmap(r.sqRing)
 	}
 	if r.cqRing != nil {
-		unix.Munmap(r.cqRing)
+		_ = unix.Munmap(r.cqRing)
 	}
 	if r.sqes != nil {
-		unix.Munmap(r.sqes)
+		_ = unix.Munmap(r.sqes)
 	}
-	unix.Close(r.fd)
+	_ = unix.Close(r.fd)
 }
 
 func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint64) {

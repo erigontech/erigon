@@ -20,11 +20,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -389,7 +392,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
-	rawdb.WriteHeader(tx, header)
+	require.NoError(t, rawdb.WriteHeader(tx, header))
 	if entry, _ := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
@@ -399,7 +402,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Stored header RLP not found")
 	} else {
 		hasher := keccak.NewFastKeccak()
-		hasher.Write(entry)
+		_, _ = hasher.Write(entry)
 
 		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
 			t.Fatalf("Retrieved RLP header mismatch: have %v, want %v", entry, header)
@@ -471,7 +474,7 @@ func TestBodyStorage(t *testing.T) {
 			log.Error("ReadBodyRLP failed", "err", err)
 		}
 		hasher := keccak.NewFastKeccak()
-		hasher.Write(bodyRlp)
+		_, _ = hasher.Write(bodyRlp)
 
 		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
 			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
@@ -627,7 +630,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	header := block.Header() // Not identical to struct literal above, due to other fields
 
 	// Store a header and check that it's not recognized as a block
-	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		t.Fatal(err)
+	}
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -643,7 +648,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	rawdb.DeleteBody(tx, block.Hash(), block.NumberU64())
 
 	// Store a header and a body separately and check reassembly
-	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		t.Fatal(err)
+	}
 	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +775,9 @@ func TestHeadStorage2(t *testing.T) {
 		t.Fatalf("Non head block entry returned: %v", entry)
 	}
 	// Assign separate entries for the head header and block
-	rawdb.WriteHeadHeaderHash(db, blockHead.Hash())
+	if err := rawdb.WriteHeadHeaderHash(db, blockHead.Hash()); err != nil {
+		t.Fatal(err)
+	}
 	rawdb.WriteHeadBlockHash(db, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
@@ -795,7 +804,7 @@ func TestHeadStorage(t *testing.T) {
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1}, nil)
 
 	// Assign separate entries for the head header and block
-	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, blockHead.Hash()))
 	rawdb.WriteHeadBlockHash(tx, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
@@ -1262,7 +1271,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyRlp)
 
 	body := new(types.Body)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.Nil(body.Withdrawals)
 	require.Len(body.Transactions, 2)
@@ -1277,7 +1286,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.Nil(body.Withdrawals)
 	require.Equal(uint32(2), body.TxCount)
@@ -1292,7 +1301,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Len(body.Withdrawals, 2)
@@ -1304,11 +1313,11 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const bodyForStorageRlp = "c48002c0c0c0"
+	const bodyForStorageRlp = "c48002c0c0"
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Empty(body.Withdrawals)
@@ -1354,7 +1363,7 @@ func TestBadBlocks(t *testing.T) {
 
 		return header.Hash()
 	}
-	rawdb.ResetBadBlockCache(tx, 4)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 4))
 
 	// put some blocks
 	for i := 1; i <= 6; i++ {
@@ -1377,12 +1386,131 @@ func TestBadBlocks(t *testing.T) {
 	require.Equal(badBlks[3].Hash(), hash1)
 
 	// testing the "limit"
-	rawdb.ResetBadBlockCache(tx, 2)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 2))
 	badBlks, err = rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
 	require.Len(badBlks, 2)
 	require.Equal(badBlks[0].Hash(), hash4)
 	require.Equal(badBlks[1].Hash(), hash3)
+
+	// a reset that fails mid-load must not leave a half-filled cache installed
+	require.Error(rawdb.ResetBadBlockCache(forEachErrTx{err: errors.New("read failed")}, 4))
+
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+	require.Equal(badBlks[0].Hash(), hash4)
+}
+
+type forEachErrTx struct {
+	kv.Tx
+	err error
+}
+
+func (t forEachErrTx) ForEach(string, []byte, func(k, v []byte) error) error { return t.err }
+
+// TestGetLatestBadBlocksConcurrentWithFailingReset pins that GetLatestBadBlocks never
+// panics or blows up when ResetBadBlockCache runs concurrently, including resets that
+// fail mid-load and clear the shared cache out from under an in-flight reader.
+func TestGetLatestBadBlocksConcurrentWithFailingReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	// Not t.Parallel(): bheapCache is a package-level global also touched by
+	// other tests (e.g. TestBadBlocks), which also run in parallel with each
+	// other. Running this one sequentially avoids cross-test interference on
+	// that shared state; the concurrency under test is the goroutines below.
+	m := execmoduletester.New(t)
+
+	rwTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rawdb.ResetBadBlockCache(rwTx, 4))
+	require.NoError(t, rwTx.Commit())
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	for i := range iterations {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			roTx, err := m.DB.BeginRo(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			// ErrBadBlockCacheEmptyAfterReset is the one expected outcome under this
+			// test's artificially dense failure injection (see ResetBadBlockCache's
+			// doc comment); anything else is a real failure.
+			_, err = rawdb.GetLatestBadBlocks(roTx)
+			if err != nil {
+				assert.ErrorIs(t, err, rawdb.ErrBadBlockCacheEmptyAfterReset)
+			}
+		}()
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				roTx, err := m.DB.BeginRo(m.Ctx)
+				if err != nil {
+					return
+				}
+				defer roTx.Rollback()
+				_ = rawdb.ResetBadBlockCache(roTx, 4)
+			} else {
+				_ = rawdb.ResetBadBlockCache(forEachErrTx{err: errors.New("boom")}, 4)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestGetLatestBadBlocksConcurrentWithTruncateCanonicalHash pins that reading the bad-block
+// cache holds the same lock TruncateCanonicalHash uses to push into it in place, so SortedValues
+// never iterates the heap's backing slice while a concurrent truncate is mutating it.
+func TestGetLatestBadBlocksConcurrentWithTruncateCanonicalHash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	// Not t.Parallel(): see TestGetLatestBadBlocksConcurrentWithFailingReset.
+	m := execmoduletester.New(t)
+
+	const numCanonical = 50
+	setupTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer setupTx.Rollback()
+	for i := uint64(1); i <= numCanonical; i++ {
+		require.NoError(t, rawdb.WriteCanonicalHash(setupTx, common.Hash{byte(i)}, i))
+	}
+	require.NoError(t, rawdb.ResetBadBlockCache(setupTx, 100))
+	require.NoError(t, setupTx.Commit())
+
+	const iterations = 100
+	var wg sync.WaitGroup
+	for range iterations {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			roTx, err := m.DB.BeginRo(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			_, err = rawdb.GetLatestBadBlocks(roTx)
+			assert.NoError(t, err)
+		}()
+		go func() {
+			defer wg.Done()
+			// Never committed, so the same numCanonical rows are still there for
+			// the next goroutine's truncate to push into the live heap again.
+			rwTx, err := m.DB.BeginRw(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer rwTx.Rollback()
+			assert.NoError(t, rawdb.TruncateCanonicalHash(rwTx, 1, true))
+		}()
+	}
+	wg.Wait()
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {

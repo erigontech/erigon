@@ -43,7 +43,7 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 	traceAPI := newTraceApiForTest(m)
 
 	t.Run("debug_traceCall", func(t *testing.T) {
-		err := debugAPI.TraceCall(ctx, ethapi.CallArgs{}, pendingNrOrHash, nil, jsonstream.New(io.Discard))
+		err := debugAPI.TraceCall(ctx, ethapi.CallArgs{}, &pendingNrOrHash, nil, jsonstream.New(io.Discard))
 		require.ErrorIs(t, err, errPendingNotSupported)
 	})
 

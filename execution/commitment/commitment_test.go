@@ -139,7 +139,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
@@ -193,7 +193,7 @@ func TestHashSort_WarmupLap(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
 		require.GreaterOrEqual(t, ut.gen, uint64(3))
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
@@ -296,7 +296,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	release := make(chan struct{})
 	warmuper := testWarmuper(context.Background(), gatedCtxFactory(entered, release), 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
 	<-entered
@@ -363,7 +363,7 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 	warmuper := testWarmuper(context.Background(), noopCtxFactory, 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	done := make(chan struct{})
 	go func() {
@@ -693,8 +693,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper.Wait()
-	require.NoError(t, err)
+	warmuper.CloseAndWait()
 
 	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper2.Start()
@@ -708,8 +707,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper2.Wait()
-	require.NoError(t, err)
+	warmuper2.CloseAndWait()
 }
 
 type recordingCtx struct {

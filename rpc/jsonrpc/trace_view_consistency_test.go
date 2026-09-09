@@ -60,7 +60,7 @@ type rejectOverlayBlockReader struct {
 }
 
 func (r rejectOverlayBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, error) {
-	if view, ok := tx.(interface{ IsOverlayReadView() bool }); blockNum != 0 && ok && view.IsOverlayReadView() {
+	if blockNum != 0 && carriesOverlayView(tx) {
 		return nil, nil, errUnexpectedOverlayBlockRead
 	}
 	return r.FullBlockReader.BlockWithSenders(ctx, tx, hash, blockNum)

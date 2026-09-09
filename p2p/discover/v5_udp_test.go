@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -276,6 +277,60 @@ func TestUDPv5_handshakeRepeatChallenge(t *testing.T) {
 	test.waitPacketOut(func(p *v5wire.Whoareyou, addr netip.AddrPort, authTag v5wire.Nonce) {
 		check(p, authTag, nonce1)
 	})
+}
+
+// A handshake record is self-signed by the sender and its endpoint is never
+// checked against the packet source, so a peer must not be able to plant an
+// arbitrary address in the routing table.
+func TestUDPv5_handshakeNodeRelayAddr(t *testing.T) {
+	t.Parallel()
+	test := newUDPV5Test(t)
+	defer test.close()
+
+	publicAddr := netip.MustParseAddrPort("1.2.3.4:30303")
+	planted := test.getNode(newkey(), netip.MustParseAddrPort("169.254.169.254:30303")).Node()
+	allowed := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.8:30303")).Node()
+	lowPort := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.9:53")).Node()
+	inList := test.getNode(newkey(), netip.MustParseAddrPort("9.9.9.9:30303")).Node()
+	outOfList := test.getNode(newkey(), netip.MustParseAddrPort("8.8.8.8:30303")).Node()
+
+	list, err := netutil.ParseNetlist("9.9.9.0/24")
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		node        *enode.Node
+		netrestrict *netutil.Netlist
+		inTabl      bool
+	}{
+		{"unrelated link-local address", planted, nil, false},
+		{"public address", allowed, nil, true},
+		{"low port", lowPort, nil, false},
+		{"outside netrestrict", outOfList, list, false},
+		{"inside netrestrict", inList, list, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test.udp.netrestrict = tc.netrestrict
+			test.udp.codec.(*testCodec).handshakeNode = tc.node
+			test.packetInFrom(newkey(), publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
+			test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
+
+			if inTable(test.table, tc.node.ID()) != tc.inTabl {
+				t.Fatalf("node %v in table = %v, want %v", tc.node.IPAddr(), !tc.inTabl, tc.inTabl)
+			}
+		})
+	}
+}
+
+func inTable(tab *Table, id enode.ID) bool {
+	for _, bucket := range tab.Nodes() {
+		for _, n := range bucket {
+			if n.Node.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // This test checks that incoming FINDNODE calls are handled correctly.
@@ -950,6 +1005,8 @@ type testCodec struct {
 	ctr  uint64
 
 	sentChallenges map[enode.ID]*v5wire.Whoareyou
+	// handshakeNode, when set, is returned as the node a handshake packet carried.
+	handshakeNode *enode.Node
 }
 
 type testCodecFrame struct {
@@ -997,7 +1054,7 @@ func (c *testCodec) Decode(input []byte, addr netip.AddrPort) (enode.ID, *enode.
 	if err != nil {
 		return enode.ID{}, nil, nil, err
 	}
-	return frame.NodeID, nil, p, nil
+	return frame.NodeID, c.handshakeNode, p, nil
 }
 
 func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {

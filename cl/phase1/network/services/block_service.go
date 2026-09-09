@@ -224,6 +224,12 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
+		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
+			// The execution layer did not answer, so nothing is known about the
+			// block yet. Retry rather than rejecting the sender for it.
+			b.scheduleBlockForLaterProcessing(msg)
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		return err
 	}
 	return nil
@@ -277,10 +283,22 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return nil
 	}
 
-	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+	// A block the fork graph never took can be retried for 30s, so open the
+	// write tx only when the block is not already on disk.
+	var persisted bool
+	if err := b.db.View(ctx, func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		persisted = slot != nil
+		return err
 	}); err != nil {
 		return err
+	}
+	if !persisted {
+		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {

@@ -196,10 +196,9 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-// ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
-// (commitment.ModeParallel + VariantParallelHexPatricia). Default false; the
-// COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
+const DefaultParallelCommitment = true
+
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{

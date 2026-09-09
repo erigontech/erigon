@@ -67,6 +67,14 @@ Other families:
 - **clean-exit**: `exit_time_secs`.
 - **stage-exec**: `timeout_seconds`, `actual_exit_code`, `chaintip_mode`,
   `rm_state_mode`.
+- **exec-from-zero's hash check**: a *second* result file,
+  `result-state-hashes-<chain>.json`, with the same four top-level fields but its
+  own measures — `matched`, `mismatched`, `local_only`, `published_only`,
+  `mismatched_<subdir>`, `local_state_files`, `published_state_files`.
+  `local_only` / `published_only` are informational (the node stops at whatever
+  step boundary it reached, and keeps building past the published set at the
+  tip); only `mismatched` fails the step. `outcome: ERROR` means no file name was
+  present on both sides, so nothing was actually compared.
 - **RPC integration**: verdict is not here — it's in
   `<result-dir>/results/test_report.json` alongside `output.log` and `summary.md`.
 

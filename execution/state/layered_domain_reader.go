@@ -132,8 +132,6 @@ func (b *domainDecodedBase) ReadAccountStorage(addr accounts.Address, key accoun
 	return val, true, nil
 }
 
-func (b *domainDecodedBase) HasStorage(addr accounts.Address) (bool, error) { return false, nil }
-
 func (b *domainDecodedBase) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	av := addr.Value()
 	enc, ok, err := b.l.baseGetAsOf(kv.CodeDomain, av[:], b.ts)

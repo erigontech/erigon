@@ -54,8 +54,7 @@ var (
 func WrapEndpointError(err error) *EndpointError {
 	// Handlers build these with NewEndpointError, so the pointer form is the one that carries a
 	// deliberate code; matching only the value form would silently turn it into a 500.
-	var byPointer *EndpointError
-	if errors.As(err, &byPointer) {
+	if byPointer, ok := errors.AsType[*EndpointError](err); ok {
 		return byPointer
 	}
 	byValue := EndpointError{}

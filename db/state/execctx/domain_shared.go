@@ -1075,10 +1075,6 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
-}
-
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
@@ -1240,14 +1236,16 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// Stash every cache-bound domain tuple during the flush and publish it only
 	// after the commit succeeds. If the commit fails, the stash is discarded, so
 	// the cache never advances ahead of durable MDBX state.
+	// It borrows the batch's buffers rather than holding a second image of the
+	// whole flush; see FlushConfig.DomainCallbacks.
 	var pendingBranches []branchCacheUpdate
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 			if domain == kv.CommitmentDomain {
 				pendingBranches = append(pendingBranches, branchCacheUpdate{
-					key:  append([]byte(nil), k...),
-					val:  append([]byte(nil), v...),
+					key:  k,
+					val:  v,
 					step: step,
 					txN:  txNum,
 				})
@@ -1255,8 +1253,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 			pendingState = append(pendingState, cache.StateUpdate{
 				Domain: domain,
-				Key:    append([]byte(nil), k...),
-				Value:  append([]byte(nil), v...),
+				Key:    k,
+				Value:  v,
 				TxNum:  txNum,
 			})
 		})
@@ -1275,15 +1273,18 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+			var codeHash []byte
 			if sd.codeStore != nil && len(v) > 0 {
-				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
+				codeHash = crypto.Keccak256(v)
+				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
 			}
 			if sd.stateCache != nil {
 				pendingState = append(pendingState, cache.StateUpdate{
-					Domain: kv.CodeDomain,
-					Key:    append([]byte(nil), k...),
-					Value:  append([]byte(nil), v...),
-					TxNum:  txNum,
+					Domain:   kv.CodeDomain,
+					Key:      k,
+					Value:    v,
+					CodeHash: codeHash,
+					TxNum:    txNum,
 				})
 			}
 		}))
@@ -1432,6 +1433,7 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 
 type getLatestOptions struct {
 	codeHash []byte
+	buf      []byte
 }
 
 func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
@@ -1541,13 +1543,19 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
+	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	if fillsCode {
+		getOpts = getOpts.WithBuf(opts.buf)
+	}
+
 	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
-	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
+	if willFill {
 		readTxNum := step.LastTxNum(sd.StepSize())
 		fillView := view
 		if fillView.NeedsFrontier() {
@@ -1555,8 +1563,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		if len(opts.codeHash) == len(common.Hash{}) {
-			fillView.FillCode(k, v, opts.codeHash, readTxNum)
+		if fillsCode {
+			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
@@ -1667,10 +1675,10 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
-	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCode(tx, sd.cacheReader(), addr, txNum, nil)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1696,7 +1704,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
 	if err != nil {
 		return nil, false, err
 	}

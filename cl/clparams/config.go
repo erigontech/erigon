@@ -403,8 +403,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 // ConfigurableCheckpointsURLs is customized by the user to specify the checkpoint sync endpoints.
 var ConfigurableCheckpointsURLs = []string{}
 
-// MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
+// MinEpochsForBlockRequests returns the configured block-serving window.
+// Configurations without the field use the consensus-spec default formula.
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
+	if b.MinEpochsForBlockRequestsConfig != 0 {
+		return b.MinEpochsForBlockRequestsConfig
+	}
 	return b.MinValidatorWithdrawabilityDelay + b.ChurnLimitQuotient/2
 }
 
@@ -490,6 +494,7 @@ type BeaconChainConfig struct {
 	HysteresisDownwardMultiplier     uint64     `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
 	HysteresisUpwardMultiplier       uint64     `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
 	MinEpochsForBlobSidecarsRequests uint64     `yaml:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS,string"` // MinEpochsForBlobSidecarsRequests defines the minimum number of epochs to wait before requesting blobs sidecars.
+	MinEpochsForBlockRequestsConfig  uint64     `yaml:"MIN_EPOCHS_FOR_BLOCK_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`                 // MinEpochsForBlockRequestsConfig defines the minimum epoch range over which a node must serve blocks.
 	FieldElementsPerBlob             uint64     `yaml:"FIELD_ELEMENTS_PER_BLOB" spec:"true" json:"FIELD_ELEMENTS_PER_BLOB,string"`                             // FieldElementsPerBlob defines the number of field elements per blob.
 	MaxBytesPerTransaction           uint64     `yaml:"MAX_BYTES_PER_TRANSACTION" spec:"true" json:"MAX_BYTES_PER_TRANSACTION,string"`                         // MaxBytesPerTransaction defines the maximum number of bytes per transaction.
 	MaxExtraDataBytes                uint64     `yaml:"MAX_EXTRA_DATA_BYTES" spec:"true" json:"MAX_EXTRA_DATA_BYTES,string"`                                   // MaxExtraDataBytes defines the maximum number of bytes in the extra data field.
@@ -1403,6 +1408,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.Eth1FollowDistance = 1024
 	cfg.ConfigName = "gnosis"
 	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.MinEpochsForBlockRequestsConfig = 33_024
 	cfg.GenesisForkVersion = 0x00000064
 	cfg.SecondsPerETH1Block = 6
 	cfg.DepositChainID = chainspec.GnosisChainID
@@ -1451,6 +1457,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.Eth1FollowDistance = 1024
 	cfg.ConfigName = "chiado"
 	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.MinEpochsForBlockRequestsConfig = 33_024
 	cfg.GenesisForkVersion = 0x0000006f
 	cfg.SecondsPerETH1Block = 6
 	cfg.DepositChainID = chainspec.ChiadoChainID

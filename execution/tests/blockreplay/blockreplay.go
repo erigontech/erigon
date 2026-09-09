@@ -174,10 +174,6 @@ func (r *recordingReader) ReadAccountStorage(address accounts.Address, key accou
 	return v, ok, nil
 }
 
-func (r *recordingReader) HasStorage(address accounts.Address) (bool, error) {
-	return r.inner.HasStorage(address)
-}
-
 func (r *recordingReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	c, err := r.inner.ReadAccountCode(address)
 	if err != nil {
@@ -247,10 +243,6 @@ func (r *inMemReader) ReadAccountStorage(address accounts.Address, key accounts.
 	var v uint256.Int
 	v.SetBytes(b[:])
 	return v, !v.IsZero(), nil
-}
-
-func (r *inMemReader) HasStorage(address accounts.Address) (bool, error) {
-	return len(r.fx.Storage[address.Value()]) > 0, nil
 }
 
 func (r *inMemReader) ReadAccountCode(address accounts.Address) ([]byte, error) {

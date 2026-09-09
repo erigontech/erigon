@@ -547,7 +547,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDb)
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

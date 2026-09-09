@@ -93,7 +93,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 	if err != nil {
 		return err
 	}
@@ -238,8 +238,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return fmt.Errorf("genesis is not traceable")
 	}
 
-	// check pruning to ensure we have history at this block level
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	// check pruning to ensure we have the block and the history at this block level
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
-func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return err
 	}

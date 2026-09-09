@@ -231,7 +231,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	resultCode := &CreationCode{}
-	if ct.resultCode != nil && len(ct.resultCode) > 0 {
+	if len(ct.resultCode) > 0 {
 		c := hexutil.Bytes(ct.resultCode)
 		resultCode.Code = &c
 		return resultCode, nil
@@ -287,7 +287,8 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Re-executes with overridden code, so stored receipts cannot answer for it.
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}

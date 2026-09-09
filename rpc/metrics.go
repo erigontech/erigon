@@ -63,8 +63,7 @@ func getRPCMethodNames(apiList []API) (methods []string) {
 	for _, api := range apiList {
 		apiType := reflect.TypeOf(api.Service)
 
-		for i := 0; i < apiType.NumMethod(); i++ {
-			method := apiType.Method(i)
+		for method := range apiType.Methods() {
 			rpcMethod := fmt.Sprintf("%s_%s", api.Namespace, pascalToCamel(method.Name))
 			methods = append(methods, rpcMethod)
 		}

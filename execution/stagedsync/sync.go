@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -450,7 +449,7 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx dbfinality.Context, timeout time.Duration) error {
+func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
@@ -499,8 +498,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
+		if _, ok := errors.AsType[*ErrLoopExhausted](err); ok {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 			return true, nil
@@ -564,7 +562,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, finalityCtx dbfinality.Context, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, finalityCtx kv.FinalityContext, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
 	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)

@@ -120,8 +120,7 @@ func GenStructStep(
 			precLen = len(groups) - 1
 		}
 		succLen := nibbles.CommonPrefixLen(succ, curr)
-		var maxLen int
-		maxLen = max(precLen, succLen)
+		maxLen := max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}

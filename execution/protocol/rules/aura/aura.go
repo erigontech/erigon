@@ -656,11 +656,14 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) error {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
+		if err := state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -674,7 +677,9 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 		return err
 	}
 
-	c.rewriteBytecode(blockNum, state)
+	if err := c.rewriteBytecode(blockNum, state); err != nil {
+		return err
+	}
 
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)

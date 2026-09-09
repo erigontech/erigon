@@ -132,10 +132,10 @@ func TestTraceBlockByNumber(t *testing.T) {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
 		if tx == nil {
-			t.Errorf("nil tx")
+			t.Fatalf("nil tx")
 		}
 		if tx.BlockHash == nil {
-			t.Errorf("nil block hash")
+			t.Fatalf("nil block hash")
 		}
 		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
@@ -388,7 +388,8 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 				cfg = &tracersConfig.TraceConfig{Tracer: &name}
 			}
 			buf, s := newStream()
-			err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), cfg, s)
+			blockNr := rpc.BlockNumberOrHashWithNumber(1)
+			err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, cfg, s)
 			require.Error(t, err)
 			require.NoError(t, s.Flush())
 			require.Empty(t, buf.Bytes(), "stream must be empty on execution error so handler omits result field")
@@ -409,7 +410,8 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 
 	t.Run("TraceCall_bad_timeout", func(t *testing.T) {
 		buf, s := newStream()
-		err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), badTimeoutCfg, s)
+		blockNr := rpc.BlockNumberOrHashWithNumber(1)
+		err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, badTimeoutCfg, s)
 		require.Error(t, err)
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
@@ -427,7 +429,7 @@ func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, o
 
 	var buf bytes.Buffer
 	s := jsonstream.New(&buf)
-	err := api.TraceCall(context.Background(), args, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), &tracersConfig.TraceConfig{
+	err := api.TraceCall(context.Background(), args, nil, &tracersConfig.TraceConfig{
 		BlockOverrides: overrides,
 	}, s)
 	require.NoError(t, err)

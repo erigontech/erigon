@@ -112,81 +112,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON validates required fields and parses the BlockTimestamp field.
-func (l *ErigonLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address        *common.Address `json:"address"`
-		Topics         *[]common.Hash  `json:"topics"`
-		Data           *hexutil.Bytes  `json:"data"`
-		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
-		TxHash         *common.Hash    `json:"transactionHash"`
-		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash      *common.Hash    `json:"blockHash"`
-		Index          *hexutil.Uint   `json:"logIndex"`
-		Removed        *bool           `json:"removed"`
-		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
-	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
-	}
-	if dec.BlockTimestamp != nil {
-		l.BlockTimestamp = *dec.BlockTimestamp
-	}
-	return nil
-}
-
 type Logs []*Log
-
-type ErigonLog struct {
-	Log
-	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
-}
-
-type ErigonLogs []*ErigonLog
-
-// ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
-func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
-	result := make(ErigonLogs, len(logs))
-	for i, l := range logs {
-		result[i] = &ErigonLog{
-			Log:            *l,
-			BlockTimestamp: hexutil.Uint64(timestamp),
-		}
-	}
-	return result
-}
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
@@ -194,54 +120,28 @@ type RPCLog struct {
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
+// ToRPCLogs converts Logs to RPCLogs, adding a timestamp to each entry.
+func (logs Logs) ToRPCLogs(timestamp uint64) RPCLogs {
+	result := make(RPCLogs, len(logs))
+	for i, l := range logs {
+		result[i] = &RPCLog{
+			Log:            *l,
+			BlockTimestamp: hexutil.Uint64(timestamp),
+		}
+	}
+	return result
+}
+
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
 func (l *RPCLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address        *common.Address `json:"address"`
-		Topics         *[]common.Hash  `json:"topics"`
-		Data           *hexutil.Bytes  `json:"data"`
-		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
-		TxHash         *common.Hash    `json:"transactionHash"`
-		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash      *common.Hash    `json:"blockHash"`
-		Index          *hexutil.Uint   `json:"logIndex"`
-		Removed        *bool           `json:"removed"`
-		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := l.Log.UnmarshalJSON(input); err != nil {
 		return err
 	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
+	var dec struct {
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
 	}
 	if dec.BlockTimestamp != nil {
 		l.BlockTimestamp = *dec.BlockTimestamp
@@ -285,7 +185,7 @@ func (logs Logs) Copy() Logs {
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
-func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
+func ToRPCTransactionLog(log *Log, header *Header) *RPCLog {
 	return &RPCLog{
 		Log:            *log,
 		BlockTimestamp: hexutil.Uint64(header.Time),

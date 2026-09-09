@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
@@ -54,6 +55,85 @@ func TestEncryptedTxnsPoolReturnsCorrectTxnWithAReplaySequence(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, txns, 1)
 	require.Equal(t, TxnIndex(38_275), txns[0].TxnIndex)
+}
+
+// The sequencer contract numbers txn indexes per eon, restarting at 0: the first
+// submission of a new eon must not be dropped as "behind" the previous eon's max.
+func TestEncryptedTxnsPoolAcceptsFirstSubmissionOfNewEon(t *testing.T) {
+	t.Parallel()
+	logger := testlog.Logger(t, log.LvlTrace)
+	p := NewEncryptedTxnsPool(logger, shuttercfg.Config{MaxPooledEncryptedTxns: 10_000}, nil, nil)
+	p.addSubmission(EncryptedTxnSubmission{
+		EonIndex: 0,
+		TxnIndex: 4,
+		GasLimit: big.NewInt(21_000),
+	})
+	err := p.handleEncryptedTxnSubmissionEvent(context.Background(), &shuttercontracts.SequencerTransactionSubmitted{
+		Eon:      1,
+		TxIndex:  0,
+		GasLimit: big.NewInt(21_000),
+	})
+	require.NoError(t, err)
+	txns, err := p.Txns(1, 0, 1, 1_000_000)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	require.Equal(t, TxnIndex(0), txns[0].TxnIndex)
+}
+
+// A new eon's key is broadcast before its keyper set activates, so submissions to
+// the old and the new eon can interleave: an old-eon submission arriving after the
+// new eon's first one is still decryptable and must not be dropped.
+func TestEncryptedTxnsPoolAcceptsOldEonSubmissionAfterNewEonStarted(t *testing.T) {
+	t.Parallel()
+	logger := testlog.Logger(t, log.LvlTrace)
+	p := NewEncryptedTxnsPool(logger, shuttercfg.Config{MaxPooledEncryptedTxns: 10_000}, nil, nil)
+	p.addSubmission(EncryptedTxnSubmission{
+		EonIndex: 0,
+		TxnIndex: 4,
+		GasLimit: big.NewInt(21_000),
+	})
+	p.addSubmission(EncryptedTxnSubmission{
+		EonIndex: 1,
+		TxnIndex: 0,
+		GasLimit: big.NewInt(21_000),
+	})
+	err := p.handleEncryptedTxnSubmissionEvent(context.Background(), &shuttercontracts.SequencerTransactionSubmitted{
+		Eon:      0,
+		TxIndex:  5,
+		GasLimit: big.NewInt(21_000),
+	})
+	require.NoError(t, err)
+	txns, err := p.Txns(0, 5, 6, 1_000_000)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	require.Equal(t, TxnIndex(5), txns[0].TxnIndex)
+}
+
+// The sequencer contract does not validate the eon argument, so two submissions in
+// one block can jump eons arbitrarily. That must not produce an inverted gap-fill
+// block range (start > end), which would error out and kill the submissions watch.
+func TestEncryptedTxnsPoolSameBlockEonJumpDoesNotBreakWatch(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	backend := contracts.NewMockBackend(ctrl) // no FilterLogs expected: nothing to backfill
+	p := newTestEncryptedTxnsPool(t, backend)
+	p.addSubmission(EncryptedTxnSubmission{
+		EonIndex: 0,
+		TxnIndex: 4,
+		BlockNum: 10,
+		GasLimit: big.NewInt(21_000),
+	})
+	err := p.handleEncryptedTxnSubmissionEvent(context.Background(), &shuttercontracts.SequencerTransactionSubmitted{
+		Eon:      2,
+		TxIndex:  0,
+		GasLimit: big.NewInt(21_000),
+		Raw:      types.Log{BlockNumber: 10},
+	})
+	require.NoError(t, err)
+	txns, err := p.Txns(2, 0, 1, 1_000_000)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	require.Equal(t, TxnIndex(0), txns[0].TxnIndex)
 }
 
 func newTestEncryptedTxnsPool(t *testing.T, backend *contracts.MockBackend) *EncryptedTxnsPool {

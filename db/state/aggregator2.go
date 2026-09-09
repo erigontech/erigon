@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -48,7 +47,7 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
-func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
+func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
 	//TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
@@ -61,7 +60,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +86,8 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	return a, nil
 }
 
-func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //nolint:gocritic
-	agg, err := opts.Open(ctx, db)
+func (opts AggOpts) MustOpen(ctx context.Context) *Aggregator { //nolint:gocritic
+	agg, err := opts.Open(ctx)
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}

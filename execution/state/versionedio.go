@@ -1851,18 +1851,6 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	return uint256.Int{}, false, nil
 }
 
-func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
-	if _, ok := vr.reads.storage[address]; ok {
-		return true, nil
-	}
-
-	if vr.stateReader != nil {
-		return vr.stateReader.HasStorage(address)
-	}
-
-	return false, nil
-}
-
 func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
 		return r.Val, nil

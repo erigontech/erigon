@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -232,41 +231,6 @@ func runRandTest(rt randTest) bool {
 	return true
 }
 
-// Benchmarks the trie hashing. Since the trie caches the result of any operation,
-// we cannot use b.N as the number of hashing rouns, since all rounds apart from
-// the first one will be NOOP. As such, we'll use b.N as the number of account to
-// insert into the trie before measuring the hashing.
-func BenchmarkHash(b *testing.B) {
-	// Make the random benchmark deterministic
-	random := rand.New(rand.NewSource(0))
-
-	// Create a realistic account trie to hash
-	addresses := make([][20]byte, b.N)
-	for i := range addresses {
-		for j := range len(addresses[i]) {
-			addresses[i][j] = byte(random.Intn(256))
-		}
-	}
-	accounts := make([][]byte, len(addresses))
-	for i := range accounts {
-		var (
-			nonce   = uint64(random.Int63())
-			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
-			root    = EmptyRoot
-			code    = crypto.Keccak256(nil)
-		)
-		accounts[i], _ = rlp.EncodeToBytes([]any{nonce, balance, root, code})
-	}
-	// Insert the accounts into the trie and hash it
-	trie := newEmpty()
-	for i := range addresses {
-		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])
-	}
-	b.ResetTimer()
-	b.ReportAllocs()
-	trie.Hash()
-}
-
 func TestDeepHash(t *testing.T) {
 	acc := accounts.NewAccount()
 	prefix := "prefix"
@@ -293,7 +257,10 @@ func TestDeepHash(t *testing.T) {
 			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value))
 		}
 
-		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
+		got2, hash2, err := prefixTrie.DeepHash([]byte(prefix))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !got2 {
 			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)
 		}
@@ -610,8 +577,10 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	}
 
 	// Get the storage root hashes via DeepHash
-	_, storageRoot1 := stateTrie.DeepHash(contract1AddrHash[:])
-	_, storageRoot2 := stateTrie.DeepHash(contract2AddrHash[:])
+	_, storageRoot1, err := stateTrie.DeepHash(contract1AddrHash[:])
+	require.NoError(t, err)
+	_, storageRoot2, err := stateTrie.DeepHash(contract2AddrHash[:])
+	require.NoError(t, err)
 
 	// Update expected accounts with computed storage roots
 	// (storage was added via Update, so the trie's AccountNode.Root is updated)

@@ -245,52 +245,44 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
+	addr := gointerfaces.ConvertH160toAddress(eventLog.Address)
+	topics := make([]common.Hash, len(eventLog.Topics))
+	for i, topic := range eventLog.Topics {
+		topics[i] = gointerfaces.ConvertH256ToHash(topic)
+	}
+	// The same log instance is sent to every matching subscriber, each reading it from
+	// its own goroutine, so it must not be mutated after the first Send.
+	lg := &types.RPCLog{
+		Log: types.Log{
+			Address:     addr,
+			Topics:      topics,
+			Data:        eventLog.Data,
+			BlockNumber: hexutil.Uint64(eventLog.BlockNumber),
+			TxHash:      gointerfaces.ConvertH256ToHash(eventLog.TransactionHash),
+			TxIndex:     hexutil.Uint(eventLog.TransactionIndex),
+			BlockHash:   gointerfaces.ConvertH256ToHash(eventLog.BlockHash),
+			Index:       hexutil.Uint(eventLog.LogIndex),
+			Removed:     eventLog.Removed,
+		},
+		BlockTimestamp: hexutil.Uint64(eventLog.BlockTimestamp),
+	}
+
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	var lg types.RPCLog
-	var topics []common.Hash
-
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
-			_, addrOk := filter.addrs.Get(gointerfaces.ConvertH160toAddress(eventLog.Address))
-			if !addrOk {
+			if _, ok := filter.addrs.Get(addr); !ok {
 				return nil
 			}
 		}
-
-		// Pre-allocate topics slice to the required size to avoid multiple allocations
-		topics = topics[:0]
-		if cap(topics) < len(eventLog.Topics) {
-			topics = make([]common.Hash, 0, len(eventLog.Topics))
+		if filter.allTopics == 0 && !a.chooseTopics(filter, topics) {
+			return nil
 		}
-		for _, topic := range eventLog.Topics {
-			topics = append(topics, gointerfaces.ConvertH256ToHash(topic))
-		}
-
-		if filter.allTopics == 0 {
-			if !a.chooseTopics(filter, topics) {
-				return nil
-			}
-		}
-
-		// Reuse lg object to avoid creating new instances
-		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
-		lg.Topics = topics
-		lg.Data = eventLog.Data
-		lg.BlockNumber = hexutil.Uint64(eventLog.BlockNumber)
-		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
-		lg.TxIndex = hexutil.Uint(eventLog.TransactionIndex)
-		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
-		lg.Index = hexutil.Uint(eventLog.LogIndex)
-		lg.Removed = eventLog.Removed
-		lg.BlockTimestamp = hexutil.Uint64(eventLog.BlockTimestamp)
-
-		filter.sender.Send(&lg)
+		filter.sender.Send(lg)
 		return nil
 	})
-	return nil
 }
 
 // chooseTopics checks if the log topics match the filter's topics.

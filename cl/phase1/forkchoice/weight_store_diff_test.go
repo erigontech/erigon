@@ -139,93 +139,6 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	require.True(t, sawNonZero, "differential check is vacuous: no node carried weight")
 }
 
-// BenchmarkHeadWeight_DeltaTreeVsFullScan compares the maintained tree against
-// the full-scan store on the same scenario.
-func BenchmarkHeadWeight_DeltaTreeVsFullScan(b *testing.B) {
-	f := buildExAnteStore(b)
-	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	cs, err := f.getCheckpointState(justified)
-	require.NoError(b, err)
-	require.NotNil(b, cs)
-	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
-
-	b.Run("delta-tree", func(b *testing.B) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		tree := f.gloasWeightTree.prepare(justified, cs)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_ = tree.GetAttestationScore(node)
-		}
-	})
-	b.Run("fullscan", func(b *testing.B) {
-		full := NewWeightStore(f) // constructed outside the lock (getCheckpointState is cached)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_ = full.GetAttestationScore(node)
-		}
-	})
-}
-
-func BenchmarkGloasWeightTreePrepare(b *testing.B) {
-	f := buildExAnteStore(b)
-	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	cs, err := f.getCheckpointState(justified)
-	require.NoError(b, err)
-	require.NotNil(b, cs)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.gloasWeightTree.prepare(justified, cs)
-
-	dirtyOne := uint64(0)
-	dirtyTenPercent := make([]uint64, 0, cs.validatorSetSize/10)
-	dirtyAll := make([]uint64, 0, cs.validatorSetSize)
-	for i := 0; i < cs.validatorSetSize; i++ {
-		vi := uint64(i)
-		if len(dirtyTenPercent) < cs.validatorSetSize/10 {
-			dirtyTenPercent = append(dirtyTenPercent, vi)
-		}
-		dirtyAll = append(dirtyAll, vi)
-	}
-
-	b.Run("clean", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-one", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.markDirty(dirtyOne)
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-10pct", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyTenPercent {
-				f.gloasWeightTree.markDirty(vi)
-			}
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-all", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyAll {
-				f.gloasWeightTree.markDirty(vi)
-			}
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("full-rebuild", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.markAllDirty()
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-}
-
 // TestGloasWeightTreeDeltaMatchesFullScan drives vote reassignments through
 // the production dirty-validator path, then asserts the delta tree still
 // matches the full-scan oracle under each payload-status view.
@@ -240,7 +153,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	defer f.mu.Unlock()
 
 	full := NewWeightStore(f)
-	tree := f.gloasWeightTree.prepare(justified, cs)
+	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)
 	for i := 0; i < f.latestMessages.latestMessagesCount(); i++ {
@@ -268,7 +181,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 			PayloadPresent: n%2 == 0,
 		})
 	}
-	tree = f.gloasWeightTree.prepare(justified, cs)
+	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	sawNonZero := false
 	for _, root := range roots {

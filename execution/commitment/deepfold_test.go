@@ -96,7 +96,7 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 	injectedSR := common.HexToHash("0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
 	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	clean.updateCell(acct[:], accHashed, &accUpd)
+	_, _ = clean.updateCell(acct[:], accHashed, &accUpd)
 	setAccountStorageRoot(clean, accHashed, cell{hash: injectedSR, hashLen: 32})
 	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
 	require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 	staleLoc := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
 	stale := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	addStorageToCell(&stale.root, staleAddr, staleLoc, []byte{0xAA, 0xBB, 0xCC, 0xDD})
-	stale.updateCell(acct[:], accHashed, &accUpd)
+	_, _ = stale.updateCell(acct[:], accHashed, &accUpd)
 	setAccountStorageRoot(stale, accHashed, cell{hash: injectedSR, hashLen: 32})
 	staleHash, err := stale.computeCellHash(&stale.root, 0, nil)
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
 	multiSR.hashLen = 32
 
 	reused := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	reused.updateCell(acct[:], accHashed, &accUpd)
+	_, _ = reused.updateCell(acct[:], accHashed, &accUpd)
 	setAccountStorageRoot(reused, accHashed, singleChildSR)
 	require.NotZero(t, reused.root.extLen, "single-child collapse must set the storage extension")
 	setAccountStorageRoot(reused, accHashed, multiSR)
@@ -145,7 +145,7 @@ func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
 	require.NoError(t, err)
 
 	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	clean.updateCell(acct[:], accHashed, &accUpd)
+	_, _ = clean.updateCell(acct[:], accHashed, &accUpd)
 	setAccountStorageRoot(clean, accHashed, multiSR)
 	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
 	require.NoError(t, err)

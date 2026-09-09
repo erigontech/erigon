@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -219,9 +219,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the sentinel for the newest page, not a request to read genesis;
+	// the blocks the scan lands on are gated as it reaches them.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
@@ -246,9 +250,12 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
@@ -331,12 +338,14 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 	return totalFees, nil
 }
 
-func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// once and uses the same one for everything it derives from the block.
+func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil, nil // not error, see also other cases https://github.com/erigontech/erigon/issues/1645
@@ -344,7 +353,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return nil, nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, n)
+	block, err := api.blockWithSenders(ctx, tx, hash, n)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -355,7 +364,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -368,14 +377,14 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)

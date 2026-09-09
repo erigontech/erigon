@@ -302,7 +302,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				if entry.Value != nil && len(entry.Value) > 0 { //nolint:gocritic
+				if len(entry.Value) > 0 { //nolint:gocritic
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
@@ -571,14 +571,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// Base budget is one-third of a slot, extended adaptively up to two-thirds when the prunable backlog is large.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
-	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
-		}
-	}
+	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+	stagePruneTimeout := min(baseTimeout+extra, maxTimeout)
 	if timeout > 0 && timeout > stagePruneTimeout {
 		stagePruneTimeout = timeout
 	}

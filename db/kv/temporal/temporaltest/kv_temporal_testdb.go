@@ -98,17 +98,15 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		panic(err)
 	}
 
-	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
+	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 	if tb != nil {
 		tb.Cleanup(stateSnapshots.Close)
 	}
-
-	if err := stateSnapshots.OpenFolder(); err != nil {
-		panic(err)
-	}
-
 	db, err := temporal.New(rawDB, stateSnapshots, blockSnapshots)
 	if err != nil {
+		panic(err)
+	}
+	if err := db.OpenStateSnapshots(ctx); err != nil {
 		panic(err)
 	}
 	if tb != nil {

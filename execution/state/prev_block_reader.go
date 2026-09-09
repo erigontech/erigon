@@ -60,9 +60,6 @@ func (o *PrevBlockReader) ReadAccountDataForDebug(a accounts.Address) (*accounts
 func (o *PrevBlockReader) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
 	return o.chain.ReadAccountStorage(a, k)
 }
-func (o *PrevBlockReader) HasStorage(a accounts.Address) (bool, error) {
-	return o.chain.HasStorage(a)
-}
 func (o *PrevBlockReader) ReadAccountCode(a accounts.Address) ([]byte, error) {
 	return o.chain.ReadAccountCode(a)
 }

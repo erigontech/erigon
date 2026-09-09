@@ -485,7 +485,7 @@ func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
 // TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
 // block selector is treated identically to an explicit "latest" selector for each
 // state method (per execution-apis: the Block parameter is optional, default
-// 'latest'). This exercises the orLatest(nil) path directly.
+// 'latest'). This exercises the blockOrLatest(nil) path directly.
 func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	a := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

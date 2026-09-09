@@ -106,15 +106,13 @@ func TestClientErrorData(t *testing.T) {
 	}
 
 	// Check code.
-	var errCode Error
-	if !errors.As(err, &errCode) {
+	if errCode, ok := errors.AsType[Error](err); !ok {
 		t.Fatalf("client did not return rpc.Error, got %#v", err)
 	} else if errCode.ErrorCode() != (testError{}.ErrorCode()) {
 		t.Fatalf("wrong error code %d, want %d", errCode.ErrorCode(), testError{}.ErrorCode())
 	}
 	// Check data.
-	var errData DataError
-	if !errors.As(err, &errData) {
+	if errData, ok := errors.AsType[DataError](err); !ok {
 		t.Fatalf("client did not return rpc.DataError, got %#v", err)
 	} else if errData.ErrorData() != (testError{}.ErrorData()) {
 		t.Fatalf("wrong error data %#v, want %#v", errData.ErrorData(), testError{}.ErrorData())

@@ -93,13 +93,13 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback()
 
-	blockNum, _, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), hash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	return blockNum, ok, err
 }
 
@@ -119,7 +119,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error)
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -142,19 +142,23 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockHeight)
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -235,17 +239,25 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	return response, nil
 }
 
-func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// once and uses the same one for everything it derives from the block.
+func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockHeight)
+	// Gate here rather than in the caller: a pruned body reads back as nil, which
+	// the caller reports as "not found" before any gate downstream could fire.
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
+		return nil, nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -384,20 +396,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -420,7 +423,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

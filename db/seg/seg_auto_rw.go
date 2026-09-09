@@ -30,9 +30,6 @@ import (
 //Reader and Writer - decorators on Getter and Compressor - which
 //can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
-// Maybe in future will add support of io.Reader/Writer interfaces to this decorators
-// Maybe in future will merge decorators into it's parents
-
 type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
@@ -156,10 +153,26 @@ func (c *Writer) Write(word []byte) (n int, err error) {
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
-	var v []byte
+	// Keep the two buffers apart and only keep the one Next decoded into: for
+	// the half the domain does not compress, Next returns a slice of the
+	// read-only mapping, and feeding that back would decode into the file.
+	var k, v []byte
 	for r.HasNext() {
-		v, _ = r.Next(v[:0])
-		if _, err := c.Write(v); err != nil {
+		key, _ := r.Next(k[:0])
+		if r.c.Has(CompressKeys) {
+			k = key
+		}
+		if _, err := c.Write(key); err != nil {
+			return err
+		}
+		if !r.HasNext() {
+			return nil
+		}
+		val, _ := r.Next(v[:0])
+		if r.c.Has(CompressVals) {
+			v = val
+		}
+		if _, err := c.Write(val); err != nil {
 			return err
 		}
 	}

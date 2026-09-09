@@ -205,8 +205,7 @@ func (s *stopCause) Error() string {
 
 // stopCauseOf returns the stopCause published on ctx, if any.
 func stopCauseOf(ctx context.Context) (*stopCause, bool) {
-	var s *stopCause
-	if errors.As(context.Cause(ctx), &s) {
+	if s, ok := errors.AsType[*stopCause](context.Cause(ctx)); ok {
 		return s, true
 	}
 	return nil, false
@@ -1007,7 +1006,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
-		worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
+		_ = worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
 		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
 
@@ -1426,7 +1425,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
-			break
 		default:
 			sender, err := t.TxSender()
 			if err != nil {
@@ -1736,7 +1734,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.execLoopGroup.Go(func() error {
-		pe.resetWorkers(workersCtx, pe.rs, nil)
+		_ = pe.resetWorkers(workersCtx, pe.rs, nil)
 		// Hand the reset worker contexts to the dispatcher as a semaphore
 		// (see dispatchRunSelfLoop). The buffer is oversized so the pool can grow
 		// elastically (acquireWorker mints extras when workers park mid-EVM) and
