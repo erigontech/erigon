@@ -189,8 +189,7 @@ func (s *stopCause) Error() string {
 
 // stopCauseOf returns the stopCause published on ctx, if any.
 func stopCauseOf(ctx context.Context) (*stopCause, bool) {
-	var s *stopCause
-	if errors.As(context.Cause(ctx), &s) {
+	if s, ok := errors.AsType[*stopCause](context.Cause(ctx)); ok {
 		return s, true
 	}
 	return nil, false
@@ -950,7 +949,9 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 	for _, worker := range pe.execWorkers {
 		// Parallel workers hold their own transaction.
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		if err := worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1462,8 +1463,7 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
 func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	var abortErr protocol.ErrExecAbortError
-	if errors.As(origErr, &abortErr) {
+	if _, ok := errors.AsType[protocol.ErrExecAbortError](origErr); ok {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
@@ -1751,7 +1751,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Release()
-		pe.resetWorkers(workersCtx, pe.rs, nil)
+		if err := pe.resetWorkers(workersCtx, pe.rs, nil); err != nil {
+			return err
+		}
 		return pe.execLoop(execLoopCtx)
 	})
 
@@ -2741,8 +2743,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		var execErr protocol.ErrExecAbortError
-		if errors.As(res.Err, &execErr) {
+		if execErr, ok := errors.AsType[protocol.ErrExecAbortError](res.Err); ok {
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface
 				// through blockResult.Err for the same reason as the other

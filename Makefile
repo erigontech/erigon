@@ -102,6 +102,7 @@ GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
+GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -124,8 +125,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 25 ]; then \
-		echo "minimum required Golang version is 1.25"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 26 ]; then \
+		echo "minimum required Golang version is 1.26"; \
 		exit 1 ;\
 	fi
 
@@ -505,13 +506,13 @@ kurtosis-cleanup:
 
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
-	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml --fast-only
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`

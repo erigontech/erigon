@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,10 +31,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
@@ -111,6 +114,51 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
+
+// A newPayload call the execution layer never answered says nothing about the
+// block, so the sender must not be rejected (and banned) for it.
+func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.OnBlockErr = fmt.Errorf("%w: execution client is down", forkchoice.ErrNewPayloadNoStatus)
+
+	err := svc.ProcessMessage(context.Background(), nil, blocks[1])
+	require.ErrorIs(t, err, ErrIgnore)
+
+	blockRoot, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
+	_, scheduled := svc.(*blockService).blocksScheduledForLaterExecution.Load(blockRoot)
+	require.True(t, scheduled, "the block must be queued for a retry")
+
+	// The block is already on disk, so a retry must cost one newPayload and no
+	// write tx: the loop re-attempts every 50ms for 30s.
+	db := svc.(*blockService).db
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHeaderSlot(tx, blockRoot, sentinelSlot)
+	}))
+
+	err = svc.ProcessMessage(context.Background(), nil, blocks[1])
+	require.ErrorIs(t, err, ErrIgnore)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.NotNil(t, slot)
+		require.Equal(t, uint64(sentinelSlot), *slot, "the retry rewrote the block")
+		return nil
+	}))
+}
+
+const sentinelSlot = 0xbadbad
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {
 	ctrl := gomock.NewController(t)

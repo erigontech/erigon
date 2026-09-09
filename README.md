@@ -92,7 +92,7 @@ For developers
 
 ### Building
 
-Toolchain: [Go >= 1.25](https://golang.org/doc/install), GCC 10+ or Clang, 64-bit architecture. On Linux, kernel > v4.
+Toolchain: [Go >= 1.26](https://golang.org/doc/install), GCC 10+ or Clang, 64-bit architecture. On Linux, kernel > v4.
 
 ```sh
 git clone https://github.com/erigontech/erigon.git

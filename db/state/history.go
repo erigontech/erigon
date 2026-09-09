@@ -231,55 +231,63 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	histView, err := hist.OpenSequentialView()
-	if err != nil {
-		return err
-	}
-	defer histView.Close()
-	efHistView, err := efHist.OpenSequentialView()
-	if err != nil {
-		return err
-	}
-	defer efHistView.Close()
+	var iiReader, histReader *seg.Reader
+	{
+		histView, err := hist.OpenSequentialView()
+		if err != nil {
+			return err
+		}
+		defer histView.Close()
+		efHistView, err := efHist.OpenSequentialView()
+		if err != nil {
+			return err
+		}
+		defer efHistView.Close()
 
-	iiReader := seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
+		iiReader = seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
+		histReader = seg.NewReader(histView.MakeGetter(), h.Compression)
+	}
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for iiReader.HasNext() {
+	for i := 0; iiReader.HasNext(); i++ {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 	}
-
-	histReader := seg.NewReader(histView.MakeGetter(), h.Compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   int(cnt),
-		Enums:      false,
-		BucketSize: recsplit.DefaultBucketSize,
-		LeafSize:   recsplit.DefaultLeafSize,
-		TmpDir:     h.dirs.Tmp,
-		IndexFile:  historyIdxPath,
-		Salt:       h.salt.Load(),
-		NoFsync:    h.noFsync,
-		Workers:    h.BuildAccessorsWorkers,
-	}, h.logger)
-	if err != nil {
-		return fmt.Errorf("create recsplit: %w", err)
-	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
-	if h._testBuildVIHook != nil {
-		h._testBuildVIHook(rs)
+	var rs *recsplit.RecSplit
+	{
+		var err error
+		rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   int(cnt),
+			Enums:      false,
+			BucketSize: recsplit.DefaultBucketSize,
+			LeafSize:   recsplit.DefaultLeafSize,
+			TmpDir:     h.dirs.Tmp,
+			IndexFile:  historyIdxPath,
+			Salt:       h.salt.Load(),
+			NoFsync:    h.noFsync,
+			Workers:    h.BuildAccessorsWorkers,
+		}, h.logger)
+		if err != nil {
+			return fmt.Errorf("create recsplit: %w", err)
+		}
+		defer rs.Close()
+		rs.LogLvl(log.LvlTrace)
+		if h._testBuildVIHook != nil {
+			h._testBuildVIHook(rs)
+		}
 	}
 
 	var seq multiencseq.SequenceReader
@@ -293,7 +301,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		i := 0
 
 		valOffset = 0
-		for iiReader.HasNext() {
+		for keys := 0; iiReader.HasNext(); keys++ {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
 
@@ -328,17 +336,21 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				}
 			}
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if keys%1024 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 			}
 		}
 
-		if err = rs.Build(ctx); err != nil {
+		if err := rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}
@@ -1420,7 +1432,7 @@ func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By
 // HistoryDump walks every value in the visible files and hands each to dumpTo.
 // val is only valid until dumpTo returns: it points into a page buffer the next
 // value decodes over.
-func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte) error) error {
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
@@ -1486,7 +1498,9 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 					val, pageBuf = seg.GetFromPage(histKeyBuf, val, pageBuf, true)
 				}
 
-				dumpTo(key, txNum, val)
+				if err := dumpTo(key, txNum, val); err != nil {
+					return err
+				}
 			}
 		}
 	}

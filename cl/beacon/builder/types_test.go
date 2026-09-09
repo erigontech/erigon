@@ -14,18 +14,30 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package dbfinality
+package builder
 
 import (
-	"context"
+	"bytes"
+	"strings"
+	"testing"
+	"time"
 
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// Context defines immutable block boundaries for database retention work.
-type Context interface {
-	PruneToBlockNum() uint64
-	RetireToBlockNum() uint64
-	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+func TestBlockValueRejectsOversizedInputBeforeParsing(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+
+	value := strings.Repeat("9", 2<<20)
+	header := ExecutionHeader{Data: ExecutionHeaderData{Message: ExecutionHeaderMessage{Value: value}}}
+	start := time.Now()
+
+	require.Nil(t, header.BlockValue())
+	require.Less(t, time.Since(start), time.Second)
+	require.Less(t, logs.Len(), 1024)
 }
