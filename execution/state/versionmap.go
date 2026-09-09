@@ -114,6 +114,9 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
+		if dbg.AssertEnabled && ci.flag == FlagDone && flag == FlagEstimate {
+			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, ci.incarnation, incarnation))
+		}
 		ci.flag = flag
 		ci.incarnation = incarnation
 		ci.Value = value
@@ -174,7 +177,7 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 
 type VersionMap struct {
 	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
-	s        sync.Map // accounts.Address -> *AddressEntry
+	s      sync.Map // accounts.Address -> *AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
 

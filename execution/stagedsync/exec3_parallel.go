@@ -83,7 +83,6 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
-
 type parallelExecutor struct {
 	txExecutor
 	// failedBlock/failedHash record the implicated block when execution fails
@@ -3109,19 +3108,19 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 				merged := MergeVersionedWrites(existingWrites, tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
-				// Flush the tip so coinbase readers gated on coinbaseFlushedUpTo
-				// see the accumulated fee credit in the versionMap.
-				be.versionMap.FlushVersionedWrites(tipWrites, true, "")
+				// Flush the tip's value as an Estimate; the whole tx is promoted to
+				// Done together at the seal point below.
+				be.versionMap.FlushVersionedWrites(tipWrites, false, "")
 			}
 		}
 		be.coinbaseFlushedUpTo = tx
-		// Seal this tx: its versionMap cells are now immutable. Any later write to
-		// them (a stale speculative incarnation flushing after finalization) trips
-		// the assertUnsealed invariant rather than silently corrupting the prefix.
-		// Only regular OCC txs participate; negative-index system/init txs and the
-		// block-end finalize tx (whose reward/withdrawal writes flush at block end)
-		// are exempt.
+		// Promote the whole tx (fee + non-fee) Estimate->Done in one step and seal.
+		// Done is granted only at the seal frontier, so no committed-dependent re-exec
+		// can downgrade a Done cell a reader already consumed, and any later write to a
+		// sealed cell trips assertUnsealed. System/init txs (negative index) and the
+		// block-end finalize tx are exempt — final at validation / block end.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 			be.versionMap.SealUpTo(txVersion.TxIndex)
 		}
 
@@ -3306,21 +3305,6 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return out
 }
 
-// feeRecipientHeldBalance reports whether h is a Balance/Address write to a fee
-// recipient — the coinbase or the base-fee burn contract — whose final value is
-// not known until calcFees. Such writes are held as Estimates at the
-// out-of-order commit so a reader pauses on the dependency instead of committing
-// the pre-fee value; calcFees then publishes the single Done. Both recipients
-// must be held: a worker gas-debit to a sender that is itself the burn contract
-// lands in the write set, and leaving it Done here lets calcFees mutate it at
-// the same version.
-func feeRecipientHeldBalance(h state.WriteHeader, coinbase, burnt accounts.Address) bool {
-	if h.Path != state.BalancePath && h.Path != state.AddressPath {
-		return false
-	}
-	return h.Address == coinbase || (!burnt.IsNil() && h.Address == burnt)
-}
-
 // runDepOrderValidation is the DEP_ORDER_VAL validation pass. It first finalizes
 // the contiguous validated-but-not-yet-finalized prefix (calcFees coinbase sweep
 // + finalize tail), then selects the dependency-ready txs — read-deps validated,
@@ -3361,21 +3345,13 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// here is a redundant pass the barrier repeats. Consume the verdict.
 			txResult.WorkerVerdictSet = false
 			valid := true
-			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			if !be.coinbase.IsNil() {
-				cb := be.coinbase
-				burnt := txResult.ExecutionResult.BurntContractAddress
-				held := func(h state.WriteHeader) bool { return feeRecipientHeldBalance(h, cb, burnt) }
-				// The worker already flushed these writes as Estimates; advance the
-				// non-fee ones to Done in place (value unchanged, only the status).
-				be.versionMap.MarkWritesComplete(writeSet.Filter(func(h state.WriteHeader) bool { return !held(h) }))
-				// The coinbase/burnt Balance/Address stay Estimates here: their fee
-				// deltas are not folded until calcFees materializes the Done in the
-				// in-order finalize sweep, so an out-of-order reader pauses on the
-				// Dependency instead of reading the pre-fee Done (the
-				// [validate,finalize] residual).
-			} else {
-				be.versionMap.MarkWritesComplete(writeSet)
+			// A regular OCC tx stays Estimate until the in-order finalize sweep seals
+			// it: marking it Done here, ahead of the seal frontier, lets a
+			// committed-dependent re-exec flush Estimate back over a Done cell a reader
+			// already consumed. System (negative index) and block-end txs are
+			// seal-exempt and never dep-order re-executed, so they are final now.
+			if txVersion.TxIndex < 0 || be.tasks[tx].Task.IsBlockEnd() {
+				be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 			}
 			if dbg.TraceTransactionIO {
 				be.versionMap.SetTrace(false)
