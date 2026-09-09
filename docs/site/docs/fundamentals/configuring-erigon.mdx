@@ -60,7 +60,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--ethstats value`: The reporting URL for an ethstats service.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
 * `--prune.include-receipts, --persist.receipts, --experiment.persist.receipts.v2`: Downloads and caches historical receipts. Without it, receipts and logs are re-derived on demand from state history, so the related RPC calls still work, just with higher latency.
-  * Default: `false` (disabled) in every prune mode
+  * Default: `true` (enabled) in every prune mode, on fresh datadirs
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
