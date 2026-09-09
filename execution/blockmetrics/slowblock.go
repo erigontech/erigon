@@ -34,9 +34,24 @@
 // harness runs, erigon validates a block in well under a millisecond, where an
 // integer reports 0. The consumer types them float64.
 //
-// total_ms is execution_ms + state_hash_ms + commit_ms — the identity the
-// spec's own reference record balances on — not wall clock. Everything before
-// the Execution stage (headers, bodies, sender recovery) sits outside it.
+// total_ms is the whole ValidateBlock wall clock plus the forkchoice flush and
+// commit, so it covers the Headers, Bodies and Senders stages that sit outside
+// execution_ms. It therefore exceeds execution_ms + state_hash_ms + commit_ms,
+// the way geth's does; the spec's reference record balances on that sum, but
+// its prose defines the field as end-to-end and geth measures it end-to-end.
+//
+// Three spec fields are absent rather than zero, because erigon has no source
+// for them and a zero would read as a measurement. state_reads.code and
+// cache.code: no CodeDomain read counter is ever incremented — the
+// content-addressed fast paths answer most reads without touching one, and the
+// cold path passes no accumulator. state_reads.code_bytes and
+// state_writes.code_bytes: no per-domain byte counter exists. state_writes.code
+// is emitted because it is real, counted by the mem batch on every put.
+//
+// state_read_ms is emitted but is not geth's: it sums each exec worker's
+// accumulator, so under the parallel executor it is CPU time across workers
+// against a wall-clock execution_ms and can exceed it. Do not compute
+// execution_ms - state_read_ms from it.
 package blockmetrics
 
 import (
@@ -79,15 +94,15 @@ type throughput struct {
 }
 
 type stateCounts struct {
-	Accounts     int64 `json:"accounts"`
-	StorageSlots int64 `json:"storage_slots"`
-	Code         int64 `json:"code"`
+	Accounts     int64  `json:"accounts"`
+	StorageSlots int64  `json:"storage_slots"`
+	Code         *int64 `json:"code,omitempty"`
 }
 
 type cacheSummaries struct {
-	Account cacheEntry `json:"account"`
-	Storage cacheEntry `json:"storage"`
-	Code    cacheEntry `json:"code"`
+	Account cacheEntry  `json:"account"`
+	Storage cacheEntry  `json:"storage"`
+	Code    *cacheEntry `json:"code,omitempty"`
 }
 
 type cacheEntry struct {
@@ -110,9 +125,10 @@ type Record struct {
 	GasUsed uint64
 	TxCount int
 
-	Execution time.Duration
-	StateHash time.Duration
-	Commit    time.Duration
+	Validation time.Duration
+	Execution  time.Duration
+	StateHash  time.Duration
+	Commit     time.Duration
 
 	Accounts DomainCounts
 	Storage  DomainCounts
@@ -129,7 +145,7 @@ func (r *Record) StateRead() time.Duration {
 }
 
 func (r *Record) Total() time.Duration {
-	return r.Execution + r.StateHash + r.Commit
+	return r.Validation + r.Commit
 }
 
 func (r *Record) mgasPerSec() float64 {
@@ -152,7 +168,7 @@ func (d DomainCounts) entry() cacheEntry {
 func ms(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
 
 func Emit(logger log.Logger, threshold time.Duration, r *Record) {
-	if logger == nil || r == nil {
+	if r == nil {
 		return
 	}
 	if threshold > 0 && r.Total() < threshold {
@@ -179,20 +195,19 @@ func Emit(logger log.Logger, threshold time.Duration, r *Record) {
 	}
 
 	if r.CountersValid {
+		codeWrites := r.Code.Writes
 		entry.StateReads = &stateCounts{
 			Accounts:     r.Accounts.Reads,
 			StorageSlots: r.Storage.Reads,
-			Code:         r.Code.Reads,
 		}
 		entry.StateWrites = &stateCounts{
 			Accounts:     r.Accounts.Writes,
 			StorageSlots: r.Storage.Writes,
-			Code:         r.Code.Writes,
+			Code:         &codeWrites,
 		}
 		entry.Cache = &cacheSummaries{
 			Account: r.Accounts.entry(),
 			Storage: r.Storage.entry(),
-			Code:    r.Code.entry(),
 		}
 	}
 

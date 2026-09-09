@@ -53,13 +53,14 @@ func captureLogger() (log.Logger, *captureHandler) {
 
 func sampleRecord() *Record {
 	return &Record{
-		Number:    1234,
-		Hash:      common.HexToHash("0xabc"),
-		GasUsed:   30_000_000,
-		TxCount:   7,
-		Execution: 40 * time.Millisecond,
-		StateHash: 50 * time.Millisecond,
-		Commit:    10 * time.Millisecond,
+		Number:     1234,
+		Hash:       common.HexToHash("0xabc"),
+		GasUsed:    30_000_000,
+		TxCount:    7,
+		Validation: 100 * time.Millisecond,
+		Execution:  40 * time.Millisecond,
+		StateHash:  50 * time.Millisecond,
+		Commit:     10 * time.Millisecond,
 	}
 }
 
@@ -72,9 +73,9 @@ func TestEmitThreshold(t *testing.T) {
 		wantEmit  bool
 	}{
 		{"zero emits every block", 0, true},
-		{"below total emits", 99 * time.Millisecond, true},
-		{"equal to total emits", 100 * time.Millisecond, true},
-		{"above total suppresses", 101 * time.Millisecond, false},
+		{"below total emits", 109 * time.Millisecond, true},
+		{"equal to total emits", 110 * time.Millisecond, true},
+		{"above total suppresses", 111 * time.Millisecond, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -93,7 +94,6 @@ func TestEmitNilsAreNoOps(t *testing.T) {
 	t.Parallel()
 	logger, h := captureLogger()
 	Emit(logger, 0, nil)
-	Emit(nil, 0, sampleRecord())
 	assert.Empty(t, h.msgs)
 }
 
@@ -127,23 +127,27 @@ func TestEmitJSONSchema(t *testing.T) {
 	assert.Equal(t, float64(50), timing["state_hash_ms"])
 	assert.Equal(t, float64(10), timing["commit_ms"])
 	assert.Equal(t, float64(11), timing["state_read_ms"])
-	assert.Equal(t, float64(100), timing["total_ms"])
+	assert.Equal(t, float64(110), timing["total_ms"])
 
 	assert.InDelta(t, 30.0/0.040, got["throughput"].(map[string]any)["mgas_per_sec"], 1e-6)
 
 	reads := got["state_reads"].(map[string]any)
 	assert.Equal(t, float64(11), reads["accounts"])
 	assert.Equal(t, float64(20), reads["storage_slots"])
-	assert.Equal(t, float64(2), reads["code"])
+	assert.NotContains(t, reads, "code",
+		"no CodeDomain read counter is ever incremented, so a zero here would read as a measurement")
 
 	writes := got["state_writes"].(map[string]any)
 	assert.Equal(t, float64(3), writes["accounts"])
 	assert.Equal(t, float64(5), writes["storage_slots"])
+	assert.Equal(t, float64(1), writes["code"], "the mem batch counts code puts, so this one is real")
 
-	account := got["cache"].(map[string]any)["account"].(map[string]any)
+	cache := got["cache"].(map[string]any)
+	account := cache["account"].(map[string]any)
 	assert.Equal(t, float64(8), account["hits"])
 	assert.Equal(t, float64(2), account["misses"])
 	assert.InDelta(t, 80.0, account["hit_rate"], 1e-9)
+	assert.NotContains(t, cache, "code", "code cache hits and misses are never counted either")
 }
 
 func TestEmitOmitsCountersWhenNotCollected(t *testing.T) {
@@ -178,12 +182,14 @@ func TestMgasPerSecWithoutTime(t *testing.T) {
 func TestStateReadIsInsideExecution(t *testing.T) {
 	t.Parallel()
 
-	rec := &Record{Execution: 10 * time.Millisecond, StateHash: 5 * time.Millisecond}
+	rec := &Record{Validation: 20 * time.Millisecond, Commit: 4 * time.Millisecond,
+		Execution: 10 * time.Millisecond, StateHash: 5 * time.Millisecond}
 	rec.Accounts = DomainCounts{ReadTime: 3 * time.Millisecond}
 	rec.Storage = DomainCounts{ReadTime: 2 * time.Millisecond}
 
 	assert.Equal(t, 5*time.Millisecond, rec.StateRead())
-	assert.Equal(t, 15*time.Millisecond, rec.Total(), "reads are already inside execution; adding them double-counts")
+	assert.Equal(t, 24*time.Millisecond, rec.Total(),
+		"total is the validation wall clock plus commit, so it covers the stages outside execution and never adds reads")
 }
 
 func TestStateReadSurvivesExceedingExecution(t *testing.T) {
@@ -202,10 +208,9 @@ func TestStateReadSurvivesExceedingExecution(t *testing.T) {
 	timing := got["timing"].(map[string]any)
 	require.Equal(t, float64(90), timing["state_read_ms"],
 		"parallel execution sums workers past the wall clock every time; a required field that vanishes then is blank timing, which is the bug this emitter exists to fix")
-	assert.Equal(t,
+	assert.Greater(t, timing["total_ms"].(float64),
 		timing["execution_ms"].(float64)+timing["state_hash_ms"].(float64)+timing["commit_ms"].(float64),
-		timing["total_ms"].(float64),
-		"state_read_ms is a share of execution_ms, never an addend, so the total holds whatever it reads")
+		"total is end-to-end like geth's, so it exceeds the phase sum by the stages outside execution")
 }
 
 func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
@@ -233,10 +238,18 @@ func TestExecOnlyIsTheOnlyClampLayer(t *testing.T) {
 	raw := diff(before, kvmetrics.DomainIOMetrics{})
 	assert.Negative(t, raw.Reads, "diff subtracts raw so one layer owns the clamp")
 
-	got := execOnly(raw, DomainCounts{})
-	assert.Zero(t, got.Reads)
-	assert.Zero(t, got.Writes)
-	assert.Zero(t, got.CacheHits)
+	for name, got := range map[string]DomainCounts{
+		"counter reset under the window": execOnly(raw, DomainCounts{}),
+		"non-exec exceeds the total": execOnly(
+			DomainCounts{Reads: 1, ReadTime: time.Millisecond},
+			DomainCounts{Reads: 5, ReadTime: 5 * time.Millisecond},
+		),
+	} {
+		assert.Zero(t, got.Reads, name)
+		assert.Zero(t, got.Writes, name)
+		assert.Zero(t, got.CacheHits, name)
+		assert.Zero(t, got.ReadTime, name)
+	}
 }
 
 func TestSinceRequiresBothSamples(t *testing.T) {
@@ -264,7 +277,7 @@ func TestTakeIsInertWithoutReadMetrics(t *testing.T) {
 	assert.False(t, Take(kvmetrics.NewDomainMetrics(), kvmetrics.NewDomainMetrics()).taken,
 		"the read path skips the counters without the gate, so every delta would be a false zero")
 
-	dbg.EnableKVReadLevelledMetrics()
+	dbg.KVReadLevelledMetrics = true
 	assert.True(t, Take(kvmetrics.NewDomainMetrics(), kvmetrics.NewDomainMetrics()).taken)
 
 	assert.False(t, Take(nil, nil).taken)
@@ -279,7 +292,7 @@ func domainWithReads(domain kv.Domain, count int64, d time.Duration) *kvmetrics.
 func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	prev := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
-	dbg.EnableKVReadLevelledMetrics()
+	dbg.KVReadLevelledMetrics = true
 
 	total := kvmetrics.NewDomainMetrics()
 	nonExec := kvmetrics.NewDomainMetrics()
@@ -292,17 +305,6 @@ func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, int64(6), accounts.Reads, "commitment's reads must not be charged to execution")
 	assert.Equal(t, 6*time.Millisecond, accounts.ReadTime)
-}
-
-func TestExecOnlyClampsInsteadOfGoingNegative(t *testing.T) {
-	t.Parallel()
-
-	got := execOnly(
-		DomainCounts{Reads: 1, ReadTime: time.Millisecond},
-		DomainCounts{Reads: 5, ReadTime: 5 * time.Millisecond},
-	)
-	assert.Zero(t, got.Reads)
-	assert.Zero(t, got.ReadTime)
 }
 
 // The envelope is a cross-client contract, like the field names. The patterns
