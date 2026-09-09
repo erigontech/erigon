@@ -487,8 +487,9 @@ func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
 	}
 }
 
-// maxLogs is spent on every in-scope log, matching or not, so a non-matching log at
-// the head of the list still consumes the budget.
+// Pins the maxLogs accounting matchFilter's two return values exist to preserve: the
+// budget is spent on every log the filter considers, matching or not, and never on one
+// it skips outright.
 func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	t.Parallel()
 
@@ -505,7 +506,7 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Empty(t, logs.FilterWithTopicMap(addrMap, topicMap, 1))
 	require.Len(t, logs.FilterWithTopicMap(addrMap, topicMap, 2), 1)
 
-	// An out-of-scope log is skipped without spending the budget.
+	// A skipped log does not spend the budget.
 	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }

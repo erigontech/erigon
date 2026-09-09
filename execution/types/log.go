@@ -196,10 +196,10 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 	return topicMap
 }
 
-// matchFilter reports whether the log is in the filter's scope (right address, enough
-// topics) and whether its topics match. Callers with a maxLogs budget spend it on every
-// in-scope log, matching or not.
-func (l *Log) matchFilter(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}) (inScope, matched bool) {
+// matchFilter reports whether the log is worth considering (right address, enough
+// topics) and, separately, whether its topics match. A maxLogs budget is spent on
+// every considered log, so the two cannot be collapsed into one bool.
+func (l *Log) matchFilter(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}) (considered, matched bool) {
 	if len(addrMap) != 0 {
 		if _, ok := addrMap[l.Address]; !ok {
 			return false, false
@@ -225,8 +225,8 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 	for _, v := range logs {
-		inScope, matched := v.matchFilter(addrMap, topicMap)
-		if !inScope {
+		considered, matched := v.matchFilter(addrMap, topicMap)
+		if !considered {
 			continue
 		}
 		if matched {

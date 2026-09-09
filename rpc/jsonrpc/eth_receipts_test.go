@@ -48,24 +48,24 @@ func TestAppendRPCLogs(t *testing.T) {
 	const blockTime = 42
 
 	cases := []struct {
-		name       string
-		logs       types.RPCLogs
-		filtered   types.Logs
-		maxResults int
-		wantLen    int
-		wantErr    bool
+		name        string
+		logs        types.RPCLogs
+		receiptLogs types.Logs
+		maxResults  int
+		wantLen     int
+		wantErr     bool
 	}{
-		{name: "unlimited", filtered: logsWithIndexes(3), maxResults: 0, wantLen: 3},
-		{name: "below limit", filtered: logsWithIndexes(3), maxResults: 5, wantLen: 3},
-		{name: "at limit", filtered: logsWithIndexes(3), maxResults: 3, wantLen: 3},
-		{name: "above limit", filtered: logsWithIndexes(4), maxResults: 3, wantErr: true},
-		{name: "limit counts logs appended earlier", logs: rpcLogsWithIndexes(2), filtered: logsWithIndexes(2), maxResults: 3, wantErr: true},
+		{name: "unlimited", receiptLogs: logsWithIndexes(3), maxResults: 0, wantLen: 3},
+		{name: "below limit", receiptLogs: logsWithIndexes(3), maxResults: 5, wantLen: 3},
+		{name: "at limit", receiptLogs: logsWithIndexes(3), maxResults: 3, wantLen: 3},
+		{name: "above limit", receiptLogs: logsWithIndexes(4), maxResults: 3, wantErr: true},
+		{name: "limit counts logs appended earlier", logs: rpcLogsWithIndexes(2), receiptLogs: logsWithIndexes(2), maxResults: 3, wantErr: true},
 		{name: "nothing to append at limit", logs: rpcLogsWithIndexes(2), maxResults: 2, wantLen: 2},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := appendRPCLogs(tc.logs, tc.filtered, nil, nil, blockTime, tc.maxResults)
+			got, err := appendRPCLogs(tc.logs, tc.receiptLogs, nil, nil, blockTime, tc.maxResults)
 			if tc.wantErr {
 				require.Nil(t, got)
 				var rpcErr rpc.Error
@@ -77,7 +77,7 @@ func TestAppendRPCLogs(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
-				assert.Equal(t, tc.filtered[i].Index, l.Log.Index)
+				assert.Equal(t, tc.receiptLogs[i].Index, l.Log.Index)
 				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
 			}
 		})
