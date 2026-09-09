@@ -63,18 +63,18 @@ type LogConfig struct {
 // StructLog is emitted to the EVM each cycle and lists information about the current internal state
 // prior to the execution of the statement.
 type StructLog struct {
-	Pc            uint64                      `json:"pc"`
-	Op            vm.OpCode                   `json:"op"`
-	Gas           uint64                      `json:"gas"`
-	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory,omitempty"`
-	MemorySize    int                         `json:"memSize"`
-	Stack         []uint256.Int               `json:"stack"`
-	ReturnData    []byte                      `json:"returnData"`
-	Storage       map[common.Hash]common.Hash `json:"-"`
-	Depth         int                         `json:"depth"`
-	RefundCounter uint64                      `json:"refund"`
-	Err           error                       `json:"-"`
+	Pc            uint64
+	Op            vm.OpCode
+	Gas           uint64
+	GasCost       uint64
+	Memory        []byte
+	MemorySize    int
+	Stack         []uint256.Int
+	ReturnData    []byte
+	Storage       map[common.Hash]common.Hash
+	Depth         int
+	RefundCounter uint64
+	Err           error
 }
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a

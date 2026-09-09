@@ -432,6 +432,8 @@ func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
 	})
 }
 
+// TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
+// more than one slot is emitted; a single-entry object never writes one.
 func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
