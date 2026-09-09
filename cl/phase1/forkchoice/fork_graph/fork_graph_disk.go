@@ -95,9 +95,9 @@ type forkGraphDisk struct {
 	blocks  sync.Map // set of blocks (block root -> block)
 	headers sync.Map // set of headers
 	// badBlocks maps an invalid block root to the slot it was seen at, so Prune
-	// can drop it. Roots marked without a slot are stored as slotUnknown: a peer
-	// can replay below-anchor blocks, which never reach f.blocks and so are not
-	// covered by the block-keyed pruning below.
+	// can drop it: an invalid block is deleted from blocks before its root is
+	// recorded here, so the block-keyed pruning below never reaches it. Roots
+	// marked with no header to take a slot from are stored as slotUnknown.
 	badBlocks sync.Map // common.Hash -> uint64 slot
 
 	// current state data — dual-protected. AddChainSegment is the sole writer
@@ -573,7 +573,8 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
-// slotUnknown marks a bad block whose slot is not known, so no prune drops it.
+// slotUnknown marks a bad block with no header to take a slot from, so no prune
+// drops it; MarkHeaderAsInvalid records the header's slot when there is one.
 const slotUnknown = math.MaxUint64
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {

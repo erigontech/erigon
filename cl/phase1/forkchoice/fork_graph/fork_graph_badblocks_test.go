@@ -32,8 +32,9 @@ import (
 )
 
 // A block rejected below the anchor slot is recorded in badBlocks but never
-// reaches f.blocks, which is the only source Prune walks. Any peer can
-// therefore grow the map without bound by replaying below-anchor blocks.
+// reaches f.blocks, so the block-keyed prune loop cannot reach it. OnBlock caps
+// finalizedSlot at the anchor, so this store site is out of a peer's reach; the
+// reachable one is the invalid-block path below.
 func TestForkGraphPrunesBelowAnchorBadBlocks(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
@@ -57,9 +58,9 @@ func TestForkGraphPrunesBelowAnchorBadBlocks(t *testing.T) {
 		"below-anchor bad blocks must not survive a prune past their slot")
 }
 
-// MarkHeaderAsInvalid has no slot of its own, so the entry must survive until a
-// prune passes the header's slot rather than being dropped on the next prune.
-func TestForkGraphKeepsMarkedInvalidHeaderUntilItsSlotIsPruned(t *testing.T) {
+// MarkHeaderAsInvalid takes the slot from the stored header. With no header it
+// falls back to slotUnknown, which no prune slot can pass.
+func TestForkGraphKeepsMarkedInvalidRootWithUnknownSlot(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -73,6 +74,64 @@ func TestForkGraphKeepsMarkedInvalidHeaderUntilItsSlotIsPruned(t *testing.T) {
 	require.NoError(t, graph.Prune(anchorState.Slot()+clparams.MainnetBeaconConfig.SlotsPerEpoch))
 	require.Equal(t, 1, countSyncMap(&disk.badBlocks),
 		"a header with no known slot must not be dropped by an unrelated prune")
+}
+
+// An invalid block is deleted from f.blocks before its root reaches badBlocks,
+// so the block-keyed prune loop never sees it. This is the site a peer can
+// drive, with many distinct invalid blocks off one known parent.
+func TestForkGraphPrunesInvalidBlockBadBlocks(t *testing.T) {
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(blockA, block1, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	disk := graph.(*forkGraphDisk)
+
+	_, status, err := graph.AddChainSegment(blockA, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, status)
+
+	blockC.Block.ProposerIndex = 81214459 // fails the transition, so the block is invalid
+	_, status, _ = graph.AddChainSegment(blockC, true)
+	require.Equal(t, InvalidBlock, status)
+	require.Equal(t, 1, countSyncMap(&disk.badBlocks))
+
+	require.NoError(t, graph.Prune(blockC.Block.Slot))
+	require.Equal(t, 1, countSyncMap(&disk.badBlocks),
+		"a prune at the block's own slot must not drop it")
+
+	require.NoError(t, graph.Prune(blockC.Block.Slot+1))
+	require.Zero(t, countSyncMap(&disk.badBlocks),
+		"an invalid block must not survive a prune past its slot")
+}
+
+// A root marked through MarkHeaderAsInvalid whose header is stored carries that
+// header's slot, so it expires by slot rather than living for the process.
+func TestForkGraphPrunesMarkedInvalidHeaderBySlot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	disk := graph.(*forkGraphDisk)
+
+	anchorRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	header, ok := graph.GetHeader(anchorRoot)
+	require.True(t, ok)
+
+	graph.MarkHeaderAsInvalid(anchorRoot)
+	require.Equal(t, 1, countSyncMap(&disk.badBlocks))
+
+	require.NoError(t, graph.Prune(header.Slot))
+	require.Equal(t, 1, countSyncMap(&disk.badBlocks),
+		"a prune at the header's own slot must not drop it")
+
+	require.NoError(t, graph.Prune(header.Slot+1))
+	require.Zero(t, countSyncMap(&disk.badBlocks),
+		"a marked root with a known slot must not survive a prune past it")
 }
 
 func countSyncMap(m *sync.Map) int {
