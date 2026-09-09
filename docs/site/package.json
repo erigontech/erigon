@@ -54,6 +54,7 @@
     "node": ">=20.0"
   },
   "overrides": {
+    "image-size": "npm:image-size-next@^2.1.1",
     "webpack": "5.105.0",
     "@babel/plugin-transform-modules-systemjs": "^7.29.4",
     "@babel/core": "^7.29.6",

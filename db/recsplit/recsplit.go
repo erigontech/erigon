@@ -448,8 +448,9 @@ func remap16(x uint64, n uint16) uint16 {
 }
 
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
-// when mapping keys to 64-bit values
-func (rs *RecSplit) ResetNextSalt() {
+// when mapping keys to 64-bit values. Everything the failed attempt accumulated has to go:
+// the encoders append into their existing buffers, so leftovers land in the rebuilt index.
+func (rs *RecSplit) ResetNextSalt() error {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
@@ -468,11 +469,39 @@ func (rs *RecSplit) ResetNextSalt() {
 		_, _ = rs.offsetFile.Seek(0, 0)
 		rs.offsetWriter.Reset(rs.offsetFile)
 	}
+	rs.gr.Reset()
+	rs.ef = eliasfano16.DoubleEliasFano{}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
+
+	if rs.existenceFV0 != nil {
+		// a completed Build closes this file, so start a fresh one rather than rewind
+		_ = rs.existenceFV0.Close()
+		_ = dir.RemoveFile(rs.existenceFV0.Name())
+		f, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return err
+		}
+		rs.existenceFV0 = f
+		rs.existenceWV0.Reset(f)
+	}
+	if rs.existenceFV1 != nil || rs.existenceFV2 != nil {
+		if rs.existenceFV1 != nil {
+			rs.existenceFV1.Close()
+		}
+		if rs.existenceFV2 != nil {
+			rs.existenceFV2.Close()
+		}
+		var err error
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
@@ -945,24 +974,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
 	}
 
-	var err error
-	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
+	indexF, createErr := dir.CreateTemp(rs.filePath)
+	if createErr != nil {
+		return fmt.Errorf("create index file %s: %w", rs.filePath, createErr)
 	}
-
+	rs.indexF = indexF
 	defer rs.indexF.Close()
 	rs.indexW = bufiopool.Writer(rs.indexF)
 	defer bufiopool.PutWriter(rs.indexW)
+
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
@@ -971,7 +1001,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	} else {
 		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
-	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
+	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
@@ -1090,7 +1120,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
+	if err := os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}

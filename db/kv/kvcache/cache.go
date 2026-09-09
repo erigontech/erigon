@@ -28,7 +28,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -56,7 +55,6 @@ type Cache interface {
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
-	HasStorage(address common.Address) (bool, error)
 }
 
 // Coherent works on top of Database Transaction and pair Coherent+ReadTransaction must
@@ -142,17 +140,6 @@ func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err er
 }
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
-}
-func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
-	// note: theoretically we could try to use the cache and look for populated storage
-	// slots for the given account, however that will be only useful in case of a
-	// collision (ie creating an account which already has storage as per eip-7610) which
-	// in reality is very rare; for all the other most likely situations in which we query
-	// if an account has storage (and that account is newly created and doesn't have storage)
-	// the cache will say that there is no known storage in which case we will still need to
-	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
 }
 
 var _ Cache = (*Coherent)(nil)         // compile-time interface check
