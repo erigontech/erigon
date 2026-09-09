@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -30,7 +31,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -682,7 +685,46 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint6
 		logger:                 log.New(),
 	}
 	downloader.headSlot.Store(headSlot)
+	// The downloader resolves each block's root from the canonical index, so a fixture without
+	// one would make every slot look like a gap regardless of what the reader serves.
+	seedCanonicalRoots(t, downloader.indiciesDB.(kv.RwDB), headSlot, reader)
 	return downloader
+}
+
+// seedCanonicalRoots stands in for a synced index: each slot maps to the root of the block the
+// reader serves there, so the production lookup and the storage mocks agree. The reader's own
+// fields are read directly rather than through ReadBeaconBlockBodyBySlot, which would pollute
+// the slot list tests assert on.
+func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader freezeblocks.BeaconSnapshotReader) {
+	t.Helper()
+	rootFor := func(slot uint64) (common.Hash, bool) {
+		br, ok := reader.(*boundaryBlockReader)
+		if !ok {
+			return common.Hash{}, false
+		}
+		block := br.blocks[slot]
+		if block == nil && br.block != nil && br.block.Block.Slot == slot {
+			block = br.block
+		}
+		if block == nil {
+			return common.Hash{}, false
+		}
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		return root, true
+	}
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= headSlot; slot++ {
+			root, ok := rootFor(slot)
+			if !ok {
+				binary.BigEndian.PutUint64(root[:8], slot+1)
+			}
+			if err := beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
 }
 
 type boundaryBlockReader struct {
