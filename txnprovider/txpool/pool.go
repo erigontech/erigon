@@ -468,8 +468,8 @@ func (p *TxPool) publishDepthMetrics() {
 	queuedSubCounter.SetInt(p.queued.Len())
 }
 
-// forgetUnusedSenders drops the sender id of every txn in the batch that
-// reached no sub-pool. Validation rejects a txn before it becomes a metaTxn, so
+// forgetUnusedSenders drops the id of every sender in the batch that has no
+// txn left in p.all. Validation rejects a txn before it becomes a metaTxn, so
 // it never enters p.deletedTxns and the flush-time eviction never sees it.
 // Callers must hold p.lock.
 func (p *TxPool) forgetUnusedSenders(ids []uint64) {
