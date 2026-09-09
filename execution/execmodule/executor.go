@@ -320,10 +320,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	return nil
 }
 
-// LastValidationExecStageTiming reports the Execution stage duration of the most
+// lastValidationExecStageTiming reports the Execution stage duration of the most
 // recent ValidateBlock. StateStep resets the stage timings per header, so on a
 // multi-header fork this is the last block's, not the whole validation's.
-func (pe *PipelineExecutor) LastValidationExecStageTiming() time.Duration {
+func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
 	if pe.validationSync == nil {
 		return 0
 	}

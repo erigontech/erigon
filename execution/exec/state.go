@@ -402,21 +402,7 @@ func (rw *Worker) Run() (err error) {
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Fold this task's reads into the per-batch log aggregate and the
-		// retained collector accumulator, then reset. Off the hot path (the
-		// result is already queued). The collector hand-off is a non-blocking
-		// TrySend: on a full buffer it is skipped and collectorAcc keeps growing
-		// (retried next task), so execution never blocks and no count is lost.
-		// Skipped entirely when read metrics are off.
-		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			doms := rw.rs.Domains()
-			doms.MergeExecMetrics(rw.readMetrics)
-			rw.collectorAcc.Merge(rw.readMetrics)
-			rw.readMetrics.Reset()
-			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
-				rw.collectorAcc = kvmetrics.NewDomainMetrics()
-			}
-		}
+		rw.PublishReadMetrics()
 	}
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and
@@ -428,6 +414,24 @@ func (rw *Worker) Run() (err error) {
 		}
 	}
 	return nil
+}
+
+// PublishReadMetrics folds this worker's task reads into the per-batch log
+// aggregate and the retained collector accumulator, then resets. Off the hot
+// path: the result is already queued. The collector hand-off is a non-blocking
+// TrySend, so execution never blocks and no count is lost. Callers that drive
+// RunTxTask directly must call it, or their reads never reach sd.metrics.
+func (rw *Worker) PublishReadMetrics() {
+	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
+		return
+	}
+	doms := rw.rs.Domains()
+	doms.MergeExecMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
+	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
 }
 
 func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {

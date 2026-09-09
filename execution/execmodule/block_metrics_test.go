@@ -221,6 +221,45 @@ func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 		"a forkchoice that unwinds commits more than this block's writes, so commit_ms would not be this block's")
 }
 
+func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
+	send := func(value uint64) func(int, *blockgen.BlockGen) {
+		return sendTo(t, m, privKey, senderAddr, value)
+	}
+
+	siblingA, err := m.GenerateChainFrom(m.Genesis, 1, send(1_000))
+	require.NoError(t, err)
+	siblingB, err := m.GenerateChainFrom(m.Genesis, 1, send(2_000))
+	require.NoError(t, err)
+
+	status, err := m.InsertBlocks(t.Context(), siblingA.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	status, err = m.InsertBlocks(t.Context(), siblingB.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	tipA := siblingA.Blocks[len(siblingA.Blocks)-1].Header()
+	tipB := siblingB.Blocks[len(siblingB.Blocks)-1].Header()
+
+	// Both validate at the same height, so both leave a record; B validates
+	// last, so the extending fork head is B when the forkchoice picks A.
+	resultA, err := m.ValidateChain(t.Context(), tipA)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, resultA.ValidationStatus)
+	resultB, err := m.ValidateChain(t.Context(), tipB)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, resultB.ValidationStatus)
+
+	collector := installCollector(t)
+
+	_, err = m.UpdateForkChoice(t.Context(), tipA)
+	require.NoError(t, err)
+
+	assert.Empty(t, collector.records(t),
+		"A's state was discarded when B became the extending fork, so RunLoop re-executes A; the cached record describes the run that was thrown away")
+}
+
 func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {
 	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 	send := func(value uint64) func(int, *blockgen.BlockGen) {

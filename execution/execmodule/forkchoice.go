@@ -769,7 +769,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
-		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore)
+		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)
 	}
 
 	sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -990,12 +990,14 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 	e.logger.Log(dbgLevel, msg, logArgs...)
 }
 
-func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration, headNum, finishProgressBefore uint64) {
+func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration, headNum, finishProgressBefore uint64, mergedExtendingFork bool) {
 	if e.forkValidator == nil {
 		return
 	}
 	rec := e.forkValidator.TakeBlockMetrics(blockHash)
-	if rec == nil || headNum != finishProgressBefore+1 {
+	// Without the merge the block is re-executed by RunLoop, so the cached
+	// record describes a run whose state was discarded.
+	if rec == nil || !mergedExtendingFork || headNum != finishProgressBefore+1 {
 		return
 	}
 	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist

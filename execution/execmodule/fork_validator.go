@@ -328,7 +328,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	}
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
-	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain))
+	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation)
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
@@ -375,7 +375,7 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	return BlockTimings{}
 }
 
-func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int) {
+func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int, validation time.Duration) {
 	if fv.blockMetricsCache == nil {
 		return
 	}
@@ -386,16 +386,17 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 	}
 	stateHash := sd.TakeCommitmentTime()
 	rec := &blockmetrics.Record{
-		Number:    header.Number.Uint64(),
-		Hash:      hash,
-		GasUsed:   header.GasUsed,
-		StateHash: stateHash,
+		Number:     header.Number.Uint64(),
+		Hash:       hash,
+		GasUsed:    header.GasUsed,
+		StateHash:  stateHash,
+		Validation: validation,
 	}
 	if body != nil {
 		rec.TxCount = len(body.Transactions)
 	}
 	rec.Accounts, rec.Storage, rec.Code, rec.CountersValid = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics()).Since(*beforeIO)
-	rec.Execution = max(fv.executor.LastValidationExecStageTiming()-stateHash, 0)
+	rec.Execution = max(fv.executor.lastValidationExecStageTiming()-stateHash, 0)
 	fv.blockMetricsCache.Add(hash, rec)
 }
 
