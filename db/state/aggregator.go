@@ -104,6 +104,7 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -2787,8 +2788,13 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	defer logEvery.Stop()
 
 	step := txNumUnwindTo / at.StepSize()
+	// Use the CURRENT (atomically published) file boundary, not the stale
+	// tx-scoped snapshot. BuildFilesInBackground may have filed new steps
+	// since this AggregatorRoTx was opened, and getLatestFromDb will use
+	// the current view — so the unwind must tag entries beyond it.
+	currentFilesEndStep := at.a.EndTxNumMinimax() / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		if err := d.unwind(ctx, tx, step, txNumUnwindTo, currentFilesEndStep, changeset[idx]); err != nil {
 			return err
 		}
 	}

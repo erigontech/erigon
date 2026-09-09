@@ -83,12 +83,16 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 	// side-effect, preventing the subsequent accede-mode open from panicking.
 	if applyMigrations {
 		dirs := datadir.New(datadirCli)
+
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
 			return nil, fmt.Errorf("open migrations db: %w", err)
 		}
 		defer migrationsDB.Close()
 		migrator := migrations.NewMigrator(opts.GetLabel())
+		migrator.ReopenDB = func() (kv.RwDB, error) {
+			return opts.Exclusive(true).Open(context.Background())
+		}
 		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
@@ -96,10 +100,16 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			rawDBExcl := opts.Exclusive(true).MustOpen()
-			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
-				rawDBExcl.Close()
+			rawDBExcl, err = migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger)
+			if err != nil {
+				// A wipe migration that fails to reopen returns no handle at all.
+				if rawDBExcl != nil {
+					rawDBExcl.Close()
+				}
 				return nil, err
 			}
+			// Release the exclusive lock here, not on function exit: the accede-mode
+			// open below would otherwise contend with this handle.
 			rawDBExcl.Close()
 		}
 	}
