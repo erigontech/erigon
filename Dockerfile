@@ -55,7 +55,16 @@ COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
 
+## Build the cgo dependencies with clang instead of the image's gcc 12.
+## xx-go prefers clang when an unversioned "clang" is on PATH and falls back to
+## gcc otherwise, so pointing the alternatives at clang-22 is all that is needed.
+RUN apt-get update -qq && apt-get install -y -qq clang-22 lld-22 && \
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 100 && \
+    update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-22 100
+
 ## Make sure required dependencies are installed (some packages required only for arm64):
+## g++ stays: it supplies the target libstdc++ headers that clang++ compiles against.
 RUN xx-apt-get install -y libc6-dev g++ && \
     xx-go mod download && \
     xx-go mod tidy
