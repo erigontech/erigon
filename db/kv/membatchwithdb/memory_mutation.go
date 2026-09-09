@@ -403,20 +403,24 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	if m.readTx != nil && !m.isTableCleared(table) {
 		// Hidden rows don't count against limit, so the db side must be free to
 		// look past them; the merge below still stops at limit.
-		hidden := m.hasDeletedEntries(table)
+		hidden := m.hasDeletedEntries(table) || len(m.deletedDups[table]) > 0
 		dbLimit := limit
 		if hidden {
 			dbLimit = kv.Unlim
 		}
 		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
-			return s, err
+			s.Close()
+			return nil, err
 		}
 		if hidden {
-			s.iterDb = newSkipDeletedIter(s.iterDb, func(k, _ []byte) bool { return m.isEntryDeleted(table, k) })
+			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if _, err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -424,53 +428,6 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	}
 	return s, nil
 }
-
-// skipDeletedIter hides rows the overlay marked deleted from a db-side stream.
-type skipDeletedIter struct {
-	it      stream.KV
-	deleted func(k, v []byte) bool
-	k, v    []byte
-	hasNext bool
-	err     error
-}
-
-func newSkipDeletedIter(it stream.KV, deleted func(k, v []byte) bool) *skipDeletedIter {
-	s := &skipDeletedIter{it: it, deleted: deleted}
-	s.advance()
-	return s
-}
-
-func (s *skipDeletedIter) advance() {
-	for s.it.HasNext() {
-		k, v, err := s.it.Next()
-		if err != nil {
-			s.err, s.hasNext = err, true
-			return
-		}
-		if s.deleted(k, v) {
-			continue
-		}
-		s.k, s.v, s.hasNext = k, v, true
-		return
-	}
-	s.k, s.v, s.hasNext = nil, nil, false
-}
-
-func (s *skipDeletedIter) HasNext() bool { return s.hasNext }
-
-func (s *skipDeletedIter) Next() (k, v []byte, err error) {
-	if s.err != nil {
-		return nil, nil, s.err
-	}
-	if !s.hasNext {
-		return nil, nil, nil
-	}
-	k, v = s.k, s.v
-	s.advance()
-	return k, v, nil
-}
-
-func (s *skipDeletedIter) Close() { s.it.Close() }
 
 type rangeIter struct {
 	iterDb, iterMem                      stream.KV
@@ -546,14 +503,16 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 			dbLimit = kv.Unlim
 		}
 		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
-			return s, err
+			s.Close()
+			return nil, err
 		}
 		if hidden {
-			s.iterDb = newSkipDeletedIter(s.iterDb, func(_, v []byte) bool { return m.isDupDeleted(table, key, v) })
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool { return !m.isDupDeleted(table, key, v) })
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error

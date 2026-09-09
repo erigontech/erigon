@@ -200,3 +200,22 @@ func TestRangeDupSortWithLimitCountsNonDeletedValues(t *testing.T) {
 
 	require.Equal(t, []string{"value1.3", "value1.5"}, values)
 }
+
+func TestRangeOnDupSortHonorsDeletedDups(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbDupSort(t, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+
+	it, err := batch.Range(kv.TblAccountVals, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	_, values := collectStream(t, it)
+
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
+}
