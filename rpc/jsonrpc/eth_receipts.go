@@ -419,7 +419,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 }
 
 func appendRPCLogs(logs types.RPCLogs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.RPCLogs, error) {
-	logs = receiptLogs.AppendFilteredRPCLogs(logs, addrMap, topicMap, blockTime)
+	// One entry past the cap is enough to detect the overflow without converting the rest.
+	var limit int
+	if maxResults != 0 {
+		limit = maxResults + 1
+	}
+	logs = receiptLogs.AppendFilteredRPCLogs(logs, addrMap, topicMap, blockTime, limit)
 	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),

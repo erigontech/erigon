@@ -423,7 +423,7 @@ func TestAppendFilteredRPCLogs(t *testing.T) {
 		},
 	}
 
-	rpcLogs := logs.AppendFilteredRPCLogs(nil, nil, nil, 1900000000)
+	rpcLogs := logs.AppendFilteredRPCLogs(nil, nil, nil, 1900000000, 0)
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
@@ -438,7 +438,7 @@ func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
 	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
 	// stays non-nil and serialises `[]` and not `null`.
 	for _, logs := range []Logs{{}, nil} {
-		rpcLogs := logs.AppendFilteredRPCLogs(RPCLogs{}, nil, nil, 1)
+		rpcLogs := logs.AppendFilteredRPCLogs(RPCLogs{}, nil, nil, 1, 0)
 		require.NotNil(t, rpcLogs)
 		require.Len(t, rpcLogs, 0)
 	}
@@ -482,7 +482,12 @@ func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
 			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
 				want = append(want, &RPCLog{Log: *l, BlockTimestamp: 7})
 			}
-			require.Equal(t, want, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7))
+			require.Equal(t, want, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 0))
+
+			if len(want) > 1 {
+				// limit stops the walk, so an over-cap receipt is not fully converted.
+				require.Len(t, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 1), 1)
+			}
 		})
 	}
 }
