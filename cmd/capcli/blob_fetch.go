@@ -60,8 +60,11 @@ type BlobFetchToStore struct {
 	// Past the data-column retention window no beacon node can serve blob sidecars any more,
 	// so payloads come from a blob archive keyed by versioned hash and every derived field is
 	// recomputed and verified locally against the canonical block.
-	Archive  string `name:"archive" help:"base URL of a blob archive API (Blobscan style); enables archive mode" default:""`
-	Attempts uint64 `name:"attempts" help:"attempts per archive request, with backoff on throttling" default:"5"`
+	Archive string `name:"archive" help:"base URL of a blob archive API (Blobscan style); enables archive mode" default:""`
+	// VerifyOnly reproduces exactly what the dump requires of the store, without fetching or
+	// writing: a matching count row is not enough, the sidecar files must also be readable.
+	VerifyOnly bool   `name:"verify-only" help:"read every blob-bearing slot back from the store and report gaps; fetches and writes nothing" default:"false"`
+	Attempts   uint64 `name:"attempts" help:"attempts per archive request, with backoff on throttling" default:"5"`
 }
 
 type blobFetchTally struct {
@@ -150,6 +153,12 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		// expected to be empty, so writing there would be pointless and confusing.
 		if slot < frozen {
 			return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
+		}
+		if c.VerifyOnly {
+			if err := c.verifySlot(ctx, tx, snr, blobStorage, slot, &tally); err != nil {
+				return err
+			}
+			continue
 		}
 		reachedRemote := true
 		if arc != nil {
@@ -450,4 +459,57 @@ func readSlotsFile(path string) ([]uint64, error) {
 		return nil, err
 	}
 	return slots, nil
+}
+
+// verifySlot asserts what DumpBlobSidecarsRange asserts: for a slot carrying commitments the
+// count row must match the block, and every sidecar must actually read back. A count row that
+// matches while the files are missing passes a count-only check and fails the dump.
+func (c *BlobFetchToStore) verifySlot(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader,
+	store blob_storage.BlobStorage, slot uint64, tally *blobFetchTally) error {
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return err
+	}
+	if blockRoot == (common.Hash{}) {
+		tally.missed++
+		return nil
+	}
+	block, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+	if err != nil {
+		return err
+	}
+	if block == nil {
+		log.Warn("Slot has no block in local segments", "slot", slot, "blockRoot", blockRoot)
+		tally.unserved++
+		return nil
+	}
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	want := 0
+	if commitments != nil {
+		want = commitments.Len()
+	}
+	if want == 0 {
+		tally.noBlobs++
+		return nil
+	}
+	count, err := store.KzgCommitmentsCount(ctx, blockRoot)
+	if err != nil {
+		return err
+	}
+	if int(count) != want {
+		log.Error("Count row does not match the block", "slot", slot, "count", count, "want", want)
+		tally.rejected++
+		return nil
+	}
+	sidecars, found, err := store.ReadBlobSidecars(ctx, slot, blockRoot)
+	if err != nil {
+		return err
+	}
+	if !found || len(sidecars) != want {
+		log.Error("Sidecars do not read back", "slot", slot, "found", found, "got", len(sidecars), "want", want)
+		tally.rejected++
+		return nil
+	}
+	tally.alreadyOk++
+	return nil
 }
