@@ -112,7 +112,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-type Logs []*Log
+type Logs []Log
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
@@ -123,9 +123,9 @@ type RPCLog struct {
 // ToRPCLogs converts Logs to RPCLogs, adding a timestamp to each entry.
 func (logs Logs) ToRPCLogs(timestamp uint64) RPCLogs {
 	result := make(RPCLogs, len(logs))
-	for i, l := range logs {
+	for i := range logs {
 		result[i] = &RPCLog{
-			Log:            *l,
+			Log:            logs[i],
 			BlockTimestamp: hexutil.Uint64(timestamp),
 		}
 	}
@@ -152,34 +152,25 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 type RPCLogs []*RPCLog
 
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
-// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
 	var totalTopics, totalData int
-	for _, l := range logs {
-		if l == nil {
-			continue
-		}
-		totalTopics += len(l.Topics)
-		totalData += len(l.Data)
+	for i := range logs {
+		totalTopics += len(logs[i].Topics)
+		totalData += len(logs[i].Data)
 	}
 	topics := make([]common.Hash, totalTopics)
 	data := make([]byte, totalData)
-	backing := make([]Log, len(logs))
 	out := make(Logs, len(logs))
-	for i, l := range logs {
-		if l == nil {
-			continue
-		}
-		dst := &backing[i]
-		nt, nd := len(l.Topics), len(l.Data)
+	for i := range logs {
+		dst := &out[i]
+		nt, nd := len(logs[i].Topics), len(logs[i].Data)
 		// Capped so a later append to one copied log cannot bleed into the next.
 		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
 		topics, data = topics[nt:], data[nd:]
-		l.copyTo(dst)
-		out[i] = dst
+		logs[i].copyTo(dst)
 	}
 	return out
 }
@@ -211,9 +202,10 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 // FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
 // in a loop with the same topics to avoid rebuilding the map on every call.
 func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
-	for _, v := range logs {
+	for i := range logs {
+		v := &logs[i]
 		if len(addrMap) != 0 {
 			if _, ok := addrMap[v.Address]; !ok {
 				continue
@@ -233,7 +225,10 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 			}
 		}
 		if found {
-			o = append(o, v)
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
+			}
+			o = append(o, *v)
 		}
 		logCount++
 		if maxLogs != 0 && logCount >= maxLogs {
@@ -248,29 +243,27 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 }
 
 func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
 
-	for _, v := range logs {
-		found := false
+	for i := range logs {
+		v := &logs[i]
 
 		// check address if addrMap is not empty
 		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
 			continue // not there? skip this log
 		}
 		//topicsMap len zero match any topics
-		if len(topicsMap) == 0 {
-			o = append(o, v)
-		} else {
-			for i := range v.Topics {
-				//Contain any topics that matched
-				if _, ok := topicsMap[v.Topics[i]]; ok {
-					found = true
-				}
+		found := len(topicsMap) == 0
+		for j := 0; !found && j < len(v.Topics); j++ {
+			//Contain any topics that matched
+			_, found = topicsMap[v.Topics[j]]
+		}
+		if found {
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
 			}
-			if found {
-				o = append(o, v)
-			}
+			o = append(o, *v)
 		}
 		logCount += 1
 		if maxLogs != 0 && logCount >= maxLogs {
@@ -344,14 +337,14 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, l := range logs {
-			payloadSize += l.encodingSize()
+		for i := range logs {
+			payloadSize += logs[i].encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, l := range logs {
-			if err := l.encodeRLP(w, b); err != nil {
+		for i := range logs {
+			if err := logs[i].encodeRLP(w, b); err != nil {
 				return err
 			}
 		}

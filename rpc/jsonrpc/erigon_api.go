@@ -42,8 +42,8 @@ type ErigonAPI interface {
 	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error)
 
 	// Receipt related (see ./erigon_receipts.go)
-	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
-	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
+	GetLogsByHash(ctx context.Context, hash common.Hash) ([]types.Logs, error)
+	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([]types.Logs, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.RPCLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error

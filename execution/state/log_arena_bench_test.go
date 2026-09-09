@@ -63,8 +63,9 @@ func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
 		}
 		ibs.Reset()
 	}
-	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
-	b.ReportMetric(float64(ibs.logs.poolBytes)/1024, "poolKB")
+	slotCap, _ := retainedLogs(ibs)
+	b.ReportMetric(float64(slotCap), "slots")
+	b.ReportMetric(float64(ibs.logs.retainedData)/1024, "retainedKB")
 }
 
 // Blocks whose transactions each emit a 64KB log — the shape an attack sends.
@@ -113,7 +114,8 @@ func BenchmarkLogEmitBlockLevelReset(b *testing.B) {
 		}
 		ibs.Reset() // once, when the block is built
 	}
-	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
+	slotCap, _ := retainedLogs(ibs)
+	b.ReportMetric(float64(slotCap), "slots")
 }
 
 // Blocks do not repeat their shape: the same logs land at different tx indexes
@@ -141,9 +143,8 @@ func BenchmarkLogEmitShiftingShape(b *testing.B) {
 			ibs.Reset()
 		}
 	}
-	entries, slotCap, dataBytes := retainedLogs(ibs)
+	slotCap, dataBytes := retainedLogs(ibs)
 	b.ReportMetric(float64(slotCap), "slots")
-	b.ReportMetric(float64(entries), "entries")
 	b.ReportMetric(float64(dataBytes)/1024, "retainedKB")
 }
 

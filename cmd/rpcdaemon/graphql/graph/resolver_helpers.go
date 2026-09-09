@@ -131,7 +131,8 @@ func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[st
 
 	logs := transReceipt["logs"].(types.Logs)
 	trans.Logs = make([]*model.Log, 0, len(logs))
-	for _, rlog := range logs {
+	for i := range logs {
+		rlog := &logs[i]
 		tlog := model.Log{
 			Index: uint64(rlog.Index),
 			Data:  hexutil.Encode(rlog.Data),

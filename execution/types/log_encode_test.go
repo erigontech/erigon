@@ -85,7 +85,7 @@ func TestLogsRlpHashMatchesReflectionHash(t *testing.T) {
 
 	var flat Logs
 	for _, l := range samples {
-		flat = append(flat, l)
+		flat = append(flat, *l)
 	}
 
 	require.Equal(t, RlpHash(flat), RlpHashLogs(flat))

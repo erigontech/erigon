@@ -227,7 +227,7 @@ func (ba *BlockAssembler) AddTransactions(
 
 	gasUsed := &ba.gasUsed
 
-	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
+	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) (types.Logs, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		// EIP-8037: execution and state gas pool dimensions can deplete
 		// independently — execution-time state-gas (e.g. CREATE code deposit)

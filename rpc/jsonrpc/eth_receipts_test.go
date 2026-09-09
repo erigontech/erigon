@@ -31,15 +31,16 @@ import (
 func logsWithIndexes(n int) types.Logs {
 	logs := make(types.Logs, n)
 	for i := range logs {
-		logs[i] = &types.Log{Index: hexutil.Uint(i)}
+		logs[i] = types.Log{Index: hexutil.Uint(i)}
 	}
 	return logs
 }
 
 func rpcLogsWithIndexes(n int) types.RPCLogs {
 	logs := make(types.RPCLogs, n)
-	for i, l := range logsWithIndexes(n) {
-		logs[i] = &types.RPCLog{Log: *l}
+	src := logsWithIndexes(n)
+	for i := range src {
+		logs[i] = &types.RPCLog{Log: src[i]}
 	}
 	return logs
 }

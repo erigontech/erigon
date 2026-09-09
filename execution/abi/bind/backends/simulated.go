@@ -157,7 +157,7 @@ func (b *SimulatedBackend) Commit() {
 		panic(err)
 	}
 	//nolint:prealloc
-	var allLogs []*types.Log
+	var allLogs types.Logs
 	for _, r := range b.pendingReceipts {
 		allLogs = append(allLogs, r.Logs...)
 	}
