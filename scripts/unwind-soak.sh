@@ -69,6 +69,22 @@ recovery_timeout_for_depth() {
         echo "$scaled"
     fi
 }
+
+# sethead_timeout_for_depth scales the deep-unwind setHead call the way
+# recovery_timeout_for_depth scales the window after it. A deep mode-B/C/D
+# setHead recomputes commitment by folding from the newest commitment file at
+# or below the target step; when the published snapshot set is coarse that
+# baseline can sit tens of steps back, and the fold dominates the call.
+# SETHEAD_CALL_TIMEOUT_SEC stays the floor so shallow depths are unaffected.
+sethead_timeout_for_depth() {
+    local depth=$1
+    local scaled=$(( depth / 15 ))
+    if [[ $scaled -lt $SETHEAD_CALL_TIMEOUT_SEC ]]; then
+        echo "$SETHEAD_CALL_TIMEOUT_SEC"
+    else
+        echo "$scaled"
+    fi
+}
 SETHEAD_RETRY_INTERVAL_SEC=2
 POLL_INTERVAL_SEC=30
 INTER_ITER_SLEEP_SEC=60
@@ -685,8 +701,9 @@ for ((i=1; i<=ITER; i++)); do
             "$SETHEAD_CALL_TIMEOUT_SEC" "$STRESS_INTER_ITER_SEC" 0
     else
         MODEB_RECOVERY_TIMEOUT=$(recovery_timeout_for_depth "$DEPTH")
+        MODEB_SETHEAD_TIMEOUT=$(sethead_timeout_for_depth "$DEPTH")
         scenario_test "$S3_MODE" "$i" "$DEPTH" \
-            "$SETHEAD_CALL_TIMEOUT_SEC" "$MODEB_RECOVERY_TIMEOUT" 1
+            "$MODEB_SETHEAD_TIMEOUT" "$MODEB_RECOVERY_TIMEOUT" 1
     fi
 
     if [[ $OVERALL_RC -ne 0 ]]; then

@@ -100,6 +100,20 @@ if [[ -f "$out/erigon.log" ]]; then
 fi
 echo "[verify-modec] dual-root-mismatches=$mismatch_count"
 
+# Pass criterion 4: no forbidden pattern anywhere in the log. The per-iter
+# error count in unwind-soak.sh only scans that phase's window, so fresh sync
+# and the gaps between iterations are otherwise unchecked. Pattern is sourced
+# from unwind-soak.sh so the two gates cannot drift apart.
+forbidden_count=0
+forbidden_patterns=$(sed -n 's/^FORBIDDEN_PATTERNS="\(.*\)"$/\1/p' scripts/unwind-soak.sh)
+if [[ -z "$forbidden_patterns" ]]; then
+    echo "[verify-modec] FORBIDDEN_PATTERNS not found in scripts/unwind-soak.sh — treating as failure"
+    forbidden_count=1
+elif [[ -f "$out/erigon.log" ]]; then
+    forbidden_count=$(grep -cE "$forbidden_patterns" "$out/erigon.log" || true)
+fi
+echo "[verify-modec] forbidden-pattern-hits=$forbidden_count"
+
 # Pass criterion 2: every scenario_test row's note starts with "ok"
 # (may include annotations like "ok+errors=N" or "ok+inv_missing=..." —
 # non-fatal notes still begin with ok). Rows starting with "fail:" or
@@ -138,10 +152,10 @@ fi
 
 echo "[verify-modec] snapshots preserved at $out/snapshots-between-iters/"
 
-if [[ "$rc" -eq 0 && "$mismatch_count" -eq 0 && "$csv_fails" -eq 0 && "$csv_total" -gt 0 ]]; then
+if [[ "$rc" -eq 0 && "$mismatch_count" -eq 0 && "$forbidden_count" -eq 0 && "$csv_fails" -eq 0 && "$csv_total" -gt 0 ]]; then
     echo "[verify-modec] PASS: cycle $cycle"
     exit 0
 fi
 
-echo "[verify-modec] FAIL: cycle $cycle (rc=$rc mismatches=$mismatch_count csv_fails=$csv_fails/$csv_total)"
+echo "[verify-modec] FAIL: cycle $cycle (rc=$rc mismatches=$mismatch_count forbidden=$forbidden_count csv_fails=$csv_fails/$csv_total)"
 exit 1
