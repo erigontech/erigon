@@ -94,3 +94,20 @@ func TestWithdrawalJSONGolden(t *testing.T) {
 	require.NoError(t, json.Unmarshal(got, &back))
 	assert.Equal(t, ws, back)
 }
+
+// Every field is a 0x-quantity, and an explicit null is not one. Reflection on
+// the hexutil fields rejects null, where the generated decoder it replaced took
+// it as "field absent" and left a zero behind.
+func TestWithdrawalJSONRejectsNull(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`{"index":null}`,
+		`{"validatorIndex":null}`,
+		`{"address":null}`,
+		`{"amount":null}`,
+		`{"index":1}`,
+	} {
+		var w Withdrawal
+		assert.Error(t, json.Unmarshal([]byte(input), &w), input)
+	}
+}

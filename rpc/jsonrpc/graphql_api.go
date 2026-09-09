@@ -226,8 +226,8 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
 	for _, withdrawal := range block.Withdrawals() {
 		wmap := make(map[string]any)
-		wmap["index"] = hexutil.Uint64(withdrawal.Index)
-		wmap["validator"] = hexutil.Uint64(withdrawal.Validator)
+		wmap["index"] = withdrawal.Index
+		wmap["validator"] = withdrawal.Validator
 		wmap["address"] = withdrawal.Address
 		wmap["amount"] = withdrawal.Amount
 
