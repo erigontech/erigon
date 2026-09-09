@@ -73,11 +73,18 @@ const (
 	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
 )
 
+// otterEntryOverheadBytes is what the cache holds per entry beyond the key and
+// the codeEntry struct: node, table slot and policy bookkeeping. Measured flat
+// at 56-66 B across entry counts and value sizes. Leaving it out undercounts a
+// layer of small contracts by ~1.6x, which is the direction an assumed average
+// used to hide.
+const otterEntryOverheadBytes = 64
+
 // codeEntryBytes is the resident cost of one code-layer slot excluding the code
-// bytes themselves: the uint64 key plus the entry struct (slice header,
-// keyHash, txNum, epoch). It is both the weigher's fixed term and the key cost
-// the byte counters use, so counter and bound agree.
-const codeEntryBytes = 8 + int64(unsafe.Sizeof(codeEntry{}))
+// bytes themselves: the uint64 key, the entry struct (slice header, keyHash,
+// txNum, epoch) and the cache's own per-entry overhead. It is both the weigher's
+// fixed term and the key cost the byte counters use, so counter and bound agree.
+const codeEntryBytes = 8 + int64(unsafe.Sizeof(codeEntry{})) + otterEntryOverheadBytes
 
 type codeEntry struct {
 	code []byte

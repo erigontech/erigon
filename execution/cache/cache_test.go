@@ -272,7 +272,7 @@ func TestCodeCache_NewDefaultCodeCache(t *testing.T) {
 }
 
 func TestCodeCache_GetPut(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -292,7 +292,7 @@ func TestCodeCache_GetPut(t *testing.T) {
 }
 
 func TestCodeCache_PutEmptyCode(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	c.Put(addr, []byte{}, 0)
@@ -303,7 +303,7 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 }
 
 func TestCodeCache_CodeDeduplication(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	code := makeCode(1)
 	addr1 := makeAddr(1)
@@ -402,7 +402,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -418,7 +418,7 @@ func TestCodeCache_Delete(t *testing.T) {
 }
 
 func TestCodeCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -431,7 +431,7 @@ func TestCodeCache_Clear(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Get(makeAddr(1)) // hit
@@ -442,7 +442,7 @@ func TestCodeCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset()
 }
@@ -658,7 +658,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCodeCache_ConcurrentAccess(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(1000, 1000))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	done := make(chan bool)
 
