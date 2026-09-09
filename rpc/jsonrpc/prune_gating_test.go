@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -609,7 +610,8 @@ type prunedHistoryConfig struct {
 // advances, so the chain is PoS and the forkchoice is driven block by block.
 func setupPhysicallyPrunedHistory(t *testing.T, cfg prunedHistoryConfig) (pruneGatingAPIs, pruneGatingChain) {
 	t.Helper()
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
 	opts := []execmoduletester.Option{
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithMaxReorgDepth(prunedHistoryMaxReorgDepth),

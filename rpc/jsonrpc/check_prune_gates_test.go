@@ -1748,7 +1748,7 @@ func TestReceiptCacheServesBlocksWhoseHistoryIsRetired(t *testing.T) {
 
 	bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
 	_, err := apis.eth.GetBalance(ctx, testAddr, &bnh)
-	require.ErrorIs(t, err, state.PrunedError, "re-execution must have no state to start from")
+	require.ErrorIs(t, err, state.PrunedError, "the history window must already refuse state for this block")
 
 	for _, ep := range receiptGatedEndpoints() {
 		t.Run(ep.name, func(t *testing.T) {
@@ -1759,9 +1759,10 @@ func TestReceiptCacheServesBlocksWhoseHistoryIsRetired(t *testing.T) {
 	}
 }
 
-// TestReceiptsWithoutCacheStopAtRetiredHistory is the other side of the pair: with no
-// receipt cache the only source is re-execution, so the block the cache answered for is
-// refused. Without it the availability leg could pass on any datadir.
+// TestReceiptsWithoutCacheStopAtRetiredHistory is the control for the test above: the
+// same fixture with the cache off refuses the block, which is what attributes the answers
+// there to the cache. The refusal here is the history-window comparison, not a read of
+// the retired files.
 func TestReceiptsWithoutCacheStopAtRetiredHistory(t *testing.T) {
 	t.Parallel()
 
@@ -1770,6 +1771,7 @@ func TestReceiptsWithoutCacheStopAtRetiredHistory(t *testing.T) {
 			Initialised: true,
 			History:     prunedHistoryDistance,
 			Blocks:      prune.KeepAllBlocksPruneMode,
+			Receipts:    prune.KeepAllReceiptsPruneMode,
 		},
 	})
 	ctx := t.Context()
