@@ -137,7 +137,7 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 	require.Nil(t, v)
 }
 
-func TestCodeCache_PutWithCodeHash_EvictsColdestWhenFull(t *testing.T) {
+func TestCodeCache_PutWithCodeHash_EvictsWhenFull(t *testing.T) {
 	// A budget with room for one entry. The second put must evict rather than
 	// freeze the layer, leaving exactly one of the two codes resident.
 	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeEntryBytes+8), 1*datasize.MB))

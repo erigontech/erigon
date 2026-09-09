@@ -109,8 +109,10 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The byte budget is the hard bound; residency settled far below the 128
-	// distinct puts rather than freezing at the first.
+	// Residency settled far below the 128 distinct puts rather than freezing at
+	// the first. No byte assertion at this size: the layer holds single-digit
+	// entries here, where the admission granularity is the same order as the
+	// budget. TestCodeCacheStaysWithinByteBudget pins the bound at a realistic size.
 	require.Less(t, cc.codeHashToCode.Len(), workers,
 		"the layer must evict to its byte budget, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),

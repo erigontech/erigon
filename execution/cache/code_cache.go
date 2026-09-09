@@ -664,8 +664,10 @@ func (c *CodeCache) PrintStatsAndReset() {
 
 	addrSizeB := c.AddrSizeBytes()
 	codeSizeB := c.codeSize.Load()
+	codeHashSizeB := c.codeHashCodeSize.Load()
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
 	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
+	codeHashUsagePct := float64(codeHashSizeB) / float64(c.codeCapacityB) * 100
 
 	log.Debug("CodeCache stats",
 		"addr_hits", addrHits,
@@ -680,5 +682,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 		"addr_usage_pct", addrUsagePct,
 		"code_size_mb", codeSizeB/(1024*1024),
 		"code_usage_pct", codeUsagePct,
+		"codehash_size_mb", codeHashSizeB/(1024*1024),
+		"codehash_usage_pct", codeHashUsagePct,
 	)
 }
