@@ -20,7 +20,7 @@
 
 # Erigon v3.6.1 — Upstream Underbelly — 2026-09-09
 
-v3.6.1 is a bugfix release recommended for all users. It fixes a downloader regression that could silently replace a valid local snapshot (#23859), a peer-ban bypass that let a banned Caplin peer reconnect immediately (#23866), and an index-build defect that could leave stale bits in a `recsplit` index after a salt-collision retry (#23858). It is a drop-in upgrade from 3.6.0 — no re-sync required.
+v3.6.1 is a bugfix and security release recommended for all users. It fixes a downloader regression that could silently replace a valid local snapshot (#23859), a peer-ban bypass that let a banned Caplin peer reconnect immediately (#23866), an index-build defect that could leave stale bits in a `recsplit` index after a salt-collision retry (#23858), and bumps `google.golang.org/grpc` for two HIGH-severity CVEs (#23888). It is a drop-in upgrade from 3.6.0 — no re-sync required.
 
 **Bugfixes**
 
@@ -35,6 +35,7 @@ v3.6.1 is a bugfix release recommended for all users. It fixes a downloader regr
 **Security**
 
 - p2p/discover: require a proven bond before accepting a PING endpoint statement (#23639) by @yperbasis — an unbonded PING could feed an arbitrary claimed address into a node's local endpoint predictor; a statement is now only accepted once a recent PONG has proven return reachability.
+- build: bump `google.golang.org/grpc` to v1.83.2 (#23888) by @lystopad — CVE-2026-84304: fragmented HTTP/2 DATA frames were each stored as a separate `recvMsg`, letting an unauthenticated peer exhaust heap memory with many one-byte frames across concurrent streams. CVE-2026-84445: an xDS gRPC server panicked on a request missing both `:authority` and `Host`; not reachable in Erigon, which never calls `xds.NewGRPCServer()`. `main` already carries v1.83.2 (#23267) and needs no code change, only this note.
 
 **Improvements**
 
