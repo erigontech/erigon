@@ -68,6 +68,11 @@ if [[ -n "${ARCHIVE_TRUST_ROOT:-}" ]]; then
   fi
 fi
 EXTRA_ARGS=()
+# ENABLE_PPROF exposes the pprof HTTP server for profiling a run in place.
+# Off by default so the standard soak flag set is unchanged.
+if [[ "${ENABLE_PPROF:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--pprof --pprof.addr=127.0.0.1 --pprof.port="${PPROF_PORT:-6060}")
+fi
 if [[ -n "$STATICPEERS" ]]; then
   EXTRA_ARGS+=(--staticpeers="$STATICPEERS")
 fi
