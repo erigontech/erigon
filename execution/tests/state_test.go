@@ -72,7 +72,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
 		dirs := datadir.New(tmpDir)
 		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {

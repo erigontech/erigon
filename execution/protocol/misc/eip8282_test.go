@@ -92,7 +92,7 @@ func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
-	statedb.CreateAccount(params.BuilderDepositAddress, true)
+	require.NoError(t, statedb.CreateAccount(params.BuilderDepositAddress, true))
 
 	_, err := misc.DequeueBuilderDepositRequests(noopSyscall, statedb, params.BuilderDepositAddress)
 	require.Error(t, err)
@@ -111,7 +111,7 @@ func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
-	statedb.CreateAccount(params.BuilderExitAddress, true)
+	require.NoError(t, statedb.CreateAccount(params.BuilderExitAddress, true))
 
 	_, err := misc.DequeueBuilderExitRequests(noopSyscall, statedb, params.BuilderExitAddress)
 	require.Error(t, err)
