@@ -135,7 +135,17 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		"commit", c.Commit, "frozenBlobs", frozen, "archive", c.Archive)
 
 	var tally blobFetchTally
-	for _, slot := range slots {
+	started := time.Now()
+	for i, slot := range slots {
+		// A chunk where nothing needs filling logs nothing per slot, so without this a long
+		// run is indistinguishable from a hung one.
+		if i > 0 && i%500 == 0 {
+			log.Info("Blob store gap fill progress", "slot", slot, "done", i, "of", len(slots),
+				"elapsed", time.Since(started).Truncate(time.Second),
+				"wouldFill", tally.wouldFill, "filled", tally.filled,
+				"noBlobs", tally.noBlobs, "missedSlots", tally.missed,
+				"alreadyComplete", tally.alreadyOk, "failures", tally.failures())
+		}
 		// Below the frozen frontier the sidecars already live in segments and the store is
 		// expected to be empty, so writing there would be pointless and confusing.
 		if slot < frozen {
