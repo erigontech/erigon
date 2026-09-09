@@ -231,7 +231,7 @@ const (
 
 func subdomain(e entry) string {
 	h := keccak.NewFastKeccak()
-	io.WriteString(h, e.String())
+	io.WriteString(h, e.String()) //nolint:errcheck
 	return b32format.EncodeToString(h.Sum(nil)[:16])
 }
 

@@ -1599,7 +1599,9 @@ func makeBlobTxn() TxnSlot {
 	blobTxn := TxnSlot{}
 	tctx := NewTxnParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)
-	tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil)
+	if _, err := tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil); err != nil {
+		panic(err)
+	}
 	// Set blob hashes and fee fields on the underlying transaction
 	bt := blobTxn.Txn.(*types.BlobTx)
 	bt.BlobVersionedHashes = make([]common.Hash, 2)

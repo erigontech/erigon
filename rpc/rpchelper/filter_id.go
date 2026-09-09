@@ -50,6 +50,6 @@ func generateSubscriptionID() SubscriptionID {
 		}
 	}
 	// if the computer has no functioning secure rand source, it will just use the incrementing number
-	hex.Write(id[:])
+	hex.Write(id[:]) //nolint:errcheck
 	return SubscriptionID(sb.String())
 }

@@ -287,7 +287,9 @@ func (tn *preminedTestnet) node(dist, index int) *enode.Node {
 	rec := new(enr.Record)
 	rec.Set(enr.IP{127, byte(dist >> 8), byte(dist), byte(index)})
 	rec.Set(enr.UDP(5000))
-	enode.SignV4(rec, key)
+	if err := enode.SignV4(rec, key); err != nil {
+		panic(err)
+	}
 	n, _ := enode.New(enode.ValidSchemes, rec)
 	return n
 }

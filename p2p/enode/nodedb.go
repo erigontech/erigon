@@ -570,7 +570,7 @@ func (db *DB) localSeq(id ID) uint64 {
 
 // storeLocalSeq stores the local record sequence counter.
 func (db *DB) storeLocalSeq(id ID, n uint64) {
-	db.storeUint64(localItemKey(id, dbLocalSeq), n)
+	_ = db.storeUint64(localItemKey(id, dbLocalSeq), n)
 }
 
 // QuerySeeds retrieves random nodes to be used as potential seed nodes

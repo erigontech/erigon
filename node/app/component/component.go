@@ -657,7 +657,7 @@ func asComponent(r relation) *component {
 }
 
 func (c *component) AddDependency(dependency relation) relation {
-	asComponent(dependency).addDependent(c, false)
+	_ = asComponent(dependency).addDependent(c, false)
 	return c
 }
 
@@ -963,7 +963,9 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 					"component", app.LogInstance(c),
 					"dependency", app.LogInstance(dependency))
 			}
-			dependency.activate(ctx, noopHanlder)
+			if err := dependency.activate(ctx, noopHanlder); err != nil {
+				onActivity(ctx, dependency, err)
+			}
 		}
 	}
 }
@@ -1041,7 +1043,7 @@ func awaitDeactivationChannels() {
 				waiters.Unlock()
 
 				if ok {
-					c.deactivate(context.Background(), noopHanlder)
+					_ = c.deactivate(context.Background(), noopHanlder)
 				}
 				return false, false
 			}, nil)
@@ -1114,7 +1116,9 @@ DEPENDENCIES:
 			deactivatoinWaiters.Unlock()
 			awaitDeactivationChannels()
 
-			dependency.deactivate(ctx, noopHanlder)
+			if err := dependency.deactivate(ctx, noopHanlder); err != nil {
+				onActivity(ctx, dependency, err)
+			}
 		}
 	}
 }
@@ -1190,7 +1194,9 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 			}
 
 			if len(c.dependents) == 0 {
-				cm.addDependency(c, domainLocked)
+				if _, err := cm.addDependency(c, domainLocked); err != nil {
+					return err
+				}
 			}
 
 			if err := cm.serviceBus().Register(c, registrations...); err != nil {
@@ -1225,7 +1231,9 @@ func (c *component) Dependents() relations {
 func (c *component) addDependent(dependent *component, parentLocked bool) error {
 	c.dependents = c.dependents.Add(dependent)
 
-	dependent.addDependency(c, parentLocked)
+	if _, err := dependent.addDependency(c, parentLocked); err != nil {
+		return err
+	}
 
 	if domain, ok := dependent.provider.(*componentDomain); ok {
 		if c.Domain() != domain {

@@ -408,7 +408,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge0A,
 			prep: func(net *handshakeTest) {
 				// Update challenge.Header.AuthData.
-				net.nodeA.c.Encode(idB, addr, &challenge0A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge0A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge0A)
 			},
 		},
@@ -421,7 +423,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge1A,
 			prep: func(net *handshakeTest) {
 				// Update challenge data.
-				net.nodeA.c.Encode(idB, addr, &challenge1A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge1A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge1A)
 			},
 		},

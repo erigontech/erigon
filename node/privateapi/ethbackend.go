@@ -120,7 +120,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 				err = s.ctx.Err()
 				return
 			case logs := <-ch:
-				s.logsFilter.distributeLogs(logs)
+				_ = s.logsFilter.distributeLogs(logs)
 			}
 		}
 	}()
@@ -142,7 +142,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 				err = s.ctx.Err()
 				return
 			case receipts := <-rch:
-				s.receiptsFilter.distributeReceipts(receipts)
+				_ = s.receiptsFilter.distributeReceipts(receipts)
 			}
 		}
 	}()

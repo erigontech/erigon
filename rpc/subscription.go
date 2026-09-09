@@ -311,7 +311,9 @@ func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) 
 		// unblocks deliver.
 		close(sub.quit)
 		if unsubscribeServer {
-			sub.requestUnsubscribe()
+			if err := sub.requestUnsubscribe(); err != nil {
+				sub.client.logger.Trace("RPC client failed to unsubscribe", "err", err)
+			}
 		}
 		if err != nil {
 			if errors.Is(err, ErrClientQuit) {

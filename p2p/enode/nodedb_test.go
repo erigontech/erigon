@@ -503,6 +503,8 @@ func TestDBExpireV5(t *testing.T) {
 	defer db.Close()
 
 	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
-	db.UpdateFindFailsV5(ID{}, ip, 4)
+	if err := db.UpdateFindFailsV5(ID{}, ip, 4); err != nil {
+		t.Fatal(err)
+	}
 	db.expireNodes()
 }

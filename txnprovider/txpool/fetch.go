@@ -183,6 +183,12 @@ const announcedSizeSlack = 8
 // (see announcedSizeSlack). Unannounced txs (including those announced by a
 // different peer) are skipped — only a self-contradicting announcement is a
 // violation.
+func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) {
+	if _, err := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: peerID, Penalty: sentryproto.PenaltyKind_Kick}); err != nil {
+		f.logger.Debug("[txpool] penalize peer failed", "peer", peerID, "err", err)
+	}
+}
+
 func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) error {
 	if f.announcements == nil {
 		return nil
@@ -471,14 +477,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
 		if hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick}) // Disconnect peer
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -486,7 +492,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		}
@@ -512,13 +518,13 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if count, err := peekAnnouncementCount(req.Data); err == nil && count > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", count)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 		txTypes, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -553,7 +559,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed GetPooledTransactions66", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -619,7 +625,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 					return err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed Transactions66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
@@ -642,7 +648,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 					return err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		default:
@@ -657,13 +663,13 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
 					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
-					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+					f.penalizePeer(ctx, sentryClient, req.PeerId)
 					return nil
 				}
 			}
 			if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		}

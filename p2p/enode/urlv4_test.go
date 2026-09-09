@@ -44,7 +44,9 @@ var parseNodeTests = []struct {
 			r.Set(enr.IP{127, 0, 0, 1})
 			r.Set(enr.UDP(30303))
 			r.SetSeq(99)
-			SignV4(&r, testKey)
+			if err := SignV4(&r, testKey); err != nil {
+				panic(err)
+			}
 			n, _ := New(ValidSchemes, &r)
 			return n
 		}(),

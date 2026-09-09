@@ -60,6 +60,9 @@ func TestRPCDaemonLatency(t *testing.T) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "\n=== %s ===\n", time.Now().Format("2006-01-02 15:04:05"))
-	f.WriteString(sb.String())
+	if _, err := f.WriteString(sb.String()); err != nil {
+		t.Logf("warning: could not write results file: %v", err)
+		return
+	}
 	t.Logf("results appended to %s", resultsFile)
 }

@@ -149,7 +149,7 @@ func (s *testService) CallMeBackLater(ctx context.Context, method string, args [
 	go func() {
 		<-ctx.Done()
 		var result any
-		c.Call(&result, method, args...)
+		_ = c.Call(&result, method, args...)
 	}()
 	return nil
 }
@@ -212,7 +212,9 @@ func (s *notificationTestService) HangSubscription(ctx context.Context, val int)
 	subscription := notifier.CreateSubscription()
 
 	go func() {
-		notifier.Notify(subscription.ID, val)
+		if err := notifier.Notify(subscription.ID, val); err != nil {
+			return
+		}
 	}()
 	return subscription, nil
 }

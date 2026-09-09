@@ -139,8 +139,8 @@ func TestCallMany(t *testing.T) {
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
-	tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
-	tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
+	_, _ = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+	_, _ = tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
 	contractBackend.Commit()
 
 	// set up the callargs

@@ -1266,7 +1266,7 @@ func TestGetBadBlocks(t *testing.T) {
 	hash4 := putBlock(i + 3)
 	require.NoError(rawdb.TruncateCanonicalHash(tx, i, true)) // trim since i
 
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	// Reset the global bad block cache so it reads only from this test's DB
 	tx2, err := m.DB.BeginRo(ctx)
@@ -1297,7 +1297,7 @@ func TestGetRawTransaction(t *testing.T) {
 	}
 	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	if number < 1 {
 		t.Error("TestSentry doesn't have enough blocks for this test")

@@ -272,7 +272,7 @@ func (c *Codec) CurrentChallenge(id enode.ID, addr netip.AddrPort) *Whoareyou {
 func (c *Codec) writeHeaders(head *Header) {
 	c.buf.Reset()
 	c.buf.Write(head.IV[:])
-	binary.Write(&c.buf, binary.BigEndian, &head.StaticHeader)
+	binary.Write(&c.buf, binary.BigEndian, &head.StaticHeader) //nolint:errcheck
 	c.buf.Write(head.AuthData)
 }
 
@@ -313,7 +313,7 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 		return head, nil, fmt.Errorf("can't get random data: %w", err)
 	}
 	c.headbuf.Reset()
-	binary.Write(&c.headbuf, binary.BigEndian, auth)
+	binary.Write(&c.headbuf, binary.BigEndian, auth) //nolint:errcheck
 	head.AuthData = c.headbuf.Bytes()
 
 	// Fill message ciphertext buffer with random bytes.
@@ -339,7 +339,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 		RecordSeq: packet.RecordSeq,
 	}
 	c.headbuf.Reset()
-	binary.Write(&c.headbuf, binary.BigEndian, auth)
+	binary.Write(&c.headbuf, binary.BigEndian, auth) //nolint:errcheck
 	head.AuthData = c.headbuf.Bytes()
 	return head, nil
 }
@@ -372,7 +372,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr netip.AddrPort, challe
 		head          = c.makeHeader(toID, flagHandshake, authsizeExtra)
 	)
 	c.headbuf.Reset()
-	binary.Write(&c.headbuf, binary.BigEndian, &auth.h)
+	binary.Write(&c.headbuf, binary.BigEndian, &auth.h) //nolint:errcheck
 	c.headbuf.Write(auth.signature)
 	c.headbuf.Write(auth.pubkey)
 	c.headbuf.Write(auth.record)
@@ -434,7 +434,7 @@ func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
 	}
 	auth := messageAuthData{SrcID: c.localnode.ID()}
 	c.buf.Reset()
-	binary.Write(&c.buf, binary.BigEndian, &auth)
+	binary.Write(&c.buf, binary.BigEndian, &auth) //nolint:errcheck
 	head.AuthData = slices.Clone(c.buf.Bytes())
 	head.Nonce = nonce
 	return head, err
@@ -473,8 +473,9 @@ func (c *Codec) Decode(inputData []byte, addr netip.AddrPort) (src enode.ID, n *
 	mask.XORKeyStream(staticHeader, staticHeader)
 
 	// Decode and verify the static header.
+	// staticHeader is exactly sizeofStaticHeader bytes by construction of sizeofStaticPacketData, so this read cannot fail.
 	c.reader.Reset(staticHeader)
-	binary.Read(&c.reader, binary.BigEndian, &head.StaticHeader)
+	binary.Read(&c.reader, binary.BigEndian, &head.StaticHeader) //nolint:errcheck
 	remainingInput := len(input) - sizeofStaticPacketData
 	if err := head.checkValid(remainingInput, c.protocolID); err != nil {
 		return enode.ID{}, nil, nil, err
@@ -511,9 +512,10 @@ func (c *Codec) decodeWhoareyou(head *Header, headerData []byte) (Packet, error)
 	if len(head.AuthData) != sizeofWhoareyouAuthData {
 		return nil, fmt.Errorf("invalid auth size %d for WHOAREYOU", len(head.AuthData))
 	}
+	// The length check above guarantees head.AuthData is exactly sizeofWhoareyouAuthData bytes, so this read cannot fail.
 	var auth whoareyouAuthData
 	c.reader.Reset(head.AuthData)
-	binary.Read(&c.reader, binary.BigEndian, &auth)
+	binary.Read(&c.reader, binary.BigEndian, &auth) //nolint:errcheck
 	p := &Whoareyou{
 		Nonce:         head.Nonce,
 		IDNonce:       auth.IDNonce,
@@ -583,8 +585,9 @@ func (c *Codec) decodeHandshakeAuthData(head *Header) (auth handshakeAuthData, e
 	if len(head.AuthData) < sizeofHandshakeAuthData {
 		return auth, fmt.Errorf("header authsize %d too low for handshake", head.AuthSize)
 	}
+	// The length check above guarantees at least sizeofHandshakeAuthData bytes are available, so this read cannot fail.
 	c.reader.Reset(head.AuthData)
-	binary.Read(&c.reader, binary.BigEndian, &auth.h)
+	binary.Read(&c.reader, binary.BigEndian, &auth.h) //nolint:errcheck
 	head.src = auth.h.SrcID
 
 	// Decode variable-size part.
@@ -635,9 +638,10 @@ func (c *Codec) decodeMessage(fromAddr netip.AddrPort, head *Header, headerData,
 	if len(head.AuthData) != sizeofMessageAuthData {
 		return nil, fmt.Errorf("invalid auth size %d for message packet", len(head.AuthData))
 	}
+	// The length check above guarantees head.AuthData is exactly sizeofMessageAuthData bytes, so this read cannot fail.
 	var auth messageAuthData
 	c.reader.Reset(head.AuthData)
-	binary.Read(&c.reader, binary.BigEndian, &auth)
+	binary.Read(&c.reader, binary.BigEndian, &auth) //nolint:errcheck
 	head.src = auth.SrcID
 
 	// Try decrypting the message.
