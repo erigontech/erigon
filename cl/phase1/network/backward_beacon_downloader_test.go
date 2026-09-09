@@ -267,3 +267,31 @@ func TestSendBlockRequestDoesNotBanOnEmptyResponse(t *testing.T) {
 	assert.False(t, requestSent.Load(), "an empty response must release the in-flight flag so the request retries")
 	assert.Empty(t, received, "an empty response must not be delivered as a batch")
 }
+
+// An empty BeaconBlocksByRange response is legal, so it is not a ban, but it is
+// also not a reason to keep asking at the stage throttle forever.
+func TestBackwardBeaconDownloaderEmptyResponseBackoff(t *testing.T) {
+	const base = 600 * time.Millisecond
+	for i, want := range []time.Duration{
+		1200 * time.Millisecond,
+		2400 * time.Millisecond,
+		4800 * time.Millisecond,
+		5 * time.Second,
+		5 * time.Second,
+	} {
+		require.Equal(t, want, emptyResponseBackoff(base, uint32(i+1)))
+	}
+}
+
+func TestBackwardBeaconDownloaderBackoffResetsOnBlocks(t *testing.T) {
+	b := NewBackwardBeaconDownloader(t.Context(), nil, nil, nil, nil, &clparams.MainnetBeaconConfig)
+	b.SetThrottle(600 * time.Millisecond)
+
+	b.backOffEmpty()
+	b.backOffEmpty()
+	require.Equal(t, uint32(2), b.emptyResponses.Load())
+
+	b.resetEmptyBackoff()
+	require.Zero(t, b.emptyResponses.Load())
+	require.Equal(t, 600*time.Millisecond, b.baseInterval)
+}
