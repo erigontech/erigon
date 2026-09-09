@@ -26,18 +26,23 @@ type seenProposerPreferencesKey struct {
 	dependentRoot common.Hash
 }
 
+type ValidatedProposerPreferencesSink interface {
+	SubmitValidatedPreferences(*cltypes.SignedProposerPreferences)
+}
+
 func newSeenProposerPreferencesKey(preferences *cltypes.ProposerPreferences) seenProposerPreferencesKey {
 	return seenProposerPreferencesKey{slot: preferences.ProposalSlot, dependentRoot: preferences.DependentRoot}
 }
 
 type proposerPreferencesService struct {
-	syncedDataManager synced_data.SyncedData
-	forkchoiceStore   forkchoice.ForkChoiceStorageReader
-	ethClock          eth_clock.EthereumClock
-	beaconCfg         *clparams.BeaconChainConfig
-	epbsPool          *pool.EpbsPool
-	now               func() time.Time
-	emitters          *beaconevents.EventEmitter
+	syncedDataManager        synced_data.SyncedData
+	forkchoiceStore          forkchoice.ForkChoiceStorageReader
+	ethClock                 eth_clock.EthereumClock
+	beaconCfg                *clparams.BeaconChainConfig
+	epbsPool                 *pool.EpbsPool
+	now                      func() time.Time
+	emitters                 *beaconevents.EventEmitter
+	validatedPreferencesSink ValidatedProposerPreferencesSink
 
 	storeMu sync.Mutex
 }
@@ -52,14 +57,35 @@ func NewProposerPreferencesService(
 	epbsPool *pool.EpbsPool,
 	emitters *beaconevents.EventEmitter,
 ) ProposerPreferencesService {
+	return NewProposerPreferencesServiceWithSink(
+		syncedDataManager,
+		forkchoiceStore,
+		ethClock,
+		beaconCfg,
+		epbsPool,
+		emitters,
+		nil,
+	)
+}
+
+func NewProposerPreferencesServiceWithSink(
+	syncedDataManager synced_data.SyncedData,
+	forkchoiceStore forkchoice.ForkChoiceStorageReader,
+	ethClock eth_clock.EthereumClock,
+	beaconCfg *clparams.BeaconChainConfig,
+	epbsPool *pool.EpbsPool,
+	emitters *beaconevents.EventEmitter,
+	validatedPreferencesSink ValidatedProposerPreferencesSink,
+) ProposerPreferencesService {
 	return &proposerPreferencesService{
-		syncedDataManager: syncedDataManager,
-		forkchoiceStore:   forkchoiceStore,
-		ethClock:          ethClock,
-		beaconCfg:         beaconCfg,
-		epbsPool:          epbsPool,
-		now:               time.Now,
-		emitters:          emitters,
+		syncedDataManager:        syncedDataManager,
+		forkchoiceStore:          forkchoiceStore,
+		ethClock:                 ethClock,
+		beaconCfg:                beaconCfg,
+		epbsPool:                 epbsPool,
+		now:                      time.Now,
+		emitters:                 emitters,
+		validatedPreferencesSink: validatedPreferencesSink,
 	}
 }
 
@@ -159,6 +185,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		DependentRoot: preferences.DependentRoot,
 	}, msg)
 	s.storeMu.Unlock()
+	if s.validatedPreferencesSink != nil {
+		s.validatedPreferencesSink.SubmitValidatedPreferences(msg)
+	}
 	if s.emitters != nil {
 		s.emitters.Operation().SendProposerPreferences(&beaconevents.VersionedSignedProposerPreferences{Version: clparams.GloasVersion.String(), Data: msg})
 	}
