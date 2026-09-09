@@ -20,11 +20,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -223,4 +227,71 @@ func TestBackwardBeaconDownloaderHTTPPreferredEmptyResponseFallsBack(t *testing.
 	if downloader.httpPreferred.Load() {
 		t.Fatal("httpPreferred remained true after empty HTTP response")
 	}
+}
+
+type emptyResponseBanRecordingSentinel struct {
+	sentinelproto.SentinelClient
+	banned chan string
+}
+
+func (s *emptyResponseBanRecordingSentinel) SendRequest(_ context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+}
+
+func (s *emptyResponseBanRecordingSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	select {
+	case s.banned <- peer.Pid:
+	default:
+	}
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func TestSendBlockRequestDoesNotBanOnEmptyResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	sentinel := &emptyResponseBanRecordingSentinel{banned: make(chan string, 1)}
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	b := NewBackwardBeaconDownloader(ctx, rpcClient, nil, nil, nil, cfg)
+
+	var requestSent atomic.Bool
+	requestSent.Store(true)
+	received := make(chan []*cltypes.SignedBeaconBlock, 1)
+	b.sendBlockRequest(ctx, 100, 10, received, &requestSent)
+
+	select {
+	case pid := <-sentinel.banned:
+		t.Fatalf("peer %s banned for a protocol-legal empty response", pid)
+	default:
+	}
+	assert.False(t, requestSent.Load(), "an empty response must release the in-flight flag so the request retries")
+	assert.Empty(t, received, "an empty response must not be delivered as a batch")
+}
+
+// An empty BeaconBlocksByRange response is legal, so it is not a ban, but it is
+// also not a reason to keep asking at the stage throttle forever.
+func TestBackwardBeaconDownloaderEmptyResponseBackoff(t *testing.T) {
+	const base = 600 * time.Millisecond
+	for i, want := range []time.Duration{
+		1200 * time.Millisecond,
+		2400 * time.Millisecond,
+		4800 * time.Millisecond,
+		5 * time.Second,
+		5 * time.Second,
+	} {
+		require.Equal(t, want, emptyResponseBackoff(base, uint32(i+1)))
+	}
+}
+
+func TestBackwardBeaconDownloaderBackoffResetsOnBlocks(t *testing.T) {
+	b := NewBackwardBeaconDownloader(t.Context(), nil, nil, nil, nil, &clparams.MainnetBeaconConfig)
+	b.SetThrottle(600 * time.Millisecond)
+
+	b.backOffEmpty()
+	b.backOffEmpty()
+	require.Equal(t, uint32(2), b.emptyResponses.Load())
+
+	b.resetEmptyBackoff()
+	require.Zero(t, b.emptyResponses.Load())
+	require.Equal(t, 600*time.Millisecond, b.baseInterval)
 }
