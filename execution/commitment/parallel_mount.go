@@ -284,7 +284,12 @@ func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatr
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
+	w, release := newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
+	w.metrics.Reset()
+	return w, func() {
+		p.metrics.Merge(w.metrics)
+		release()
+	}
 }
 
 func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {

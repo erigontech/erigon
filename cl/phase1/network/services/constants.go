@@ -30,11 +30,9 @@ const (
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
-	blobJobsIntervalTick          = 5 * time.Millisecond
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
-	blobJobExpiry                 = 30 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
 )
