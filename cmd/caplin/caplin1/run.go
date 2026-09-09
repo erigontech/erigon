@@ -383,6 +383,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
+	// The chain's coinbase, so a proposer that registered nothing still builds under a real address
+	// rather than address(0) — where the fees are credited and stranded, and where a follower
+	// executing under a different one would diverge.
+	validatorParameters.SetDefaultFeeRecipient(config.SuggestedFeeRecipient)
 	// Select the pluggable consensus engine (cl/consensus). L1 uses the beacon
 	// engine (Casper FFG, full DA); an L2 based rollup selects "rollup" (or
 	// "rollup-dev" single-node) so the fork choice + fork graph adapt their

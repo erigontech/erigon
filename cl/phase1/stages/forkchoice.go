@@ -274,7 +274,10 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(s, nextSlot)),
 		PrevRandao:            randaoMix,
-		SuggestedFeeRecipient: (common.Address{}), // We can not know this ahead of time
+		// The chain's fee recipient, which every client reads from the same config — so the block
+		// a follower opens has the same coinbase as the one the proposer builds. Zero when the
+		// chain does not configure one, which is the pre-existing behaviour (fees to address(0)).
+		SuggestedFeeRecipient: cfg.caplinConfig.SuggestedFeeRecipient,
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
@@ -302,9 +305,11 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 	// instead of waiting for the build trigger. Runs per slot on EVERY client (this routine is not the
 	// proposer path). No-op on execution clients that don't support it (the wire engine API). The parent
 	// (head) execution hash is the head payload header's block hash.
-	// TODO(fee-recipient): SuggestedFeeRecipient is empty here (a follower can't know the proposer's local
-	// registration). Once the L2 validator-registration contract lands, source it deterministically by
-	// proposerIndex (GetBeaconProposerIndexForSlot) so every client executes the identical coinbase.
+	// The coinbase comes from chain config (CaplinConfig.SuggestedFeeRecipient), so every client
+	// opens the block under the same one. STILL TO COME: per-proposer recipients, which need an L2
+	// registration contract keyed by proposerIndex (GetBeaconProposerIndexForSlot) and read from
+	// STATE — a follower cannot be told the proposer's local registration, it has to be able to
+	// derive it.
 	if cfg.executionClient != nil {
 		if err := cfg.executionClient.NewPayloadAttrs(ctx, headPayloadHeader.BlockHash, &payloadAttributes); err != nil {
 			log.Warn("failed to deliver payload attributes to execution", "err", err)

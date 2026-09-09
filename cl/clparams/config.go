@@ -70,6 +70,17 @@ type CaplinConfig struct {
 	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
 	DevValidatorCount int    // number of validators (default 64)
 
+	// SuggestedFeeRecipient is the coinbase every client opens a block under. It has to be a
+	// CHAIN-LEVEL value, not a proposer-local one: coinbase is execution-affecting (fee credit and
+	// the COINBASE opcode), so a follower executing under a different address DIVERGES from the
+	// proposer. Left unset it is address(0), which is what the L2 runs as today — every block's
+	// fees are credited to the zero address and stranded there.
+	//
+	// This is the INTERIM the per-proposer design names: one address for the chain, identical
+	// because the config is. The end state is an on-chain registration contract keyed by the
+	// deterministic proposer index, which a follower can read from state rather than be told.
+	SuggestedFeeRecipient common.Address
+
 	// Network stuff
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
