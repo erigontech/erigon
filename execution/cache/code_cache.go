@@ -46,10 +46,6 @@ const (
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
-	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
-	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
-	// ceiling to an envelope byte budget.
-	codeSizeEntryBytes = 64
 )
 
 type versionedAddressID struct {
@@ -265,8 +261,10 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		func(k uint64, e codeEntry) { cc.codeSize.Add(-codeEntryResident(k, e)) })
 	cc.codeHashToCode = newByteLRU(codeCapacityBytes, codeEntryResident,
 		func(k uint64, e codeEntry) { cc.codeHashCodeSize.Add(-codeEntryResident(k, e)) })
-	cc.codeSizeByCodeHash = newGrowLRU[codeSizeEntry](
-		datasize.ByteSize(DefaultCodeSizeCacheEntries*codeSizeEntryBytes), codeSizeEntryBytes,
+	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
+	// the slot charge already covers.
+	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
+		uint32(cc.codeSizeCapEntries), 0,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
 	return cc
 }

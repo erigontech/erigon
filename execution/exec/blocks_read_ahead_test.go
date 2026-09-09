@@ -95,10 +95,6 @@ func (s stubTemporalGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([
 	return s.v, s.step, nil
 }
 
-func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
-
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -116,10 +112,6 @@ func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ kv.Ge
 func (s *sharedCodeTemporalGetter) GetLatestValSize(domain kv.Domain, key []byte) (int, bool, error) {
 	value, _, err := s.GetLatest(domain, key, kv.GetLatestOptions{})
 	return len(value), len(value) > 0, err
-}
-
-func (s *sharedCodeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
 }
 
 func (s *sharedCodeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }

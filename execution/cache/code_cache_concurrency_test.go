@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // Concurrent puts of the same cold code must account each content layer once.
@@ -192,4 +194,45 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 
 	_, ok := cc.Get(addr)
 	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
+}
+
+// A growLRU generation reserves no external payload for a value freelru stores
+// inline, so the slot and per-shard charges alone have to cover it.
+func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
+	defer sizeLayer.Close()
+	require.Zero(t, sizeLayer.avgBytes, "the size layer must reserve no external payload")
+
+	// Zero payload so the assertion weighs the table and shard charge alone; the
+	// code bytes a real content layer also reserves would mask an undercharge.
+	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
+	defer contentLayer.Close()
+
+	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer) })
+	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer) })
+}
+
+func requireGenerationCovered[V any](t *testing.T, g *growLRU[V]) {
+	t.Helper()
+	for _, capacity := range []uint32{1 << 12, 1 << 14, 1 << 16} {
+		// TotalAlloc rather than HeapAlloc: a collection inside the window would
+		// swamp a heap-size delta.
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		gen := g.newShards(capacity)
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		runtime.KeepAlive(gen)
+
+		allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+		charged := g.generationBytes(capacity)
+		require.Positive(t, allocated)
+		require.GreaterOrEqual(t, charged, allocated,
+			"envelope reserves %d B for %d slots but the generation allocates %d B",
+			charged, capacity, allocated)
+	}
 }

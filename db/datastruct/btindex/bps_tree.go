@@ -335,14 +335,16 @@ func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 // If key is nil, returns cursor with first key
 // If found item.key has a prefix of key, returns item.key
 // if key is greater than all keys, returns nil
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, _ error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	cur = b.cursorGetter(nil, nil, 0, g)
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		cur.Reset(0, g)
+		if err := cur.Reset(0, g); err != nil {
+			return nil, err
+		}
 		return cur, nil
 	}
 
@@ -369,7 +371,9 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
 			// m = l
 			if cur.d == 0 {
-				cur.resetNoRead(l, g)
+				if err := cur.resetNoRead(l, g); err != nil {
+					return nil, err
+				}
 			} else {
 				cur.nextNoRead()
 			}
@@ -382,7 +386,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			}
 
 			cur.value, _ = g.Next(cur.value[:0])
-			return cur, err
+			return cur, nil
 		}
 
 		cmp = b.compareKey(g, seekKey, m)
@@ -403,7 +407,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		m = l
 	}
 
-	err = cur.Reset(m, g)
+	err := cur.Reset(m, g)
 	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
 		return nil, err
 	}
@@ -413,7 +417,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 // Get: returns for exact given key, value and offset in file where key starts
 // If given key is nil, returns first key
 // If no exact match found, returns nil values
-func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
+func (b *BpsTree) Get(g *seg.Reader, key, buf []byte) (v []byte, ok bool, offset uint64, err error) {
 	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
@@ -425,7 +429,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if err != nil || !ok {
 		return nil, false, 0, err
 	}
-	v, _ = g.Next(nil)
+	v, _ = g.Next(buf[:0])
 	return v, true, offset, nil
 }
 
