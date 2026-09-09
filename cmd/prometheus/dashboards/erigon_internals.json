@@ -4164,7 +4164,7 @@
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               },
               "editorMode": "code",
-              "expr": "irate(domain_commitment_updates_applied{instance=~\"$instance\"}[$__rate_interval]) > 0",
+              "expr": "irate(commitment_branch_writes_total{instance=~\"$instance\"}[$__rate_interval]) > 0",
               "hide": false,
               "legendFormat": "commitment trie node updates: {{instance}}",
               "range": true,

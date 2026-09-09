@@ -38,7 +38,11 @@ var (
 	mxRoundDuration = metrics.NewHistogram("commitment_round_duration_seconds",
 		[]float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60})
 
-	mxKeys       = metrics.GetOrCreateCounter("commitment_keys_total")
+	mxKeys = metrics.GetOrCreateCounter("commitment_keys_total")
+
+	// Same event as mxTraversals, under the name the shipped dashboards use.
+	mxTrieProcessedKeys = metrics.GetOrCreateCounter("domain_commitment_keys")
+
 	mxFolds      = metrics.GetOrCreateCounter("commitment_folds_total")
 	mxUnfolds    = metrics.GetOrCreateCounter("commitment_unfolds_total")
 	mxBranchPuts = metrics.GetOrCreateCounter("commitment_branch_writes_total")
@@ -100,6 +104,7 @@ func observeRound(m *Metrics, start time.Time) {
 	addU64(mxReadBytes, v.BranchReadBytes)
 	addVec(mxTraversals, "address", v.AddressKeys)
 	addVec(mxTraversals, "storage", v.StorageKeys)
+	addU64(mxTrieProcessedKeys, v.AddressKeys+v.StorageKeys)
 	addVec(mxReads, "account", v.LoadAccount)
 	addVec(mxReads, "storage", v.LoadStorage)
 	addVec(mxReads, "branch", v.LoadBranch)

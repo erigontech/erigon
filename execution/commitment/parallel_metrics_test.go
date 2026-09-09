@@ -199,3 +199,64 @@ func TestBranchWritesArePublishedOnce(t *testing.T) {
 	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
 		"commitment_branch_write_bytes_total counts each write once")
 }
+
+func TestProcessedKeysPublishedPerRound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(t *testing.T, ms *MockState, keys [][]byte, upds []Update) MetricValues
+	}{
+		{"sequential", func(t *testing.T, ms *MockState, keys [][]byte, upds []Update) MetricValues {
+			tr := newSeqTrie(t, ms)
+			defer tr.Release()
+			ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+			defer ut.Close()
+			_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+			require.NoError(t, err)
+			return tr.metrics.AsValues()
+		}},
+		{"parallel", func(t *testing.T, ms *MockState, keys [][]byte, upds []Update) MetricValues {
+			tr := newParTrie(t, ms, 4)
+			defer tr.Release()
+			ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+			defer ut.Close()
+			for _, k := range keys {
+				ut.TouchPlainKey(string(k), nil, nil)
+			}
+			_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+			require.NoError(t, err)
+			return tr.metrics.AsValues()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := NewMockState(t)
+			keys, upds := buildNibbleSpread(t, 16, 4)
+			require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+			before := mxTrieProcessedKeys.GetValueUint64()
+			v := tc.run(t, ms, keys, upds)
+			published := mxTrieProcessedKeys.GetValueUint64() - before
+
+			require.Positive(t, v.AddressKeys+v.StorageKeys, "the round traversed keys")
+			assert.EqualValues(t, v.AddressKeys+v.StorageKeys, published,
+				"domain_commitment_keys publishes one tick per processed key")
+		})
+	}
+}
+
+func TestProcessedKeysCountsDeepFoldedStorage(t *testing.T) {
+	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
+	fk, fu := buildMixedCorpus(555, 200)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+
+	before := mxTrieProcessedKeys.GetValueUint64()
+	_, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	published := mxTrieProcessedKeys.GetValueUint64() - before
+
+	require.Positive(t, deepFolds, "the whale must take the concurrent deep fold")
+	assert.GreaterOrEqual(t, published, uint64(len(keys)),
+		"every touched key is traversed at least once, deep-folded storage included")
+}
