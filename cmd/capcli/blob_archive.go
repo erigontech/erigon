@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 // blobLenBytes is the fixed size of a blob: 4096 field elements of 32 bytes.
@@ -305,15 +306,48 @@ func buildVerifiedSidecars(block *cltypes.SignedBeaconBlock, payloads map[uint64
 // derive every proof must be the one the local index calls canonical: without that gate a
 // reorged or foreign block could be used to build sidecars that verify against themselves
 // but do not belong to this chain.
-func (c *BlobFetchToStore) fillSlotFromArchive(ctx context.Context, tx kv.Tx, store blob_storage.BlobStorage,
-	src *archiveSource, beaconCfg *clparams.BeaconChainConfig, slot uint64, tally *blobFetchTally) error {
+func (c *BlobFetchToStore) fillSlotFromArchive(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader,
+	store blob_storage.BlobStorage, src *archiveSource, beaconCfg *clparams.BeaconChainConfig,
+	slot uint64, tally *blobFetchTally) error {
 	localRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return err
 	}
 	if localRoot == (common.Hash{}) {
-		log.Warn("Slot has no canonical root", "slot", slot)
+		// A slot with no proposed block has nothing to fetch; it is not a gap.
+		tally.missed++
+		return nil
+	}
+
+	// Decide from local data whether there is any work, so a run over a whole chunk does not
+	// pull ten thousand blocks from a peer to discover that almost none carry blobs. The
+	// local body is enough for the commitment count; only proof generation needs the full
+	// block, and that is fetched below once work is confirmed.
+	localBlock, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+	if err != nil {
+		return err
+	}
+	if localBlock == nil {
+		log.Warn("Slot has no block in local segments", "slot", slot, "blockRoot", localRoot)
 		tally.unserved++
+		return nil
+	}
+	localCommitments := localBlock.Block.Body.GetBlobKzgCommitments()
+	if localCommitments == nil || localCommitments.Len() == 0 {
+		tally.noBlobs++
+		return nil
+	}
+	storedNow, err := store.KzgCommitmentsCount(ctx, localRoot)
+	if err != nil {
+		return err
+	}
+	if int(storedNow) == localCommitments.Len() {
+		tally.alreadyOk++
+		return nil
+	}
+	if storedNow > 0 && !c.Overwrite {
+		log.Warn("Slot already holds sidecars, skipping", "slot", slot, "stored", storedNow, "want", localCommitments.Len())
+		tally.rejected++
 		return nil
 	}
 

@@ -123,3 +123,15 @@ func TestGetRetryGivesUpWithAnError(t *testing.T) {
 	require.False(t, found)
 	require.ErrorContains(t, err, "503")
 }
+
+// A slot with no proposed block is normal on any chain with missed slots. Counting it as an
+// unfilled gap would inflate the failure count, make an otherwise clean run exit non-zero,
+// and bury genuine archive misses among hundreds of false ones.
+func TestMissedSlotsAreNotFailures(t *testing.T) {
+	var tally blobFetchTally
+	tally.missed = 300
+	require.Zero(t, tally.failures(), "missed slots must not count as failures")
+
+	tally.unserved = 1
+	require.Equal(t, 1, tally.failures(), "a genuine miss must still count")
+}
