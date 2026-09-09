@@ -94,6 +94,9 @@ For developers
 
 Toolchain: [Go >= 1.26](https://golang.org/doc/install), GCC 10+ or Clang, 64-bit architecture. On Linux, kernel > v4.
 
+On x86-64 the build targets the `x86-64-v2` baseline (requires SSE4.2, POPCNT). All modern server CPUs qualify:
+Intel 2nd gen Core+ (2011), AMD Bulldozer+ (2012). Older hardware is not supported.
+
 ```sh
 git clone https://github.com/erigontech/erigon.git
 cd erigon

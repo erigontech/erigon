@@ -123,7 +123,6 @@ jobs:
           mkdir \
             $GITHUB_WORKSPACE/build-arm64 \
             $GITHUB_WORKSPACE/build-amd64 \
-            $GITHUB_WORKSPACE/build-amd64v2 \
             $GITHUB_WORKSPACE/docker-build-output
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -223,7 +222,7 @@ jobs:
             --output type=registry \
             --attest type=provenance,mode=max \
             --sbom=true \
-            --platform linux/amd64,linux/amd64/v2,linux/arm64 \
+            --platform linux/amd64,linux/arm64 \
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
             --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/${CHECKOUT_REF}" \
@@ -277,7 +276,7 @@ jobs:
         run: |
           echo "=== Verifying release artifacts ==="
           FAILED=0
-          for PLATFORM in arm64 amd64 amd64v2; do
+          for PLATFORM in arm64 amd64; do
             FILE="${GITHUB_WORKSPACE}/release/${APPLICATION}_${RELEASE_VERSION}_linux_${PLATFORM}.tar"
             if [ ! -f "${FILE}" ]; then
               echo "ERROR: Missing artifact: ${FILE}"
@@ -310,15 +309,6 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
-          retention-days: 7
-          compression-level: 0
-          if-no-files-found: error
-
-      - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
@@ -438,10 +428,10 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
-      - name: Download amd64v2 artifact
+      - name: Download amd64 artifact
         uses: actions/download-artifact@v8
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
       - name: Install required packages
         run: |
@@ -452,8 +442,7 @@ jobs:
         env:
           VERSION: ${{ needs.build-release.outputs.parsed-version }}
         run: |
-          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64v2.tar
-          mv -v ${APPLICATION}_v${VERSION}_linux_amd64v2 ${APPLICATION}_v${VERSION}_linux_amd64
+          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64.tar
           tar xvf ${APPLICATION}_v${VERSION}_linux_arm64.tar
           cat <<'POSTINST' > postinst.template
           #!/bin/sh
@@ -640,12 +629,6 @@ jobs:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
-    - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v8
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-        path: dist/
-
     - name: Download arm64 debian package
       uses: actions/download-artifact@v8
       with:
@@ -669,7 +652,6 @@ jobs:
         for FILE in \
           "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_arm64.tar" \
           "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64.tar" \
-          "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64v2.tar" \
           "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_arm64.deb" \
           "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_amd64.deb"; do
           if [ ! -f "${FILE}" ]; then
