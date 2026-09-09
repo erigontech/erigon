@@ -95,9 +95,9 @@ func TestWithdrawalJSONGolden(t *testing.T) {
 	assert.Equal(t, ws, back)
 }
 
-// Every field is a 0x-quantity, and an explicit null is not one. Reflection on
-// the hexutil fields rejects null, where the generated decoder it replaced took
-// it as "field absent" and left a zero behind.
+// The rejection comes from hexutil.Uint64 and common.Address carrying their own
+// UnmarshalJSON, not from reflection: encoding/json ignores a null literal for a
+// plain uint64 field, which is what the generated pointer-decoder relied on.
 func TestWithdrawalJSONRejectsNull(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{

@@ -223,20 +223,24 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	response["block"] = getBlockRes
 	response["receipts"] = result
 
-	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
-	for _, withdrawal := range block.Withdrawals() {
-		wmap := make(map[string]any)
-		wmap["index"] = withdrawal.Index
-		wmap["validator"] = withdrawal.Validator
-		wmap["address"] = withdrawal.Address
-		wmap["amount"] = withdrawal.Amount
-
-		wresult = append(wresult, wmap)
-	}
-
-	response["withdrawals"] = wresult
+	response["withdrawals"] = marshalWithdrawals(block.Withdrawals())
 
 	return response, nil
+}
+
+// marshalWithdrawals renders withdrawals for the graphql_ block responses. The
+// three integers are hexutil.Uint64, so they encode as 0x-quantities.
+func marshalWithdrawals(withdrawals types.Withdrawals) []map[string]any {
+	out := make([]map[string]any, 0, len(withdrawals))
+	for _, withdrawal := range withdrawals {
+		out = append(out, map[string]any{
+			"index":     withdrawal.Index,
+			"validator": withdrawal.Validator,
+			"address":   withdrawal.Address,
+			"amount":    withdrawal.Amount,
+		})
+	}
+	return out
 }
 
 // getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it

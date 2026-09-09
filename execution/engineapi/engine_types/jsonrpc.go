@@ -57,7 +57,7 @@ type ExecutionPayload struct {
 	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
-// PayloadAttributes represent the attributes required to start assembling a payload
+// ForkChoiceState is the head/safe/finalized triple of engine_forkchoiceUpdated.
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
 	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
