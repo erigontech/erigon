@@ -304,7 +304,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d
-		dbg.EnableKVReadLevelledMetrics()
+		dbg.KVReadLevelledMetrics = true
 	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {

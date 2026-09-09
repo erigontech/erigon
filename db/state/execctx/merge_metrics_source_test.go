@@ -58,18 +58,18 @@ func sharedDomainsForMetrics(t *testing.T) *execctx.SharedDomains {
 func TestMergeMetricsSeparatesNonExecSources(t *testing.T) {
 	prev := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
-	dbg.EnableKVReadLevelledMetrics()
+	dbg.KVReadLevelledMetrics = true
 
 	sd := sharedDomainsForMetrics(t)
 
-	sd.MergeMetrics(kvmetrics.SourceExec, batchOfReads(5))
+	sd.MergeMetrics(kvmetrics.SourceExec, batchOfReads(7))
 	sd.MergeMetrics(kvmetrics.SourceCommitment, batchOfReads(3))
 	sd.MergeMetrics(kvmetrics.SourceWarmup, batchOfReads(2))
 
-	require.Equal(t, int64(10), mergedReads(t, sd.Metrics()),
+	require.Equal(t, int64(12), mergedReads(t, sd.Metrics()),
 		"every source lands in the aggregate")
 	require.Equal(t, int64(5), mergedReads(t, sd.NonExecMetrics()),
-		"commitment and warmup are held apart from execution's reads")
+		"commitment and warmup are held apart from execution's reads; exec is 7 so inverting the guard reads 7 here")
 }
 
 func TestMergeMetricsSkipsNonExecSplitWithoutReadMetrics(t *testing.T) {
