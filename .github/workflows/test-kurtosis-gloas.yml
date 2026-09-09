@@ -210,6 +210,10 @@ jobs:
             package_args: .github/workflows/kurtosis/gloas-three-cl-mixed.io
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
+          - suite: gloas-caplin-genesis
+            package_args: .github/workflows/kurtosis/gloas-caplin-genesis.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 30
 
     steps:
       - name: Fast checkout git repository
@@ -393,6 +397,23 @@ jobs:
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
+
+      - name: Verify Gloas genesis through the Beacon API
+        if: matrix.suite == 'gloas-caplin-genesis'
+        run: |
+          set -euo pipefail
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+          beacon_url=$(kurtosis port print "$enclave_name" cl-1-caplin-erigon http)
+          curl --fail --silent --show-error \
+            "$beacon_url/eth/v2/debug/beacon/states/genesis" \
+            | jq -e '
+                .version == "gloas" and
+                .data.slot == "0" and
+                (.data.latest_execution_payload_bid.block_hash != "0x" + ("0" * 64)) and
+                (.data.latest_execution_payload_bid.gas_limit | tonumber) > 0 and
+                (.data.latest_execution_payload_bid.execution_requests_root != "0x" + ("0" * 64)) and
+                .data.latest_block_hash == .data.latest_execution_payload_bid.block_hash
+              '
 
       - name: Dump Kurtosis enclave on failure
         if: failure()
