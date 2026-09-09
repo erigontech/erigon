@@ -72,8 +72,9 @@ func TestExecutionRequestsGloasDecodesAboveElectraMaxima(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// progressiveDecodeLimit doubles the configured limit, so exceed that too.
-			want := int(tc.count)*2 + 1
+			// The old guard was progressiveDecodeLimit(count), which doubles the
+			// configured limit but floors at 16. Exceed whichever applies.
+			want := max(int(tc.count)*2, 16) + 1
 			requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 			tc.fill(requests, want)
 			encoded, err := requests.EncodeSSZ(nil)
