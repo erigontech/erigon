@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -217,5 +218,43 @@ func TestFirstLogIndex(t *testing.T) {
 	require.Equal(uint32(2), first)
 
 	_, err = rawtemporaldb.FirstLogIndex(tx, 1, 1)
+	require.Error(err)
+}
+
+// TestFirstLogIndexPreV1_1 covers the other shape: a receipt domain older than
+// V1_1 keeps each txn's own first log index, so the record read is the txn's own
+// and the first txn of a block has one like every other.
+func TestFirstLogIndexPreV1_1(t *testing.T) {
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
+
+	saved := statecfg.Schema.ReceiptDomain.FileVersion.DataKV
+	statecfg.Schema.ReceiptDomain.FileVersion.DataKV = version.V1_0_standart
+	t.Cleanup(func() { statecfg.Schema.ReceiptDomain.FileVersion.DataKV = saved })
+
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
+	require.True(rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
+
+	// txn0 at txNum 1 starts at 0 and emits 2 logs, txn1 at txNum 2 starts at 2.
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 10, 0, 1))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 2, 20, 0, 2))
+	require.NoError(doms.Flush(t.Context(), tx))
+
+	first, err := rawtemporaldb.FirstLogIndex(tx, 1, 0)
+	require.NoError(err)
+	require.Equal(uint32(0), first)
+
+	first, err = rawtemporaldb.FirstLogIndex(tx, 2, 1)
+	require.NoError(err)
+	require.Equal(uint32(2), first)
+
+	_, err = rawtemporaldb.FirstLogIndex(tx, 0, 0)
 	require.Error(err)
 }
