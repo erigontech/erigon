@@ -497,6 +497,9 @@ func (t *UDPv5) checkTableAddr(sender netip.Addr, node *enode.Node) error {
 	if t.netrestrict != nil && !t.netrestrict.ContainsAddr(node.IPAddr()) {
 		return errors.New("not contained in netrestrict list")
 	}
+	if node.UDP() <= 1024 {
+		return errLowPort
+	}
 	return nil
 }
 
@@ -506,14 +509,8 @@ func (t *UDPv5) verifyResponseNode(c *callV5, r *enr.Record, distances []uint, s
 	if err != nil {
 		return nil, err
 	}
-	if err := netutil.CheckRelayAddr(c.addr.Addr(), node.IPAddr()); err != nil {
+	if err := t.checkTableAddr(c.addr.Addr(), node); err != nil {
 		return nil, err
-	}
-	if t.netrestrict != nil && !t.netrestrict.ContainsAddr(node.IPAddr()) {
-		return nil, errors.New("not contained in netrestrict list")
-	}
-	if node.UDP() <= 1024 {
-		return nil, errLowPort
 	}
 	if distances != nil {
 		nd := enode.LogDist(c.id, node.ID())

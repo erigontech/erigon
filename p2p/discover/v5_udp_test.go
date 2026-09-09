@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -289,16 +290,27 @@ func TestUDPv5_handshakeNodeRelayAddr(t *testing.T) {
 	publicAddr := netip.MustParseAddrPort("1.2.3.4:30303")
 	planted := test.getNode(newkey(), netip.MustParseAddrPort("169.254.169.254:30303")).Node()
 	allowed := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.8:30303")).Node()
+	lowPort := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.9:53")).Node()
+	inList := test.getNode(newkey(), netip.MustParseAddrPort("9.9.9.9:30303")).Node()
+	outOfList := test.getNode(newkey(), netip.MustParseAddrPort("8.8.8.8:30303")).Node()
+
+	list, err := netutil.ParseNetlist("9.9.9.0/24")
+	require.NoError(t, err)
 
 	for _, tc := range []struct {
-		name   string
-		node   *enode.Node
-		inTabl bool
+		name        string
+		node        *enode.Node
+		netrestrict *netutil.Netlist
+		inTabl      bool
 	}{
-		{"unrelated link-local address", planted, false},
-		{"public address", allowed, true},
+		{"unrelated link-local address", planted, nil, false},
+		{"public address", allowed, nil, true},
+		{"low port", lowPort, nil, false},
+		{"outside netrestrict", outOfList, list, false},
+		{"inside netrestrict", inList, list, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			test.udp.netrestrict = tc.netrestrict
 			test.udp.codec.(*testCodec).handshakeNode = tc.node
 			test.packetInFrom(newkey(), publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
 			test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
