@@ -2378,8 +2378,12 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
+		foldDone := hph.metrics.StartFolding(nil)
 		if err := hph.fold(); err != nil {
 			return cell{}, fmt.Errorf("final fold: %w", err)
+		}
+		if foldDone != nil {
+			foldDone()
 		}
 	}
 
