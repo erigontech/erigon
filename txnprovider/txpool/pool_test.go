@@ -352,6 +352,27 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
+func TestGetCachedBlobTxnLockedPropagatesParseError(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	hash := common.Hash{0xAB, 0xCD}
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		value := make([]byte, len(sender)+3)
+		copy(value, sender[:])
+		copy(value[len(sender):], []byte{0xff, 0xff, 0xff}) // not valid RLP
+		return tx.Put(kv.PoolTransaction, hash[:], value)
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		mt, err := pool.getCachedBlobTxnLocked(tx, hash[:])
+		require.Error(t, err)
+		require.Nil(t, mt)
+		return nil
+	}))
+}
+
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
