@@ -42,6 +42,12 @@ type byteLRU[V any] struct {
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
+	// onEvict is held indirectly so Close can drop it. The underlying cache
+	// stays reachable until its runtime cleanup runs, and a callback that
+	// captured the owning CodeCache would keep that owner — and every byte it
+	// holds — alive for just as long. Harnesses build one cache per fixture.
+	onEvict atomic.Pointer[func(uint64, V)]
+
 	resident atomic.Int64
 	limit    atomic.Int64 // bytes reserved from the envelope; also otter's maximum
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
@@ -63,6 +69,9 @@ const (
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *byteLRU[V] {
 	b := &byteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
+	if onEvict != nil {
+		b.onEvict.Store(&onEvict)
+	}
 	floor := min(byteLRUFloorBytes, b.maxBytes)
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
@@ -72,8 +81,8 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
 		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
 			b.resident.Add(-weigh(e.Key, e.Value))
-			if onEvict != nil {
-				onEvict(e.Key, e.Value)
+			if fn := b.onEvict.Load(); fn != nil {
+				(*fn)(e.Key, e.Value)
 			}
 		},
 		Executor: func(fn func()) { fn() },
@@ -146,6 +155,12 @@ func (b *byteLRU[V]) Close() {
 		return
 	}
 	b.closed = true
+	// Drop the entries, not just the reservation. The underlying cache stays
+	// reachable after Close, so a layer that keeps its bytes here keeps them for
+	// the life of the process — and harnesses build one cache per fixture.
+	b.c.InvalidateAll()
+	b.onEvict.Store(nil)
+	b.resident.Store(0)
 	cachebudget.Global.Release(b.limit.Load())
 	b.limit.Store(0)
 	b.ceiling.Store(0)

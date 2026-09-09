@@ -18,12 +18,14 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/crypto"
 )
 
@@ -71,4 +73,40 @@ func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 
 	require.LessOrEqual(t, cache.CodeSizeBytes(), int64(budget))
 	require.LessOrEqual(t, cache.codeHashCodeSize.Load(), int64(budget))
+}
+
+// A harness builds one cache per fixture and closes it. A closed cache must
+// release its bytes: the underlying cache stays reachable until its runtime
+// cleanup runs, so anything the eviction callback captures outlives Close.
+func TestCodeCacheClosedIsCollectable(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	heap := func() float64 {
+		for range 4 {
+			runtime.GC()
+		}
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return float64(m.HeapAlloc) / 1048576
+	}
+
+	const caches = 200
+	base := heap()
+	for range caches {
+		cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+		for i := range 4000 {
+			code := make([]byte, 256)
+			binary.BigEndian.PutUint64(code, uint64(i))
+			cc.Put(nil, code, uint64(i))
+		}
+		cc.Close()
+	}
+	retained := heap() - base
+
+	// Each cache held ~1.2MB while live; keeping even a tenth of that per closed
+	// cache is what turned a fixture harness into tens of GB.
+	require.Less(t, retained, float64(caches)*0.12,
+		"closed caches retained %.2f MB across %d caches", retained, caches)
 }
