@@ -56,6 +56,12 @@ type BlobFetchToStore struct {
 	SkipRoot  bool   `name:"skip-remote-root-check" help:"do not cross-check the local canonical root against an endpoint" default:"false"`
 	Timeout   uint64 `name:"timeout" help:"per-request timeout in seconds" default:"30"`
 	PauseMs   uint64 `name:"pause-ms" help:"pause between slots, to stay polite to public endpoints" default:"200"`
+
+	// Past the data-column retention window no beacon node can serve blob sidecars any more,
+	// so payloads come from a blob archive keyed by versioned hash and every derived field is
+	// recomputed and verified locally against the canonical block.
+	Archive  string `name:"archive" help:"base URL of a blob archive API (Blobscan style); enables archive mode" default:""`
+	Attempts uint64 `name:"attempts" help:"attempts per archive request, with backoff on throttling" default:"5"`
 }
 
 type blobFetchTally struct {
@@ -117,9 +123,15 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		endpoints: endpoints,
 		client:    &http.Client{Timeout: time.Duration(c.Timeout) * time.Second},
 	}
+	var arc *archiveSource
+	if c.Archive != "" {
+		arc = newArchiveSource(endpoints, strings.TrimSuffix(c.Archive, "/"),
+			int(c.Attempts), time.Duration(c.Timeout)*time.Second)
+	}
+
 	frozen := csn.FrozenBlobs()
 	log.Info("Filling blob store gaps", "slots", len(slots), "endpoints", len(endpoints),
-		"commit", c.Commit, "frozenBlobs", frozen)
+		"commit", c.Commit, "frozenBlobs", frozen, "archive", c.Archive)
 
 	var tally blobFetchTally
 	for _, slot := range slots {
@@ -128,7 +140,11 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		if slot < frozen {
 			return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
 		}
-		if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
+		if arc != nil {
+			if err := c.fillSlotFromArchive(ctx, tx, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
+				return err
+			}
+		} else if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
 			return err
 		}
 		if c.PauseMs > 0 {
