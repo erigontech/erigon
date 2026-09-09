@@ -135,3 +135,22 @@ func TestMissedSlotsAreNotFailures(t *testing.T) {
 	tally.unserved = 1
 	require.Equal(t, 1, tally.failures(), "a genuine miss must still count")
 }
+
+// The request counter is what lets the caller pace only the slots that reach a remote. If it
+// stopped advancing, every slot would be treated as local and a public archive would be hit
+// with no delay at all.
+func TestArchiveSourceCountsItsRequests(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	s := newArchiveSource(nil, srv.URL, 3, 0)
+	require.Zero(t, s.requests)
+	_, _, err := s.getRetry(t.Context(), srv.URL, "text/plain")
+	require.NoError(t, err)
+	require.Equal(t, 1, s.requests)
+	_, _, err = s.getRetry(t.Context(), srv.URL, "text/plain")
+	require.NoError(t, err)
+	require.Equal(t, 2, s.requests, "each attempt must be counted")
+}

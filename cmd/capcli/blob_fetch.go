@@ -151,14 +151,19 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		if slot < frozen {
 			return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
 		}
+		reachedRemote := true
 		if arc != nil {
+			before := arc.requests
 			if err := c.fillSlotFromArchive(ctx, tx, snr, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
 				return err
 			}
+			reachedRemote = arc.requests > before
 		} else if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
 			return err
 		}
-		if c.PauseMs > 0 {
+		// Only pace the slots that touched a remote. Sleeping through locally answered slots
+		// turns a two hour job into a two day one for no politeness gain.
+		if c.PauseMs > 0 && reachedRemote {
 			time.Sleep(time.Duration(c.PauseMs) * time.Millisecond)
 		}
 	}

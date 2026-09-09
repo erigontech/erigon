@@ -89,6 +89,10 @@ type archiveSource struct {
 	client          *http.Client
 	maxAttempts     int
 	pause           time.Duration
+
+	// requests counts outbound calls so the caller can pace only the slots that actually
+	// reach a remote, instead of sleeping through the ~97% that are answered locally.
+	requests int
 }
 
 func newArchiveSource(beaconEndpoints []string, blobscanBase string, maxAttempts int, timeout time.Duration) *archiveSource {
@@ -122,6 +126,7 @@ func (s *archiveSource) getRetry(ctx context.Context, url, accept string) ([]byt
 			return nil, false, err
 		}
 		req.Header.Set("Accept", accept)
+		s.requests++
 		resp, err := s.client.Do(req)
 		if err != nil {
 			lastErr = err
