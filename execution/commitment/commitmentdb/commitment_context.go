@@ -923,6 +923,7 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 var KeyCommitmentState = commitment.KeyCommitmentState
 
 var ErrBehindCommitment = errors.New("behind commitment")
+var ErrTornCommitmentDatadir = errors.New("torn commitment datadir")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
@@ -957,19 +958,62 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0, ctx, nil) // blockNum/txNum not yet known; trieContext only used for reading here
+	return SeekCommitments(ctx, tx, sdc)
+}
 
-	_, _, state, err := sdc.LatestCommitmentState(trieContext)
-	if err != nil {
-		return 0, 0, err
-	}
-	if state != nil {
-		blockNum, txNum, err = sdc.restorePatriciaState(state)
-		if err != nil {
-			return 0, 0, err
+type commitmentStateCandidate struct {
+	context  *SharedDomainsCommitmentContext
+	domain   kv.Domain
+	state    []byte
+	txNum    uint64
+	blockNum uint64
+}
+
+func SeekCommitments(ctx context.Context, tx kv.TemporalTx, contexts ...*SharedDomainsCommitmentContext) (txNum, blockNum uint64, err error) {
+	activeContexts := make([]*SharedDomainsCommitmentContext, 0, len(contexts))
+	candidates := make([]commitmentStateCandidate, 0, len(contexts))
+	for _, sdc := range contexts {
+		if sdc == nil {
+			continue
 		}
-		return txNum, blockNum, nil
+		activeContexts = append(activeContexts, sdc)
+		trieContext := sdc.trieContext(tx, 0, 0, ctx, nil)
+		candidateBlock, candidateTx, state, candidateErr := sdc.LatestCommitmentState(trieContext)
+		if candidateErr != nil {
+			return 0, 0, candidateErr
+		}
+		if state == nil {
+			continue
+		}
+		candidates = append(candidates, commitmentStateCandidate{
+			context:  sdc,
+			domain:   sdc.CommitmentDomain(),
+			state:    state,
+			txNum:    candidateTx,
+			blockNum: candidateBlock,
+		})
 	}
+
+	if len(candidates) != 0 {
+		if len(candidates) != len(activeContexts) {
+			return 0, 0, fmt.Errorf("%w: commitment state is missing for one or more domains", ErrTornCommitmentDatadir)
+		}
+		first := candidates[0]
+		for _, candidate := range candidates[1:] {
+			if candidate.txNum != first.txNum || candidate.blockNum != first.blockNum {
+				return 0, 0, fmt.Errorf("%w: %s is at block %d tx %d, %s is at block %d tx %d",
+					ErrTornCommitmentDatadir, first.domain, first.blockNum, first.txNum,
+					candidate.domain, candidate.blockNum, candidate.txNum)
+			}
+		}
+		for _, candidate := range candidates {
+			if _, _, restoreErr := candidate.context.restorePatriciaState(candidate.state); restoreErr != nil {
+				return 0, 0, restoreErr
+			}
+		}
+		return first.txNum, first.blockNum, nil
+	}
+
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {

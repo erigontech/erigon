@@ -1,6 +1,7 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"testing"
@@ -41,6 +42,107 @@ type testStateReader struct {
 	readStepSize     uint64
 	readCalls        int
 	withHistory      bool
+}
+
+type seekStateReader struct {
+	domain kv.Domain
+	state  []byte
+}
+
+func (r *seekStateReader) WithHistory() bool { return false }
+
+func (r *seekStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *seekStateReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, kv.Step, error) {
+	if domain == r.domain && bytes.Equal(key, KeyCommitmentState) {
+		return r.state, 0, nil
+	}
+	return nil, 0, nil
+}
+
+func (r *seekStateReader) Clone(kv.TemporalTx) StateReader { return r }
+
+func (r *seekStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+
+type seekSharedDomains struct {
+	sd
+}
+
+func (seekSharedDomains) StepSize() uint64 { return 1 }
+
+func (seekSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return &fakePutDel{} }
+
+func (seekSharedDomains) HasSharedBranchCache() bool { return false }
+
+type seekTemporalTx struct {
+	kv.TemporalTx
+	progress []byte
+}
+
+func (tx *seekTemporalTx) GetOne(string, []byte) ([]byte, error) { return tx.progress, nil }
+
+func seekContext(t *testing.T, domain kv.Domain, variant commitment.TrieVariant, blockNum, txNum uint64, withState bool) *SharedDomainsCommitmentContext {
+	t.Helper()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = variant
+	sdc := NewSharedDomainsCommitmentContext(seekSharedDomains{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	if withState {
+		stateful, ok := sdc.patriciaTrie.(commitment.StatefulTrie)
+		require.True(t, ok)
+		trieState, err := stateful.EncodeCurrentState(nil)
+		require.NoError(t, err)
+		storedState, err := NewCommitmentState(txNum, blockNum, trieState).Encode()
+		require.NoError(t, err)
+		sdc.SetStateReader(&seekStateReader{domain: domain, state: storedState})
+	} else {
+		sdc.SetStateReader(&seekStateReader{domain: domain})
+	}
+	t.Cleanup(sdc.Close)
+	return sdc
+}
+
+func TestSeekCommitmentsRestoresBothDomainsAtSamePosition(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 7, 22, true)
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 22, txNum)
+	require.EqualValues(t, 7, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.True(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsRejectsMismatchedPositions(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 8, 22, true)
+
+	_, _, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+	require.False(t, hexCtx.justRestored.Load())
+	require.False(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsTreatsMissingProgressAsFresh(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 0, 0, false)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 0, 0, false)
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.Zero(t, txNum)
+	require.Zero(t, blockNum)
+}
+
+func TestSeekCommitmentsRejectsOneDomainMissingState(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 0, 0, false)
+
+	_, _, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
 }
 
 var _ StateReader = (*testStateReader)(nil)

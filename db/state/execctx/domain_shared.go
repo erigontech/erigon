@@ -239,6 +239,7 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 
 type SharedDomains struct {
 	sdCtx            *commitmentdb.SharedDomainsCommitmentContext
+	commitmentCtxs   map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext
 	commitmentDomain kv.Domain
 
 	stepSize uint64
@@ -396,6 +397,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd := &SharedDomains{
 		logger:           logger,
 		commitmentDomain: commitmentDomain,
+		commitmentCtxs:   make(map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext),
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
@@ -422,6 +424,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitmentDomain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	sd.commitmentCtxs[commitmentDomain] = sd.sdCtx
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -2014,7 +2017,16 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(sd.commitmentCtxs))
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if sdc := sd.commitmentCtxs[domain]; sdc != nil {
+			contexts = append(contexts, sdc)
+		}
+	}
+	if len(contexts) == 0 && sd.sdCtx != nil {
+		contexts = append(contexts, sd.sdCtx)
+	}
+	txNum, blockNum, err = commitmentdb.SeekCommitments(ctx, tx, contexts...)
 	if err != nil {
 		return 0, 0, err
 	}

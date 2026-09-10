@@ -454,17 +454,17 @@ different states and correctly report different roots.
 - Modify: `db/state/execctx/domain_shared.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context_test.go`
 
-- [ ] make `SeekCommitment` seek every registered commitment domain and restore each trie from its own
+- [x] make `SeekCommitment` seek every registered commitment domain and restore each trie from its own
       `KeyCommitmentState`
-- [ ] require the restored `(blockNum, txNum)` to agree across domains; a disagreement is a torn datadir
+- [x] require the restored `(blockNum, txNum)` to agree across domains; a disagreement is a torn datadir
       — return a distinct error and refuse to start rather than folding onto a mismatched pair
-- [ ] fix the `SyncStageProgress["Execution"]` fallback so "one domain has state, the other does not" is
+- [x] fix the `SyncStageProgress["Execution"]` fallback so "one domain has state, the other does not" is
       the torn case, not the fresh case
-- [ ] write tests: both domains at the same `(blockNum, txNum)` restores both tries
-- [ ] write tests: domains at different `(blockNum, txNum)` returns the torn error
-- [ ] write tests: neither domain has state and `SyncStageProgress` is absent → fresh, as today
-- [ ] write tests: one domain has state and the other does not → torn, not fresh
-- [ ] run `make test-short` — must pass before task 10
+- [x] write tests: both domains at the same `(blockNum, txNum)` restores both tries
+- [x] write tests: domains at different `(blockNum, txNum)` returns the torn error
+- [x] write tests: neither domain has state and `SyncStageProgress` is absent → fresh, as today
+- [x] write tests: one domain has state and the other does not → torn, not fresh
+- [x] run `make test-short` — must pass before task 10
 
 ### Task 10: Build both trie contexts in NewSharedDomains
 
