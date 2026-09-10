@@ -62,7 +62,7 @@ func makeBenchNewPayloadRequest(b *testing.B, numTx int) []byte {
 
 	withdrawals := make([]*types.Withdrawal, 16)
 	for i := range withdrawals {
-		withdrawals[i] = &types.Withdrawal{Index: uint64(i), Validator: uint64(i), Address: to, Amount: 1e9}
+		withdrawals[i] = &types.Withdrawal{Index: hexutil.Uint64(i), Validator: hexutil.Uint64(i), Address: to, Amount: 1e9}
 	}
 
 	zero := hexutil.Uint64(0)
