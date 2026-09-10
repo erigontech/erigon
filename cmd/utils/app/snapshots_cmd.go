@@ -858,7 +858,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if doesRmCommitment && strings.Contains(filepath.Base(res.Path), "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && res.TypeString == kv.CommitmentDomain.String() && res.Ext == ".kv" {
 			if snapDir == "" {
 				snapDir = dirs.DataDir
 			}
@@ -896,7 +896,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 			for i := range files {
 				res := &files[i]
-				if !strings.Contains(res.Name(), domainName) {
+				if res.TypeString != domainName {
 					continue
 				}
 				if removeLatest {
@@ -3743,9 +3743,10 @@ func duClassifyFile(dir, name string) string {
 		return duCatRcache
 	}
 
-	// commitment history/idx files
-	if (ldir == "history" || ldir == "idx") && strings.Contains(lname, "commitment") {
-		return duCatCommitHist
+	if ldir == "history" || ldir == "idx" {
+		if parsed, _, ok := snaptype.ParseFileName(dir, name); ok && parsed.TypeString == kv.CommitmentDomain.String() {
+			return duCatCommitHist
+		}
 	}
 
 	switch ldir {

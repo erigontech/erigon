@@ -565,7 +565,8 @@ func resolvePathForOverlap(path string) (string, error) {
 }
 
 func isCommitmentFileName(name string) bool {
-	return strings.Contains(name, kv.CommitmentDomain.String())
+	parsed, _, ok := snaptype.ParseFileName("", name)
+	return ok && parsed.TypeString == kv.CommitmentDomain.String()
 }
 
 // commitmentFileSize is one commitment .kv as it ended up on disk.

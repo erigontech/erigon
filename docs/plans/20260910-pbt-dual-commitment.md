@@ -712,16 +712,17 @@ different states and correctly report different roots.
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 - Modify: `cmd/integration/commands/commitment.go`
 - Create: `cmd/utils/app/snapshots_commitment_sweep_test.go`
+- Modify: `cmd/integration/commands/commitment_report_test.go`
 
-- [ ] replace the `strings.Contains(..., "commitment")` file sweep in the snapshot command with an exact
+- [x] replace the `strings.Contains(..., "commitment")` file sweep in the snapshot command with an exact
       match against the parsed type string
-- [ ] do the same for the history/idx sweep in the same file
-- [ ] do the same for the `strings.Contains(name, kv.CommitmentDomain.String())` check in the integration
+- [x] do the same for the history/idx sweep in the same file
+- [x] do the same for the `strings.Contains(name, kv.CommitmentDomain.String())` check in the integration
       commitment command
-- [ ] write tests: a commitment-removal pass over a directory holding both `v1.0-commitment.0-1024.kv`
+- [x] write tests: a commitment-removal pass over a directory holding both `v1.0-commitment.0-1024.kv`
       and `v1.0-commitment-bin.0-1024.kv` removes only the hex file
-- [ ] write tests: selecting `commitment-bin` removes only the bin file
-- [ ] run `make test-short` — must pass before task 23
+- [x] write tests: selecting `commitment-bin` removes only the bin file
+- [x] run `make test-short` — must pass before task 23
 
 ### Task 23: Reset, BAL warmup and the rebuild command
 
