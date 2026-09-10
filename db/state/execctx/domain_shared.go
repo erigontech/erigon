@@ -631,8 +631,8 @@ func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.Dom
 // line), without touching the collector. The exec hot path calls this each task
 // for the log, and feeds the collector separately via a retained accumulator so
 // a full collector buffer can never block or drop. wm is read, not retained.
-// Exec-only by contract: a non-exec producer must use MergeMetrics, or its reads
-// land in the total without landing in nonExecMetrics and are billed to execution.
+// Reads only, and exec-only by contract: writes never reach nonExecMetrics, and a
+// non-exec producer that skips MergeMetrics has its reads billed to execution.
 func (sd *SharedDomains) MergeExecMetrics(wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
 }

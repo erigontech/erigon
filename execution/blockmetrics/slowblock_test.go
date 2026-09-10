@@ -189,7 +189,7 @@ func TestStateReadIsInsideExecution(t *testing.T) {
 
 	assert.Equal(t, 5*time.Millisecond, rec.StateRead())
 	assert.Equal(t, 24*time.Millisecond, rec.Total(),
-		"total is the validation wall clock plus commit, so it covers the stages outside execution and never adds reads")
+		"Total must be Validation+Commit")
 }
 
 func TestStateReadSurvivesExceedingExecution(t *testing.T) {
@@ -207,10 +207,10 @@ func TestStateReadSurvivesExceedingExecution(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(h.msgs[0]), &got))
 	timing := got["timing"].(map[string]any)
 	require.Equal(t, float64(90), timing["state_read_ms"],
-		"parallel execution sums workers past the wall clock every time; a required field that vanishes then is blank timing, which is the bug this emitter exists to fix")
+		"state_read_ms must survive exceeding execution_ms, not be dropped")
 	assert.Greater(t, timing["total_ms"].(float64),
 		timing["execution_ms"].(float64)+timing["state_hash_ms"].(float64)+timing["commit_ms"].(float64),
-		"total is end-to-end like geth's, so it exceeds the phase sum by the stages outside execution")
+		"total_ms must exceed execution_ms + state_hash_ms + commit_ms")
 }
 
 func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
@@ -275,7 +275,7 @@ func TestTakeIsInertWithoutReadMetrics(t *testing.T) {
 
 	dbg.KVReadLevelledMetrics = false
 	assert.False(t, Take(kvmetrics.NewDomainMetrics(), kvmetrics.NewDomainMetrics()).taken,
-		"the read path skips the counters without the gate, so every delta would be a false zero")
+		"Take must return an untaken Sample when the gate is off")
 
 	dbg.KVReadLevelledMetrics = true
 	assert.True(t, Take(kvmetrics.NewDomainMetrics(), kvmetrics.NewDomainMetrics()).taken)

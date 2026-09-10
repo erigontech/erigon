@@ -18,40 +18,12 @@
 // names are a cross-client contract — renaming one breaks every consumer.
 // Spec: https://ethresear.ch/t/a-small-step-towards-data-driven-protocol-decisions-unified-slowblock-metrics-across-clients/23907
 //
-// The payload is never a standalone line. It is the Msg of an erigon log
-// record, so the envelope follows the operator's log config: a consumer strips
-// ANSI, then takes either the console payload — "[WARN] [t] {…}" off a TTY,
-// "WARN[t] {…}" on one, and no "[t]" at all under ERIGON_LOG_NO_TIMESTAMPS —
-// or the msg field under --log.console.json / --log.dir.json, where the record
-// arrives escaped inside it. TestEmittedLineSurvivesEveryLogFormat pins all
-// four. The payload carries level and msg anyway because the spec requires
-// both and pins their values.
-//
-// Rounding follows the spec's presentation and nothing else: mgas_per_sec to
-// two decimals because the spec says two, hit_rate to two to match besu, and
-// every *_ms as its measured nanoseconds expressed in milliseconds. The spec
-// types the durations int64; at --debug.slow-block-threshold=0, the mode a
-// harness runs, erigon validates a block in well under a millisecond, where an
-// integer reports 0. The consumer types them float64.
-//
-// total_ms is the whole ValidateBlock wall clock plus the forkchoice flush and
-// commit, so it covers the Headers, Bodies and Senders stages that sit outside
-// execution_ms. It therefore exceeds execution_ms + state_hash_ms + commit_ms,
-// the way geth's does; the spec's reference record balances on that sum, but
-// its prose defines the field as end-to-end and geth measures it end-to-end.
-//
-// Three spec fields are absent rather than zero, because erigon has no source
-// for them and a zero would read as a measurement. state_reads.code and
-// cache.code: no CodeDomain read counter is ever incremented — the
-// content-addressed fast paths answer most reads without touching one, and the
-// cold path passes no accumulator. state_reads.code_bytes and
-// state_writes.code_bytes: no per-domain byte counter exists. state_writes.code
-// is emitted because it is real, counted by the mem batch on every put.
-//
-// state_read_ms is emitted but is not geth's: it sums each exec worker's
-// accumulator, so under the parallel executor it is CPU time across workers
-// against a wall-clock execution_ms and can exceed it. Do not compute
-// execution_ms - state_read_ms from it.
+// state_reads.code, cache.code, state_reads.code_bytes and
+// state_writes.code_bytes are absent rather than zero: erigon has no source for
+// them and a zero would read as a measurement. state_writes.code is real.
+// state_read_ms sums each exec worker's accumulator, so under the parallel
+// executor it is CPU time across workers and can exceed the wall-clock
+// execution_ms.
 package blockmetrics
 
 import (
