@@ -17,9 +17,12 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"errors"
 	"maps"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,9 +35,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -181,4 +187,37 @@ func TestPBinDualExecutionWitness(t *testing.T) {
 		require.ErrorContains(t, err, "binary parent shadow root missing or invalid for block 2")
 		require.Nil(t, result)
 	})
+}
+
+func TestPBinFrozenHexHistoricalWitness(t *testing.T) {
+	api, m := pbinDualWitnessFixture(t)
+	selector := rpc.BlockNumberOrHashWithNumber(2)
+	before, err := api.ExecutionWitness(t.Context(), selector, nil)
+	require.NoError(t, err)
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	state = bytes.Clone(state)
+	txNum, _ := commitmentdb.DecodeTxBlockNums(state)
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
+	settingsPath := filepath.Join(m.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+	frozenSettings, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	api = NewPrivateDebugAPI(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, &rpccfg.DebugApiConfig{})
+	after, err := api.ExecutionWitness(t.Context(), selector, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	currentSettings, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	require.Equal(t, frozenSettings, currentSettings)
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.ErrorContains(t, domains.DomainPut(kv.CommitmentDomain, tx, []byte("branch"), []byte("value"), txNum+1, nil), "is frozen")
+	currentState, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, state, currentState)
 }

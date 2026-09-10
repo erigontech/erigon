@@ -709,6 +709,10 @@ different states and correctly report different roots.
       timestamp, and cover activation-crossing and frozen-hex requests
 - [x] ➕ make historical simulation replay accept the target domain and reconstruct genesis in
       writable temporary storage isolated from the source datadir's freeze metadata
+- [x] ➕ isolate historical witness folds from durable freeze checks and verify that pre-activation
+      witnesses remain available after hex is frozen without changing its saved state
+- [x] ➕ select the payload builder's commitment domain by the proposed timestamp; validate built
+      payloads before, at, and after activation, after hex freeze, and in binary-only mode
 - [x] write tests: a witness request for a pre-flip block selects hex and for a post-flip block selects
       bin, on the same `hex+bin` datadir
 - [x] write tests: a post-flip request can no longer silently receive a hex-derived answer
