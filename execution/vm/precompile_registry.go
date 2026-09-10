@@ -362,6 +362,7 @@ func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
 	if !gas.live() {
 		return nil, ErrOutOfGas
 	}
+	refundable := gas.chargedExecution
 	if !gas.ChargeExecution(executionGas) {
 		return nil, ErrOutOfGas
 	}
@@ -379,7 +380,25 @@ func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
 	// leftover.State, so this is the whole reservoir back on the error path.
 	gas.remaining.State = leftover.State
 	gas.RefundExecution(leftover.Execution)
+	gas.chargedExecution = refundable
+	if err == nil {
+		gas.absorbMisplacedStateGas()
+	}
 	return ret, err
+}
+
+func (g *PrecompileGas) absorbMisplacedStateGas() {
+	misplaced := min(g.remaining.State, g.used.StateSpill)
+	if misplaced == 0 {
+		return
+	}
+	before := g.remaining.Execution
+	g.remaining.State -= misplaced
+	g.remaining.Execution += misplaced
+	g.used.StateSpill -= misplaced
+	if g.tracer != nil && g.tracer.OnGasChange != nil {
+		g.tracer.OnGasChange(before, g.remaining.Execution, tracing.GasChangeCallStateGasReturned)
+	}
 }
 
 func (g *PrecompileGas) adoptChildUsage(usage mdgas.MdGasUsage) bool {
