@@ -656,19 +656,21 @@ different states and correctly report different roots.
 - Modify: `db/kv/tables.go`
 - Modify: `db/rawdb/accessors_chain.go`
 - Modify: `execution/stagedsync/stage_execute.go`
+- Modify: `execution/stagedsync/stage_execute_prune_test.go`
 - Modify: `execution/stagedsync/committer.go`
 - Modify: `execution/state/genesiswrite/genesis_write.go`
+- Modify: `execution/state/genesiswrite/pbin_genesis_test.go`
 
-- [ ] add a chaindata table for shadow roots keyed by `dbutils.BlockBodyKey(number, hash)`, following the
+- [x] add a chaindata table for shadow roots keyed by `dbutils.BlockBodyKey(number, hash)`, following the
       BAL accessor shape
-- [ ] write the shadow root from the committer's shadow arm
-- [ ] wire pruning at the three places the BAL analogue is pruned: the `PruneTable` call in the execute
+- [x] write the shadow root from the committer's shadow arm
+- [x] wire pruning at the three places the BAL analogue is pruned: the `PruneTable` call in the execute
       stage and the two per-block sweeps in `accessors_chain.go` — the accessor alone does not prune
-- [ ] write block 0's shadow root at genesis; nothing else produces it
-- [ ] write tests: read-back by `(number, hash)`; two hashes at the same height store distinct roots
-- [ ] write tests: pruning a block through the **stage** path, not just the accessor, removes the record
-- [ ] write tests: genesis leaves a shadow root for block 0 under `hex+bin`
-- [ ] run `make test-short` — must pass before task 20
+- [x] write block 0's shadow root at genesis; nothing else produces it
+- [x] write tests: read-back by `(number, hash)`; two hashes at the same height store distinct roots
+- [x] write tests: pruning a block through the **stage** path, not just the accessor, removes the record
+- [x] write tests: genesis leaves a shadow root for block 0 under `hex+bin`
+- [x] run `make test-short` — must pass before task 20
 
 ### Task 20: Expose the migration over the debug API
 

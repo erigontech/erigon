@@ -26,11 +26,12 @@ import (
 
 // commitmentResult is the outcome of a single commitment computation.
 type commitmentResult struct {
-	blockNum  uint64
-	blockHash common.Hash
-	txNum     uint64
-	rootHash  []byte
-	err       error
+	blockNum   uint64
+	blockHash  common.Hash
+	txNum      uint64
+	rootHash   []byte
+	shadowRoot []byte
+	err        error
 }
 
 // commitComputeRequest is sent through the commitResults channel to tell
@@ -719,11 +720,12 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		cc.fail(ctx, target, err)
 		return
 	}
-	rh, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, eip8246, target)
+	result, err := cc.computeRootFromBALResult(ctx, req, math.MaxUint32, emptyRemoval, eip8246, target)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
+	rh := result.canonicalRoot
 	if headerRootMismatch(rh, req.stateRoot[:]) {
 		cc.fail(ctx, target, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
@@ -739,7 +741,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// Shadow mode defers publish to the incremental cross-check at
 	// blockResult(N); otherwise publish the verified root now.
 	if !dbg.BALShadowCompute {
-		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
+		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh, shadowRoot: result.shadowRoot})
 	}
 }
 
@@ -773,11 +775,19 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, error) {
+	result, err := cc.computeRootFromBALResult(ctx, req, maxTxIndex, emptyRemoval, eip8246, t)
+	if err != nil {
+		return nil, err
+	}
+	return result.canonicalRoot, nil
+}
+
+func (cc *commitmentCalculator) computeRootFromBALResult(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) (dualCommitmentResult, error) {
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: cc.doms.GetCommitmentContext().CommitmentDomain(), txNum: t.lastTxNum + 1}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
-		return nil, fmt.Errorf("lazy-load: %w", err)
+		return dualCommitmentResult{}, fmt.Errorf("lazy-load: %w", err)
 	}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
@@ -790,7 +800,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
-	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
+	return cc.computeRootFromUpdatesResult(ctx, t, balUpdates, reader)
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -799,23 +809,25 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // flushing its own deferred update) so its branch deltas never pend into a
 // later window block's changeset. Used by BAL compute-ahead, which supplies
 // its own balState-derived updates rather than cc.state.
-func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, error) {
+func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) (dualCommitmentResult, error) {
 	cc.setCanonicalCommitmentDomain(t.blockTime)
 	if hexCtx, binCtx, ok := cc.dualCommitmentContexts(); ok {
 		result, err := cc.computeDualFromUpdatesWithRole(ctx, t, updates, reader, hexCtx, binCtx)
 		if err != nil {
-			return nil, err
+			return dualCommitmentResult{}, err
 		}
-		return result.canonicalRoot, nil
+		return result, nil
 	}
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
-		return cc.computeIsolated(ctx, t)
+		root, err := cc.computeIsolated(ctx, t)
+		return dualCommitmentResult{canonicalDomain: sdCtx.CommitmentDomain(), canonicalRoot: root}, err
 	}
-	return cc.computeWithBlockAccumulator(ctx, t)
+	root, err := cc.computeWithBlockAccumulator(ctx, t)
+	return dualCommitmentResult{canonicalDomain: sdCtx.CommitmentDomain(), canonicalRoot: root}, err
 }
 
 // shadowCrossCheck recomputes block N the incremental way and asserts the
@@ -830,11 +842,12 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	rh, err := cc.computeRootFromUpdates(ctx, target, cc.handOffUpdates(), cc.asOfReader)
+	result, err := cc.computeRootFromUpdatesResult(ctx, target, cc.handOffUpdates(), cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
+	rh := result.canonicalRoot
 	// Both operands are roots this node computed, so the header-root toggle does
 	// not apply: this is the only thing validating the BAL-driven path.
 	if !bytes.Equal(rh, balRoot) {
@@ -842,7 +855,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 			ErrWrongTrieRoot, target.blockNum, rh, balRoot))
 		return
 	}
-	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh})
+	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh, shadowRoot: result.shadowRoot})
 }
 
 // fail publishes a calculator error. It does NOT cancel execution: the apply
@@ -942,10 +955,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			return
 		}
 		rootErr := canonicalRootError(t, result.canonicalRoot)
-		if !m.publishRoot && rootErr == nil {
+		if !m.publishRoot && rootErr == nil && result.shadowRoot == nil {
 			return
 		}
-		r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: result.canonicalRoot}
+		r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: result.canonicalRoot, shadowRoot: result.shadowRoot}
 		r.err = rootErr
 		cc.publish(ctx, r)
 		return

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -150,6 +151,28 @@ func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hexRoot, headerRoot)
 	require.NotEqual(t, hexRoot, binRoot)
+}
+
+func TestPBinGenesisWritesShadowRootAtBlockZero(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer sd.Close()
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
+	_, _, err = genesiswrite.ComputeGenesisCommitment(t.Context(), g, tx, sd, head)
+	require.NoError(t, err)
+
+	shadowRoot, err := sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	got, err := rawdb.ReadShadowStateRoot(tx, head.Hash(), 0)
+	require.NoError(t, err)
+	require.Equal(t, shadowRoot, got)
 }
 
 func TestHexGenesisWithoutScheduleIsStable(t *testing.T) {

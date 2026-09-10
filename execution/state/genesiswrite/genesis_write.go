@@ -615,12 +615,27 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		roots[domain] = root
 	}
 	if len(commitmentDomains) == 1 {
+		head.Root = common.BytesToHash(roots[commitmentDomains[0]])
 		return roots[commitmentDomains[0]], statedb, nil
 	}
+	canonicalDomain := kv.CommitmentDomain
 	if g.Config != nil && g.Config.IsBinaryTrie(head.Time) {
-		return roots[kv.CommitmentBinDomain], statedb, nil
+		canonicalDomain = kv.CommitmentBinDomain
 	}
-	return roots[kv.CommitmentDomain], statedb, nil
+	canonicalRoot := roots[canonicalDomain]
+	head.Root = common.BytesToHash(canonicalRoot)
+	shadowDomain := kv.CommitmentDomain
+	if canonicalDomain == kv.CommitmentDomain {
+		shadowDomain = kv.CommitmentBinDomain
+	}
+	dbPutter, ok := any(tx).(kv.Putter)
+	if !ok {
+		return nil, nil, errors.New("genesis shadow root requires a writable transaction")
+	}
+	if err := rawdb.WriteShadowStateRoot(dbPutter, head.Hash(), blockNum, roots[shadowDomain]); err != nil {
+		return nil, nil, err
+	}
+	return canonicalRoot, statedb, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
