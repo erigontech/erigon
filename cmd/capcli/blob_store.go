@@ -30,8 +30,7 @@ import (
 )
 
 // storeBlobsForBlock fetches and stores the sidecars a block needs, and fails if the store does
-// not hold all of them afterwards. Every block the chain download commits goes through here,
-// including the bootstrap head.
+// not hold all of them afterwards.
 func (c *ChainEndpoint) storeBlobsForBlock(
 	ctx context.Context,
 	blobDB blob_storage.BlobStorage,
@@ -45,7 +44,7 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	}
 	ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, beaconConfig)
 	if err != nil {
-		return fmt.Errorf("failed to get blob identifiers: %w", err)
+		return fmt.Errorf("failed to get blob identifiers at slot %d: %w", block.Block.Slot, err)
 	}
 	// BlobsIdentifiersFromBlocks drops a whole block once its commitments exceed the per-request
 	// cap, and the remote block is decoded but never consensus-validated, so the endpoint chooses
@@ -53,9 +52,13 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if ids.Len() != commitments.Len() {
 		return fmt.Errorf("got %d blob identifiers for %d commitments at slot %d", ids.Len(), commitments.Len(), block.Block.Slot)
 	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
 	blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, beaconConfig, baseUriBlob, block)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve blobs: %w, uri: %s", err, baseUriBlob)
+		return fmt.Errorf("failed to retrieve blobs at slot %d: %w, uri: %s/0x%x", block.Block.Slot, err, baseUriBlob, blockRoot)
 	}
 	if err := storeRemoteBlobs(ctx, blobDB, ids, blobs, block); err != nil {
 		return fmt.Errorf("failed to verify and store blobs at slot %d: %w", block.Block.Slot, err)
@@ -64,9 +67,12 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 }
 
 // storeRemoteBlobs verifies a remote blob response against the requested identifiers, stores what
-// matches, and requires the store to serve every requested identity back afterwards. The insert
-// reports a nil error when it stops early on a mismatch, so its error alone cannot tell a full
-// insert from an empty one.
+// matches, and requires the store to serve every requested identity back afterwards. Given the
+// insert's early-stop contract, its error alone cannot tell a full insert from an empty one.
+//
+// Each response sidecar is bound to the block by commitment first. The insert skips the commitment
+// inclusion proof from Gloas on, so without that comparison nothing ties a sidecar to the block it
+// claims to belong to and a self-consistent blob, commitment and proof from elsewhere would verify.
 //
 // Completeness is judged by reading the store rather than by this invocation's insert count: blob
 // storage commits independently of the caller's beacon transaction, so a re-run can legitimately
@@ -80,6 +86,18 @@ func storeRemoteBlobs(
 	blobs []*cltypes.BlobSidecar,
 	block *cltypes.SignedBeaconBlock,
 ) error {
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	for _, sidecar := range blobs {
+		if sidecar == nil {
+			return errors.New("blob response contains a nil sidecar")
+		}
+		if commitments == nil || sidecar.Index >= uint64(commitments.Len()) {
+			return fmt.Errorf("blob sidecar index %d is outside the block's commitments", sidecar.Index)
+		}
+		if common.Bytes48(*commitments.Get(int(sidecar.Index))) != sidecar.KzgCommitment {
+			return fmt.Errorf("blob sidecar at index %d carries a commitment the block does not reference", sidecar.Index)
+		}
+	}
 	_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs,
 		block.Version(),
 		func(header *cltypes.SignedBeaconBlockHeader) error {

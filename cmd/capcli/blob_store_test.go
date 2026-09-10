@@ -94,6 +94,9 @@ func TestStoreRemoteBlobsRejectsAnIncompleteInsert(t *testing.T) {
 
 	block := denebTestBlock()
 	block.Signature = sidecar.SignedBlockHeader.Signature
+	// The block references this sidecar's commitment, so the identifier mismatch below is what
+	// stops the insert rather than the block/sidecar binding.
+	commitTo(t, block, sidecar.KzgCommitment)
 	err := storeRemoteBlobs(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block)
 
 	require.Error(t, err, "a zero insert must not be reported as success")
@@ -198,9 +201,8 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	require.ErrorContains(t, err, "identifier")
 }
 
-// Gloas sidecars carry no commitment inclusion proof — VerifyBlobSidecars encodes that contract with
-// a version gate, but the insert path applied the Deneb proof check unconditionally, so a valid
-// proofless sidecar was rejected and the store never saw it.
+// Gloas sidecars carry no commitment inclusion proof, a contract VerifyBlobSidecars states with a
+// version gate and the insert path has to honour.
 func TestStoreRemoteBlobsAcceptsAProoflessGloasSidecar(t *testing.T) {
 	blob := goethkzg.Blob{}
 	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
@@ -220,12 +222,84 @@ func TestStoreRemoteBlobsAcceptsAProoflessGloasSidecar(t *testing.T) {
 	store := blob_storage.NewBlobStore(db, fs)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
 
-	require.NoError(t, storeRemoteBlobs(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar},
-		testBlock(clparams.GloasVersion, testBlobSlot)))
+	block := testBlock(clparams.GloasVersion, testBlobSlot)
+	commitTo(t, block, sidecar.KzgCommitment)
+	require.NoError(t, storeRemoteBlobs(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block))
 
 	stored, found, err := blob_storage.NewBlobStore(db, fs).ReadBlobSidecars(t.Context(), testBlobSlot, root)
 	require.NoError(t, err)
 	require.True(t, found, "the Gloas sidecar was not durably stored")
 	require.Len(t, stored, 1)
 	require.Equal(t, common.Bytes48(commitment), stored[0].KzgCommitment)
+}
+
+// gloasSidecarFor builds a sidecar with a real KZG commitment and proof but no inclusion proof,
+// bound to header. blobByte selects the blob it commits to, so a caller can build a sidecar that is
+// internally consistent yet commits to something other than the block's commitment.
+func gloasSidecarFor(t *testing.T, header *cltypes.SignedBeaconBlockHeader, blobByte byte) *cltypes.BlobSidecar {
+	t.Helper()
+	blob := goethkzg.Blob{}
+	// Last byte of the first field element: a leading byte can exceed the BLS modulus and the
+	// commitment call then rejects the scalar as non-canonical.
+	blob[31] = blobByte
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	return cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment),
+		common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+}
+
+// commitTo makes block commit to commitment at index 0. For Gloas the commitments live in the
+// execution payload bid rather than the body, and NewSignedBeaconBlock leaves the bid unset.
+func commitTo(t *testing.T, block *cltypes.SignedBeaconBlock, commitment common.Bytes48) {
+	t.Helper()
+	list := block.Block.Body.GetBlobKzgCommitments()
+	require.NotNil(t, list, "the block has nowhere to hold commitments")
+	kzgCommitment := cltypes.KZGCommitment(commitment)
+	list.Append(&kzgCommitment)
+}
+
+// Gloas sidecars carry no inclusion proof, so without comparing each sidecar's commitment against
+// the block's at that index nothing ties a sidecar to the block it claims to belong to: an
+// internally consistent blob, commitment and proof taken from another block verifies and is stored.
+func TestStoreRemoteBlobsRejectsASidecarCommittingToAnotherBlob(t *testing.T) {
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: testBlobSlot}}
+	root, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+	sidecar := gloasSidecarFor(t, header, 1)
+
+	block := testBlock(clparams.GloasVersion, testBlobSlot)
+	commitTo(t, block, gloasSidecarFor(t, header, 2).KzgCommitment)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+
+	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
+		[]*cltypes.BlobSidecar{sidecar}, block)
+
+	require.Error(t, err, "a sidecar committing to a blob the block does not reference must be rejected")
+	require.ErrorContains(t, err, "commitment")
+}
+
+// The version gate must still require the inclusion proof before Gloas. Without this, removing the
+// proof check outright leaves the suite green: the other pre-Gloas cases here return early on an
+// empty response or break on a mismatched root before the proof is reached.
+func TestStoreRemoteBlobsRejectsAPreGloasSidecarWithABadInclusionProof(t *testing.T) {
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: testBlobSlot}}
+	root, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+	sidecar := gloasSidecarFor(t, header, 1)
+
+	block := testBlock(clparams.DenebVersion, testBlobSlot)
+	commitTo(t, block, sidecar.KzgCommitment)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+
+	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
+		[]*cltypes.BlobSidecar{sidecar}, block)
+
+	require.Error(t, err, "a pre-Gloas sidecar with a zero inclusion proof must be rejected")
+	require.ErrorContains(t, err, "inclusion proof")
 }
