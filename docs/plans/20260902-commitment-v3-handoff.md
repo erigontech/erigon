@@ -137,43 +137,6 @@ Three details in that entry that are not optional:
   (a stale db record and the file record hold the same bytes). No guard test exists for it; it
   stays because it mirrors `getLatestFromDb`'s contract.
 
-## Benchmark rig
-
-Two arms, identical hardware, differing only in `COMMITMENT_EDGE_RECORDS`:
-
-| arm | host      | datadir                   | metrics | pprof | run dir            |
-|-----|-----------|---------------------------|---------|-------|--------------------|
-| v2  | snap-arb1 | `/erigon-data/hoodi-v2`   | 6061    | 6062  | `~/hoodi-runs/v2`  |
-| v3  | edev      | `/erigon-data/hoodi-v3`   | 6081    | 6082  | `~/hoodi-runs/v3`  |
-
-Scripts live in `~` on both hosts: `hoodi-arm.sh` (one arm, wipes derived state and runs from 0),
-`restart-arm.sh` (stop, install `/tmp/erigon-new`, relaunch from 0), `measure-state.sh` (stop and
-report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc capture).
-
-- Builds happen on **snap-arb1** only (`~/erigon-cv3`, commits arrive as `git format-patch` +
-  `git am`, so its SHAs differ from this branch: `d7a9d63f54` there = `315bb3404bb` here). edev's
-  `~/erigon-cv3` is repointed to `awskii/r36converter` and has no commitment-v3 history. snap-arb1
-  has no ssh key for edev; stream the binary through the Mac,
-  `ssh snap-arb1 'gzip -1 -c /tmp/erigon-new' | ssh edev 'gunzip -c > /tmp/erigon-new'` (93 s),
-  and never run two transfers at the same destination.
-- Restart sequence: stop both arms (the first half of `restart-arm.sh`: kill the monitor, `kill -INT`
-  the node pid, wait), build, `cp build/bin/erigon /tmp/erigon-new`, stream to edev, then
-  `bash ~/restart-arm.sh v2 false 6061 6062 30303 42069` on snap-arb1 and
-  `bash ~/restart-arm.sh v3 true 6081 6082 30403 42169` on edev. The script moves the old run dir
-  to `~/hoodi-runs/<arm>-<ts>` and relaunches from 0.
-- Build while the nodes are **stopped**. A build on snap-arb1 steals CPU from the v2 arm only and
-  biases the comparison.
-- `KV_READ_METRICS=true` gates `domain_commitment_took` and the per-domain read counters.
-- `metrics.csv`'s `block` column is wrong: it greps the last `blk=` in the log, which lands on the
-  `parallel committed blk=0` line. Read `parallel executed` instead.
-- Patch transfer: use a dedicated directory. A stale `/tmp/0*.patch` glob re-applied landed
-  commits once.
-- `seg rm-state` hardcodes `promptUser := true`; pipe `printf "1\n" |` or it silently deletes
-  nothing.
-- Per-table chaindata sizes: `integration print_table_sizes`. It opens the db **read-write**
-  (`openDB`'s third arg is `applyMigrations`, not readonly), so the node must be stopped.
-  `integration` is not built on either host yet.
-
 ## Decisions still open
 
 1. Whether run 6 holds parity with v2 past the heavy range and what the v3 cycle length does to
@@ -190,29 +153,3 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
    and probes each file's existence filter for every absent nibble. Invisible at from-0 with 1-2
    files; at the tip it is files x absent nibbles per such read. Counters are in place (see
    "State at handoff"); the rig binary has to be rebuilt to report them.
-
-## State at handoff
-
-Run 6: both arms running from 0 on `3.7.0-dev-d7a9d63f` (md5 `d7ac02c70c`), started together at
-10:29:35Z (v3) / 10:29:36Z (v2) with `--prune.mode=full --prune.include-commitment-history`,
-`KV_READ_METRICS=true`, on wiped chaindata and no state snapshot files (checked on disk). A first
-10:14Z start had a 26 s offset between the arms and was replaced; its records are in
-`~/hoodi-runs/{v2,v3}-20260902T1029*`, run 5's in `-20260902T1014*`. To start the arms together,
-stop both, then run each host's `restart-arm.sh` behind `sleep $((T - $(date +%s)))` with one
-shared epoch `T`. The calcState fix is PR #23737 against main from
-`~/org/wrk/wt/calcstate-dirty`, `make lint` clean, `execution/stagedsync` green, judged HOLDS;
-Copilot review requested. `MACHINES.org` carries both arms under snap-arb1 and edev.
-
-Mask-knowledge counters (commit after 8b7e733e04f, not yet in the rig binary). Trie level, in
-execctx: `domain_commitment_node_reads{mask="known"|"unknown"}` per node read. Aggregator level,
-keyed by what the walk did rather than by the caller's mask, because the trie forwards every read
-as a narrowed known mask: `domain_commitment_record_reads{walk="satisfied"|"exhausted"}`,
-`domain_commitment_record_files_consulted{walk=...}` (a v3 file reached with something still
-missing, before its existence filter) and `domain_commitment_record_files_scanned{walk=...}` (a
-file actually seeked). An exhausted walk is one that ran out of files with children still wanted,
-which is what a maskless read does every time, warm cache or not. Per block: delta of a counter over
-the delta of `domain_commitment_took_count` between two `metrics-last.prom` dumps, or
-`increase(...[5m])` on both. Read them on the 1M run or a synced node, not in the first steps,
-since the cost is files x absent nibbles. Tests: `TestCommitmentV3RecordWalkIsCountedByOutcome`
-and `TestCommitmentV3UnknownMaskNodeReadExhaustsTheFileWalk` (db/state),
-`TestReadCommitmentRecordsCountsMaskKnowledge` (execctx).
