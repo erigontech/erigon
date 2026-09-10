@@ -3,13 +3,17 @@
 
 Run: python3 .github/workflows/scripts/docs-deploy-trigger.test.py
 
-Every case here is a YAML shape that a human might plausibly write into
-docs-deploy.yml's `on.push.branches` list. They exist because the cutover
-workflow's "is the trigger pinned to this branch?" check and its rewrite must
-agree on every one of them: when they disagree the check says "not pinned", the
-rewrite says "already pinned", and the job fails on every scheduled run.
+Every case is a YAML shape a human might write into docs-deploy.yml's
+`on.push.branches`. They exist because the cutover workflow's "is this trigger
+pinned?" check and its rewrite read the same list: when the two disagree, the
+check reports "not pinned", the rewrite reports "already pinned", and the job
+fails on every scheduled run. The negative cases matter as much as the positive
+ones — a parser that accepts a shape YAML itself rejects reports a pin that the
+deploy trigger does not actually have.
 """
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import tempfile
@@ -21,92 +25,141 @@ assert spec is not None and spec.loader is not None
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
+FAILURES = []
+
+
+def check(name, got, want):
+    if got != want:
+        FAILURES.append(f"{name}: got {got!r}, want {want!r}")
+
 
 def parse(text):
-    lo, hi = mod.branch_span(text)
-    return mod.entries(text[lo:hi])
+    """Branch names, or the refusal message — never an escaping SystemExit.
+
+    A refusal must be comparable data: letting SystemExit propagate kills the
+    run and hides every result gathered so far, so a regression shows up as one
+    stray line instead of a report.
+    """
+    try:
+        lo, hi = mod.branch_span(text)
+        return mod.entries(text[lo:hi])
+    except SystemExit as e:
+        return f"REFUSED: {e}"
+
+
+def run_cli(text, argv):
+    """Run main() over `text`, returning (rc, stdout, resulting file)."""
+    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
+        fh.write(text)
+        path = fh.name
+    os.environ["DEPLOY_YML"] = path
+    sys.argv = ["docs-deploy-trigger.py", *argv]
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = mod.main()
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 1
+        if e.code and not isinstance(e.code, int):
+            out.write(str(e.code))
+    result = open(path).read()
+    os.unlink(path)
+    return rc, out.getvalue(), result
 
 
 HEAD = "on:\n  push:\n"
 TAIL = "\npermissions:\n  contents: read\n"
+REFUSE_NO_LIST = "REFUSED: the push: trigger has no branches: list - refusing to edit blindly"
+REFUSE_NO_PUSH = "REFUSED: docs-deploy.yml has no push: trigger - refusing to edit blindly"
 
-# (name, on-block body, expected branches)
-CASES = [
-    ("plain",
-     "    branches:\n      - release/3.6\n", ["release/3.6"]),
+ACCEPTED = [
+    ("plain", "    branches:\n      - release/3.6\n", ["release/3.6"]),
     ("paths after branches",
      "    branches:\n      - release/3.6\n    paths:\n      - 'docs/site/**'\n", ["release/3.6"]),
-    ("single quotes",
-     "    branches:\n      - 'release/3.6'\n", ["release/3.6"]),
-    ("double quotes",
-     '    branches:\n      - "release/3.6"\n', ["release/3.6"]),
-    ("trailing comment on the entry",
+    ("single quotes", "    branches:\n      - 'release/3.6'\n", ["release/3.6"]),
+    ("double quotes", '    branches:\n      - "release/3.6"\n', ["release/3.6"]),
+    ("trailing comment on entry",
      "    branches:\n      - release/3.6  # deploy\n", ["release/3.6"]),
-    ("comment line inside the list",
+    ("quoted entry, comment with no gap",
+     "    branches:\n      - 'release/3.6'#c\n", ["release/3.6"]),
+    ("indented comment in the list",
      "    branches:\n      # the publishing branch\n      - release/3.6\n", ["release/3.6"]),
-    ("blank line inside the list",
-     "    branches:\n\n      - release/3.6\n", ["release/3.6"]),
-    ("dash at the key's indent",
-     "    branches:\n    - release/3.6\n", ["release/3.6"]),
-    ("tab-indented entry",
-     "    branches:\n\t- release/3.6\n", ["release/3.6"]),
-    ("extra spaces after the dash",
-     "    branches:\n      -    release/3.6\n", ["release/3.6"]),
-    ("trailing whitespace on the entry",
-     "    branches:\n      - release/3.6   \n", ["release/3.6"]),
-    ("comment on the push: key",
-     None, ["release/3.6"]),          # handled specially below
+    ("column-0 comment in the list",
+     "    branches:\n# publishing branch\n      - release/3.6\n", ["release/3.6"]),
+    ("blank line in the list", "    branches:\n\n      - release/3.6\n", ["release/3.6"]),
+    ("dash at the key's indent", "    branches:\n    - release/3.6\n", ["release/3.6"]),
+    ("tab-indented entry", "    branches:\n\t- release/3.6\n", ["release/3.6"]),
+    ("extra spaces after dash", "    branches:\n      -    release/3.6\n", ["release/3.6"]),
+    ("trailing whitespace", "    branches:\n      - release/3.6   \n", ["release/3.6"]),
     ("comment on the branches: key",
      "    branches:  # only the deploy branch\n      - release/3.6\n", ["release/3.6"]),
     ("'#' inside the branch name",
      "    branches:\n      - release/3.6#keep\n", ["release/3.6#keep"]),
-    ("two entries",
-     "    branches:\n      - release/3.6\n      - release/3.5\n",
+    ("two entries", "    branches:\n      - release/3.6\n      - release/3.5\n",
      ["release/3.6", "release/3.5"]),
+]
+
+# Shapes YAML itself does not read as a branches list. Accepting one would
+# report a pin the deploy trigger does not have.
+REJECTED = [
+    ("branches:#c — not a key in YAML",
+     "    branches:#c\n      - release/3.6\n", REFUSE_NO_LIST),
+    ("push: with only paths, pull_request lists branches later",
+     "    paths:\n      - x\n  pull_request:\n    branches:\n      - release/3.6\n",
+     REFUSE_NO_LIST),
 ]
 
 
 def run():
-    failures = []
+    for name, body, want in ACCEPTED + REJECTED:
+        check(name, parse(HEAD + body + TAIL), want)
 
-    for name, body, expected in CASES:
-        if body is None:                       # the push:-key comment case
-            text = "on:\n  push:  # publish\n    branches:\n      - release/3.6\n" + TAIL
-        else:
-            text = HEAD + body + TAIL
-        try:
-            got = parse(text)
-        except SystemExit as e:
-            failures.append(f"{name}: refused with {e}")
-            continue
-        if got != expected:
-            failures.append(f"{name}: got {got}, want {expected}")
+    check("comment on the push: key",
+          parse("on:\n  push:  # publish\n    branches:\n      - release/3.6\n" + TAIL),
+          ["release/3.6"])
+    check("push:#c — not a key in YAML",
+          parse("on:\n  push:#c\n    branches:\n      - release/3.6\n" + TAIL),
+          REFUSE_NO_PUSH)
 
-    # A branch named only by another trigger is not a deploy pin.
-    other = ("on:\n  push:\n    branches:\n      - release/3.6\n"
+    # A branch named by another trigger is not a deploy pin — in either order.
+    after = ("on:\n  push:\n    branches:\n      - release/3.6\n"
              "  pull_request:\n    branches:\n      - release/3.7\n" + TAIL)
-    if parse(other) != ["release/3.6"]:
-        failures.append(f"pull_request leak: got {parse(other)}")
+    check("pull_request after push", parse(after), ["release/3.6"])
+    before = ("on:\n  pull_request:\n    branches:\n      - release/3.5\n"
+              "  push:\n    branches:\n      - release/3.6\n" + TAIL)
+    check("pull_request before push", parse(before), ["release/3.6"])
 
-    # Round trip: repointing preserves comment, quoting and indentation.
+    # --list is the contract the workflow greps with `-Fxq`: one name per line.
+    rc, out, _ = run_cli(HEAD + "    branches:\n      - release/3.6\n" + TAIL, ["--list"])
+    check("--list rc", rc, 0)
+    check("--list output", out, "release/3.6\n")
+
+    # Repointing rewrites the name and nothing else.
     src = ("on:\n  push:\n    branches:\n      # publishing branch\n"
            '      - "release/3.6"  # deploy\n    paths:\n      - x\n' + TAIL)
-    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
-        fh.write(src)
-        path = fh.name
-    os.environ["DEPLOY_YML"] = path
-    sys.argv = ["docs-deploy-trigger.py", "--repoint", "release/3.7"]
-    mod.main()
-    out = open(path).read()
-    os.unlink(path)
-    want = src.replace('"release/3.6"', '"release/3.7"')
-    if out != want:
-        failures.append("round trip changed more than the branch name:\n" + out)
+    rc, _, result = run_cli(src, ["--repoint", "release/3.7"])
+    check("repoint rc", rc, 0)
+    check("repoint round trip", result, src.replace('"release/3.6"', '"release/3.7"'))
 
-    for f in failures:
+    # Already pinned is a no-op, not a failure: the workflow's step would
+    # otherwise try to commit an unchanged tree and go red.
+    pinned = HEAD + "    branches:\n      - release/3.7\n" + TAIL
+    rc, out, result = run_cli(pinned, ["--repoint", "release/3.7"])
+    check("already-pinned rc", rc, 0)
+    check("already-pinned is a no-op", result, pinned)
+    check("already-pinned says so", "already pins release/3.7" in out, True)
+
+    # An ambiguous list must not be rewritten by guesswork.
+    two = HEAD + "    branches:\n      - release/3.6\n      - release/3.5\n" + TAIL
+    rc, out, result = run_cli(two, ["--repoint", "release/3.7"])
+    check("two entries refuses", rc != 0 or "expected exactly one" in out, True)
+    check("two entries unchanged", result, two)
+
+    total = len(ACCEPTED) + len(REJECTED) + 12
+    for f in FAILURES:
         print("FAIL", f)
-    print(f"{len(CASES) + 2 - len(failures)}/{len(CASES) + 2} passed")
-    return 1 if failures else 0
+    print(f"{total - len(FAILURES)}/{total} passed")
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":

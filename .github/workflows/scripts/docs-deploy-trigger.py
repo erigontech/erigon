@@ -44,10 +44,10 @@ def _block_after(src, key_re, start=0):
 
 
 def branch_span(src):
-    push = _block_after(src, r'^(?P<i>[ \t]*)push:[ \t]*(?:#.*)?$')
+    push = _block_after(src, r'^(?P<i>[ \t]*)push:(?:[ \t]+#.*)?[ \t]*$')
     if not push:
         sys.exit('docs-deploy.yml has no push: trigger - refusing to edit blindly')
-    b = _block_after(src[:push[1]], r'^(?P<i>[ \t]*)branches:[ \t]*(?:#.*)?$', push[0])
+    b = _block_after(src[:push[1]], r'^(?P<i>[ \t]*)branches:(?:[ \t]+#.*)?[ \t]*$', push[0])
     if not b:
         sys.exit('the push: trigger has no branches: list - refusing to edit blindly')
     return b
@@ -59,8 +59,8 @@ def branch_span(src):
 # branch it does not actually name.
 ENTRY = re.compile(
     r"^(?P<lead>[ \t]*-[ \t]*)"
-    r"(?:(?P<q>['\"])(?P<qname>[^'\"]+)(?P=q)|(?P<name>\S+))"
-    r"(?P<trail>(?:[ \t]+#.*)?[ \t]*)$", re.M)
+    r"(?:(?P<q>['\"])(?P<qname>[^'\"]+)(?P=q)(?P<qtrail>[ \t]*(?:#.*)?)"
+    r"|(?P<name>\S+)(?P<trail>(?:[ \t]+#.*)?[ \t]*))$", re.M)
 
 
 def entries(block):
@@ -89,7 +89,8 @@ def main():
         return 0
     def swap(m):
         q = m.group('q') or ''
-        return f"{m.group('lead')}{q}{new}{q}{m.group('trail')}"
+        trail = m.group('qtrail') if q else m.group('trail')
+        return f"{m.group('lead')}{q}{new}{q}{trail}"
 
     patched = ENTRY.sub(swap, block)
     open(path, 'w').write(src[:lo] + patched + src[hi:])
