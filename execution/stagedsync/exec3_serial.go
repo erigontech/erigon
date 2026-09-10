@@ -374,6 +374,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 		txTask.Engine = se.cfg.engine
 
 		result := se.worker.RunTxTask(txTask)
+		se.worker.PublishReadMetrics()
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {

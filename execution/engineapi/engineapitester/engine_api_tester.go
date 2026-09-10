@@ -249,7 +249,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
-	httpAPIs := []string{"eth"}
+	httpAPIs := []string{"eth", "txpool"}
 	if args.EnableTestingAPI {
 		httpAPIs = append(httpAPIs, "testing")
 	}
