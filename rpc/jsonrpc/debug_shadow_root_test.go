@@ -55,6 +55,7 @@ func TestDebugMigrationProgress(t *testing.T) {
 	ctx := context.Background()
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 	head, err := m.BlockReader.CurrentBlock(tx)
 	tx.Rollback()
 	require.NoError(t, err)
@@ -99,6 +100,7 @@ func TestDebugMigrationProgress(t *testing.T) {
 			if tc.mode == dbstate.TrieVariantHexBin {
 				tx, err := m.DB.BeginTemporalRw(ctx)
 				require.NoError(t, err)
+				defer tx.Rollback()
 				require.NoError(t, tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(head.NumberU64(), head.Hash())))
 				require.NoError(t, tx.Commit())
 
@@ -114,6 +116,7 @@ func writeDebugShadowRoot(t *testing.T, db kv.TemporalRwDB, hash common.Hash, nu
 	t.Helper()
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	require.NoError(t, rawdb.WriteShadowStateRoot(tx, hash, number, root))
 	require.NoError(t, tx.Commit())
 }

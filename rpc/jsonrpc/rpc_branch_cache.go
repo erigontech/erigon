@@ -24,8 +24,15 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-func newSnapshotCommitmentDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+func newSnapshotCommitmentDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...execctx.SharedDomainOption) (*execctx.SharedDomains, error) {
+	options := make([]execctx.SharedDomainOption, 0, 3+len(opts))
+	options = append(options,
+		execctx.WithoutDeferredBranchUpdates(),
+		execctx.WithoutSharedBranchCache(),
+		execctx.WithSequentialCommitment(),
+	)
+	options = append(options, opts...)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, options...)
 	if err != nil {
 		if domains != nil {
 			domains.Close()

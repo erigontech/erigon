@@ -18,6 +18,7 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
@@ -94,18 +96,27 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
-	if err != nil {
-		return nil, err
-	}
-	defer tsd.Close()
-
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
 	}
+	if genesis == nil {
+		if statecfg.ExperimentalBinCommitment && !statecfg.ExperimentalHexBinCommitment {
+			return nil, execctx.ErrBinCommitmentUnsupported
+		}
+		return nil, errors.New("genesis block not found")
+	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
+	commitmentDomain := kv.CommitmentDomain
+	if genesis.Config != nil && genesis.Config.IsBinaryTrie(genesisHeader.Time) {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithCommitmentDomain(commitmentDomain))
+	if err != nil {
+		return nil, err
+	}
+	defer tsd.Close()
 	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
 	if err != nil {
 		return nil, err

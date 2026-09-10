@@ -619,10 +619,8 @@ func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	}
 }
 
-// binCommitmentTrie reports whether the datadir runs the EIP-8297 binary commitment
-// trie, which skips the witness pipeline's MPT-shaped phases.
-func binCommitmentTrie() bool {
-	return execctx.PickTrieVariant() == commitment.VariantBinPatriciaTrie
+func binCommitmentTrie(chainConfig *chain.Config, header *types.Header) bool {
+	return chainConfig.IsBinaryTrie(header.Time)
 }
 
 // buildAccessedState re-executes a block against a recording historical-state reader
@@ -741,16 +739,24 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
-	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie())
-	if err != nil {
-		return nil, err
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	blockHeader, err := api.resolveWitnessHeader(ctx, tx, blockNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie(chainConfig, blockHeader))
+	if err != nil {
+		return nil, err
+	}
 
 	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode)
 	if ok {
@@ -896,7 +902,6 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
 func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	binTrie := binCommitmentTrie()
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -906,6 +911,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	binTrie := binCommitmentTrie(chainConfig, block.HeaderNoCopy())
+	commitmentDomain := kv.CommitmentDomain
+	if binTrie {
+		commitmentDomain = kv.CommitmentBinDomain
 	}
 
 	engine := api.engine()
@@ -927,7 +937,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Witness capture is served by the sequential HexPatriciaHashed and by
 	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
 	// cannot serve it and is demoted.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New(), execctx.WithCommitmentDomain(commitmentDomain))
 	if err != nil {
 		return nil, err
 	}
@@ -951,10 +961,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
 	// history, so the history-availability check only applies to the durable path.
 	if hc == nil {
-		commitmentDomain := kv.CommitmentDomain
-		if binTrie {
-			commitmentDomain = kv.CommitmentBinDomain
-		}
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(commitmentDomain)
 		if firstTxNumInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
@@ -1519,6 +1525,27 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 		EndTxNum:          endTxNum,
 		ParentNum:         parentNum,
 	}, nil
+}
+
+func (api *DebugAPIImpl) resolveWitnessHeader(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	blockNrOrHash rpc.BlockNumberOrHash,
+) (*types.Header, error) {
+	resolve := blockNrOrHash
+	resolve.RequireCanonical = false
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
+	header, err := api._blockReader.Header(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+	return header, nil
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor

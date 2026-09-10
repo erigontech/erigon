@@ -84,9 +84,10 @@ func TestPBinExecutionWitnessReachable(t *testing.T) {
 
 	m, _, _, _ := chainWithDeployedContract(t)
 	enableCommitmentHistoryFlag(t, m.DB)
-	require.True(t, binCommitmentTrie(), "the chain above is committed with the binary trie")
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	base := newBaseApiForTest(m)
+	require.True(t, binCommitmentTrie(base._chainConfig.Load(), m.Genesis.HeaderNoCopy()), "the chain above is committed with the binary trie")
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	// Block 2 calls the contract deployed by block 1, so its witness covers an account
 	// read, a storage write and a code read.
@@ -165,7 +166,6 @@ func TestPBinHexOnlyCallersStillRefuse(t *testing.T) {
 		"rpc/jsonrpc/eth_call.go",       // eth_getProof, eth_getWitness
 		"rpc/jsonrpc/eth_simulation.go", // eth_simulateV1
 		"rpc/jsonrpc/receipts/receipts_generator.go",
-		"rpc/rpchelper/commitment.go",
 		"db/integrity/commitment_integrity.go",
 	} {
 		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))

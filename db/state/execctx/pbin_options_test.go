@@ -185,3 +185,26 @@ func TestSharedDomainsHexOnlyOptionSelectsHexArmInDualMode(t *testing.T) {
 	require.Nil(t, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
 }
+
+func TestSharedDomainsExplicitCommitmentDomainSelectsBinArm(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+	})
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomain(kv.CommitmentBinDomain))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, kv.CommitmentBinDomain, sd.GetCommitmentCtx().CommitmentDomain())
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
+}

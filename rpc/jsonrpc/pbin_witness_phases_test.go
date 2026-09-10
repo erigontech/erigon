@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -94,12 +93,11 @@ func TestPBinWitnessModeRejectsExplicitCanonical(t *testing.T) {
 func TestPBinExecutionWitnessRejectsCanonicalRequest(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	withBinCommitmentDatadir(t)
+	base := newBaseApiForTest(m)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
-	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
-	statecfg.ExperimentalBinCommitment = true
-	require.True(t, binCommitmentTrie())
+	require.True(t, binCommitmentTrie(base._chainConfig.Load(), m.Genesis.HeaderNoCopy()))
 
 	canonical := "canonical"
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)

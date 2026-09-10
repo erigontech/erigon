@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -403,6 +404,15 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("default should be legacy, got %v", got)
 		}
 	})
+}
+
+func TestBinCommitmentTrieUsesBlockTime(t *testing.T) {
+	activation := uint64(10)
+	config := &chain.Config{BinaryTrieTime: &activation}
+
+	require.False(t, binCommitmentTrie(config, &types.Header{Time: 9}))
+	require.True(t, binCommitmentTrie(config, &types.Header{Time: 10}))
+	require.True(t, binCommitmentTrie(config, &types.Header{Time: 11}))
 }
 
 // TestWitnessReaderComposition pins the per-phase reader the two build phases install:

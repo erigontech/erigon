@@ -394,6 +394,16 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			commitmentDomain = candidate
 		}
 	}
+	if o.commitmentDomain != nil {
+		requestedDomain := *o.commitmentDomain
+		if requestedDomain == kv.CommitmentBinDomain && o.trieCfg.Variant == commitment.VariantBinPatriciaTrie && !slices.Contains(commitmentDomains, requestedDomain) {
+			requestedDomain = kv.CommitmentDomain
+		}
+		if !slices.Contains(commitmentDomains, requestedDomain) {
+			return nil, fmt.Errorf("commitment domain %s is not registered", *o.commitmentDomain)
+		}
+		commitmentDomain = requestedDomain
+	}
 
 	generationTx := cacheGenerationTx(tx)
 	if generationTx == nil {

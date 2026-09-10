@@ -95,12 +95,16 @@ func measureWitnessSizes(t *testing.T, binTrie bool) []witnessSizes {
 	if binTrie {
 		withBinCommitmentDatadir(t)
 	}
-	require.Equal(t, binTrie, binCommitmentTrie())
-	require.False(t, witnessVerifySkipped(binTrie), "a measured witness must be a verified one")
-
 	c := buildPBinWitnessChain(t)
 	enableCommitmentHistoryFlag(t, c.m.DB)
-	api := NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, &rpccfg.DebugApiConfig{})
+	base := newBaseApiForTest(c.m)
+	selectionConfig := base._chainConfig.Load()
+	if selectionConfig == nil {
+		selectionConfig = c.m.ChainConfig
+	}
+	require.Equal(t, binTrie, binCommitmentTrie(selectionConfig, c.m.Genesis.HeaderNoCopy()))
+	require.False(t, witnessVerifySkipped(binTrie), "a measured witness must be a verified one")
+	api := NewPrivateDebugAPI(base, c.m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	sizes := make([]witnessSizes, 0, len(pbinWitnessCorpus))
 	for _, block := range pbinWitnessCorpus {

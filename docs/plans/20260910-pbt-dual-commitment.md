@@ -694,17 +694,17 @@ different states and correctly report different roots.
 - Modify: `db/state/execctx/options.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 
-- [ ] give `binCommitmentTrie` the block it is serving and answer from `Config.IsBinaryTrie` on that
+- [x] give `binCommitmentTrie` the block it is serving and answer from `Config.IsBinaryTrie` on that
       header's time instead of the process-global `PickTrieVariant`
-- [ ] make the genesis-commitment helper in `rpc/rpchelper` use the trie the genesis timestamp selects
-- [ ] make the block-correct selection an explicit `NewSharedDomains` option so a caller that needs it
+- [x] make the genesis-commitment helper in `rpc/rpchelper` use the trie the genesis timestamp selects
+- [x] make the block-correct selection an explicit `NewSharedDomains` option so a caller that needs it
       cannot silently inherit the process default
-- [ ] leave the non-folding RPC sites (`eth_call`, `eth_simulation`, the receipts generator) on
+- [x] leave the non-folding RPC sites (`eth_call`, `eth_simulation`, the receipts generator) on
       `WithHexCommitmentOnly` — they compute no root
-- [ ] write tests: a witness request for a pre-flip block selects hex and for a post-flip block selects
+- [x] write tests: a witness request for a pre-flip block selects hex and for a post-flip block selects
       bin, on the same `hex+bin` datadir
-- [ ] write tests: a post-flip request can no longer silently receive a hex-derived answer
-- [ ] run `make test-short` — must pass before task 22
+- [x] write tests: a post-flip request can no longer silently receive a hex-derived answer
+- [x] run `make test-short` — must pass before task 22
 
 ### Task 22: Stop the substring sweeps from eating bin files
 
