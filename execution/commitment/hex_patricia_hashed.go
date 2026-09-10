@@ -602,8 +602,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	if lowDepth > 64 {
-		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	if lowDepth > 64 && lowCell.accountAddrLen == 0 {
+		cell.loaded = cell.loaded&cellLoadAccount | lowCell.loaded&cellLoadStorage
 	} else {
 		cell.loaded = lowCell.loaded
 	}
