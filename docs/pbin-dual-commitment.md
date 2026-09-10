@@ -137,6 +137,12 @@ shadow-root record is unavailable.
 The explicit commitment-history option enables history and history snapshots for both domains through
 `EnableHistoricalCommitment` (`db/state/statecfg/state_schema.go`).
 
+`eth_simulateV1` keeps both live tries current across simulated blocks and selects each returned
+state root by the simulated timestamp. Frozen hex is excluded from post-activation folds.
+Historical replay uses the selected domain in temporary storage with independent freeze settings;
+`ComputeCustomCommitmentFromStateHistory` (`rpc/rpchelper/commitment.go`) leaves the source freeze
+marker unchanged.
+
 ## Compatibility
 
 A datadir without `binaryTrieTime` remains hex-only: it registers the existing commitment domain,

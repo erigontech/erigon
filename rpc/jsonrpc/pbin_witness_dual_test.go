@@ -103,7 +103,7 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime, config.BinaryTrieTime = &amsterdam, &activation
 	balance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
-	genesis := &types.Genesis{Config: config, Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).Set(balance)}, to: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")}}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+	genesis := &types.Genesis{Config: config, Difficulty: uint256.NewInt(0), Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).Set(balance)}, to: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")}}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key), execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, true) }))
 	tx, err := m.DB.BeginTemporalRw(t.Context())
@@ -115,6 +115,8 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 		require.NotEmpty(t, code)
 		genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(0), Nonce: 1, Code: append([]byte(nil), code...)}
 	}
+	require.NoError(t, tx.Delete(kv.ConfigTable, kv.GenesisKey))
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, genesis))
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	_, ibs, err := genesiswrite.ComputeGenesisCommitment(t.Context(), genesis, tx, domains, m.Genesis.Header())
@@ -145,7 +147,7 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 			account := alloc[address]
 			account.Storage = nil
 			alloc[address] = account
-			rootBlock, state, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, Alloc: alloc, Timestamp: activation}, datadir.New(t.TempDir()), log.New())
+			rootBlock, state, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, Difficulty: uint256.NewInt(0), Alloc: alloc, Timestamp: activation}, datadir.New(t.TempDir()), log.New())
 			require.NoError(t, err)
 			state.Close()
 			header.Root = rootBlock.Root()

@@ -703,8 +703,12 @@ different states and correctly report different roots.
 - [x] make the genesis-commitment helper in `rpc/rpchelper` use the trie the genesis timestamp selects
 - [x] make the block-correct selection an explicit `NewSharedDomains` option so a caller that needs it
       cannot silently inherit the process default
-- [x] leave the non-folding RPC sites (`eth_call`, `eth_simulation`, the receipts generator) on
-      `WithHexCommitmentOnly` — they compute no root
+- [x] leave non-folding RPC contexts (`eth_call` and receipt execution) on
+      `WithHexCommitmentOnly`
+- [x] ➕ keep both live tries current in `eth_simulateV1`, select the returned root by each simulated
+      timestamp, and cover activation-crossing and frozen-hex requests
+- [x] ➕ make historical simulation replay accept the target domain and reconstruct genesis in
+      writable temporary storage isolated from the source datadir's freeze metadata
 - [x] write tests: a witness request for a pre-flip block selects hex and for a post-flip block selects
       bin, on the same `hex+bin` datadir
 - [x] write tests: a post-flip request can no longer silently receive a hex-derived answer

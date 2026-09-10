@@ -44,7 +44,7 @@ import (
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
 	base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	if statecfg.ExperimentalBinCommitment {
+	if statecfg.ExperimentalBinCommitment && !statecfg.ExperimentalHexBinCommitment {
 		config := m.ChainConfig.Copy()
 		binaryTrieTime := uint64(0)
 		config.BinaryTrieTime = &binaryTrieTime
