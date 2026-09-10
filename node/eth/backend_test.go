@@ -7,7 +7,33 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+func TestValidateEmbeddedBuilderMode(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		enabled    bool
+		internalCL bool
+		wantError  bool
+	}{
+		{name: "disabled without embedded Caplin"},
+		{name: "enabled with embedded Caplin", enabled: true, internalCL: true},
+		{name: "enabled without embedded Caplin", enabled: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := ethconfig.Config{InternalCL: test.internalCL}
+			cfg.CaplinConfig.EpbsBuilder.Enabled = test.enabled
+			err := validateEmbeddedBuilderMode(&cfg)
+			if test.wantError {
+				require.ErrorContains(t, err, "embedded Caplin")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
 
 func TestRemoveContents(t *testing.T) {
 	tmpDirName := t.TempDir()

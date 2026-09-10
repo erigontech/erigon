@@ -21,6 +21,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -144,6 +145,9 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 			deps.BeaconConfig = &copy
 		}},
 		{name: "zero pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = 0 }},
+		{name: "pending capacity shorter than one epoch", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.MaxPending = int(deps.BeaconConfig.SlotsPerEpoch) - 1
+		}},
 		{name: "zero retained capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxRetained = 0 }},
 		{name: "retry cadence too short", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.RetryInterval = minValidatedPreferencesRetryInterval - time.Nanosecond
@@ -158,4 +162,8 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 			require.Nil(t, runtime)
 		})
 	}
+}
+
+func TestDefaultRuntimeCapacityCoversOneMainnetEpoch(t *testing.T) {
+	require.GreaterOrEqual(t, epbscfg.DefaultConfig().MaxPending, int(clparams.MainnetBeaconConfig.SlotsPerEpoch))
 }

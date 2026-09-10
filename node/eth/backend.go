@@ -275,6 +275,9 @@ func New(
 	tracer *tracers.Tracer,
 	opts ...NewOption,
 ) (*Ethereum, error) {
+	if err := validateEmbeddedBuilderMode(config); err != nil {
+		return nil, err
+	}
 	options := newOptions{}
 	for _, opt := range opts {
 		opt(&options)
@@ -1028,6 +1031,13 @@ func New(
 	}
 
 	return backend, nil
+}
+
+func validateEmbeddedBuilderMode(config *ethconfig.Config) error {
+	if config.CaplinConfig.EpbsBuilder.Enabled && !config.InternalCL {
+		return errors.New("embedded ePBS builder requires embedded Caplin")
+	}
+	return nil
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
