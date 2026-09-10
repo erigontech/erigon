@@ -20,6 +20,8 @@ import (
 	"math"
 	"testing"
 	"unsafe"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
@@ -126,4 +128,30 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
 			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
 	}
+}
+
+func TestEnterFrameReadOnlyProtocol(t *testing.T) {
+	evm := &EVM{}
+
+	outer := evm.enterFrame(true)
+	require.True(t, outer)
+	require.True(t, evm.readOnly)
+	require.Equal(t, 1, evm.depth)
+
+	inner := evm.enterFrame(true)
+	require.False(t, inner, "a read-only frame inside a read-only frame must not claim the restore")
+	evm.exitFrame(inner)
+	require.True(t, evm.readOnly, "the child must not clear the parent's read-only flag")
+	require.Equal(t, 1, evm.depth)
+
+	evm.exitFrame(outer)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 0, evm.depth)
+
+	writable := evm.enterFrame(false)
+	require.False(t, writable)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 1, evm.depth)
+	evm.exitFrame(writable)
+	require.Equal(t, 0, evm.depth)
 }

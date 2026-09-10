@@ -17,8 +17,10 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"sync"
@@ -27,6 +29,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // PrecompilesFunc builds a chain's precompile overlay at an L2 version. The
@@ -136,6 +141,169 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 
 	actual, _ := mergedCache.LoadOrStore(key, set)
 	return actual.(*mergedPrecompileSet)
+}
+
+// PrecompileContext carries the precompile's calling frame. Self is its own
+// code address; ActingAs is the identity the frame acts under, which diverges
+// from Self under CALLCODE and DELEGATECALL.
+type PrecompileContext struct {
+	Self     accounts.Address
+	ActingAs accounts.Address
+	Caller   accounts.Address
+	ReadOnly bool
+	EVM      *EVM
+	Value    uint256.Int
+}
+
+// PrecompileGas is the frame's gas handle. Charging through it is what keeps
+// the reservoir and the usage report agreeing: a state charge exceeding the
+// EIP-8037 reservoir spills into execution gas, and handleFrameRevert returns
+// the spill on REVERT only if it was recorded.
+type PrecompileGas struct {
+	remaining *mdgas.MdGas
+	used      *mdgas.MdGasUsage
+	tracer    *tracing.Hooks
+	// Before Amsterdam there is no state dimension to charge against.
+	amsterdam bool
+	// Execution gas charged through this handle and not yet given back.
+	chargedExecution uint64
+}
+
+// onGasChange mirrors useMdGas so a tracer sees the same event stream either way.
+func (g *PrecompileGas) onGasChange(before mdgas.MdGas, spilled uint64, typ mdgas.MdGasType, reason tracing.GasChangeReason) {
+	if g.tracer == nil || g.tracer.OnGasChange == nil {
+		return
+	}
+	from, to := gasChangeDimension(before, *g.remaining, typ, spilled)
+	if from != to {
+		g.tracer.OnGasChange(from, to, reason)
+	}
+}
+
+// release detaches the handle when RunStateful returns: evm.call's named
+// returns die with the frame, and a stashed handle would mutate a dead copy.
+func (g *PrecompileGas) release() { g.remaining, g.used = nil, nil }
+
+func (g *PrecompileGas) live() bool { return g.remaining != nil }
+
+// Remaining reports the gas left, or zero once the frame has returned.
+func (g *PrecompileGas) Remaining() mdgas.MdGas {
+	if !g.live() {
+		return mdgas.MdGas{}
+	}
+	return *g.remaining
+}
+
+// ChargeExecution deducts execution gas, charging nothing when it reports false.
+func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
+	if !g.live() {
+		return false
+	}
+	before := *g.remaining
+	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.ExecutionGas) {
+		return false
+	}
+	g.chargedExecution += amount
+	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallPrecompiledContract)
+	return true
+}
+
+// ChargeState deducts state gas, spilling into execution gas when the EIP-8037
+// reservoir is short, and charging nothing when it reports false. Before
+// Amsterdam it charges execution gas outright: the reservoir is empty, so the
+// charge would land in used.State, which pre-Amsterdam accounting drops —
+// taking gas off the frame without it reaching the receipt or the block.
+func (g *PrecompileGas) ChargeState(amount uint64) bool {
+	if !g.live() {
+		return false
+	}
+	if !g.amsterdam {
+		return g.ChargeExecution(amount)
+	}
+	if !g.stateChargeFits(amount) {
+		return false
+	}
+	before, spilledBefore := *g.remaining, g.used.StateSpill
+	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas) {
+		return false
+	}
+	g.onGasChange(before, g.used.StateSpill-spilledBefore, mdgas.StateGas, tracing.GasChangeCallPrecompiledContract)
+	return true
+}
+
+// RefundExecution gives execution gas back, capped at what this handle charged:
+// execution gas can only return from this frame's own charge, and an unbounded
+// refill underflows used.Execution and mints gas for the caller.
+func (g *PrecompileGas) RefundExecution(amount uint64) bool {
+	if !g.live() {
+		return false
+	}
+	if amount > g.chargedExecution {
+		return false
+	}
+	before := *g.remaining
+	mdgas.Refill(g.remaining, g.used, amount, mdgas.ExecutionGas)
+	g.chargedExecution -= amount
+	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallLeftOverRefunded)
+	return true
+}
+
+// RefundState reverses a state charge or forwards a nested call's refunded
+// reservoir. Deliberately unbounded, unlike RefundExecution: a forwarded refund
+// did not originate here, and net state usage may legitimately go negative.
+func (g *PrecompileGas) RefundState(amount uint64) bool {
+	if !g.live() {
+		return false
+	}
+	if !g.amsterdam {
+		// Mirrors ChargeState: pre-Amsterdam the charge went to execution.
+		return g.RefundExecution(amount)
+	}
+	if !g.stateRefundFits(amount) {
+		return false
+	}
+	before, spilledBefore := *g.remaining, g.used.StateSpill
+	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
+	g.onGasChange(before, spilledBefore-g.used.StateSpill, mdgas.StateGas, tracing.GasChangeCallLeftOverRefunded)
+	return true
+}
+
+func (g *PrecompileGas) stateChargeFits(amount uint64) bool {
+	if amount > math.MaxInt64 || g.used.State > math.MaxInt64-int64(amount) {
+		return false
+	}
+	spill := amount - min(amount, g.remaining.State)
+	return spill <= math.MaxUint64-g.used.StateSpill
+}
+
+func (g *PrecompileGas) stateRefundFits(amount uint64) bool {
+	if amount > math.MaxInt64 || g.used.State < math.MinInt64+int64(amount) {
+		return false
+	}
+	spill := min(amount, g.used.StateSpill)
+	return spill <= math.MaxUint64-g.remaining.Execution &&
+		amount-spill <= math.MaxUint64-g.remaining.State
+}
+
+// StatefulPrecompile receives the calling frame's context and charges its own
+// gas; RequiredGas is not consulted. One instance serves every frame, including
+// parallel-executor workers, so it must keep no per-call state on its receiver.
+// It must not mutate state when ctx.ReadOnly is set: the state surface reached
+// through ctx.EVM has no readOnly awareness, so a missed branch corrupts state
+// under STATICCALL instead of failing.
+type StatefulPrecompile interface {
+	PrecompiledContract
+	RunStateful(input []byte, gas *PrecompileGas, ctx *PrecompileContext) (ret []byte, err error)
+}
+
+// NoStatelessRun supplies the stateless half of PrecompiledContract: it is
+// reached only by a misroute, so Run errors rather than returning empty success.
+type NoStatelessRun struct{}
+
+func (NoStatelessRun) RequiredGas([]byte) uint64 { return 0 }
+
+func (NoStatelessRun) Run([]byte) ([]byte, error) {
+	return nil, errors.New("vm: stateful precompile reached the stateless Run path")
 }
 
 func isNilContract(p PrecompiledContract) bool {
