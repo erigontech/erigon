@@ -290,43 +290,6 @@ func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
 	require.Equal(t, want, got, "account-only re-touch dropped the singleton's storage slot")
 }
 
-type slotKV struct{ loc, val string }
-
-type nibbleSlots struct {
-	nib   byte
-	count int
-}
-
-// soleAccountSlots mines one account plus storage slots grouped by first storage nibble, so a
-// test can shape the storage collapse deterministically.
-func soleAccountSlots(seed int64, groups []nibbleSlots) (string, [][]slotKV) {
-	rnd := rand.New(rand.NewSource(seed))
-	addr := make([]byte, length.Addr)
-	rnd.Read(addr)
-
-	firstNibble := func(loc []byte) byte {
-		pk := make([]byte, 0, length.Addr+length.Hash)
-		pk = append(pk, addr...)
-		pk = append(pk, loc...)
-		return KeyToHexNibbleHash(pk)[64]
-	}
-
-	slots := make([][]slotKV, len(groups))
-	for gi, g := range groups {
-		for len(slots[gi]) < g.count {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			if firstNibble(loc) != g.nib {
-				continue
-			}
-			val := make([]byte, 32)
-			rnd.Read(val)
-			slots[gi] = append(slots[gi], slotKV{hex.EncodeToString(loc), hex.EncodeToString(val)})
-		}
-	}
-	return hex.EncodeToString(addr), slots
-}
-
 // The same trie carried across blocks, as a running node holds it. A sole-account root folds via
 // propagate and writes no root branch record, so its state travels only in the carried trie or
 // the state blob — a fresh trie per batch is not a lifecycle this shape has.
@@ -352,20 +315,20 @@ func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, slots := soleAccountSlots(20260706, []nibbleSlots{{0x2, tc.survivors}, {0x8, 6}, {0xd, 6}})
-			surv := slots[0]
-			gone := append(append([]slotKV{}, slots[1]...), slots[2]...)
+			a := addrHex(findAddressForNibble(3, 4242))
+			surv := storageLocsForNibble(0x2, tc.survivors, 1)
+			gone := append(storageLocsForNibble(0x8, 6, 1000), storageLocsForNibble(0xd, 6, 1000000)...)
 
 			ub1 := NewUpdateBuilder().Balance(a, 1)
 			ubf := NewUpdateBuilder().Balance(a, 2)
-			for _, kv := range surv {
-				ub1.Storage(a, kv.loc, kv.val)
-				ubf.Storage(a, kv.loc, kv.val)
+			for _, loc := range surv {
+				ub1.Storage(a, loc, "01")
+				ubf.Storage(a, loc, "01")
 			}
 			ub2 := NewUpdateBuilder().Balance(a, 2)
-			for _, kv := range gone {
-				ub1.Storage(a, kv.loc, kv.val)
-				ub2.DeleteStorage(a, kv.loc)
+			for _, loc := range gone {
+				ub1.Storage(a, loc, "02")
+				ub2.DeleteStorage(a, loc)
 			}
 			k1, u1 := ub1.Build()
 			k2, u2 := ub2.Build()
@@ -383,25 +346,19 @@ func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
 // deleting the account with its slots must collapse the trie to the empty root.
 func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	t.Parallel()
-	a, slots := soleAccountSlots(20260707, []nibbleSlots{{0x2, 2}, {0x8, 6}, {0xd, 6}})
-	var all []slotKV
-	for _, g := range slots {
-		all = append(all, g...)
+	a := addrHex(findAddressForNibble(3, 4243))
+	all := append(append(storageLocsForNibble(0x2, 2, 2), storageLocsForNibble(0x8, 6, 2000)...), storageLocsForNibble(0xd, 6, 2000000)...)
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	for _, loc := range all {
+		ub1.Storage(a, loc, "01")
 	}
-	build1 := func() ([][]byte, []Update) {
-		ub := NewUpdateBuilder().Balance(a, 1)
-		for _, kv := range all {
-			ub.Storage(a, kv.loc, kv.val)
-		}
-		return ub.Build()
-	}
+	k1, u1 := ub1.Build()
 
 	t.Run("delete_storage_keeps_account", func(t *testing.T) {
 		t.Parallel()
-		k1, u1 := build1()
 		ub2 := NewUpdateBuilder().Balance(a, 2)
-		for _, kv := range all {
-			ub2.DeleteStorage(a, kv.loc)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
 		}
 		k2, u2 := ub2.Build()
 
@@ -414,10 +371,9 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 
 	t.Run("delete_account_empties_trie", func(t *testing.T) {
 		t.Parallel()
-		k1, u1 := build1()
 		ub2 := NewUpdateBuilder().Delete(a)
-		for _, kv := range all {
-			ub2.DeleteStorage(a, kv.loc)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
 		}
 		k2, u2 := ub2.Build()
 
