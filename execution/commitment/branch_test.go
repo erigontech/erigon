@@ -115,3 +115,15 @@ func TestLegacyContractHashFromPrefix_ZeroAlloc(t *testing.T) {
 	allocs = testing.AllocsPerRun(1000, func() { _, _ = legacyContractHashFromPrefix(prefix) })
 	require.Zero(t, allocs, "legacyContractHashFromPrefix (even) must not allocate")
 }
+
+func TestLegacyRowWithEdgeShapedPrefixIsParsedAsLegacy(t *testing.T) {
+	var cells [16]cellEncodeData
+	cells[12] = recordTestData("branch", nil)
+	legacy, err := NewBranchEncoder(1024).EncodeBranch(1<<12, 1<<12, 1<<12, &cells)
+	require.NoError(t, err)
+	require.True(t, BranchData(legacy).IsEdgeRecord())
+
+	count, err := BranchData(legacy).ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+}
