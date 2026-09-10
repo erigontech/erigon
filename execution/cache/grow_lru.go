@@ -176,7 +176,7 @@ func (g *growLRU[V]) maybeGrow() {
 	}
 	next := g.newShards(newCap)
 	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
+		if v, ok := old.Peek(k); ok {
 			next.Add(k, v)
 		}
 	}
