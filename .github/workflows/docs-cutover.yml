@@ -7,9 +7,14 @@ run-name: "Docs cutover${{ inputs.dry_run && ' (dry run)' || '' }}"
 # A release changes nothing in the docs pipeline on its own. Making the new
 # series live takes two edits in two different places:
 #
-#   1. `on.push.branches` in docs-deploy.yml ON THE NEW RELEASE BRANCH. A new
-#      release branch is cut from the previous one, so it inherits the OLD
-#      branch name in its own push trigger and never fires for itself.
+#   1. `on.push.branches` in docs-deploy.yml ON THE NEW RELEASE BRANCH, which
+#      arrives wrong in one of two ways. Cut from the previous release branch,
+#      it inherits that branch's name and never fires for itself. Cut from
+#      `main` — create-release-branch.yml's default base — docs-deploy.yml is
+#      not there at all: `main` has never carried it, and PR #23283 ADDED it to
+#      release/3.6 (+84/-0) rather than inheriting it. This workflow handles
+#      both: it repoints an inherited copy, and seeds a missing one from the
+#      branch currently publishing.
 #   2. The DOCS_DEPLOY_BRANCH repository variable, read by docs-deploy.yml's
 #      job gate and by docs-deploy-cron.yml.
 #
@@ -101,6 +106,15 @@ jobs:
             exit 1
           fi
 
+          # The backwards-move guard below compares series numerically, which is
+          # meaningless if the variable is not a release branch at all. Refuse
+          # rather than compare "main" against "3.6".
+          if ! echo "$DEPLOY_BRANCH" | grep -qE '^release/[0-9]+\.[0-9]+$'; then
+            echo "::error::DOCS_DEPLOY_BRANCH is '${DEPLOY_BRANCH}', which is not a release/N.N branch."
+            echo "This workflow only understands release-series branches. Fix the variable or disable this workflow."
+            exit 1
+          fi
+
           # Selection must agree with docs/site/src/releases.js, which drives the
           # {ERIGON_VERSION} the site renders. Two rules from there matter here:
           #   - the API orders by publish date, which is wrong the moment a
@@ -134,21 +148,27 @@ jobs:
           # abort the assignment, killing the step before the diagnostic prints.
 
           if [ -z "$newest" ]; then
-            echo "::error::No stable release found. Refusing to guess a target series."
+            echo "::error::No stable release in the cutover window (majors ${major_now}-$((major_now + 1)))."
+            echo "Either the newest series has only pre-releases, or DOCS_DEPLOY_BRANCH is ahead of every stable release."
+            echo "Refusing to guess a target series."
             exit 1
+          fi
+
+          # The bound advances one major at a time by design. When a stable
+          # release sits ABOVE that window, the bound is why it is being
+          # ignored — say so, rather than going quiet about a whole major.
+          higher="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 > m + 1' | sort -t. -k1,1n | tail -n1 || true)"
+          if [ -n "$higher" ]; then
+            echo "::warning::Stable v${higher} is above the one-major cutover window from ${DEPLOY_BRANCH}."
+            echo "::warning::This run targets the next major only; re-run after that cutover lands to continue."
           fi
 
           target_series="$(echo "$newest" | cut -d. -f1-2)"
           target_branch="release/${target_series}"
 
-          # The backwards-move guard below compares series numerically, which is
-          # meaningless if the variable is not a release branch at all. Refuse
-          # rather than compare "main" against "3.6".
-          if ! echo "$DEPLOY_BRANCH" | grep -qE '^release/[0-9]+\.[0-9]+$'; then
-            echo "::error::DOCS_DEPLOY_BRANCH is '${DEPLOY_BRANCH}', which is not a release/N.N branch."
-            echo "This workflow only understands release-series branches. Fix the variable or disable this workflow."
-            exit 1
-          fi
           current_series="${DEPLOY_BRANCH#release/}"
 
           echo "newest stable release : v${newest}"
@@ -174,11 +194,22 @@ jobs:
               --jq '.content' 2>/dev/null | base64 -d || echo '')"
             if [ -z "$deploy_yml" ]; then
               echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
-            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${target_branch}\$"; then
+            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${target_branch//./\\.}\$"; then
               echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
               echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
             else
-              echo "Docs deploy branch is current and its push trigger pins itself. Nothing to do."
+              # The trigger is right; the label can still be wrong if a hand-flip
+              # skipped the version bump, which publishes the site under the
+              # previous series' label.
+              cfg="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${target_branch}" \
+                --jq '.content' 2>/dev/null | base64 -d || echo '')"
+              lbl="$(echo "$cfg" | grep -A3 'const currentDocsVersion' \
+                | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+              if [ -n "$lbl" ] && [ "$lbl" != "v${target_series}" ]; then
+                echo "::warning::${target_branch} publishes under label ${lbl}, expected v${target_series} — the version bump never ran."
+              else
+                echo "Docs deploy branch is current, pins itself, and publishes as ${lbl:-unknown}. Nothing to do."
+              fi
             fi
             exit 0
           fi
@@ -244,6 +275,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
           TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
         run: |
           set -euo pipefail
 
@@ -287,12 +319,26 @@ jobs:
           # Condition B — does docs-deploy.yml on the target branch pin itself?
           deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
             --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          # A missing file is NOT an error. docs-deploy.yml lives only on the
+          # deploy branch — `main` has never carried it, and PR #23283 ADDED it
+          # to release/3.6 rather than inheriting it. So a release branch cut
+          # from `main` (create-release-branch.yml's default base) legitimately
+          # arrives without it, and the repoint step seeds it from the branch
+          # currently publishing.
           if [ -z "$deploy_yml" ]; then
-            echo "::error::${TARGET_BRANCH} carries no docs-deploy.yml. It cannot become the docs branch."
-            exit 1
+            echo "${TARGET_BRANCH} carries no docs-deploy.yml — it will be seeded from ${CURRENT_BRANCH}."
+            echo "seed=true" >> "$GITHUB_OUTPUT"
+            repointed=false
+            echo "repointed=false" >> "$GITHUB_OUTPUT"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "seed=false" >> "$GITHUB_OUTPUT"
           # Only the push-trigger block matters; workflow_dispatch ignores it.
-          if echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${TARGET_BRANCH}\$"; then
+          # Escape the dots: unescaped, release/3.6 as an ERE also matches a
+          # typo'd release/3x6 and would report the trigger as correctly pinned.
+          target_re="${TARGET_BRANCH//./\\.}"
+          if echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${target_re}\$"; then
             repointed=true
           else
             repointed=false
@@ -372,6 +418,7 @@ jobs:
           TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
           CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
           RUN_ID: ${{ github.run_id }}
+          SEED: ${{ steps.state.outputs.seed }}
         run: |
           set -euo pipefail
 
@@ -400,6 +447,16 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$workdir"
           cd "$workdir"
 
+          # Seed the file when the branch never had one (cut from `main`).
+          # Taken from the branch currently publishing, so the copy is the one
+          # in production, then repointed below like any inherited copy.
+          if [ "${SEED}" = "true" ]; then
+            mkdir -p .github/workflows
+            gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${CURRENT_BRANCH}" \
+              --jq '.content' | base64 -d > .github/workflows/docs-deploy.yml
+            echo "Seeded docs-deploy.yml from ${CURRENT_BRANCH}."
+          fi
+
           # Rewrite the pinned branch inside the `on:` block only, so a match in a
           # comment or a job condition further down is left alone.
           #
@@ -416,12 +473,12 @@ jobs:
           head, sep, tail = src.partition('\npermissions:')
           if not sep:
               sys.exit('docs-deploy.yml has no permissions: block - refusing to edit blindly')
-          entries = re.findall(r'^\s*-\s*(release/[0-9]+\.[0-9]+)\s*$', head, flags=re.M)
+          entries = re.findall(r'^[ \t]*-[ \t]*(release/[0-9]+\.[0-9]+)[ \t]*$', head, flags=re.M)
           if len(entries) != 1:
               sys.exit(f'expected exactly one release/N.N push-trigger entry in the on: block, found {entries}')
           if entries[0] == new:
               sys.exit(f'{path} already pins {new} - nothing to repoint')
-          patched = re.sub(r'^(\s*-\s*)release/[0-9]+\.[0-9]+\s*$', rf'\g<1>{new}', head, flags=re.M)
+          patched = re.sub(r'^([ \t]*-[ \t]*)release/[0-9]+\.[0-9]+[ \t]*$', rf'\g<1>{new}', head, flags=re.M)
           open(path, 'w').write(patched + sep + tail)
           print(f'repointed {entries[0]} -> {new}')
           PY
@@ -566,7 +623,11 @@ jobs:
           # runner detail, and this guarantee must not depend on it. (An
           # environment-scoped variable of the same name would also shadow the
           # repository one in the context, but not here.)
-          DEPLOY_BRANCH="$(gh api "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" --jq '.value')"
+          if ! DEPLOY_BRANCH="$(gh api "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" --jq '.value')"; then
+            echo "::error::Could not read DOCS_DEPLOY_BRANCH through the API."
+            echo "Grant the release App the repository 'Variables: read and write' permission, or set the variable by hand."
+            exit 1
+          fi
 
           # Everything in `needs.*` was computed BEFORE the approval wait, which
           # can last up to the 30-day environment timeout. Approving a stale run
@@ -598,15 +659,6 @@ jobs:
             exit 1
           fi
 
-          if [ "$DEPLOY_BRANCH" = "$TARGET_BRANCH" ]; then
-            # Someone flipped it by hand while this waited. The variable alone
-            # does not publish anything, so the site can still be serving the
-            # old series; dispatch a deploy rather than declaring victory.
-            echo "::warning::DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — flipped outside this run."
-            echo "already_done=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           # The two preparation steps must STILL be satisfied: a merged PR can be
           # reverted while this job waits for approval.
           config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${TARGET_BRANCH}" \
@@ -620,9 +672,20 @@ jobs:
             echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
             exit 1
           fi
-          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${TARGET_BRANCH}\$"; then
+          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${TARGET_BRANCH//./\\.}\$"; then
             echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
             exit 1
+          fi
+
+          # Only now, with both prerequisites re-confirmed, is it safe to notice
+          # that someone flipped the variable by hand while this waited. Taking
+          # this exit any earlier would skip the checks above and then dispatch
+          # a deploy of a branch whose version bump may have been reverted.
+          if [ "$DEPLOY_BRANCH" = "$TARGET_BRANCH" ]; then
+            echo "::warning::DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — flipped outside this run."
+            echo "The branch is versioned and repointed, so a deploy is dispatched below."
+            echo "already_done=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           echo "Re-validated: ${TARGET_BRANCH} is the newest stable series, versioned and repointed."
