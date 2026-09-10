@@ -1,6 +1,6 @@
 name: Docs - Release-series cutover
 
-run-name: "Docs cutover check${{ inputs.dry_run && ' (dry run)' || '' }}"
+run-name: "Docs cutover${{ inputs.dry_run && ' (dry run)' || '' }}"
 
 # Moves the published docs to a new release series when one goes stable.
 #
@@ -36,12 +36,15 @@ run-name: "Docs cutover check${{ inputs.dry_run && ' (dry run)' || '' }}"
 #
 # WHY THE SWITCH IS ENVIRONMENT-GATED
 # create-release-branch.yml puts privileged release-namespace operations behind
-# an environment with required reviewers, deliberately. Publishing a different
-# docs series is that kind of operation: the docs for a new series should go
-# live when they are ready, not the instant a tag appears. The gate keeps the
-# detection and preparation fully automatic while the last step stays a click.
-# To make the cutover zero-touch, delete the `environment:` line on the `switch`
-# job; nothing else depends on it.
+# the `release-branch-management` environment and its required reviewers,
+# deliberately. Publishing a different docs series is that kind of operation:
+# the docs for a new series should go live when they are ready, not the instant
+# a tag appears. The gate keeps detection and preparation fully automatic while
+# the last step stays a click. The `switch` job reuses that same environment —
+# naming a NEW one would be worse than no gate at all, because GitHub creates a
+# referenced-but-missing environment on demand with no protection rules, and the
+# run would go green having approved nothing. To make the cutover zero-touch,
+# delete the `environment:` line and the gate assertion on the `switch` job.
 
 on:
   schedule:
@@ -56,11 +59,12 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  # One cutover in flight at a time. Never cancel: a half-applied cutover is
-  # the failure state this workflow exists to prevent.
-  group: docs-cutover
-  cancel-in-progress: false
+# NOTE: concurrency is deliberately NOT set at workflow level. A `switch` job
+# parked on environment approval would hold the group for up to the 30-day
+# approval timeout, and every later scheduled run would queue behind it — the
+# read-only detector would go silent for exactly as long as the cutover is
+# half-applied, which is the state this workflow exists to surface. The acting
+# jobs carry their own group instead.
 
 permissions:
   contents: read
@@ -109,7 +113,9 @@ jobs:
             | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
             | sed 's/^v//' \
             | sort -t. -k1,1n -k2,2n -k3,3n \
-            | tail -n1)"
+            | tail -n1 || true)"
+          # `|| true`: with no match `grep` exits 1 and pipefail would abort the
+          # assignment, killing the step before the diagnostic below can print.
 
           if [ -z "$newest" ]; then
             echo "::error::No stable release found. Refusing to guess a target series."
@@ -172,6 +178,9 @@ jobs:
     if: needs.detect.outputs.diverged == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: docs-cutover-prepare
+      cancel-in-progress: false
     outputs:
       ready: ${{ steps.state.outputs.ready }}
     permissions:
@@ -181,8 +190,15 @@ jobs:
         id: app_token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          # `client-id`, matching every other consumer of this App in the repo;
+          # `app-id` is the deprecated alias and warns on each run.
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          # Least privilege, as in update-disk-sizes.yml: push a branch, open a
+          # PR, dispatch docs-version-bump.yml. Nothing else.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
 
       - name: Read the desired end state off the target branch
         id: state
@@ -217,7 +233,7 @@ jobs:
           current_label="$(echo "$config" \
             | grep -A3 'const currentDocsVersion' \
             | grep -oE "label: *'v[0-9]+\.[0-9]+'" \
-            | grep -oE "v[0-9]+\.[0-9]+" | head -n1)"
+            | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
           if [ -z "$current_label" ]; then
             echo "::error::Could not read currentDocsVersion.label from docusaurus.config.ts on ${TARGET_BRANCH}."
             echo "The literal is rewritten at each cutover; if its shape changed, this workflow must be updated."
@@ -271,14 +287,38 @@ jobs:
           set -euo pipefail
 
           # docs-version-bump.yml names its branch docs/version-bump-<label>-<run id>,
-          # so an existing proposal can only be found by head prefix. Without this
-          # check every daily run would open another identical pull request.
-          existing="$(gh pr list --state open --base "$TARGET_BRANCH" \
+          # so an existing proposal can only be found by head prefix. --limit is
+          # explicit: the default page is 30, and release branches accumulate
+          # back-port PRs, which would push the match off the page and make this
+          # dispatch a duplicate every single day.
+          existing="$(gh pr list --state open --base "$TARGET_BRANCH" --limit 100 \
             --json number,headRefName \
             --jq "[.[] | select(.headRefName | startswith(\"docs/version-bump-v${TARGET_SERIES}-\"))] | .[0].number // empty")"
           if [ -n "$existing" ]; then
             echo "Version-bump PR #${existing} is already open against ${TARGET_BRANCH}. Waiting for it to merge."
             exit 0
+          fi
+
+          # A dispatched run takes minutes to build before it opens its PR. Without
+          # this, a re-run inside that window sees no PR and dispatches a second
+          # version bump, and both race to open competing PRs from the same base.
+          inflight="$(gh run list --workflow docs-version-bump.yml --branch "$TARGET_BRANCH" \
+            --limit 20 --json status,databaseId \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "requested" or .status == "waiting")] | length' || echo 0)"
+          if [ "$inflight" != "0" ]; then
+            echo "A docs-version-bump run is already in flight on ${TARGET_BRANCH}. Waiting for it."
+            exit 0
+          fi
+
+          # If the last attempt failed and left no PR, re-dispatching daily just
+          # produces a stream of identical failures. Stop and say why.
+          last="$(gh run list --workflow docs-version-bump.yml --branch "$TARGET_BRANCH" \
+            --limit 1 --json conclusion --jq '.[0].conclusion // empty' || true)"
+          if [ "$last" = "failure" ]; then
+            echo "::error::The last docs-version-bump run on ${TARGET_BRANCH} failed and opened no PR."
+            echo "Fix that run before the cutover can continue — re-dispatching it daily would only repeat the failure."
+            echo "A common cause: ${ARCHIVE_LABEL} is already present in versions.json from a partial manual archive."
+            exit 1
           fi
 
           echo "Dispatching docs-version-bump.yml on ${TARGET_BRANCH}: archive ${ARCHIVE_LABEL}, publish v${TARGET_SERIES}"
@@ -305,26 +345,48 @@ jobs:
             exit 0
           fi
 
+          # The remote branch can outlive its PR: closed-without-merging keeps it,
+          # and a push that lands before a failed `gh pr create` leaves it with no
+          # PR at all. A plain push would then be rejected non-fast-forward on
+          # every subsequent run, with only git's rejection text as a diagnostic.
+          # Re-point it at the current target tip instead, guarded by the SHA we
+          # actually observed so a concurrent writer is never clobbered.
+          remote_sha="$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/heads/${head}" | cut -f1 || true)"
+          if [ -n "$remote_sha" ]; then
+            echo "::warning::Branch ${head} already exists (${remote_sha:0:10}) with no open PR — recreating it from the ${TARGET_BRANCH} tip."
+          fi
+
           workdir="${RUNNER_TEMP}/cutover-repo"
           rm -rf "$workdir"
           git clone --depth 1 --branch "$TARGET_BRANCH" \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$workdir"
           cd "$workdir"
 
-          # Rewrite the branch name only inside the `on:` block, so a match in a
+          # Rewrite the pinned branch inside the `on:` block only, so a match in a
           # comment or a job condition further down is left alone.
-          python3 - "$CURRENT_BRANCH" "$TARGET_BRANCH" <<'PY'
+          #
+          # The entry is matched as "whatever release/N.N is pinned", NOT as the
+          # value of DOCS_DEPLOY_BRANCH. Those differ whenever a previous cutover
+          # stalled: the variable can still read release/3.5 while this branch
+          # already inherited release/3.6. Anchoring on the variable would make the
+          # detector and this rewrite disagree, and the step would fail daily.
+          python3 - "$TARGET_BRANCH" <<'PY'
           import re, sys
-          old, new = sys.argv[1], sys.argv[2]
+          new = sys.argv[1]
           path = '.github/workflows/docs-deploy.yml'
           src = open(path).read()
           head, sep, tail = src.partition('\npermissions:')
           if not sep:
               sys.exit('docs-deploy.yml has no permissions: block - refusing to edit blindly')
-          patched, n = re.subn(rf'^(\s*-\s*){re.escape(old)}\s*$', rf'\g<1>{new}', head, flags=re.M)
-          if n != 1:
-              sys.exit(f'expected exactly one push-trigger entry for {old} in the on: block, found {n}')
+          entries = re.findall(r'^\s*-\s*(release/[0-9]+\.[0-9]+)\s*$', head, flags=re.M)
+          if len(entries) != 1:
+              sys.exit(f'expected exactly one release/N.N push-trigger entry in the on: block, found {entries}')
+          if entries[0] == new:
+              sys.exit(f'{path} already pins {new} - nothing to repoint')
+          patched = re.sub(r'^(\s*-\s*)release/[0-9]+\.[0-9]+\s*$', rf'\g<1>{new}', head, flags=re.M)
           open(path, 'w').write(patched + sep + tail)
+          print(f'repointed {entries[0]} -> {new}')
           PY
 
           git config user.name "erigon-release-bot[bot]"
@@ -341,7 +403,13 @@ jobs:
           Opened automatically by the docs cutover workflow (run ${RUN_ID}).
           MSG
           git commit -F "${RUNNER_TEMP}/commit-msg.txt"
-          git push origin "HEAD:refs/heads/${head}"
+
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="refs/heads/${head}:${remote_sha}" \
+              origin "HEAD:refs/heads/${head}"
+          else
+            git push origin "HEAD:refs/heads/${head}"
+          fi
 
           # Quoted delimiter: the body is markdown full of backticks, which an
           # interpolating heredoc would run as command substitution. Placeholders
@@ -365,6 +433,8 @@ jobs:
           s=s.replace("__TARGET__",os.environ["TARGET_BRANCH"]).replace("__CURRENT__",os.environ["CURRENT_BRANCH"]).replace("__RUN__",os.environ["RUN_ID"]); \
           open(p,"w").write(s)' "${RUNNER_TEMP}/pr-body.md"
 
+          # Push succeeded, so the branch exists even if this fails; the guard
+          # above is what lets the next run recover instead of wedging.
           gh pr create \
             --base "$TARGET_BRANCH" \
             --head "$head" \
@@ -394,20 +464,117 @@ jobs:
     needs: [detect, prepare]
     if: needs.detect.outputs.diverged == 'true' && needs.prepare.outputs.ready == 'true' && !inputs.dry_run
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # Approval gate, matching create-release-branch.yml: configure required
-    # reviewers on this environment in repo settings. Remove this line to make
-    # the cutover zero-touch.
-    environment: docs-deploy-cutover
+    timeout-minutes: 10
+    concurrency:
+      group: docs-cutover-switch
+      cancel-in-progress: false
+    # Approval gate. This reuses release-branch-management — the environment
+    # create-release-branch.yml already gates on, which carries a
+    # required_reviewers rule today — rather than naming a fresh environment.
+    # A referenced environment that does not exist is CREATED ON DEMAND with no
+    # protection rules at all, so an invented name would look like a gate while
+    # approving nothing. The pre-flight step below asserts the rule is really
+    # there, because that property lives in repo settings and can be removed
+    # without touching this file.
+    environment: release-branch-management
     steps:
       - name: Generate GitHub App token
         id: app_token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          # Deliberately UNSCOPED, unlike every other consumer of this App.
+          # Writing a repository variable needs the App's `variables` permission,
+          # and this action version exposes no `permission-variables` input — so
+          # listing any permission-* here would mint a token that is *missing*
+          # the one permission this job exists to use. Revisit when the action
+          # gains that input.
+
+      - name: Assert the approval gate is real
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rules="$(gh api "repos/{owner}/{repo}/environments/release-branch-management" \
+            --jq '[.protection_rules[]?.type] | join(",")' 2>/dev/null || echo "__unreadable__")"
+          if [ "$rules" = "__unreadable__" ]; then
+            echo "::warning::Could not read the environment's protection rules with this token; continuing."
+          elif ! echo "$rules" | grep -q 'required_reviewers'; then
+            echo "::error::Environment release-branch-management has no required_reviewers rule (rules: ${rules:-none})."
+            echo "This job would flip the published docs series with no human approval. Refusing."
+            exit 1
+          else
+            echo "Approval gate present (rules: ${rules})."
+          fi
+
+      - name: Re-validate before flipping
+        id: revalidate
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOY_BRANCH: ${{ vars.DOCS_DEPLOY_BRANCH }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+        run: |
+          set -euo pipefail
+
+          # Everything in `needs.*` was computed BEFORE the approval wait, which
+          # can last up to the 30-day environment timeout. Approving a stale run
+          # would publish a series that is no longer the newest, or re-apply a
+          # cutover somebody already did by hand. Re-read the world instead of
+          # trusting the snapshot.
+          #
+          # Selection duplicated from the `detect` job on purpose: the two must
+          # agree, and a shared step would need a composite action for three lines.
+          newest="$(gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n -k3,3n \
+            | tail -n1 || true)"
+          if [ -z "$newest" ]; then
+            echo "::error::No stable release visible at approval time. Refusing to flip."
+            exit 1
+          fi
+          newest_branch="release/$(echo "$newest" | cut -d. -f1-2)"
+
+          if [ "$newest_branch" != "$TARGET_BRANCH" ]; then
+            echo "::error::Newest stable series is now ${newest_branch}, but this run was prepared for ${TARGET_BRANCH}."
+            echo "Refusing to publish a superseded series. Re-run the workflow to prepare ${newest_branch}."
+            exit 1
+          fi
+
+          if [ "$DEPLOY_BRANCH" = "$TARGET_BRANCH" ]; then
+            echo "DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — someone completed the cutover. Nothing to do."
+            echo "already_done=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The two preparation steps must STILL be satisfied: a merged PR can be
+          # reverted while this job waits for approval.
+          config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          label="$(echo "$config" | grep -A3 'const currentDocsVersion' \
+            | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+          deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+
+          if [ "$label" != "v${TARGET_SERIES}" ]; then
+            echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
+            exit 1
+          fi
+          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${TARGET_BRANCH}\$"; then
+            echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
+            exit 1
+          fi
+
+          echo "Re-validated: ${TARGET_BRANCH} is the newest stable series, versioned and repointed."
+          echo "already_done=false" >> "$GITHUB_OUTPUT"
 
       - name: Flip DOCS_DEPLOY_BRANCH
+        if: steps.revalidate.outputs.already_done == 'false'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -434,18 +601,34 @@ jobs:
           fi
           echo "DOCS_DEPLOY_BRANCH: ${CURRENT_BRANCH} -> ${TARGET_BRANCH}"
 
-      - name: Publish the new series immediately
+      - name: Publish the new series
+        if: steps.revalidate.outputs.already_done == 'false'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
         run: |
           set -euo pipefail
-          # Without this the site would keep serving the old series until the
-          # 06:20 cron, up to 24h later.
-          gh workflow run docs-deploy.yml --ref "$TARGET_BRANCH"
+
+          # The variable is already flipped, so the site is going to change either
+          # way: this only decides whether it changes now or at the 06:20 cron.
+          # A dispatch failure must therefore NOT fail the job and imply the
+          # cutover did not happen — it did.
+          if gh workflow run docs-deploy.yml --ref "$TARGET_BRANCH"; then
+            dispatched="dispatched"
+          else
+            dispatched="NOT dispatched"
+            echo "::warning::Variable flipped, but dispatching docs-deploy.yml failed (the App may lack actions:write)."
+            echo "::warning::The 06:20 UTC docs-deploy-cron will publish ${TARGET_BRANCH} within 24h."
+          fi
+
+          # Deliberately not claiming the site is live: accepting a dispatch is
+          # not a successful build, and a Pages failure would make that a lie.
           {
-            echo "### Docs cutover complete"
+            echo "### Docs cutover applied"
             echo ""
-            echo "\`DOCS_DEPLOY_BRANCH\` now reads \`${TARGET_BRANCH}\`, and a deploy has been dispatched."
+            echo "\`DOCS_DEPLOY_BRANCH\` now reads \`${TARGET_BRANCH}\`. Deploy ${dispatched}."
+            echo ""
+            echo "The site serves the new series once that deploy run succeeds — check the"
+            echo "\`Deploy Docs\` workflow on \`${TARGET_BRANCH}\`, not this run."
           } >> "$GITHUB_STEP_SUMMARY"
