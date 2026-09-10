@@ -397,10 +397,8 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
-	if p, ok := tx.AggTx().(interface {
-		Cfg(kv.Domain) statecfg.DomainCfg
-	}); ok {
-		sd.sdCtx.SetCommitmentEdgeRecords(p.Cfg(kv.CommitmentDomain).EdgeRecordsInCommitment)
+	if p, ok := tx.AggTx().(interface{ CommitmentEdgeRecords() bool }); ok {
+		sd.sdCtx.SetCommitmentEdgeRecords(p.CommitmentEdgeRecords())
 	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin

@@ -2679,12 +2679,12 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 	return at.d[kv.CommitmentDomain].d.branchCache
 }
 
-// Cfg returns the domain configuration visible to this transaction.
-func (at *AggregatorRoTx) Cfg(domain kv.Domain) statecfg.DomainCfg {
-	if at.d[domain] == nil {
-		return statecfg.DomainCfg{}
+// CommitmentEdgeRecords reports the record format the commitment domain is configured for.
+func (at *AggregatorRoTx) CommitmentEdgeRecords() bool {
+	if at.d[kv.CommitmentDomain] == nil {
+		return false
 	}
-	return at.d[domain].d.DomainCfg
+	return at.d[kv.CommitmentDomain].d.EdgeRecordsInCommitment
 }
 
 // AdaptivePinController attached to the commitment domain (implements
