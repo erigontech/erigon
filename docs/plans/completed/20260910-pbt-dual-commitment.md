@@ -824,11 +824,11 @@ different states and correctly report different roots.
 
 ### Task 28: [Final] Update documentation
 
-- [ ] add `docs/pbin-dual-commitment.md` describing the two-domain model, the three datadir modes, the
+- [x] add `docs/pbin-dual-commitment.md` describing the two-domain model, the three datadir modes, the
       freeze lifecycle and the debug API — citing source by identifier and file, never `file.go:NNN`
-- [ ] update `docs/pbin-encoding.md` if the domain split changes anything it states
-- [ ] update CLAUDE.md if new patterns emerged
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `docs/pbin-encoding.md` if the domain split changes anything it states
+- [x] update CLAUDE.md if new patterns emerged
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

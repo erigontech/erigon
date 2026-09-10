@@ -10,6 +10,18 @@ and a leaf commits its complete tree key (the type's doc comment).
 
 Everything below was produced by running the engine. Hex is real.
 
+## 0. Storage domain
+
+`PBinPatriciaHashed` writes binary-trie records to the commitment domain selected by the datadir
+mode. A binary-only datadir uses the existing `kv.CommitmentDomain` (`db/kv/tables.go`) with the
+binary trie as its algorithm. A `hex+bin` datadir keeps the hex trie in that domain and writes the
+binary trie to `kv.CommitmentBinDomain`, whose schema is defined by `Schema.CommitmentBinDomain`
+(`db/state/statecfg/state_schema.go`). Its snapshot files use the `commitment-bin` filename prefix.
+
+This domain split does not change any encoding below. `Config.IsBinaryTrie` in
+`execution/chain/chain_config.go` selects which domain's root is canonical for a block; the
+committer's dual-fold path records the other root as the shadow root.
+
 ---
 
 ## 1. Tree keys
