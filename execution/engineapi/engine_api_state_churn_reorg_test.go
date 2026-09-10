@@ -246,6 +246,7 @@ func buildChurnChain(
 
 	addr, deployTxn, churn, err := contracts.DeployStateChurn(transactOpts, eat.ContractBackend)
 	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.WaitForPending(ctx, transactOpts.From, deployTxn.Hash()))
 	deployBlock, err := eat.MockCl.BuildCanonicalBlock(ctx)
 	require.NoError(t, err)
 	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, deployBlock.ExecutionPayload, deployTxn.Hash()))

@@ -83,10 +83,9 @@ func (req *requestGenerator) txpoolContent() (RPCMethod, string) {
 	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
 }
 
-// TxpoolPendingHashesFrom returns the hashes the pool holds for address in its
-// pending subpool. A transaction the pool accepted may still sit in queued,
-// where block building will not pick it up, so acceptance alone is not enough
-// to assert that the next block must contain it.
+// TxpoolPendingHashesFrom returns the hashes txpool_contentFrom reports as
+// pending for address. The server folds the baseFee subpool into that bucket,
+// so the result is a superset of what block building selects.
 func (reqGen *requestGenerator) TxpoolPendingHashesFrom(address common.Address) (map[common.Hash]struct{}, error) {
 	var b struct {
 		CommonResponse
