@@ -831,6 +831,12 @@ var (
 		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
+
+	DisableTCP = cli.BoolFlag{
+		Name:  "downloader.disable.tcp",
+		Usage: "Turns off TCP for the downloader, leaving uTP as the only BitTorrent transport",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -953,6 +959,11 @@ var (
 		Name:  "caplin.mev-relay-url",
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
+	}
+	CaplinAllowPrivateBuilderURLs = cli.BoolFlag{
+		Name:  "caplin.builder.allow-private-urls",
+		Usage: "Allow validator-configured builder URLs to resolve to private or loopback addresses",
+		Value: false,
 	}
 	CaplinValidatorMonitorFlag = cli.BoolFlag{
 		Name:  "caplin.validator-monitor",
@@ -1846,6 +1857,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
@@ -2147,6 +2159,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
 				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				DisableTCP:               boolFlagOpt(ctx, &DisableTCP),
 				Verify:                   ctx.Bool(DownloaderVerifyFlag.Name),
 				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
 				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
