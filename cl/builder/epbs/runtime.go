@@ -13,24 +13,32 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 type RuntimeDependencies struct {
-	BeaconConfig *clparams.BeaconChainConfig
-	Clock        LiveSlotClock
-	Head         LiveHeadStateSource
-	Forkchoice   LiveForkchoiceSource
-	Assembler    PayloadAssembler
-	Publisher    GossipPublisher
+	BeaconConfig     *clparams.BeaconChainConfig
+	Clock            LiveSlotClock
+	Head             LiveHeadStateSource
+	Forkchoice       LiveForkchoiceSource
+	Assembler        PayloadAssembler
+	Publisher        GossipPublisher
+	BidProcessor     BidProcessor
+	PayloadProcessor PayloadProcessor
+	AcceptedBlocks   AcceptedBlockReader
+	Events           *beaconevents.EventEmitter
 }
 
 type Runtime struct {
 	coordinator *Coordinator
 	runner      *ValidatedPreferencesRunner
+	reveals     *revealRunner
+	events      *beaconevents.EventEmitter
 }
 
 func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) {
@@ -43,15 +51,18 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	}
 	cfg = resolvedCfg
 	if isNilDependency(deps.Clock) || isNilDependency(deps.Head) || isNilDependency(deps.Forkchoice) ||
-		isNilDependency(deps.Assembler) || isNilDependency(deps.Publisher) {
+		isNilDependency(deps.Assembler) || isNilDependency(deps.Publisher) || isNilDependency(deps.BidProcessor) ||
+		isNilDependency(deps.PayloadProcessor) || isNilDependency(deps.AcceptedBlocks) || deps.Events == nil {
 		return nil, errors.New("epbs/runtime: missing dependency")
 	}
+	bidPublisher := newValidatedBidPublisher(deps.BidProcessor, deps.Publisher, cfg.RetryInterval)
+	assembler := newBloblessPayloadAssembler(deps.Assembler)
 	coordinator := NewCoordinator(
 		deps.BeaconConfig,
 		signer,
 		FixedMarginStrategy{Margin: cfg.BidMargin},
-		deps.Assembler,
-		deps.Publisher,
+		assembler,
+		bidPublisher,
 		cfg.MaxRetained,
 	)
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
@@ -60,7 +71,11 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	if err != nil {
 		return nil, fmt.Errorf("epbs/runtime: create preferences runner: %w", err)
 	}
-	return &Runtime{coordinator: coordinator, runner: runner}, nil
+	reveals := newRevealRunner(
+		deps.BeaconConfig, deps.Clock, signer, coordinator, deps.AcceptedBlocks, deps.PayloadProcessor,
+		deps.Publisher, cfg.RetryInterval, cfg.MaxRetained,
+	)
+	return &Runtime{coordinator: coordinator, runner: runner, reveals: reveals, events: deps.Events}, nil
 }
 
 func ValidateRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainConfig) error {
@@ -90,6 +105,12 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	if beaconCfg.SlotsPerEpoch == 0 {
 		return cfg, nil, errors.New("epbs/runtime: slots per epoch must be positive")
 	}
+	if beaconCfg.PayloadDueBps > clparams.BpsFactor {
+		return cfg, nil, errors.New("epbs/runtime: payload deadline must be within the slot")
+	}
+	if beaconCfg.SecondsPerSlot == 0 || beaconCfg.SecondsPerSlot > uint64(math.MaxInt64/int64(time.Second)) {
+		return cfg, nil, errors.New("epbs/runtime: slot duration is outside the supported range")
+	}
 	if cfg.MaxPending == 0 {
 		if beaconCfg.SlotsPerEpoch > uint64(^uint(0)>>1) {
 			return cfg, nil, errors.New("epbs/runtime: slots per epoch exceeds pending capacity range")
@@ -117,8 +138,58 @@ func (r *Runtime) SubmitValidatedPreferences(preferences *cltypes.SignedProposer
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if r == nil || r.runner == nil {
+	if r == nil || r.runner == nil || r.reveals == nil || r.events == nil {
 		return errors.New("epbs/runtime: not initialized")
 	}
-	return r.runner.Run(ctx)
+	if ctx == nil {
+		return errors.New("epbs/runtime: nil context")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	events := make(chan *beaconevents.EventStream, r.reveals.maxQueue())
+	subscription := r.events.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	runnerDone := make(chan error, 1)
+	revealsDone := make(chan struct{})
+	runnerExited := false
+	go func() { runnerDone <- r.runner.Run(runCtx) }()
+	go func() {
+		defer close(revealsDone)
+		r.reveals.Run(runCtx)
+	}()
+	defer func() {
+		cancel()
+		if !runnerExited {
+			<-runnerDone
+		}
+		<-revealsDone
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-runnerDone:
+			runnerExited = true
+			if err == nil {
+				return errors.New("epbs/runtime: preferences runner stopped")
+			}
+			return err
+		case err, ok := <-subscription.Err():
+			if !ok || err == nil {
+				return errors.New("epbs/runtime: accepted block subscription stopped")
+			}
+			return fmt.Errorf("epbs/runtime: accepted block subscription: %w", err)
+		case event, ok := <-events:
+			if !ok {
+				return errors.New("epbs/runtime: accepted block event stream stopped")
+			}
+			if event == nil || event.Event != beaconevents.StateBlock {
+				continue
+			}
+			data, ok := event.Data.(*beaconevents.BlockData)
+			if ok && data != nil {
+				r.reveals.SubmitAcceptedBlock(data.Block)
+			}
+		}
+	}
 }

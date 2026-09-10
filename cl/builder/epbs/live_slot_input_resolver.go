@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -33,6 +34,7 @@ var (
 
 type LiveSlotClock interface {
 	GetCurrentSlot() uint64
+	GetSlotTime(uint64) time.Time
 	GenesisValidatorsRoot() common.Hash
 }
 

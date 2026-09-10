@@ -100,6 +100,9 @@ type RetainedPayload struct {
 	Assembled         *eladapter.AssembledPayload
 	ExecutionRequests *cltypes.ExecutionRequests
 	BidValue          uint64
+	BuilderIndex      uint64
+	SignedBidRoot     common.Hash
+	GenesisRoot       common.Hash
 }
 
 type Coordinator struct {
@@ -267,6 +270,10 @@ func (c *Coordinator) runSlotGuarded(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	signedBidRoot, err := signedBid.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("epbs/coordinator: bid root: %w", err)
+	}
 
 	identity := PayloadIdentity{
 		Slot: input.Slot, ParentBlockHash: input.ParentBlockHash,
@@ -274,6 +281,7 @@ func (c *Coordinator) runSlotGuarded(
 	}
 	retained := &RetainedPayload{
 		PayloadID: payloadID, Assembled: assembled, ExecutionRequests: executionRequests, BidValue: bidValue,
+		BuilderIndex: input.BuilderIndex, SignedBidRoot: common.Hash(signedBidRoot), GenesisRoot: input.GenesisValidatorsRoot,
 	}
 	owned, err := cloneRetainedPayload(c.beaconCfg, retained)
 	if err != nil {
@@ -322,6 +330,16 @@ func (c *Coordinator) Payload(identity PayloadIdentity) (*RetainedPayload, bool,
 		return nil, false, fmt.Errorf("epbs/coordinator: clone retained payload: %w", err)
 	}
 	return cloned, true, nil
+}
+
+func (c *Coordinator) MatchesPayload(identity PayloadIdentity, builderIndex uint64, signedBidRoot common.Hash) bool {
+	if c == nil || signedBidRoot == (common.Hash{}) {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := c.retained[identity]
+	return entry != nil && entry.payload.BuilderIndex == builderIndex && entry.payload.SignedBidRoot == signedBidRoot
 }
 
 func (c *Coordinator) DropPayload(identity PayloadIdentity) bool {
@@ -591,6 +609,9 @@ func cloneRetainedPayload(beaconCfg *clparams.BeaconChainConfig, source *Retaine
 		PayloadID: source.PayloadID, Assembled: assembled,
 		ExecutionRequests: source.ExecutionRequests.Clone().(*cltypes.ExecutionRequests),
 		BidValue:          source.BidValue,
+		BuilderIndex:      source.BuilderIndex,
+		SignedBidRoot:     source.SignedBidRoot,
+		GenesisRoot:       source.GenesisRoot,
 	}, nil
 }
 
