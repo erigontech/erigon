@@ -507,7 +507,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 			// Frame classification compares the bare sentinel: a wrapped
 			// revert would burn the frame's gas and drop the return data.
-			if err != nil && vmErrorCodeFromErr(err) == VMErrorCodeExecutionReverted {
+			if err != nil && isRevert(err) {
 				err = ErrExecutionReverted
 			}
 		} else {

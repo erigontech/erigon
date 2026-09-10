@@ -466,23 +466,27 @@ func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
 }
 
 func TestStatefulPrecompileMultiWrappedExceptionalBurnsFrameGas(t *testing.T) {
-	const chainID = 900415
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x94}))
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: funcPrecompile{name: "MULTIWRAP",
-		run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
-			if !gas.ChargeExecution(100) {
-				return nil, vm.ErrOutOfGas
-			}
-			return nil, fmt.Errorf("%w: %w", vm.ErrOutOfGas, vm.ErrExecutionReverted)
-		}}})
+	for i, exceptional := range []error{vm.ErrOutOfGas, vm.ErrGasUintOverflow, vm.ErrMaxCodeSizeExceeded} {
+		t.Run(exceptional.Error(), func(t *testing.T) {
+			chainID := uint64(900415 + i)
+			precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{byte(0x94 + i)}))
+			registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: funcPrecompile{name: "MULTIWRAP",
+				run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+					if !gas.ChargeExecution(100) {
+						return nil, vm.ErrOutOfGas
+					}
+					return nil, fmt.Errorf("%w: %w", exceptional, vm.ErrExecutionReverted)
+				}}})
 
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+			cfg := newL2TestConfig(t, chainID)
+			vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
-		mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
-	require.ErrorIs(t, err, vm.ErrOutOfGas)
-	require.Zero(t, remaining.Execution, "an exceptional failure burns the frame's leftover gas")
+			_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
+				mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
+			require.ErrorIs(t, err, exceptional)
+			require.Zero(t, remaining.Execution, "an exceptional failure burns the frame's leftover gas")
+		})
+	}
 }
 
 // A refused call must record no address access; EIP-7928 makes that consensus-visible.
