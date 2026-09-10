@@ -353,12 +353,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
 	if st.msg.AccessList() != nil && !rules.IsBerlin {
-		// eth_createAccessList's own convergence-loop accumulator is not
-		// caller-declared EIP-2930 intent, so it opts out of this gate.
-		skipper, ok := st.msg.(interface{ SkipAccessListForkCheck() bool })
-		if !ok || !skipper.SkipAccessListForkCheck() {
-			return upfrontTxnFees{}, types.ErrAccessListPreBerlin
-		}
+		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
 	}
 	if st.msg.BlobHashes() != nil {
 		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {

@@ -1696,64 +1696,56 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	})
 }
 
-// TestCreateAccessListPreBerlin covers the regression this package's preCheck
-// fork gates introduced: eth_createAccessList feeds its own convergence-loop
-// accumulator into the message it builds, so a bare AccessList()!=nil check in
-// preCheck rejected the endpoint's own output on every pre-Berlin block, not
-// just requests that actually asked for EIP-2930 semantics.
+// TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
+// pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
+// meaningful concept there, regardless of whether the caller supplied one or
+// the call would otherwise touch storage.
 func TestCreateAccessListPreBerlin(t *testing.T) {
 	preBerlin := chain.TestChainBerlinConfig.Copy()
 	preBerlin.BerlinBlock = nil
 
-	t.Run("plain transfer converges to an empty access list", func(t *testing.T) {
+	t.Run("plain transfer rejects pre-Berlin", func(t *testing.T) {
 		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
 		_ = bankKey
 		api := newTestEthAPIWithFilters(t, m)
 		recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
 
-		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
 			From: &bankAddr,
 			To:   &recipient,
 		}, nil, nil, nil)
-		require.NoError(t, err)
-		require.Empty(t, res.Error)
-		require.NotNil(t, res.Accesslist)
-		require.Empty(t, *res.Accesslist)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
 	})
 
-	t.Run("contract call converges to a populated access list", func(t *testing.T) {
+	t.Run("contract call rejects pre-Berlin", func(t *testing.T) {
 		m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, preBerlin)
 		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 		data := hexutil.Bytes(contractInvocationData(42))
 
-		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
 			From: &bankAddress,
 			To:   &contractAddress,
 			Data: &data,
 		}, nil, nil, nil)
-		require.NoError(t, err)
-		require.Empty(t, res.Error)
-		require.Len(t, *res.Accesslist, 1)
-		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
 	})
 
-	t.Run("caller-supplied seed access list still converges", func(t *testing.T) {
+	t.Run("caller-supplied seed access list rejects pre-Berlin", func(t *testing.T) {
 		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
 		_ = bankKey
 		api := newTestEthAPIWithFilters(t, m)
 		recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
 		seed := types.AccessList{{Address: common.HexToAddress("0x4444444444444444444444444444444444444444")}}
 
-		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
 			From:       &bankAddr,
 			To:         &recipient,
 			AccessList: &seed,
 		}, nil, nil, nil)
-		require.NoError(t, err)
-		require.Empty(t, res.Error)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
 	})
 
-	t.Run("eth_call with an explicit access list still rejects pre-Berlin", func(t *testing.T) {
+	t.Run("eth_call with an explicit access list rejects pre-Berlin", func(t *testing.T) {
 		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
 		_ = bankKey
 		api := newTestEthAPIWithFilters(t, m)
@@ -1766,5 +1758,21 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 			AccessList: &al,
 		}, nil, nil, nil)
 		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("access list from Berlin on still converges", func(t *testing.T) {
+		m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.TestChainBerlinConfig)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+		data := hexutil.Bytes(contractInvocationData(42))
+
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddress,
+			To:   &contractAddress,
+			Data: &data,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
 }
