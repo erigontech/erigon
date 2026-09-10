@@ -242,6 +242,7 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 		if err != nil {
 			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
 		}
+		relativePaths[i] = filepath.ToSlash(relativePaths[i])
 	}
 	return relativePaths
 }
