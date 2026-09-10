@@ -35,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/handler"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/builder/epbs"
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -78,6 +80,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/node/ethconfig"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
@@ -193,7 +196,9 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	executionModule execmodule.ExecutionModule,
+) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -499,7 +504,32 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
-	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
+	var embeddedBuilder *epbs.Runtime
+	if config.EpbsBuilder.Enabled {
+		if executionModule == nil {
+			return errors.New("embedded ePBS builder requires the in-process execution module")
+		}
+		embeddedBuilder, err = epbs.NewRuntime(config.EpbsBuilder, epbs.RuntimeDependencies{
+			BeaconConfig: beaconConfig,
+			Clock:        ethClock,
+			Head:         syncedDataManager,
+			Forkchoice:   forkChoice,
+			Assembler:    eladapter.NewAdapter(executionModule, beaconConfig),
+			Publisher:    gossipManager,
+		})
+		if err != nil {
+			return fmt.Errorf("initialize embedded ePBS builder: %w", err)
+		}
+	}
+	proposerPreferencesService := services.NewProposerPreferencesServiceWithSink(
+		syncedDataManager,
+		forkChoice,
+		ethClock,
+		beaconConfig,
+		epbsPool,
+		emitters,
+		embeddedBuilder,
+	)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
@@ -522,6 +552,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		executionPayloadBidService,
 	)
 	peerDas.Start(ctx)
+	if embeddedBuilder != nil {
+		builderDone := make(chan struct{})
+		go func() {
+			defer close(builderDone)
+			if err := embeddedBuilder.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("Embedded ePBS builder stopped", "err", err)
+			}
+		}()
+		defer func() {
+			cn()
+			<-builderDone
+		}()
+		logger.Info("Embedded ePBS builder started")
+	}
 
 	{
 		go batchSignatureVerifier.Start()

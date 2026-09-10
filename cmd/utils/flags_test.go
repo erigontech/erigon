@@ -329,6 +329,29 @@ func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
+func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
+	enabled := EpbsBuilderFlag
+	key := EpbsBuilderKeyFlag
+	margin := EpbsBuilderBidMarginFlag
+	cfg := ethconfig.Config{}
+	app := &cli.Command{
+		Flags: []cli.Flag{&enabled, &key, &margin},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			setCaplin(cmd, &cfg)
+			return nil
+		},
+	}
+	require.NoError(t, app.Run(context.Background(), []string{
+		"erigon", "--builder", "--builder.key=/secure/builder.key", "--builder.bid-margin=0.9",
+	}))
+	require.True(t, cfg.CaplinConfig.EpbsBuilder.Enabled)
+	require.Equal(t, "/secure/builder.key", cfg.CaplinConfig.EpbsBuilder.KeyPath)
+	require.Equal(t, 0.9, cfg.CaplinConfig.EpbsBuilder.BidMargin)
+	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxPending)
+	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxRetained)
+	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.RetryInterval)
+}
+
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool
