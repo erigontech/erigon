@@ -541,6 +541,10 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	} else {
 		cell.accountAddrLen = 0
 	}
+	if depth == 64 && cell.hashedExtLen == 0 && cell.extLen > 0 {
+		copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+		cell.hashedExtLen = cell.extLen
+	}
 	cell.storageAddrLen = upCell.storageAddrLen
 	if upCell.storageAddrLen > 0 {
 		copy(cell.storageAddr[:], upCell.storageAddr[:upCell.storageAddrLen])

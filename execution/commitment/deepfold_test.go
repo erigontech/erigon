@@ -429,6 +429,33 @@ func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
 	require.Equal(t, want, restored, "state-restored trie re-expanded the survivor under the wrong nibble")
 }
 
+func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4244))
+	under := storageLocsForNibble(0x6, 2, 17)
+	fresh := storageLocsForNibble(0x0, 1, 4711)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range under {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range fresh {
+		ub2.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	k1, u1 := ub1.Build()
+	k2, u2 := ub2.Build()
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	restored, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+	require.Equal(t, want, carriedRoot(t, k1, u1, k2, u2), "carried trie lost the storage extension below the sole account")
+	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
+}
+
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
 func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
 	rnd := rand.New(rand.NewSource(seed))
