@@ -237,6 +237,7 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	data *solid.AttestationData,
 	inclusionDelay uint64,
+	parentSlot uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
 	var justifiedCheckpoint solid.Checkpoint
@@ -275,7 +276,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 			}
 			payloadMatch = true
 		} else {
-			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			slotIndex := parentSlot % b.BeaconConfig().SlotsPerHistoricalRoot
 			aval := b.GetExecutionPayloadAvailability()
 			payloadAvailable := aval.GetBitAt(int(slotIndex))
 			payloadMatch = (data.CommitteeIndex == 1) == payloadAvailable
