@@ -377,7 +377,8 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// A budget with room for one entry. Successive distinct codes evict rather
 	// than freezing the layer, and residency never exceeds the budget.
-	const codeCap = codeEntryBytes + 8
+	// The budget is split across the two content layers, so size it for one entry each.
+	const codeCap = 2 * (codeEntryBytes + 8)
 	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeCap), 1024*1024))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
@@ -387,7 +388,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
 	assert.Equal(t, 1, c.CodeLen())
-	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap))
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap)/2)
 
 	// Exactly one of the three addrs still resolves to its code — which one is
 	// the eviction policy's call, not the test's.

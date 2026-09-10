@@ -140,7 +140,7 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 func TestCodeCache_PutWithCodeHash_EvictsWhenFull(t *testing.T) {
 	// A budget with room for one entry. The second put must evict rather than
 	// freeze the layer, leaving exactly one of the two codes resident.
-	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeEntryBytes+8), 1*datasize.MB))
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(2*(codeEntryBytes+8)), 1*datasize.MB))
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 

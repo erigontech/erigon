@@ -264,9 +264,13 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The content-addressed layers grow from a small start into the shared
 	// envelope, so a cache over few contracts (a test fixture) never pre-commits
 	// the full budget. onEvict keeps the byte/entry counters following residency.
-	cc.hashToCode = newByteLRU(codeCapacityBytes, codeEntryResident,
+	// The two content layers hold the same code under different keys, so they
+	// split the budget rather than each taking it: the configured figure is what
+	// the cache costs, not half of it.
+	perLayer := max(codeCapacityBytes/2, 1)
+	cc.hashToCode = newByteLRU(perLayer, codeEntryResident,
 		func(k uint64, e codeEntry) { cc.codeSize.Add(-codeEntryResident(k, e)) })
-	cc.codeHashToCode = newByteLRU(codeCapacityBytes, codeEntryResident,
+	cc.codeHashToCode = newByteLRU(perLayer, codeEntryResident,
 		func(k uint64, e codeEntry) { cc.codeHashCodeSize.Add(-codeEntryResident(k, e)) })
 	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
 	// the slot charge already covers.
