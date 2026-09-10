@@ -190,11 +190,25 @@ jobs:
             # 06:20 cron does — quietly, for as long as nobody notices. The
             # state machine below never looks at the branch in this case, so
             # check it here.
+          # Extract the branches of the PUSH trigger only. The `on:` block can
+          # carry other triggers with their own branch filters, and a match in
+          # one of those is not a deploy trigger: a file whose push list still
+          # names the old branch would read as pinned, the variable would flip,
+          # and merges would never publish. Comparing with `grep -Fx` against
+          # this list also removes every regex-escaping question.
+          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
+          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
+          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
+          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
+          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
+          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
+          AWKEOF
             deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${target_branch}" \
               --jq '.content' 2>/dev/null | base64 -d || echo '')"
             if [ -z "$deploy_yml" ]; then
               echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
-            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${target_branch//./\\.}[[:blank:]]*\$"; then
+            elif ! printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
+                   | grep -Fxq "$target_branch"; then
               echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
               echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
             else
@@ -318,65 +332,73 @@ jobs:
           fi
           echo "archive_label=${current_label}" >> "$GITHUB_OUTPUT"
 
-          # Before any version bump is dispatched, prove the target branch holds
-          # the PUBLISHED docs tree. Presence of docs-deploy.yml is not the test:
-          # PR #23283 added that file to release/3.6 by hand, so a human can
-          # cherry-pick it onto a branch cut from `main` and the tree is still
-          # main's. main carries versions.json ["v3.4","v3.3"] where release/3.6
-          # has ["v3.5","v3.4","v3.3"], and main's label already reads v3.6 — so
-          # a bump there archives the wrong content under the right name and
-          # drops a version from the published dropdown, silently. Run this
-          # whenever a bump is pending, not only when the workflow file is absent.
-          if [ "$archived" = false ]; then
-            tgt_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${TARGET_BRANCH}" \
-              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
-            cur_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${CURRENT_BRANCH}" \
-              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
-            cur_config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${CURRENT_BRANCH}" \
-              --jq '.content' 2>/dev/null | base64 -d || echo '')"
-            cur_label="$(echo "$cur_config" | grep -A3 'const currentDocsVersion' \
-              | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+          # What this proves, precisely: publishing the target branch loses no
+          # docs version — every version archived on the branch currently
+          # publishing is archived on the target too, and that branch's LIVE
+          # series either is the target's current label (so the bump will
+          # archive it) or is already archived there.
+          #
+          # What it does NOT prove: that the branch was cut from the right
+          # place. The archived `versioned_docs` trees are byte-identical across
+          # main, release/3.5 and release/3.6, and the live docs tree differs on
+          # all three, so no cheap structural test separates "cut from main"
+          # from "cut from the previous release and edited since". This is a
+          # loss detector, not a provenance detector.
+          #
+          # It runs UNCONDITIONALLY. Gating it on "a bump is pending" skipped it
+          # in the worst case: main today carries label v3.6 with versions.json
+          # ["v3.4","v3.3"], so a branch cut from main reads as already
+          # versioned, and the check that would notice v3.5 vanishing is exactly
+          # the code the gate skipped.
+          # (unconditional — see above)
+          tgt_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+          cur_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${CURRENT_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+          cur_config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${CURRENT_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          cur_label="$(echo "$cur_config" | grep -A3 'const currentDocsVersion' \
+            | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
 
-            # Fail CLOSED. An unreadable inventory is indistinguishable from an
-            # empty one, and an empty one makes every comparison below pass —
-            # admitting exactly the branch this refuses.
-            if [ -z "$tgt_versions" ] || [ -z "$cur_versions" ] || [ -z "$cur_label" ]; then
-              echo "::error::Could not read the docs inventory needed to validate ${TARGET_BRANCH}:"
-              [ -z "$tgt_versions" ] && echo "  - versions.json on ${TARGET_BRANCH}"
-              [ -z "$cur_versions" ] && echo "  - versions.json on ${CURRENT_BRANCH}"
-              [ -z "$cur_label" ] && echo "  - currentDocsVersion.label on ${CURRENT_BRANCH}"
-              echo "Refusing to dispatch a version bump without confirming the branch holds the published docs."
-              exit 1
-            fi
-
-            missing=""
-            for v in $(echo "$cur_versions" | tr -d '[]"' | tr ',' ' '); do
-              case "$tgt_versions" in
-                *"\"${v}\""*) ;;
-                *) missing="${missing} ${v}" ;;
-              esac
-            done
-            # The LIVE series on the publishing branch must survive too: either
-            # it is still the target's current label (the bump will archive it)
-            # or it is already archived there. Archived-superset alone misses
-            # this — after a skipped cutover both inventories can match while the
-            # live label is archived nowhere and simply disappears.
-            if [ "$cur_label" != "$current_label" ]; then
-              case "$tgt_versions" in
-                *"\"${cur_label}\""*) ;;
-                *) missing="${missing} ${cur_label}(live)" ;;
-              esac
-            fi
-
-            if [ -n "$missing" ]; then
-              echo "::error::${TARGET_BRANCH} does not carry the published docs versions present on ${CURRENT_BRANCH}:${missing}"
-              echo "Its docs tree is not the published one — most likely it was cut from 'main' rather than from ${CURRENT_BRANCH}."
-              echo "Versioning it would archive the wrong content and drop those versions from the site."
-              echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
-              exit 1
-            fi
-            echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
+          # Fail CLOSED. An unreadable inventory is indistinguishable from an
+          # empty one, and an empty one makes every comparison below pass —
+          # admitting exactly the branch this refuses.
+          if [ -z "$tgt_versions" ] || [ -z "$cur_versions" ] || [ -z "$cur_label" ]; then
+            echo "::error::Could not read the docs inventory needed to validate ${TARGET_BRANCH}:"
+            [ -z "$tgt_versions" ] && echo "  - versions.json on ${TARGET_BRANCH}"
+            [ -z "$cur_versions" ] && echo "  - versions.json on ${CURRENT_BRANCH}"
+            [ -z "$cur_label" ] && echo "  - currentDocsVersion.label on ${CURRENT_BRANCH}"
+            echo "Refusing to dispatch a version bump without confirming the branch holds the published docs."
+            exit 1
           fi
+
+          missing=""
+          for v in $(echo "$cur_versions" | tr -d '[]"' | tr ',' ' '); do
+            case "$tgt_versions" in
+              *"\"${v}\""*) ;;
+              *) missing="${missing} ${v}" ;;
+            esac
+          done
+          # The LIVE series on the publishing branch must survive too: either
+          # it is still the target's current label (the bump will archive it)
+          # or it is already archived there. Archived-superset alone misses
+          # this — after a skipped cutover both inventories can match while the
+          # live label is archived nowhere and simply disappears.
+          if [ "$cur_label" != "$current_label" ]; then
+            case "$tgt_versions" in
+              *"\"${cur_label}\""*) ;;
+              *) missing="${missing} ${cur_label}(live)" ;;
+            esac
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "::error::${TARGET_BRANCH} does not carry the published docs versions present on ${CURRENT_BRANCH}:${missing}"
+            echo "Its docs tree is not the published one — most likely it was cut from 'main' rather than from ${CURRENT_BRANCH}."
+            echo "Versioning it would archive the wrong content and drop those versions from the site."
+            echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
+            exit 1
+          fi
+          echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
 
           # Condition B — does docs-deploy.yml on the target branch pin itself?
           deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
@@ -402,10 +424,21 @@ jobs:
           fi
           echo "seed=false" >> "$GITHUB_OUTPUT"
           # Only the push-trigger block matters; workflow_dispatch ignores it.
-          # Escape the dots: unescaped, release/3.6 as an ERE also matches a
-          # typo'd release/3x6 and would report the trigger as correctly pinned.
-          target_re="${TARGET_BRANCH//./\\.}"
-          if echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${target_re}[[:blank:]]*\$"; then
+          # Extract the branches of the PUSH trigger only. The `on:` block can
+          # carry other triggers with their own branch filters, and a match in
+          # one of those is not a deploy trigger: a file whose push list still
+          # names the old branch would read as pinned, the variable would flip,
+          # and merges would never publish. Comparing with `grep -Fx` against
+          # this list also removes every regex-escaping question.
+          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
+          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
+          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
+          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
+          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
+          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
+          AWKEOF
+          if printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
+               | grep -Fxq "$TARGET_BRANCH"; then
             repointed=true
           else
             repointed=false
@@ -537,16 +570,46 @@ jobs:
           new = sys.argv[1]
           path = '.github/workflows/docs-deploy.yml'
           src = open(path).read()
-          head, sep, tail = src.partition('\npermissions:')
-          if not sep:
-              sys.exit('docs-deploy.yml has no permissions: block - refusing to edit blindly')
-          entries = re.findall(r'^[ \t]*-[ \t]*(release/[0-9]+\.[0-9]+)[ \t]*$', head, flags=re.M)
+
+          # Scope to the PUSH trigger's branch list, matching the shell check.
+          # The `on:` block may hold other triggers with their own branch
+          # filters; rewriting one of those would leave the deploy trigger
+          # pointing at the old branch while everything reported success.
+          m = re.search(r'^(?P<i>[ \t]+)push:[ \t]*$', src, re.M)
+          if not m:
+              sys.exit('docs-deploy.yml has no push: trigger - refusing to edit blindly')
+          pind = len(m.group('i'))
+          rest = src[m.end():]
+          end = len(rest)
+          for line in re.finditer(r'^(?P<i>[ \t]*)\S.*$', rest, re.M):
+              if len(line.group('i')) <= pind:
+                  end = line.start()
+                  break
+          push_block = rest[:end]
+
+          bm = re.search(r'^(?P<i>[ \t]+)branches:[ \t]*$', push_block, re.M)
+          if not bm:
+              sys.exit('the push: trigger has no branches: list - refusing to edit blindly')
+          bind = len(bm.group('i'))
+          tail_of_block = push_block[bm.end():]
+          bend = len(tail_of_block)
+          for line in re.finditer(r'^(?P<i>[ \t]*)\S.*$', tail_of_block, re.M):
+              if len(line.group('i')) <= bind:
+                  bend = line.start()
+                  break
+          branches = tail_of_block[:bend]
+
+          entries = re.findall(r"^[ \t]*-[ \t]*['\"]?(\S+?)['\"]?[ \t]*$", branches, re.M)
           if len(entries) != 1:
-              sys.exit(f'expected exactly one release/N.N push-trigger entry in the on: block, found {entries}')
+              sys.exit(f'expected exactly one push branch entry, found {entries}')
           if entries[0] == new:
               sys.exit(f'{path} already pins {new} - nothing to repoint')
-          patched = re.sub(r'^([ \t]*-[ \t]*)release/[0-9]+\.[0-9]+[ \t]*$', rf'\g<1>{new}', head, flags=re.M)
-          open(path, 'w').write(patched + sep + tail)
+
+          patched_branches = re.sub(r"^([ \t]*-[ \t]*)['\"]?\S+?['\"]?([ \t]*)$",
+                                    rf'\g<1>{new}\g<2>', branches, flags=re.M)
+          out = (src[:m.end()] + push_block[:bm.end()] + patched_branches
+                 + tail_of_block[bend:] + rest[end:])
+          open(path, 'w').write(out)
           print(f'repointed {entries[0]} -> {new}')
           PY
 
@@ -761,7 +824,21 @@ jobs:
             echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
             exit 1
           fi
-          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${TARGET_BRANCH//./\\.}[[:blank:]]*\$"; then
+          # Extract the branches of the PUSH trigger only. The `on:` block can
+          # carry other triggers with their own branch filters, and a match in
+          # one of those is not a deploy trigger: a file whose push list still
+          # names the old branch would read as pinned, the variable would flip,
+          # and merges would never publish. Comparing with `grep -Fx` against
+          # this list also removes every regex-escaping question.
+          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
+          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
+          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
+          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
+          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
+          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
+          AWKEOF
+          if ! printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
+               | grep -Fxq "$TARGET_BRANCH"; then
             echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
             exit 1
           fi
