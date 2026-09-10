@@ -1073,10 +1073,19 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // aggregator-scope BranchCache shared across SharedDomains instances.
 func (sd *SharedDomains) HasSharedBranchCache() bool { return sd.branchCache != nil }
 
+func (sd *SharedDomains) CommitmentDomains() []kv.Domain {
+	domains := make([]kv.Domain, 0, len(sd.commitmentCtxs))
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if sd.commitmentCtxs[domain] != nil {
+			domains = append(domains, domain)
+		}
+	}
+	return domains
+}
+
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
-// commitment is not yet frozen into files — where a step-boundary checkpoint
-// must be written.
-func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
+// commitment is not yet frozen into files for domain.
+func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, domain kv.Domain, txNum uint64) bool {
 	ss := sd.stepSize
 	if ss == 0 || sd.discardCommitment {
 		return false
@@ -1084,7 +1093,7 @@ func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bo
 	if (txNum+1)%ss != 0 {
 		return false
 	}
-	return txNum/ss >= uint64(roTx.StepsInFiles(sd.commitmentDomainValue()))
+	return txNum/ss >= uint64(roTx.StepsInFiles(domain))
 }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
@@ -2050,10 +2059,8 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
 	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(sd.commitmentCtxs))
-	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if sdc := sd.commitmentCtxs[domain]; sdc != nil {
-			contexts = append(contexts, sdc)
-		}
+	for _, domain := range sd.CommitmentDomains() {
+		contexts = append(contexts, sd.commitmentCtxs[domain])
 	}
 	if len(contexts) == 0 && sd.sdCtx != nil {
 		contexts = append(contexts, sd.sdCtx)

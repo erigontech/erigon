@@ -455,7 +455,7 @@ func (rs *StateV3) ApplyTxIndexes(
 // contain a commitment state at each step end, even when the boundary falls
 // mid-block.
 func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() {
+	if rs.domains.IsUnfrozenStepEdge(roTx, rs.domains.GetCommitmentContext().CommitmentDomain(), txNum) && !rs.domains.InlineTouchKeyDisabled() {
 		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
 			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {

@@ -594,18 +594,19 @@ different states and correctly report different roots.
 **Files:**
 - Modify: `db/state/execctx/domain_shared.go`
 - Modify: `execution/stagedsync/committer.go`
+- Modify: `execution/state/rw_v3.go`
 - Modify: `execution/stagedsync/committer_test.go`
 
-- [ ] give `SharedDomains.IsUnfrozenStepEdge` a domain parameter — it currently ends in
+- [x] give `SharedDomains.IsUnfrozenStepEdge` a domain parameter — it currently ends in
       `StepsInFiles(kv.CommitmentDomain)`, so both arms would be gated on the hex frontier
-- [ ] drive `checkpointStepsFromBAL` and `computeStepBoundary` for every live commitment domain, not just
+- [x] drive `checkpointStepsFromBAL` and `computeStepBoundary` for every live commitment domain, not just
       the canonical one
-- [ ] write tests: a block straddling an unfrozen step edge leaves a commitment checkpoint in **both**
+- [x] write tests: a block straddling an unfrozen step edge leaves a commitment checkpoint in **both**
       domains at that edge
-- [ ] write tests: the **canonical** domain's `.kv` does not lag its accounts/storage `.kv` after such a
+- [x] write tests: the **canonical** domain's `.kv` does not lag its accounts/storage `.kv` after such a
       block — the shadow domain is excluded from the minimax by design and may legitimately lag in file
       terms, so it is not part of this assertion
-- [ ] run `make test-short` — must pass before task 17
+- [x] run `make test-short` — must pass before task 17
 
 ### Task 17: Point the canonical-domain consumers at the selector
 

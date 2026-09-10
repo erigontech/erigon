@@ -495,7 +495,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// step's commitment .kv inconsistent — so exactly one of the two paths
 		// checkpoints a block. loop() drains a block's request before its results,
 		// so computedAhead[n] is already settled when this hook fires.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
+		if !cc.computedAhead[r.blockNum] && cc.isUnfrozenStepEdge(r.txNum) {
 			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum, blockTime: r.blockTime})
 		}
 
@@ -758,7 +758,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 		return nil
 	}
 	for edge := ((req.firstTxNum/ss)+1)*ss - 1; edge < req.lastTxNum; edge += ss {
-		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
+		if !cc.isUnfrozenStepEdge(edge) {
 			continue
 		}
 		target := commitTarget{blockNum: req.blockNum, blockHash: req.blockHash, lastTxNum: edge, blockTime: req.blockTime}
@@ -1328,6 +1328,15 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target 
 // still needs the pre-edge dirty keys.
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
+}
+
+func (cc *commitmentCalculator) isUnfrozenStepEdge(txNum uint64) bool {
+	for _, domain := range cc.doms.CommitmentDomains() {
+		if cc.doms.IsUnfrozenStepEdge(cc.roTx, domain, txNum) {
+			return true
+		}
+	}
+	return false
 }
 
 // computeAndCheck computes per-block commitment and validates the root,
