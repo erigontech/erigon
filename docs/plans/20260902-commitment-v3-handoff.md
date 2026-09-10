@@ -1,7 +1,7 @@
 # commitment-v3 handoff — 2026-09-02
 
-Branch `awskii/commitment-v3`, worktree `~/org/wrk/wt/commitment-v3`, off `origin/main @ 0124ab5a0c`.
-Nothing of this branch is pushed; the calcState fix it carries is PR #23737 against main. Full evidence trail: `~/org/e/research/commitment-v3-singleton-storage.org`.
+Branch `awskii/commitment-v3`, off `origin/main @ 0124ab5a0c`, merged with `origin/main @ 2eb5d827efa` on 2026-09-10.
+The calcState fix it carries is PR #23737 against main.
 
 ## Where the model stands
 
