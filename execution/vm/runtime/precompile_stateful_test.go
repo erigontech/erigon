@@ -507,6 +507,26 @@ func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
 	require.Equal(t, uint64(9_900), remaining.Execution, "a revert keeps the frame's leftover gas")
 }
 
+func TestStatefulPrecompileMultiWrappedExceptionalBurnsFrameGas(t *testing.T) {
+	const chainID = 900415
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x94}))
+	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: funcPrecompile{name: "MULTIWRAP",
+		run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+			if !gas.ChargeExecution(100) {
+				return nil, vm.ErrOutOfGas
+			}
+			return nil, fmt.Errorf("%w: %w", vm.ErrOutOfGas, vm.ErrExecutionReverted)
+		}}})
+
+	cfg := newL2TestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
+		mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+	require.Zero(t, remaining.Execution, "an exceptional failure burns the frame's leftover gas")
+}
+
 // TestStatefulPrecompileRefusedCallLeavesNoFrameTrace pins where the static
 // write-protection guard sits. The equivalent opcode is rejected while gas is
 // charged and never reaches the frame, so a refused re-entrant CALL must not

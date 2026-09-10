@@ -519,7 +519,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			// Frame-level classification compares the bare sentinel, so an
 			// idiomatically wrapped revert would burn the frame's gas and skip
 			// the return-data copy while the receipt still read as reverted.
-			if err != nil && errors.Is(err, ErrExecutionReverted) {
+			if err != nil && vmErrorCodeFromErr(err) == VMErrorCodeExecutionReverted {
 				err = ErrExecutionReverted
 			}
 		} else {
