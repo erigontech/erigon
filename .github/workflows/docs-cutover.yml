@@ -194,7 +194,7 @@ jobs:
               --jq '.content' 2>/dev/null | base64 -d || echo '')"
             if [ -z "$deploy_yml" ]; then
               echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
-            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[ \t]*-[ \t]*${target_branch//./\\.}[ \t]*\$"; then
+            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${target_branch//./\\.}[[:blank:]]*\$"; then
               echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
               echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
             else
@@ -318,6 +318,66 @@ jobs:
           fi
           echo "archive_label=${current_label}" >> "$GITHUB_OUTPUT"
 
+          # Before any version bump is dispatched, prove the target branch holds
+          # the PUBLISHED docs tree. Presence of docs-deploy.yml is not the test:
+          # PR #23283 added that file to release/3.6 by hand, so a human can
+          # cherry-pick it onto a branch cut from `main` and the tree is still
+          # main's. main carries versions.json ["v3.4","v3.3"] where release/3.6
+          # has ["v3.5","v3.4","v3.3"], and main's label already reads v3.6 — so
+          # a bump there archives the wrong content under the right name and
+          # drops a version from the published dropdown, silently. Run this
+          # whenever a bump is pending, not only when the workflow file is absent.
+          if [ "$archived" = false ]; then
+            tgt_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${TARGET_BRANCH}" \
+              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+            cur_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${CURRENT_BRANCH}" \
+              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+            cur_config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${CURRENT_BRANCH}" \
+              --jq '.content' 2>/dev/null | base64 -d || echo '')"
+            cur_label="$(echo "$cur_config" | grep -A3 'const currentDocsVersion' \
+              | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+
+            # Fail CLOSED. An unreadable inventory is indistinguishable from an
+            # empty one, and an empty one makes every comparison below pass —
+            # admitting exactly the branch this refuses.
+            if [ -z "$tgt_versions" ] || [ -z "$cur_versions" ] || [ -z "$cur_label" ]; then
+              echo "::error::Could not read the docs inventory needed to validate ${TARGET_BRANCH}:"
+              [ -z "$tgt_versions" ] && echo "  - versions.json on ${TARGET_BRANCH}"
+              [ -z "$cur_versions" ] && echo "  - versions.json on ${CURRENT_BRANCH}"
+              [ -z "$cur_label" ] && echo "  - currentDocsVersion.label on ${CURRENT_BRANCH}"
+              echo "Refusing to dispatch a version bump without confirming the branch holds the published docs."
+              exit 1
+            fi
+
+            missing=""
+            for v in $(echo "$cur_versions" | tr -d '[]"' | tr ',' ' '); do
+              case "$tgt_versions" in
+                *"\"${v}\""*) ;;
+                *) missing="${missing} ${v}" ;;
+              esac
+            done
+            # The LIVE series on the publishing branch must survive too: either
+            # it is still the target's current label (the bump will archive it)
+            # or it is already archived there. Archived-superset alone misses
+            # this — after a skipped cutover both inventories can match while the
+            # live label is archived nowhere and simply disappears.
+            if [ "$cur_label" != "$current_label" ]; then
+              case "$tgt_versions" in
+                *"\"${cur_label}\""*) ;;
+                *) missing="${missing} ${cur_label}(live)" ;;
+              esac
+            fi
+
+            if [ -n "$missing" ]; then
+              echo "::error::${TARGET_BRANCH} does not carry the published docs versions present on ${CURRENT_BRANCH}:${missing}"
+              echo "Its docs tree is not the published one — most likely it was cut from 'main' rather than from ${CURRENT_BRANCH}."
+              echo "Versioning it would archive the wrong content and drop those versions from the site."
+              echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
+              exit 1
+            fi
+            echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
+          fi
+
           # Condition B — does docs-deploy.yml on the target branch pin itself?
           deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
             --jq '.content' 2>/dev/null | base64 -d || echo '')"
@@ -328,33 +388,6 @@ jobs:
           # arrives without it, and the repoint step seeds it from the branch
           # currently publishing.
           if [ -z "$deploy_yml" ]; then
-            # Seeding the workflow file is not enough to make this a valid docs
-            # branch. A branch cut from `main` also carries main's docs TREE,
-            # which is not the previous series': main's versions.json is
-            # ["v3.4","v3.3"] where release/3.6 has ["v3.5","v3.4","v3.3"], and
-            # the doc pages differ. Versioning that tree would archive main's
-            # content under the previous series' label and drop a version from
-            # the published dropdown — a wrong site, silently. Refuse instead,
-            # and say what to do about it.
-            tgt_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${TARGET_BRANCH}" \
-              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
-            cur_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${CURRENT_BRANCH}" \
-              --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
-            missing=""
-            for v in $(echo "$cur_versions" | tr -d '[]"' | tr ',' ' '); do
-              case "$tgt_versions" in
-                *"\"${v}\""*) ;;
-                *) missing="${missing} ${v}" ;;
-              esac
-            done
-            if [ -n "$missing" ]; then
-              echo "::error::${TARGET_BRANCH} is missing archived docs versions present on ${CURRENT_BRANCH}:${missing}"
-              echo "Its docs tree is not the published one — most likely it was cut from 'main' rather than from ${CURRENT_BRANCH}."
-              echo "Versioning it would archive the wrong content and drop those versions from the site."
-              echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
-              exit 1
-            fi
-
             echo "${TARGET_BRANCH} carries no docs-deploy.yml — it will be seeded from ${CURRENT_BRANCH}."
             {
               echo "seed=true"
@@ -372,7 +405,7 @@ jobs:
           # Escape the dots: unescaped, release/3.6 as an ERE also matches a
           # typo'd release/3x6 and would report the trigger as correctly pinned.
           target_re="${TARGET_BRANCH//./\\.}"
-          if echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[ \t]*-[ \t]*${target_re}[ \t]*\$"; then
+          if echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${target_re}[[:blank:]]*\$"; then
             repointed=true
           else
             repointed=false
@@ -728,7 +761,7 @@ jobs:
             echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
             exit 1
           fi
-          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[ \t]*-[ \t]*${TARGET_BRANCH//./\\.}[ \t]*\$"; then
+          if ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^[[:blank:]]*-[[:blank:]]*${TARGET_BRANCH//./\\.}[[:blank:]]*\$"; then
             echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
             exit 1
           fi
