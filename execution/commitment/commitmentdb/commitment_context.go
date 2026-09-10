@@ -63,14 +63,15 @@ type sd interface {
 }
 
 type SharedDomainsCommitmentContext struct {
-	sharedDomains sd
-	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
-	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
-	traceW        io.Writer
-	stateReader   StateReader
-	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	sharedDomains    sd
+	commitmentDomain kv.Domain
+	updates          *commitment.Updates
+	patriciaTrie     commitment.Trie
+	variant          commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
+	justRestored     atomic.Bool            // set to true when commitment trie was just restored from snapshot
+	traceW           io.Writer
+	stateReader      StateReader
+	paraTrieDB       kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
 	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
 	// worker count from WarmupNumWorkersOrDefault.
@@ -239,7 +240,7 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	variant := cfg.Variant
 	if variant == "" {
 		variant = commitment.VariantHexPatriciaTrie
@@ -253,9 +254,10 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		}
 	}
 	ctx := &SharedDomainsCommitmentContext{
-		sharedDomains: sd,
-		tmpDir:        tmpDir,
-		variant:       variant,
+		sharedDomains:    sd,
+		commitmentDomain: commitmentDomain,
+		tmpDir:           tmpDir,
+		variant:          variant,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -275,6 +277,17 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	return ctx
 }
 
+func (sdc *SharedDomainsCommitmentContext) CommitmentDomain() kv.Domain {
+	if sdc.commitmentDomain == kv.CommitmentBinDomain {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
+func (sdc *SharedDomainsCommitmentContext) commitmentDomainValue() kv.Domain {
+	return sdc.CommitmentDomain()
+}
+
 // trieContext builds the main (root-fold) trie read context. readCtx carries
 // the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
 // metrics); the main fold is single-goroutine so it owns that accumulator
@@ -284,12 +297,13 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
-		putter:       putter,
-		stepSize:     sdc.sharedDomains.StepSize(),
-		txNum:        txNum,
-		blockNum:     blockNum,
-		traceW:       sdc.traceW,
-		readCodeSize: sdc.variant == commitment.VariantBinPatriciaTrie,
+		putter:           putter,
+		commitmentDomain: sdc.commitmentDomainValue(),
+		stepSize:         sdc.sharedDomains.StepSize(),
+		txNum:            txNum,
+		blockNum:         blockNum,
+		traceW:           sdc.traceW,
+		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -498,7 +512,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 	}
 
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
+	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(sdc.commitmentDomainValue(), key)
 	if ok {
 		return commitment.BranchData(enc).ChildCount(), nil
 	}
@@ -506,7 +520,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
 
-	enc, _, err := stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
+	enc, _, err := stateReader.Read(sdc.commitmentDomainValue(), key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
@@ -804,11 +818,12 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:       sdc.sharedDomains.AsPutDel(roTx),
-			stepSize:     stepSize,
-			txNum:        txNum,
-			traceW:       sdc.traceW,
-			readCodeSize: sdc.variant == commitment.VariantBinPatriciaTrie,
+			putter:           sdc.sharedDomains.AsPutDel(roTx),
+			commitmentDomain: sdc.commitmentDomainValue(),
+			stepSize:         stepSize,
+			txNum:            txNum,
+			traceW:           sdc.traceW,
+			readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -850,12 +865,13 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:         sdc.sharedDomains.AsPutDel(roTx),
-			stepSize:       stepSize,
-			txNum:          txNum,
-			localCollector: collector,
-			traceW:         sdc.traceW,
-			readCodeSize:   sdc.variant == commitment.VariantBinPatriciaTrie,
+			putter:           sdc.sharedDomains.AsPutDel(roTx),
+			commitmentDomain: sdc.commitmentDomainValue(),
+			stepSize:         stepSize,
+			txNum:            txNum,
+			localCollector:   collector,
+			traceW:           sdc.traceW,
+			readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -925,7 +941,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if err := trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+	if err := trieContext.stateReader.CheckDataAvailable(sdc.commitmentDomainValue(), step); err != nil {
 		return 0, 0, nil, err
 	}
 
@@ -1055,9 +1071,10 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	putter   kv.TemporalPutDel
-	txNum    uint64
-	blockNum uint64
+	putter           kv.TemporalPutDel
+	commitmentDomain kv.Domain
+	txNum            uint64
+	blockNum         uint64
 
 	stepSize       uint64
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
@@ -1075,11 +1092,15 @@ func (sdc *TrieContext) SetReadCodeSize(v bool) { sdc.readCodeSize = v }
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
 func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
-	return &TrieContext{stateReader: reader, stepSize: stepSize}
+	return NewTrieContextRoForDomain(reader, stepSize, kv.CommitmentDomain)
+}
+
+func NewTrieContextRoForDomain(reader StateReader, stepSize uint64, commitmentDomain kv.Domain) *TrieContext {
+	return &TrieContext{stateReader: reader, stepSize: stepSize, commitmentDomain: commitmentDomain}
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.readDomain(sdc.commitmentDomainValue(), pref)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1113,7 +1134,14 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.localCollector != nil {
 		return sdc.localCollector.Collect(prefix, data)
 	}
-	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
+	return sdc.putter.DomainPut(sdc.commitmentDomainValue(), prefix, data, sdc.txNum, prevData)
+}
+
+func (sdc *TrieContext) commitmentDomainValue() kv.Domain {
+	if sdc.commitmentDomain == kv.CommitmentBinDomain {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.

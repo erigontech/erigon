@@ -418,7 +418,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 	)
 	hc := &headCaptureSource{}
 
-	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
+	collapse := collapseReaderFor(hc, nil, kv.CommitmentDomain, firstTxNumInBlock, endTxNum)
 	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
 	require.True(t, ok, "head-capture collapse phase must install the dual-tx reader")
 	asOf, ok := hcCollapse.PlainStateAsOf()
@@ -426,7 +426,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 	require.Equal(t, endTxNum, asOf, "collapse detection reads plain state at block end")
 	require.False(t, collapse.WithHistory())
 
-	trie := trieReaderFor(hc, nil, firstTxNumInBlock)
+	trie := trieReaderFor(hc, nil, kv.CommitmentDomain, firstTxNumInBlock)
 	hcTrie, ok := trie.(*commitmentdb.CommitmentReplayStateReader)
 	require.True(t, ok, "head-capture trie phase must install the dual-tx reader")
 	asOf, ok = hcTrie.PlainStateAsOf()
@@ -434,14 +434,14 @@ func TestWitnessReaderComposition(t *testing.T) {
 	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
 	require.True(t, trie.WithHistory(), "trie phase is read-only: PutBranch must no-op during witness capture")
 
-	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
+	durableCollapse := collapseReaderFor(nil, nil, kv.CommitmentDomain, firstTxNumInBlock, endTxNum)
 	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)
 	require.True(t, ok, "durable collapse phase installs the split-history reader")
 	asOf, ok = splitReader.PlainStateAsOf()
 	require.True(t, ok)
 	require.Equal(t, endTxNum, asOf, "durable collapse reads plain state at block end")
 
-	durableTrie := trieReaderFor(nil, nil, firstTxNumInBlock)
+	durableTrie := trieReaderFor(nil, nil, kv.CommitmentDomain, firstTxNumInBlock)
 	historyReader, ok := durableTrie.(*commitmentdb.HistoryStateReader)
 	require.True(t, ok, "durable trie phase installs a plain history reader")
 	require.Equal(t, firstTxNumInBlock, historyReader.AsOf())

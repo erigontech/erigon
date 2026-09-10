@@ -30,11 +30,11 @@ import (
 // Empty values (deletion tombstones) resolve to nil like absent keys: the branch
 // cache never stores tombstones, and unpinned prefixes fall through to the
 // authoritative read anyway.
-func pinBranchResolver(ttx kv.TemporalGetter) commitment.BatchBranchResolver {
+func pinBranchResolver(ttx kv.TemporalGetter, commitmentDomain kv.Domain) commitment.BatchBranchResolver {
 	return func(keys [][]byte) ([][]byte, error) {
 		vals := make([][]byte, len(keys))
 		for i, k := range keys {
-			v, _, err := ttx.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+			v, _, err := ttx.GetLatest(commitmentDomain, k, kv.GetLatestOptions{})
 			if err != nil {
 				return nil, err
 			}

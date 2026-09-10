@@ -859,20 +859,20 @@ type headCaptureSource struct {
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
 // end in both modes, commitment from the pinned parent latest (head-capture) or the
 // parent-block history txNum (durable).
-func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
+func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, endTxNum)
 	}
-	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	return commitmentdb.NewSplitHistoryReaderForDomain(tx, commitmentDomain, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
 
 // trieReaderFor selects the witness-trie state reader: plain state at the parent
 // (firstTxNumInBlock) in both modes, commitment from the pinned parent latest
 // (head-capture) or the same parent history txNum (durable). Both report
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
-func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
+func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, firstTxNumInBlock)
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -951,7 +951,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
 	// history, so the history-availability check only applies to the durable path.
 	if hc == nil {
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentDomain := kv.CommitmentDomain
+		if binTrie {
+			commitmentDomain = kv.CommitmentBinDomain
+		}
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(commitmentDomain)
 		if firstTxNumInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 		}
@@ -1319,7 +1323,11 @@ func detectCollapseSiblings(
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
-	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
+	commitmentDomain := kv.CommitmentDomain
+	if binTrie {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
+	splitStateReader := collapseReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock, endTxNum)
 	sdCtx.SetStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -1408,7 +1416,11 @@ func buildWitnessTrie(
 
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
+	commitmentDomain := kv.CommitmentDomain
+	if binTrie {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}

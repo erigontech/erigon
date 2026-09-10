@@ -416,31 +416,36 @@ different states and correctly report different roots.
 ### Task 8: Parameterize the commitment context on its domain
 
 **Files:**
+- Modify: `db/state/aggregator.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `execution/commitment/commitmentdb/reader.go`
 - Modify: `db/state/execctx/domain_shared.go`
 - Modify: `db/state/execctx/pin_branch_resolver.go`
 - Modify: `execution/stagedsync/committer.go`
+- Modify: `execution/stagedsync/committer_step_boundary_test.go`
+- Modify: `rpc/jsonrpc/debug_execution_witness.go`
+- Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
+- Modify: `rpc/jsonrpc/eth_simulation.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context_test.go`
 - Modify: `execution/commitment/commitmentdb/reader_test.go`
 - Modify: `execution/commitment/commitmentdb/pbin_nocache_test.go`
 - Modify: `execution/commitment/commitmentdb/pbin_state_header_test.go`
 
-- [ ] add the commitment domain as a field on `SharedDomainsCommitmentContext`, set through
+- [x] add the commitment domain as a field on `SharedDomainsCommitmentContext`, set through
       `NewSharedDomainsCommitmentContext`, and replace the hardcoded `kv.CommitmentDomain` on its read,
       write and state-blob paths
-- [ ] replace the `d == kv.CommitmentDomain` branches in the commitment readers with a check against the
+- [x] replace the `d == kv.CommitmentDomain` branches in the commitment readers with a check against the
       reader's own commitment domain
-- [ ] do the same in `asOfStateReader.Read`, which routes commitment reads to `GetLatest` and everything
+- [x] do the same in `asOfStateReader.Read`, which routes commitment reads to `GetLatest` and everything
       else to `GetAsOf`
-- [ ] cover the four remaining hardcodes on the same path: `flushPendingUpdates`' `putBranch`, the
+- [x] cover the four remaining hardcodes on the same path: `flushPendingUpdates`' `putBranch`, the
       `useBranchCache := domain == kv.CommitmentDomain` gate, the adaptive-pin reader, and the pin
       branch resolver
-- [ ] update the constructor's callers, `pbin_nocache_test.go` and `pbin_state_header_test.go` included
-- [ ] write tests: a context bound to the bin domain reads and writes bin branches and never touches the
+- [x] update the constructor's callers, `pbin_nocache_test.go` and `pbin_state_header_test.go` included
+- [x] write tests: a context bound to the bin domain reads and writes bin branches and never touches the
       hex tables
-- [ ] write tests: a context bound to the hex domain behaves exactly as today, cache gate included
-- [ ] run `make test-short` — must pass before task 9
+- [x] write tests: a context bound to the hex domain behaves exactly as today, cache gate included
+- [x] run `make test-short` — must pass before task 9
 
 ### Task 9: SeekCommitment over both domains, with a torn-datadir refusal
 

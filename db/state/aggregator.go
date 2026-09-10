@@ -1762,6 +1762,10 @@ func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 
 func (at *AggregatorRoTx) Agg() *Aggregator { return at.a }
 
+func (at *AggregatorRoTx) CanonicalCommitmentDomain() kv.Domain {
+	return at.a.CanonicalCommitmentDomain()
+}
+
 func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint64) {
 	return at.d[domain].d.minStepInDB(tx)
 }

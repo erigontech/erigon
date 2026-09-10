@@ -314,7 +314,7 @@ func newCommitmentCalculator(
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
 	// (avoids future sd.mem state) and GetLatest for commitment branches
 	// (written sequentially by this calculator).
-	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: doms.GetCommitmentContext().CommitmentDomain(), txNum: 0}
 
 	return &commitmentCalculator{
 		doms:                 doms,
@@ -764,7 +764,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: cc.doms.GetCommitmentContext().CommitmentDomain(), txNum: t.lastTxNum + 1}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
@@ -1104,10 +1104,11 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd     *execctx.SharedDomains
-	roTx   kv.TemporalTx
-	getter execctxapi.StateGetter
-	txNum  uint64
+	sd               *execctx.SharedDomains
+	roTx             kv.TemporalTx
+	getter           execctxapi.StateGetter
+	commitmentDomain kv.Domain
+	txNum            uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1117,7 +1118,7 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 }
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if d == kv.CommitmentDomain {
+	if d == r.commitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
 			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
@@ -1151,7 +1152,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, commitmentDomain: r.commitmentDomain, txNum: r.txNum}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1163,5 +1164,5 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
 		getterOpts = getterOpts.WithMetrics(metrics)
 	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), commitmentDomain: r.commitmentDomain, txNum: r.txNum}
 }

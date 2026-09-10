@@ -17,6 +17,7 @@
 package commitmentdb
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -80,6 +81,26 @@ type putBranchCall struct {
 type fakePutDel struct {
 	puts []putBranchCall
 }
+
+type recordingStateReader struct {
+	commitmentDomain kv.Domain
+	value            []byte
+	step             kv.Step
+	reads            []kv.Domain
+}
+
+func (r *recordingStateReader) WithHistory() bool { return false }
+
+func (r *recordingStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *recordingStateReader) Read(d kv.Domain, _ []byte, _ uint64) ([]byte, kv.Step, error) {
+	r.reads = append(r.reads, d)
+	return r.value, r.step, nil
+}
+
+func (r *recordingStateReader) Clone(kv.TemporalTx) StateReader { return r }
+
+func (r *recordingStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
 
 func (p *fakePutDel) DomainPut(d kv.Domain, k, v []byte, txNum uint64, prev []byte) error {
 	p.puts = append(p.puts, putBranchCall{d, append([]byte(nil), k...), append([]byte(nil), v...), txNum, append([]byte(nil), prev...)})
@@ -152,6 +173,27 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	require.Empty(t, pinnedTx.calls)
 	// No extra pinned-latest reads from the plain reads.
 	require.Len(t, pinnedTx.getCalls, 1)
+}
+
+func TestCommitmentSplitStateReaderUsesBoundDomain(t *testing.T) {
+	t.Parallel()
+
+	commitmentReader := &recordingStateReader{commitmentDomain: kv.CommitmentBinDomain, value: []byte{1}, step: 1}
+	plainReader := &recordingStateReader{commitmentDomain: kv.CommitmentDomain, value: []byte{2}, step: 2}
+	reader := NewCommitmentSplitStateReader(commitmentReader, plainReader, kv.CommitmentBinDomain, false)
+
+	value, step, err := reader.Read(kv.CommitmentBinDomain, []byte{1}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value)
+	require.Equal(t, kv.Step(1), step)
+	require.Equal(t, []kv.Domain{kv.CommitmentBinDomain}, commitmentReader.reads)
+	require.Empty(t, plainReader.reads)
+
+	value, step, err = reader.Read(kv.CommitmentDomain, []byte{2}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{2}, value)
+	require.Equal(t, kv.Step(2), step)
+	require.Equal(t, []kv.Domain{kv.CommitmentDomain}, plainReader.reads)
 }
 
 func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {

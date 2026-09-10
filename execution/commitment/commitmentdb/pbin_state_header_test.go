@@ -52,7 +52,11 @@ func pbinStateTestCtx(t *testing.T, variant commitment.TrieVariant) *SharedDomai
 	t.Helper()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = variant
-	sdc := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, commitment.ModeDirect, t.TempDir(), cfg)
+	domain := kv.CommitmentDomain
+	if variant == commitment.VariantBinPatriciaTrie {
+		domain = kv.CommitmentBinDomain
+	}
+	sdc := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
 	t.Cleanup(sdc.Close)
 	return sdc
 }

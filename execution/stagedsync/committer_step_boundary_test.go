@@ -637,7 +637,7 @@ func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
 	require.NotNil(t, doms.Collector())
 	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
 	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
-	reader := (&asOfStateReader{sd: doms, roTx: captureTx}).CloneForWorker(context.Background(), captureTx)
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx, commitmentDomain: kv.CommitmentDomain}).CloneForWorker(context.Background(), captureTx)
 	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
 	require.NoError(t, err)
 	require.True(t, captureTx.nonNilMetrics)

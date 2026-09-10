@@ -33,13 +33,14 @@ func Test_EncodeCommitmentState(t *testing.T) {
 }
 
 type testStateReader struct {
-	branchData   []byte
-	step         kv.Step
-	readDomain   kv.Domain
-	readKey      []byte
-	readStepSize uint64
-	readCalls    int
-	withHistory  bool
+	branchData       []byte
+	step             kv.Step
+	commitmentDomain kv.Domain
+	readDomain       kv.Domain
+	readKey          []byte
+	readStepSize     uint64
+	readCalls        int
+	withHistory      bool
 }
 
 var _ StateReader = (*testStateReader)(nil)
@@ -53,7 +54,11 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 	r.readDomain = d
 	r.readKey = append(r.readKey[:0], key...)
 	r.readStepSize = stepSize
-	if r.readDomain != kv.CommitmentDomain {
+	commitmentDomain := r.commitmentDomain
+	if commitmentDomain == kv.AccountsDomain {
+		commitmentDomain = kv.CommitmentDomain
+	}
+	if r.readDomain != commitmentDomain {
 		return nil, 0, nil
 	}
 	return r.branchData, r.step, nil
@@ -97,10 +102,28 @@ func Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant(t *testing.T) {
 
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	sdc := NewSharedDomainsCommitmentContext(nil, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
 	defer sdc.Close()
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.Trie().Variant())
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.variant)
+}
+
+func TestCommitmentContextUsesBoundBinDomain(t *testing.T) {
+	t.Parallel()
+
+	reader := &testStateReader{branchData: []byte{1, 2, 3}, commitmentDomain: kv.CommitmentBinDomain}
+	putter := &fakePutDel{}
+	sdc := &SharedDomainsCommitmentContext{commitmentDomain: kv.CommitmentBinDomain, stateReader: reader}
+	trieContext := &TrieContext{commitmentDomain: sdc.CommitmentDomain(), stateReader: reader, putter: putter, txNum: 7}
+
+	branch, _, err := trieContext.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Equal(t, []byte{1, 2, 3}, branch)
+	require.Equal(t, kv.CommitmentBinDomain, reader.readDomain)
+
+	require.NoError(t, trieContext.PutBranch([]byte{0xbb}, []byte{4}, []byte{5}))
+	require.Len(t, putter.puts, 1)
+	require.Equal(t, kv.CommitmentBinDomain, putter.puts[0].domain)
 }
 
 type branchChildCountDomains struct {

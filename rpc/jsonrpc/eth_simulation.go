@@ -1138,6 +1138,7 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
 			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
 			commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}),
+			sd.GetCommitmentCtx().CommitmentDomain(),
 			false,
 		),
 	}

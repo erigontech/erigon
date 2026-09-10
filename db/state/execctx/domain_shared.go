@@ -238,7 +238,8 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 }
 
 type SharedDomains struct {
-	sdCtx *commitmentdb.SharedDomainsCommitmentContext
+	sdCtx            *commitmentdb.SharedDomainsCommitmentContext
+	commitmentDomain kv.Domain
 
 	stepSize uint64
 
@@ -324,6 +325,13 @@ type SharedDomains struct {
 	adaptivePinController *commitment.AdaptivePinController
 }
 
+func (sd *SharedDomains) commitmentDomainValue() kv.Domain {
+	if sd.commitmentDomain == kv.CommitmentBinDomain {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
 // cacheUnwindState records the lowest boundary that the next durable cache
 // publication must invalidate. It is separate from mem-batch changesets
 // because an unwind without changesets must still revoke cache entries;
@@ -370,7 +378,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 	commitmentDomain := kv.CommitmentDomain
-	if trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+	if p, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+		commitmentDomain = p.CanonicalCommitmentDomain()
+	} else if trieCfg.Variant == commitment.VariantBinPatriciaTrie {
 		commitmentDomain = kv.CommitmentBinDomain
 	}
 
@@ -385,6 +395,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
 		logger:           logger,
+		commitmentDomain: commitmentDomain,
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
@@ -410,7 +421,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitmentDomain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -571,7 +582,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	defer upd.Clear()
 
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+		return sd.DomainPut(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData)
 	}
 
 	if !lockHeld {
@@ -1041,7 +1052,7 @@ func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bo
 	if (txNum+1)%ss != 0 {
 		return false
 	}
-	return txNum/ss >= uint64(roTx.StepsInFiles(kv.CommitmentDomain))
+	return txNum/ss >= uint64(roTx.StepsInFiles(sd.commitmentDomainValue()))
 }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
@@ -1240,7 +1251,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			if domain == kv.CommitmentDomain {
+			if domain == sd.commitmentDomainValue() {
 				pendingBranches = append(pendingBranches, branchCacheUpdate{
 					key:  append([]byte(nil), k...),
 					val:  append([]byte(nil), v...),
@@ -1259,7 +1270,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	var opts []kv.FlushOption
 	if sd.branchCache != nil {
-		opts = append(opts, stash(kv.CommitmentDomain))
+		opts = append(opts, stash(sd.commitmentDomainValue()))
 	}
 	if sd.stateCache != nil {
 		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain))
@@ -1300,14 +1311,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+				v, step, err := ttx.GetLatest(sd.commitmentDomainValue(), prefix, kv.GetLatestOptions{})
 				if err != nil {
 					return nil, 0, false, err
 				}
 				return v, uint64(step), len(v) > 0, nil
 			}
 			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				return pinBranchResolver(ttx), nil, nil
+				return pinBranchResolver(ttx, sd.commitmentDomainValue()), nil, nil
 			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}
@@ -1495,7 +1506,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. Snapshot-isolated readers must disable it because
 	// concurrent commits can advance the cache beyond their transaction view.
-	useBranchCache := domain == kv.CommitmentDomain && sd.branchCache != nil
+	useBranchCache := domain == sd.commitmentDomainValue() && sd.branchCache != nil
 	if useBranchCache {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by

@@ -128,8 +128,6 @@ func TestPBinTrieContextRefusesCodeBearingAccountWithoutCode(t *testing.T) {
 
 // Only a bin SharedDomains must insist the code is there.
 func TestPBinSharedDomainsReadsCodeSizeUnderBin(t *testing.T) {
-	t.Parallel()
-
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 
