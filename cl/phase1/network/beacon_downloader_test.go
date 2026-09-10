@@ -28,6 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -383,21 +384,6 @@ func TestForwardRequestMoreBoundsActiveProbes(t *testing.T) {
 }
 
 func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
-	previousInterval := forwardBeaconRequestInterval
-	previousTimeout := forwardBeaconRequestTimeout
-	previousProbeTimeout := forwardBeaconProbeTimeout
-	previousResponsePoll := forwardBeaconResponsePoll
-	forwardBeaconRequestInterval = 3 * time.Millisecond
-	forwardBeaconRequestTimeout = 300 * time.Millisecond
-	forwardBeaconProbeTimeout = 210 * time.Millisecond
-	forwardBeaconResponsePoll = time.Millisecond
-	t.Cleanup(func() {
-		forwardBeaconRequestInterval = previousInterval
-		forwardBeaconRequestTimeout = previousTimeout
-		forwardBeaconProbeTimeout = previousProbeTimeout
-		forwardBeaconResponsePoll = previousResponsePoll
-	})
-
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
@@ -408,38 +394,41 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	var response bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
 
-	sentinel := &rotatingProbeSentinel{response: response.Bytes(), canceled: make(chan struct{})}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
-	downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
-	processed := make(chan int, 1)
-	var processOnce sync.Once
-	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		processOnce.Do(func() { processed <- len(blocks) })
-		return highest, nil
+	sentinel := &rotatingProbeSentinel{response: response.Bytes()}
+	// Outside the bubble: NewBeaconRpcP2P starts loops that outlive a request,
+	// and a bubble may not end while they are parked.
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil)
+
+	synctest.Test(t, func(t *testing.T) {
+		// synctest treats a receive as durably blocking only for a channel created
+		// inside the bubble, so this one cannot be built with the sentinel.
+		sentinel.canceled = make(chan struct{})
+
+		ctx := t.Context()
+		downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
+		processed := make(chan int, 1)
+		var processOnce sync.Once
+		downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+			processOnce.Do(func() { processed <- len(blocks) })
+			return highest, nil
+		})
+
+		done := make(chan struct{})
+		go func() {
+			downloader.RequestMore(ctx)
+			close(done)
+		}()
+
+		select {
+		case blockCount := <-processed:
+			require.Equal(t, 1, blockCount)
+		case <-done:
+			t.Fatal("request window ended before a healthy probe was processed")
+		}
+		<-sentinel.canceled
+		<-done
 	})
 
-	done := make(chan struct{})
-	go func() {
-		downloader.RequestMore(ctx)
-		close(done)
-	}()
-
-	select {
-	case blockCount := <-processed:
-		require.Equal(t, 1, blockCount)
-	case <-done:
-		t.Fatal("request window ended before a healthy probe was processed")
-	case <-time.After(time.Second):
-		t.Fatal("healthy probe was not processed")
-	}
-	select {
-	case <-sentinel.canceled:
-	case <-time.After(time.Second):
-		t.Fatal("slow probes were not canceled before the request window ended")
-	}
-	<-done
 	require.GreaterOrEqual(t, sentinel.calls.Load(), int32(3))
 	require.LessOrEqual(t, sentinel.maximum.Load(), int32(maxConcurrentForwardBeaconRequests))
 	require.Zero(t, sentinel.active.Load())
