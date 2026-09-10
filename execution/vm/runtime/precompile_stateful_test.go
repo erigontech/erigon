@@ -14,9 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// These tests sit outside package vm on purpose: a chain integrating against
-// erigon has only the exported surface, so anything they need that vm does not
-// export is a gap in the seam rather than a gap in the test.
+// Outside package vm on purpose: an integrating chain sees only the exported surface.
 package runtime
 
 import (
@@ -37,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// recordingStatefulPrecompile implements vm.StatefulPrecompile and records
-// the PrecompileContext of every RunStateful call for assertion.
 type recordingStatefulPrecompile struct {
 	vm.NoStatelessRun
 	calls []*vm.PrecompileContext
@@ -142,8 +138,6 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	require.False(t, got.ReadOnly)
 }
 
-// TestStatefulPrecompileReentryHitsDepthLimit pins that a stateful precompile
-// re-entering the EVM through ctx.EVM counts against CallCreateDepth.
 func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	const chainID = 900403
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8a}))
@@ -167,9 +161,6 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	require.LessOrEqual(t, calls, 1030, "recursion must be cut off by the depth limit")
 }
 
-// TestStatefulPrecompileStateGasAttribution pins that State-dimension gas a
-// stateful precompile consumes is reported as State usage, not folded into
-// Execution.
 func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	const chainID = 900404
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8b}))
@@ -192,9 +183,6 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	require.Equal(t, uint64(100), gasUsed.Execution, "Execution usage must not absorb the State spend")
 }
 
-// TestStatefulPrecompileStaticContextInherited pins that a nested call made
-// through ctx.EVM from inside a STATICCALL'd precompile keeps write
-// protection, like nested bytecode frames do.
 func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	const chainID = 900405
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8c}))
@@ -214,10 +202,6 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	require.ErrorIs(t, err, vm.ErrWriteProtection)
 }
 
-// TestStatefulPrecompileCallCodeIdentity pins the third frameIdentity branch,
-// the one where ActingAs and Caller are both the caller and neither is Self.
-// A CALLCODE'd precompile has to write to the calling contract's address, not
-// its own.
 func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
 	const chainID = 900406
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x91}))
@@ -239,10 +223,6 @@ func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
 	require.False(t, got.ReadOnly)
 }
 
-// TestStatefulPrecompileStateGasSpill pins the attribution when a state charge
-// outruns the reservoir: the whole charge counts as State usage and the part
-// that came out of execution gas is reported as spill, rather than the charge
-// being read back off the reservoir alone.
 func TestStatefulPrecompileStateGasSpill(t *testing.T) {
 	const chainID = 900407
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8e}))
@@ -266,10 +246,7 @@ func TestStatefulPrecompileStateGasSpill(t *testing.T) {
 	require.Equal(t, uint64(0), gasUsed.Execution, "spilled state gas must not be reported as execution usage")
 }
 
-// TestStatefulPrecompileSpillRestoredOnRevert pins that handleFrameRevert can
-// see the spill. EIP-8037 returns state gas to the parent on revert, so the 30
-// that spilled into execution gas comes back while the 100 charged as
-// execution gas stays spent.
+// EIP-8037 returns state gas to the parent on revert.
 func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
 	const chainID = 900408
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
@@ -290,10 +267,6 @@ func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
 	require.Equal(t, uint64(10), remaining.State, "the reservoir is restored to what the frame was handed")
 }
 
-// TestStatefulPrecompileNetStateRefundSucceeds pins that ending a frame with
-// more state gas than it was handed is a valid result, not gas minting. State
-// usage is signed for exactly this case, and the frame's execution usage still
-// derives correctly from it.
 func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 	const chainID = 900409
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x90}))
@@ -317,9 +290,7 @@ func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 	require.Equal(t, uint64(0), gasUsed.Execution, "a net state refund must not inflate execution usage")
 }
 
-// TestStatefulPrecompileCannotEscapeStaticContext pins the value transfer and
-// the account creation, which the interpreter refuses while charging gas for
-// CALL and CREATE — a path ctx.EVM skips entirely.
+// ctx.EVM skips the interpreter, where the CALL/CREATE static guard normally sits.
 func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	const chainID = 900410
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
@@ -346,8 +317,7 @@ func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, balance.IsZero(), "no value may leave a static frame")
 
-	// Control arm: the same precompile under a plain CALL still moves value,
-	// so the gate is scoped to the static context and not to ctx.EVM.
+	// Control arm: the gate is the static context, not ctx.EVM.
 	callErr, createErr = nil, nil
 	cfg2 := newL2TestConfig(t, chainID)
 	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
@@ -411,10 +381,6 @@ func (p reservoirChargeStatefulPrecompile) RunStateful(_ []byte, gas *vm.Precomp
 	return nil, nil
 }
 
-// TestStatefulPrecompileStateChargeIsTraced pins the gas-event stream against
-// the interpreter's useMdGas: a state charge the EIP-8037 reservoir covers in
-// full reports the state dimension, so reading only the execution figures
-// drops the event entirely.
 func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
 	const chainID = 900411
 	const reservoir, charge = uint64(500), uint64(40)
@@ -435,17 +401,12 @@ func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
 	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
 		mdgas.MdGas{Execution: 10_000, State: reservoir}, uint256.Int{}, false)
 	require.NoError(t, err)
-	// The surrounding frame-enter and frame-exit events report execution gas;
-	// only the charge itself is in the state dimension.
+	// Frame enter/exit emit gas events too, in the execution dimension.
 	require.Contains(t, events, gasEvent{reservoir, reservoir - charge},
 		"a reservoir-covered state charge must still reach the tracer")
 }
 
-// TestStatefulPrecompileCannotMintExecutionGas pins the bound on
-// RefundExecution. Execution gas only comes back from a charge this frame
-// made, so an unbounded refill underflows used.Execution and returns the
-// caller more gas than it handed in — evm.call validates nothing after
-// RunStateful.
+// Nothing downstream of RunStateful re-validates the frame's gas, so the bound has to hold here.
 func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
 	const chainID = 900412
 	const handed = uint64(100_000)
@@ -483,10 +444,7 @@ func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
 	require.Zero(t, gasUsed.Execution)
 }
 
-// TestStatefulPrecompileWrappedRevertKeepsFrameGas pins the classification of a
-// revert wrapped the way Go idiomatically wraps a sentinel. handleFrameRevert
-// compares the bare value, so an unnormalized wrap burns the frame's leftover
-// gas while the receipt still reads as reverted.
+// The revert check compares the bare value, so a wrapped sentinel must still classify as a revert.
 func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
 	const chainID = 900413
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x92}))
@@ -527,11 +485,7 @@ func TestStatefulPrecompileMultiWrappedExceptionalBurnsFrameGas(t *testing.T) {
 	require.Zero(t, remaining.Execution, "an exceptional failure burns the frame's leftover gas")
 }
 
-// TestStatefulPrecompileRefusedCallLeavesNoFrameTrace pins where the static
-// write-protection guard sits. The equivalent opcode is rejected while gas is
-// charged and never reaches the frame, so a refused re-entrant CALL must not
-// record an address access (consensus-relevant under EIP-7928) or a tracer
-// Enter/Exit pair of its own.
+// A refused call must record no address access; EIP-7928 makes that consensus-visible.
 func TestStatefulPrecompileRefusedCallLeavesNoFrameTrace(t *testing.T) {
 	const chainID = 900414
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x93}))
@@ -561,10 +515,6 @@ func TestStatefulPrecompileRefusedCallLeavesNoFrameTrace(t *testing.T) {
 	require.NotContains(t, entered, target, "a refused call must not open a frame on the target")
 }
 
-// TestSetPrecompilesNilRestoresChainSet pins both halves of the override
-// contract: an empty non-nil map disables every precompile, nil means the
-// chain's own set. Resolving nil lazily instead would put registryMu on the
-// call path.
 func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 	const chainID = 900415
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x94}))
@@ -607,10 +557,7 @@ func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas
 	return nil, p.callErr
 }
 
-// TestStatefulPrecompileNestedCallMovesTheReservoir pins the EIP-8037 handoff.
-// MdGas passes by value, so a nested call handed gas.Remaining() directly would
-// leave the reservoir standing in both frames and let each nesting level spend
-// it again.
+// MdGas is a value type: handing a child gas.Remaining() would leave the reservoir in both frames.
 func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
 	const chainID = 900416
 	const reservoir, charge = uint64(5_000), uint64(400)
@@ -631,11 +578,7 @@ func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
 	require.Equal(t, int64(charge), gasUsed.State)
 }
 
-// TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas pins where a state
-// charge lands before Amsterdam. There is no reservoir then, so charging the
-// state dimension would spill into execution gas but record itself in
-// used.State, which pre-Amsterdam transaction accounting drops — taking the gas
-// off the frame without it reaching the receipt or the block.
+// No reservoir before Amsterdam, and pre-Amsterdam accounting drops used.State entirely.
 func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
 	const chainID = 900417
 	const charge = uint64(40)
@@ -655,10 +598,7 @@ func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
 	require.Equal(t, int64(0), gasUsed.State)
 }
 
-// TestStatefulPrecompileHandoffCoversEveryReentryKind pins the EIP-8037 handoff
-// on the re-entry kinds beyond plain CALL. Each keeps its own caller identity,
-// so they need their own helper, but the reservoir has to move the same way:
-// handing the child gas.Remaining() would leave it standing in both frames.
+// Same reservoir handoff, on the re-entry kinds that keep their own caller identity.
 func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
 	const reservoir, charge = uint64(5_000), uint64(400)
 	for i, kind := range []string{"call", "staticcall", "delegatecall"} {
@@ -683,10 +623,7 @@ func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
 	}
 }
 
-// TestStatefulPrecompileDelegateCallKeepsFrameValue pins that a nested
-// DELEGATECALL out of a precompile preserves the calling frame's msg.value.
-// DELEGATECALL takes no value operand, so a helper that let the caller supply
-// one would hand the delegate frame a value the opcode never could.
+// DELEGATECALL has no value operand: the value comes from the calling frame, not from the API.
 func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	const chainID = 900430
 	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa8}))
@@ -709,10 +646,7 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 		"the delegate frame must observe the calling frame's value")
 }
 
-// TestStatefulPrecompilePanicReleasesTheGasHandle pins the handle's lifetime
-// against a panic. Erigon recovers execution panics on versioned state, so a
-// release that only runs on the normal path leaves a stashed handle pointing at
-// the dead frame's counters and still accepting charges.
+// Erigon recovers execution panics, so a gas handle can outlive its frame.
 func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
 	const chainID = 900431
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xaa}))
@@ -741,11 +675,7 @@ func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
 	require.False(t, stashed.ChargeExecution(1), "and must refuse to charge")
 }
 
-// TestVersionGatedPrecompileIsPrecompiledToTracers pins that an address the EVM
-// activates at an L2 version is a precompile to the tracers too. They rebuild
-// Rules from the VMContext instead of reading the EVM's, so a dropped L2Version
-// makes 4byte record precompile input as a contract selector, flat traces keep
-// calls they should filter, and JS isPrecompiled return false.
+// Tracers rebuild Rules from the VMContext, so a dropped L2Version misclassifies the gated address.
 func TestVersionGatedPrecompileIsPrecompiledToTracers(t *testing.T) {
 	const chainID = 900432
 	const activeAt = 30

@@ -38,9 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// frameIdentity resolves the address a frame acts as and its caller for the
-// given call type: CALLCODE and DELEGATECALL run foreign code under the
-// calling frame's own identity.
+// frameIdentity resolves the address a frame acts as and its caller: CALLCODE
+// and DELEGATECALL run foreign code under the calling frame's own identity.
 func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (self, frameCaller accounts.Address) {
 	switch typ {
 	case CALLCODE:
@@ -52,15 +51,11 @@ func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (se
 	}
 }
 
-// enterFrame applies the per-frame depth and read-only protocol shared by
-// the interpreter and the stateful-precompile dispatch, so nested calls
-// inherit static protection either way.
 func (evm *EVM) enterFrame(readOnly bool) (restoreReadonly bool) {
 	restoreReadonly = readOnly && !evm.readOnly
 	if restoreReadonly {
 		evm.readOnly = true
 	}
-	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	return restoreReadonly
 }
@@ -381,12 +376,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}()
 	}
 
-	// The interpreter rejects a value-bearing CALL from a static frame while
-	// charging gas, so that frame never reaches here. A stateful precompile
-	// calling back in through PrecompileContext.EVM does, and has to be refused
-	// on the same terms — above the tracer and BAL hooks below, or a refusal
-	// would record an address access (consensus-relevant under EIP-7928) and an
-	// Enter/Exit pair that the opcode path never produces.
+	// The interpreter refuses a value-bearing CALL from a static frame while
+	// charging gas, so only a precompile calling back in through ctx.EVM
+	// reaches here. Refuse above the tracer and BAL hooks, or the refusal
+	// records an EIP-7928 address access the opcode path never produces.
 	if evm.readOnly && typ == CALL && !value.IsZero() {
 		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
 	}
@@ -500,14 +493,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				EVM:      evm,
 				Value:    value,
 			}
-			// Charging through the handle keeps gasUsed.State and
-			// gasUsed.StateSpill in step with gasRemaining, so the accounting
-			// defer and handleFrameRevert below both read the real figures.
 			frameRemaining, frameUsed := gasRemaining, gasUsed
 			pgas := &PrecompileGas{remaining: &frameRemaining, used: &frameUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
 			func() {
-				// Released here, not after the call: a recovered panic out of
-				// RunStateful would otherwise leave a stashed handle live.
+				// Deferred: a recovered panic must not leave a live handle.
 				defer pgas.release()
 				defer func() { gasRemaining, gasUsed = frameRemaining, frameUsed }()
 				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
@@ -516,9 +505,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			if pgas.aborted != nil {
 				ret, err = nil, pgas.aborted
 			}
-			// Frame-level classification compares the bare sentinel, so an
-			// idiomatically wrapped revert would burn the frame's gas and skip
-			// the return-data copy while the receipt still read as reverted.
+			// Frame classification compares the bare sentinel: a wrapped
+			// revert would burn the frame's gas and drop the return data.
 			if err != nil && vmErrorCodeFromErr(err) == VMErrorCodeExecutionReverted {
 				err = ErrExecutionReverted
 			}
@@ -858,8 +846,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 // otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller accounts.Address, code []byte, gas mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	// Refused before the nonce read below, for the same reason as in evm.call:
-	// deriving the CREATE address touches state the opcode path never reaches.
+	// Before the nonce read below: deriving the address touches state.
 	if evm.readOnly {
 		return nil, accounts.NilAddress, gas, mdgas.MdGasUsage{}, ErrWriteProtection
 	}
