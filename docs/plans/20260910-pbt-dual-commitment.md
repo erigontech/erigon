@@ -375,13 +375,13 @@ different states and correctly report different roots.
 - Modify: `cmd/utils/app/domain_cmd.go`
 - Modify: `db/snaptype/files_test.go`
 
-- [ ] add the `ParseFileType` / `ParseEnum` entry for `commitment-bin`
-- [ ] add `commitment-bin` to the hand-listed name tables in the integration and snapshot commands, and
+- [x] add the `ParseFileType` / `ParseEnum` entry for `commitment-bin`
+- [x] add `commitment-bin` to the hand-listed name tables in the integration and snapshot commands, and
       widen the `domain_cmd` bound check
-- [ ] write tests: `ParseFileName("v1.0-commitment-bin.0-1024.kv")` yields type string `commitment-bin`,
+- [x] write tests: `ParseFileName("v1.0-commitment-bin.0-1024.kv")` yields type string `commitment-bin`,
       from 0, to 1024, and is classified as a state file
-- [ ] write tests: `v1.0-commitment.0-1024.kv` still parses as `commitment`, unchanged
-- [ ] run `make test-short` — must pass before task 7
+- [x] write tests: `v1.0-commitment.0-1024.kv` still parses as `commitment`, unchanged
+- [x] run `make test-short` — must pass before task 7
 
 ### Task 7: Make the branch cache per-domain and keep bin off the trunk
 

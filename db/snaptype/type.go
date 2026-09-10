@@ -432,6 +432,8 @@ var CaplinEnums = struct {
 	BlobSidecars: MinCaplinEnum + 1,
 }
 
+var CommitmentBin = register(Enum(MaxEnum-1), "commitment-bin", version.V1_0_standart, nil, nil, nil)
+
 func (ft Enum) String() string {
 	if t, ok := registeredTypes[ft]; ok {
 		return t.Name()

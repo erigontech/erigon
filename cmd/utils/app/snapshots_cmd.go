@@ -1493,6 +1493,8 @@ func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 		domain, idx = kv.CodeDomain, kv.CodeHistoryIdx
 	case "commitment":
 		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
+	case "commitment-bin":
+		domain, idx = kv.CommitmentBinDomain, kv.CommitmentBinHistoryIdx
 	case "receipt":
 		domain, idx = kv.ReceiptDomain, kv.ReceiptHistoryIdx
 	case "rcache":
@@ -2516,6 +2518,10 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 	if commitmentHistory {
 		viTypes = append(viTypes, "commitment")
 		iiTypes = append(iiTypes, "commitment")
+		if statecfg.ExperimentalBinCommitment {
+			viTypes = append(viTypes, "commitment-bin")
+			iiTypes = append(iiTypes, "commitment-bin")
+		}
 	}
 	for i := range accFiles {
 		res := &accFiles[i]
