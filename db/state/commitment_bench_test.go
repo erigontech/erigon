@@ -268,8 +268,8 @@ func runBenchArm(t testing.TB, arm benchArm, blocks, blocksPerTx, buildEvery, pr
 			domains.EnableParaTrieDB(db)
 		}
 		if path := os.Getenv("BENCH_TRACE"); path != "" {
-			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-			require.NoError(t, err)
+			f, openErr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			require.NoError(t, openErr)
 			defer f.Close()
 			domains.GetCommitmentContext().SetTraceWriter(f)
 		}
@@ -278,8 +278,8 @@ func runBenchArm(t testing.TB, arm benchArm, blocks, blocksPerTx, buildEvery, pr
 			txNum := uint64(blockNum + 1)
 			require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
 			for _, entry := range entriesFor(uint64(blockNum)) {
-				previous, _, err := domains.GetLatest(entry.domain, tx, entry.key)
-				require.NoError(t, err)
+				previous, _, getErr := domains.GetLatest(entry.domain, tx, entry.key)
+				require.NoError(t, getErr)
 				require.NoError(t, domains.DomainPut(entry.domain, tx, entry.key, entry.value, txNum, previous))
 			}
 			began := time.Now()

@@ -120,8 +120,8 @@ func applyAcceptanceBatch(t *testing.T, db kv.TemporalRwDB, entries []acceptance
 	require.NoError(t, err)
 	for i := range entries {
 		entry := &entries[i]
-		previous, _, err := domains.GetLatest(entry.domain, tx, entry.key)
-		require.NoError(t, err)
+		previous, _, getErr := domains.GetLatest(entry.domain, tx, entry.key)
+		require.NoError(t, getErr)
 		require.NoError(t, domains.DomainPut(entry.domain, tx, entry.key, entry.value, txNum, previous))
 	}
 	root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "acceptance", nil)
@@ -182,11 +182,11 @@ func recomputeAcceptanceRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	require.NoError(t, err)
 	defer domains.Close()
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		it, err := tx.Debug().RangeLatest(domain, nil, nil, -1)
-		require.NoError(t, err)
+		it, rangeErr := tx.Debug().RangeLatest(domain, nil, nil, -1)
+		require.NoError(t, rangeErr)
 		for it.HasNext() {
-			key, _, err := it.Next()
-			require.NoError(t, err)
+			key, _, nextErr := it.Next()
+			require.NoError(t, nextErr)
 			domains.GetCommitmentContext().TouchKey(domain, string(key), nil)
 		}
 		it.Close()

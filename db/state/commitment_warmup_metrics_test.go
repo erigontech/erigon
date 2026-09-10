@@ -55,8 +55,8 @@ func commitmentReadsMeteredThroughCompute(t *testing.T, edgeRecords, parallel bo
 		}
 		for i := range batch {
 			entry := &batch[i]
-			previousValue, _, err := domains.GetLatest(entry.domain, tx, entry.key)
-			require.NoError(t, err)
+			previousValue, _, getErr := domains.GetLatest(entry.domain, tx, entry.key)
+			require.NoError(t, getErr)
 			require.NoError(t, domains.DomainPut(entry.domain, tx, entry.key, entry.value, txNum, previousValue))
 		}
 		_, err = domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "warmup-metrics", nil)
