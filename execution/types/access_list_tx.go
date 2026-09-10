@@ -269,10 +269,44 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+// countAccessList walks the encoded tuples' headers for exact counts, which size
+// the decode. Requiring each key list to end inside its own tuple is what bounds
+// the totals by the input: rlp.Prefix alone checks a length against the whole
+// payload, which would let overlapping tuples count the same bytes repeatedly.
+// On malformed input it stops early and leaves the error to the decoder.
+func countAccessList(raw []byte) (tuples, keys int) {
+	for pos := 0; pos < len(raw); {
+		tuplePos, tupleLen, isList, err := rlp.Prefix(raw, pos)
+		if err != nil || !isList {
+			return
+		}
+		// A valid tuple starts with a 20-byte address, encoded in 21 bytes. A
+		// malformed one only skews the count, which is a capacity hint.
+		keyPos, keyLen, isList, err := rlp.Prefix(raw, tuplePos+21)
+		if err != nil || !isList || keyPos+keyLen > tuplePos+tupleLen {
+			return
+		}
+		tuples++
+		keys += keyLen / 33
+		pos = tuplePos + tupleLen
+	}
+	return
+}
+
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {
-	_, err := s.List()
+	l, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
+	}
+	*al = (*al)[:0] // decoding replaces, and both paths below must agree
+	// One arena backs every tuple's StorageKeys, so a tuple costs no allocation
+	// of its own. Walk the tuple headers first to size both slices exactly; a
+	// non-slice reader can't be walked, so there both stay nil and grow.
+	var keys []common.Hash
+	if raw := s.Peek(); uint64(len(raw)) >= l {
+		nTuples, nKeys := countAccessList(raw[:l])
+		*al = make(AccessList, 0, nTuples)
+		keys = make([]common.Hash, 0, nKeys)
 	}
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
@@ -282,9 +316,11 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if tuple.StorageKeys, err = decodeHashList(s); err != nil {
+		start := len(keys)
+		if keys, err = decodeHashListTo(s, keys); err != nil {
 			return fmt.Errorf("read StorageKeys: %w", err)
 		}
+		tuple.StorageKeys = keys[start:len(keys):len(keys)]
 		// end of tuple
 		if err = s.ListEnd(); err != nil {
 			return fmt.Errorf("close AccessTuple: %w", err)

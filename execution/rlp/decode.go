@@ -676,6 +676,10 @@ func NewBytesStream(b []byte) *Stream {
 	return stream
 }
 
+// Peek returns the bytes not yet read, without consuming them, for a stream
+// created from a byte slice. It is nil for any other reader.
+func (s *Stream) Peek() []byte { return s.sliceRdr }
+
 // PutStream returns a Stream to the pool.
 func PutStream(stream *Stream) {
 	stream.sliceRdr = nil // release caller's backing array
