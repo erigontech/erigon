@@ -812,7 +812,11 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			return nil, 0, err
 		}
 		if blockRoot == (common.Hash{}) {
-			continue
+			// Below BlocksAvailable the reader goes straight to the segment without consulting the
+			// canonical index, so a zero root means indexing has not caught up rather than an empty
+			// slot. Failing the pass leaves the target and completion state intact; skipping would
+			// count the slot as visited and let the pass report success with its blobs unfetched.
+			return nil, 0, fmt.Errorf("no canonical block root for slot %d: snapshot indexing has not caught up", currentSlot-visited)
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {

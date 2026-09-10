@@ -18,7 +18,6 @@ package network
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -31,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -669,7 +668,7 @@ func TestBlobHistoryDownloaderDropsRetriesBeforeNonArchiveRetentionFloor(t *test
 	require.Empty(t, downloader.retryRanges)
 }
 
-func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
+func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader *boundaryBlockReader) *BlobHistoryDownloader {
 	t.Helper()
 	downloader := &BlobHistoryDownloader{
 		ctx:                    t.Context(),
@@ -695,30 +694,19 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint6
 // reader serves there, so the production lookup and the storage mocks agree. The reader's own
 // fields are read directly rather than through ReadBeaconBlockBodyBySlot, which would pollute
 // the slot list tests assert on.
-func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader freezeblocks.BeaconSnapshotReader) {
+func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader *boundaryBlockReader) {
 	t.Helper()
-	rootFor := func(slot uint64) (common.Hash, bool) {
-		br, ok := reader.(*boundaryBlockReader)
-		if !ok {
-			return common.Hash{}, false
-		}
-		block := br.blocks[slot]
-		if block == nil && br.block != nil && br.block.Block.Slot == slot {
-			block = br.block
-		}
-		if block == nil {
-			return common.Hash{}, false
-		}
-		root, err := block.Block.HashSSZ()
-		require.NoError(t, err)
-		return root, true
-	}
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
 		for slot := uint64(0); slot <= headSlot; slot++ {
-			root, ok := rootFor(slot)
-			if !ok {
-				binary.BigEndian.PutUint64(root[:8], slot+1)
+			block := reader.blocks[slot]
+			if block == nil {
+				block = reader.block
 			}
+			if block == nil {
+				continue
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
 			if err := beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root); err != nil {
 				return err
 			}
@@ -797,3 +785,52 @@ func (s boundarySyncedChecker) Synced() bool { return bool(s) }
 type boundarySyncedCheckerFunc func() bool
 
 func (f boundarySyncedCheckerFunc) Synced() bool { return f() }
+
+// unindexCanonicalRoot removes a slot's canonical row, leaving the state a snapshot-backed slot is
+// in before the antiquary's indexing walk reaches it.
+func unindexCanonicalRoot(t *testing.T, db kv.RwDB, slot uint64) {
+	t.Helper()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot))
+	}))
+}
+
+// Below BlocksAvailable the reader serves a block straight from the segment without consulting the
+// canonical index, so a block can be visible before its index row exists. Treating that as an empty
+// slot would count it as visited, leave it out of retryRanges, and let the pass ratchet the target
+// up to the recent window and report completion — the slot's blobs would never be fetched and blob
+// retirement could then wedge on the dump.
+func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const head = uint64(1_000)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = head
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{head: block}}
+
+	downloader := newBoundaryDownloader(t, head, 0, head, reader)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	db := downloader.indiciesDB.(kv.RwDB)
+	unindexCanonicalRoot(t, db, head)
+	targetBefore := downloader.nextBackfillTargetSlot
+
+	require.Error(t, downloader.downloadOnce(false), "an unindexed slot must fail the pass, not be skipped")
+	require.Equal(t, targetBefore, downloader.nextBackfillTargetSlot, "the pass advanced its target over an unindexed slot")
+	require.False(t, downloader.backfillCompleted.Load(), "the pass reported completion over an unindexed slot")
+
+	// Indexing catches up: the slot is now resolvable and the pass can finish.
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, head, root)
+	}))
+	reader.slots = nil
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Contains(t, reader.slots, head, "the slot was not revisited after its index row appeared")
+	require.True(t, downloader.backfillCompleted.Load(), "a fully indexed and stored range must complete")
+}
