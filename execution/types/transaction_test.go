@@ -1085,3 +1085,15 @@ func TestDecodeAccessListReplacesExisting(t *testing.T) {
 	require.Equal(t, viaSlice, viaReader)
 	require.Len(t, viaSlice, 1)
 }
+
+// A typed txn with no access list decodes to a nil slice, which rpc/ethapi
+// marshals as null. A non-nil empty slice would silently move that to [].
+func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
+	t.Parallel()
+	al, err := decodeALFrom(encodeAL(t, AccessList{}))
+	require.NoError(t, err)
+	require.Nil(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "null", string(encoded))
+}

@@ -297,9 +297,10 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	}
 	*al = (*al)[:0] // both paths below must agree
 	// One arena backs every tuple's StorageKeys. A non-slice reader can't be
-	// walked, so there both slices stay nil and grow.
+	// walked, so there both slices stay nil and grow. An empty list is left
+	// alone: allocating it would decode to [] where the caller marshals null.
 	var keys []common.Hash
-	if raw := s.Peek(); uint64(len(raw)) >= l {
+	if raw := s.Peek(); l > 0 && uint64(len(raw)) >= l {
 		nTuples, nKeys := countAccessList(raw[:l])
 		*al = make(AccessList, 0, nTuples)
 		keys = make([]common.Hash, 0, nKeys)
