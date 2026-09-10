@@ -152,7 +152,8 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
 		// hex-nibble structure and the binary key space has no nibbles.
 		trie := NewPBinPatriciaHashed(nil)
-		tree := NewUpdates(ModeDirect, tmpdir, trie.setHashSuite(pbinSelectedSum))
+		trie.setHashSuite(pbinSelectedSum)
+		tree := NewBinUpdates(tmpdir, nil)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -1530,14 +1531,36 @@ func (t *Updates) spillDirect() {
 func (t *Updates) Mode() Mode { return t.mode }
 
 func (t *Updates) PlainKeys() map[string]struct{} {
-	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
+	var keys map[string]struct{}
+	switch t.mode {
+	case ModeDirect, ModeParallel:
+		keys = t.keys
+	case ModeUpdate:
+		if t.treeIdx != nil {
+			keys = make(map[string]struct{}, len(t.treeIdx))
+			for key := range t.treeIdx {
+				keys[key] = struct{}{}
+			}
+		}
+	default:
 		return nil
 	}
-	cp := make(map[string]struct{}, len(t.keys))
-	for k := range t.keys {
+	if keys == nil {
+		return nil
+	}
+	cp := make(map[string]struct{}, len(keys))
+	for k := range keys {
 		cp[k] = struct{}{}
 	}
 	return cp
+}
+
+func NewBinUpdates(tmpdir string, plainKeys map[string]struct{}) *Updates {
+	updates := NewUpdates(ModeDirect, tmpdir, pbinKeyHasherWith(pbinSelectedSum))
+	for key := range plainKeys {
+		updates.TouchPlainKey(key, nil, nil)
+	}
+	return updates
 }
 
 func (t *Updates) Size() (updates uint64) {

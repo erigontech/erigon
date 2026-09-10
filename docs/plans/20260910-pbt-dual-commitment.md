@@ -518,14 +518,14 @@ different states and correctly report different roots.
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/commitment_test.go`
 
-- [ ] add the `ModeUpdate` branch to `Updates.PlainKeys`, reading `treeIdx`
-- [ ] add a helper that builds a bin `Updates` from a plain-key set, so the committer does it once at
+- [x] add the `ModeUpdate` branch to `Updates.PlainKeys`, reading `treeIdx`
+- [x] add a helper that builds a bin `Updates` from a plain-key set, so the committer does it once at
       fold time rather than teeing per touch
-- [ ] write tests: `PlainKeys` returns the same set for `ModeUpdate`, `ModeDirect` and `ModeParallel`
+- [x] write tests: `PlainKeys` returns the same set for `ModeUpdate`, `ModeDirect` and `ModeParallel`
       given the same touches
-- [ ] write tests: the bin collector built from a hex `Updates` key set contains exactly those keys,
+- [x] write tests: the bin collector built from a hex `Updates` key set contains exactly those keys,
       deletions included
-- [ ] run `make test-short` — must pass before task 13
+- [x] run `make test-short` — must pass before task 13
 
 ### Task 13: A buffering PatriciaContext for the bin arm
 

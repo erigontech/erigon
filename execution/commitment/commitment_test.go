@@ -847,6 +847,47 @@ func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.
 	require.Equal(t, wantB, ctx.puts[1].data, "reused buffer must not retain stale bytes from the earlier, longer round")
 }
 
+func TestUpdatesPlainKeys_AllModes(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{"account-a", "storage-a", "deleted"}
+	for _, mode := range []Mode{ModeUpdate, ModeDirect, ModeParallel} {
+		updates := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		t.Cleanup(updates.Close)
+		for _, key := range keys {
+			updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
+		}
+		updates.TouchPlainKey("deleted", nil, updates.TouchStorage)
+
+		require.Equal(t, map[string]struct{}{
+			"account-a": {},
+			"storage-a": {},
+			"deleted":   {},
+		}, updates.PlainKeys())
+	}
+}
+
+func TestNewBinUpdatesFromPlainKeys(t *testing.T) {
+	t.Parallel()
+
+	accountKey := string(bytes.Repeat([]byte{0x01}, length.Addr))
+	storageKey := string(append(bytes.Repeat([]byte{0x01}, length.Addr), bytes.Repeat([]byte{0x02}, length.Hash)...))
+	deletedKey := string(bytes.Repeat([]byte{0x03}, length.Addr))
+	hexUpdates := NewUpdates(ModeUpdate, t.TempDir(), KeyToHexNibbleHash)
+	defer hexUpdates.Close()
+	for _, key := range []string{accountKey, storageKey, deletedKey} {
+		hexUpdates.TouchPlainKey(key, []byte("value"), hexUpdates.TouchStorage)
+	}
+	hexUpdates.TouchPlainKey(deletedKey, nil, hexUpdates.TouchStorage)
+	plainKeys := hexUpdates.PlainKeys()
+	updates := NewBinUpdates(t.TempDir(), plainKeys)
+	defer updates.Close()
+
+	require.Equal(t, ModeDirect, updates.Mode())
+	require.Equal(t, plainKeys, updates.PlainKeys())
+	require.EqualValues(t, len(plainKeys), updates.Size())
+}
+
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
