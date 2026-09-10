@@ -424,7 +424,7 @@ func appendRPCLogs(logs types.RPCLogs, filtered types.Logs, blockTime uint64, ma
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 		}
 	}
-	return append(logs, filtered.ToRPCLogs(blockTime)...), nil
+	return filtered.AppendRPCLogs(logs, blockTime), nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
