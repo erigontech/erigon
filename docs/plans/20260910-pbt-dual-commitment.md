@@ -733,15 +733,15 @@ different states and correctly report different roots.
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `execution/exec/bal_commitment_warmup_test.go`
 
-- [ ] add the bin domain to the hand-listed `DomainTables` calls in the reset stages
-- [ ] extend the commitment special case in `reset_state.go` to cover the bin domain
-- [ ] make the BAL commitment warmup domain-aware: warm the canonical domain, and never request the
+- [x] add the bin domain to the hand-listed `DomainTables` calls in the reset stages
+- [x] extend the commitment special case in `reset_state.go` to cover the bin domain
+- [x] make the BAL commitment warmup domain-aware: warm the canonical domain, and never request the
       branch cache for a domain that has none
-- [ ] make the rebuild command's hex pins — domain progress, domain names, and the refs override —
+- [x] make the rebuild command's hex pins — domain progress, domain names, and the refs override —
       follow the domain being rebuilt
-- [ ] write tests: a reset on a `hex+bin` datadir clears both commitment tables
-- [ ] write tests: warmup against the bin domain performs no branch-cache put
-- [ ] run `make test-short` — must pass before task 24
+- [x] write tests: a reset on a `hex+bin` datadir clears both commitment tables
+- [x] write tests: warmup against the bin domain performs no branch-cache put
+- [x] run `make test-short` — must pass before task 24
 
 ### Task 24: Keep the two folds out of each other's metrics
 

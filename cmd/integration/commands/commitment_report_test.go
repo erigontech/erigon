@@ -76,6 +76,13 @@ func TestCommitmentFileSizesMatchDisk(t *testing.T) {
 	require.Equal(t, total, totalCommitmentBytes(files))
 }
 
+func TestCommitmentRebuildDomainFollowsTarget(t *testing.T) {
+	registered := []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}, registered))
+	require.Equal(t, kv.CommitmentBinDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, registered))
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, []kv.Domain{kv.CommitmentDomain}))
+}
+
 func TestCommitmentFileSizesMissingDir(t *testing.T) {
 	files, err := commitmentFileSizes(filepath.Join(t.TempDir(), "never-written"))
 	require.NoError(t, err, "a rebuild that produced nothing reports nothing, it does not fail")

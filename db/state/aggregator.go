@@ -1418,7 +1418,9 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
 	for _, name := range names {
-		tables = append(tables, a.d[name].Tables()...)
+		if d := a.d[name]; d != nil {
+			tables = append(tables, d.Tables()...)
+		}
 	}
 	return tables
 }

@@ -39,18 +39,21 @@ type commitmentRecordingTx struct {
 	kv.TemporalTx
 	mu      sync.Mutex
 	domains []kv.Domain
+	opts    []kv.GetLatestOptions
+	aggTx   any
 }
 
-func (tx *commitmentRecordingTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+func (tx *commitmentRecordingTx) GetLatest(domain kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.mu.Lock()
 	tx.domains = append(tx.domains, domain)
+	tx.opts = append(tx.opts, opts)
 	tx.mu.Unlock()
 	return nil, 0, nil
 }
 
 func (*commitmentRecordingTx) Rollback() {}
 
-func (*commitmentRecordingTx) AggTx() any { return nil }
+func (tx *commitmentRecordingTx) AggTx() any { return tx.aggTx }
 
 type commitmentBeginErrorDB struct {
 	kv.RoDB
@@ -88,6 +91,21 @@ type commitmentBranchCacheProvider struct {
 }
 
 func (p commitmentBranchCacheProvider) BranchCache(kv.Domain) *commitment.BranchCache {
+	return p.cache
+}
+
+type commitmentDomainProvider struct {
+	domain   kv.Domain
+	cache    *commitment.BranchCache
+	requests *[]kv.Domain
+}
+
+func (p commitmentDomainProvider) CanonicalCommitmentDomain() kv.Domain {
+	return p.domain
+}
+
+func (p commitmentDomainProvider) BranchCache(domain kv.Domain) *commitment.BranchCache {
+	*p.requests = append(*p.requests, domain)
 	return p.cache
 }
 
@@ -137,6 +155,35 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	require.NotEmpty(t, tx.domains)
 	for _, domain := range tx.domains {
 		require.Equal(t, kv.CommitmentDomain, domain)
+	}
+}
+
+func TestWarmBALCommitmentUsesCanonicalDomainWithoutBinBranchCache(t *testing.T) {
+	cache := commitment.NewBranchCache(100)
+	defer cache.Close()
+	var requests []kv.Domain
+	tx := &commitmentRecordingTx{aggTx: commitmentDomainProvider{
+		domain:   kv.CommitmentBinDomain,
+		cache:    cache,
+		requests: &requests,
+	}}
+	db := &singleTxRoDB{tx: tx}
+	bal := types.BlockAccessList{{
+		Address:        accounts.InternAddress(common.Address{19: 2}),
+		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+	}}
+
+	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	require.NotEmpty(t, tx.domains)
+	for _, domain := range tx.domains {
+		require.Equal(t, kv.CommitmentBinDomain, domain)
+	}
+	require.Empty(t, requests)
+	for _, opts := range tx.opts {
+		require.False(t, opts.BranchCache())
 	}
 }
 

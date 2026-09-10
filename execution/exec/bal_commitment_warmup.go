@@ -60,13 +60,18 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 
 type balCommitmentContext struct {
 	tx         kv.TemporalTx
+	domain     kv.Domain
 	cache      *commitment.BranchCache
 	cacheStats *balCommitmentCacheStats
 }
 
 func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	domain := c.domain
+	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
+		domain = kv.CommitmentDomain
+	}
 	if c.cache == nil {
-		return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+		return c.tx.GetLatest(domain, prefix, kv.GetLatestOptions{})
 	}
 
 	data, step, ok := c.cache.Get(prefix)
@@ -76,7 +81,7 @@ func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	}
 	c.cacheStats.misses.Add(1)
 	c.cacheStats.fillRequests.Add(1)
-	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
+	return c.tx.GetLatest(domain, prefix, kv.GetLatestOptions{}.WithBranchCache())
 }
 
 type balCommitmentCacheStats struct {
@@ -95,6 +100,13 @@ func (*balCommitmentContext) Account([]byte) (*commitment.Update, error) {
 
 func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errors.New("BAL commitment warmup does not read storage")
+}
+
+func balWarmupCommitmentDomain(tx kv.TemporalTx) kv.Domain {
+	if provider, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+		return provider.CanonicalCommitmentDomain()
+	}
+	return kv.CommitmentDomain
 }
 
 func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, workers int) error {
@@ -120,12 +132,16 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 			factoryErrs <- errors.New("BAL commitment warmup requires a temporal read transaction")
 			return nil, nil
 		}
+		domain := balWarmupCommitmentDomain(txTemporal)
 		var cache *commitment.BranchCache
-		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
-			cache = provider.BranchCache(kv.CommitmentDomain)
+		if domain == kv.CommitmentDomain {
+			if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
+				cache = provider.BranchCache(domain)
+			}
 		}
 		return &balCommitmentContext{
 			tx:         txTemporal,
+			domain:     domain,
 			cache:      cache,
 			cacheStats: cacheStats,
 		}, tx.Rollback

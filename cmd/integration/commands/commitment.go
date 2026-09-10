@@ -853,6 +853,13 @@ func checkRebuildFlags(target dbstate.RebuildTarget, hasOutput bool) error {
 	return refuseSqueezeForBinTarget(target, squeeze)
 }
 
+func commitmentRebuildDomain(target dbstate.RebuildTarget, domains []kv.Domain) kv.Domain {
+	if target.Variant == commitment.VariantBinPatriciaTrie && slices.Contains(domains, kv.CommitmentBinDomain) {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
 	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
 		return err
@@ -862,6 +869,8 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	rebuildDomain := commitmentRebuildDomain(rebuildTarget, agg.CommitmentDomains())
 
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br, dbg.MaxReorgDepth)
@@ -873,7 +882,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	defer rwTx.Rollback()
 
 	if !clearCommitment {
-		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		domainProgress := rwTx.Debug().DomainProgress(rebuildDomain)
 		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
 		if err != nil {
 			return err
@@ -933,13 +942,13 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			DryRun:                 false,
 			StepRange:              "0-999999",
 			OnlyDomain:             !withHistory,
-			DomainNames:            []string{kv.CommitmentDomain.String()},
+			DomainNames:            []string{rebuildDomain.String()},
 		}); err != nil {
 			return err
 		}
 
 		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-		sconf := statecfg.Schema.CommitmentDomain
+		sconf := statecfg.Schema.GetDomainCfg(rebuildDomain)
 		for _, tn := range sconf.Tables() {
 			log.Info("Clearing", "table", tn)
 			if err := rwTx.ClearTable(tn); err != nil {
@@ -958,13 +967,12 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(rebuildDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()

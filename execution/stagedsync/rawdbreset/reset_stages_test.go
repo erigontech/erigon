@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -108,6 +109,35 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestResetExecClearsBothCommitmentDomains(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+	})
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Put(kv.TblCommitmentVals, []byte("branch"), []byte{1}))
+	require.NoError(t, tx.Put(kv.TblCommitmentBinVals, []byte("branch"), []byte{1}))
+	require.NoError(t, tx.Commit())
+
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+	require.NoError(t, db.ViewTemporal(t.Context(), func(roTx kv.TemporalTx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			value, _, err := roTx.GetLatest(domain, []byte("branch"), kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Nil(t, value)
+		}
+		return nil
+	}))
 }
 
 // TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB exercises the
