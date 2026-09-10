@@ -383,6 +383,52 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	})
 }
 
+// The same shape re-expanding: a sole account whose storage collapses to one slot and then grows
+// back must re-insert the survivor under its own first storage nibble. The root cell's derived
+// navigation path has to hash the slot alone, not the whole account-plus-slot plain key.
+func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 7777))
+	surv := storageLocsForNibble(0x2, 1, 11)
+	gone := append(storageLocsForNibble(0x8, 6, 3000), storageLocsForNibble(0xd, 6, 3000000)...)
+	fresh := append(storageLocsForNibble(0x5, 20, 5000), storageLocsForNibble(0xa, 20, 5000000)...)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range surv {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range gone {
+		ub1.Storage(a, loc, loc)
+		ub2.DeleteStorage(a, loc)
+	}
+	ub3 := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range fresh {
+		ub3.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	k1, u1 := ub1.Build()
+	k2, u2 := ub2.Build()
+	k3, u3 := ub3.Build()
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+
+	ms := NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	processBatch(t, ms, tr, k1, u1)
+	processBatch(t, ms, tr, k2, u2)
+	require.Equal(t, want, processBatch(t, ms, tr, k3, u3), "carried trie re-expanded the survivor under the wrong nibble")
+
+	msr := NewMockState(t)
+	_, blob := processModeBatchState(t, msr, modeSeq, 0, k1, u1, nil)
+	_, blob = processModeBatchState(t, msr, modeSeq, 0, k2, u2, blob)
+	restored, _ := processModeBatchState(t, msr, modeSeq, 0, k3, u3, blob)
+	require.Equal(t, want, restored, "state-restored trie re-expanded the survivor under the wrong nibble")
+}
+
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
 func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
 	rnd := rand.New(rand.NewSource(seed))

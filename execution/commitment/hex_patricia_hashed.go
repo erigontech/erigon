@@ -643,7 +643,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
 			}
-			if depth == 0 {
+			if depth == 0 && cell.accountAddrLen == 0 {
 				accountKeyLen = 0
 			}
 			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
