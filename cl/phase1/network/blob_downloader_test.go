@@ -157,3 +157,44 @@ func TestCollectIncompleteBlocksReadsTheCountUnderTheCanonicalRoot(t *testing.T)
 	require.NoError(t, err)
 	require.Empty(t, batch, "a slot whose sidecars are stored under its canonical root must not be re-queued")
 }
+
+// A block can be readable while its canonical row is not yet written: below BlocksAvailable the
+// snapshot path serves blocks by ordinal lookup without consulting the index, and blob backfill
+// starts before the antiquary's indexing walk finishes.
+//
+// This branch deliberately skips such a slot rather than failing the pass, unlike main. Main pairs
+// its error return with indexing the inclusive visible tip; without that second half the error
+// fires on the tip every pass and backfill can never complete. Neither piece is on this branch, so
+// the skip is the coherent behaviour here — and this test exists to keep a later cherry-pick from
+// importing main's error return on its own.
+func TestCollectIncompleteBlocksSkipsAnUnindexedSlotInsteadOfFailing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const slot = 1_000
+
+	// No MarkRootCanonical for this slot: the index has not caught up with the segment.
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	commitment := cltypes.KZGCommitment{}
+	commitment[0] = 0x01
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+
+	// Probing the store with a zero key would be meaningless, so the skip has to happen first.
+	store := blob_mock_services.NewMockBlobStorage(ctrl)
+	store.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Times(0)
+
+	b := &BlobHistoryDownloader{
+		ctx:         context.Background(),
+		beaconCfg:   &clparams.MainnetBeaconConfig,
+		indiciesDB:  db,
+		blobStorage: store,
+		blockReader: stubBlockReader{slot: slot, block: block},
+		logger:      log.New(),
+	}
+
+	batch, visited, err := b.collectIncompleteBlocks(slot, slot)
+	require.NoError(t, err, "an unindexed slot must be skipped, not fail the pass")
+	require.Empty(t, batch, "an unindexed slot must not be queued for download")
+	require.Equal(t, uint64(1), visited, "the pass must advance past the slot rather than stall on it")
+}
