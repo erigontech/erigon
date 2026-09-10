@@ -34,37 +34,26 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// PrecompilesFunc builds a chain's precompile overlay at an L2 version. It is
-// handed the version and nothing else on purpose: the merged result is cached
-// per (chainID, base fork tier, L2Version), so an overlay that varied with any
-// other part of Rules would be served a stale set on a cache hit. L1-fork
-// variation belongs to the built-in base sets, which the fork tier already
-// keys.
-//
-// That cache has no eviction, so L2Version has to be a short upgrade ladder
-// (ArbOS 30, 50, …). A chain whose L2Config resolves it from the block number
-// grows the cache without bound.
+// PrecompilesFunc builds a chain's precompile overlay at an L2 version. The
+// merged result is cached per (chainID, fork tier, L2Version) with no
+// eviction: an overlay that varied on anything else in Rules is served stale
+// on a hit, and an L2Version derived from block number grows the cache forever.
 type PrecompilesFunc func(l2Version uint64) PrecompiledContracts
 
 var (
 	registryMu sync.RWMutex
 	providers  = map[uint256.Int]PrecompilesFunc{}
-	// providerCount keeps the overwhelmingly common no-provider case off
-	// registryMu: Precompiles and ActivePrecompiles run 2-3 times per
-	// transaction, and an RWMutex read lock anti-scales with worker count.
+	// Keeps the common no-provider path off registryMu: it is hit 2-3 times
+	// per transaction and an RWMutex read lock anti-scales with workers.
 	providerCount atomic.Int64
 	mergedCache   = map[precompileCacheKey]*mergedPrecompileSet{}
 )
 
-// RegisterPrecompiles registers f as the precompile provider for chainID. A
-// provider's entries overlay the fork-selected built-ins on that chain only,
-// and win on address collision (a chain may deliberately replace a built-in).
-// Panics if chainID is already registered, is nil or zero, or f is nil.
-//
-// Registration must complete before any EVM exists for that chain. The set is
-// snapshotted per EVM but resolved live by state.Prepare, so a change made
-// mid-run desyncs the EIP-2929 warm set from what dispatches, and parallel
-// workers can run one block against different sets.
+// RegisterPrecompiles registers f as chainID's precompile provider; its entries
+// overlay the fork-selected built-ins and win on address collision. Must return
+// before any EVM exists for the chain: the set is snapshotted per EVM but
+// resolved live by state.Prepare, so a mid-run change desyncs the EIP-2929 warm
+// set from what dispatches and splits parallel workers across two sets.
 func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	if f == nil {
 		panic("vm: RegisterPrecompiles: nil PrecompilesFunc")
@@ -83,8 +72,7 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	dropCachedLocked(*chainID)
 }
 
-// UnregisterPrecompiles removes a chain's provider and its cached merged
-// sets; for tests and controlled teardown of an embedded chain.
+// UnregisterPrecompiles removes chainID's provider and its cached merged sets.
 func UnregisterPrecompiles(chainID *uint256.Int) {
 	if chainID == nil || chainID.IsZero() {
 		panic("vm: UnregisterPrecompiles: chain ID 0")
@@ -98,8 +86,6 @@ func UnregisterPrecompiles(chainID *uint256.Int) {
 	dropCachedLocked(*chainID)
 }
 
-// dropCachedLocked removes every merged set cached for chainID. Caller holds
-// the write lock.
 func dropCachedLocked(chainID uint256.Int) {
 	for k := range mergedCache {
 		if k.chainID == chainID {
@@ -114,8 +100,6 @@ type precompileCacheKey struct {
 	l2Version uint64
 }
 
-// rulesChainID tolerates a nil ChainID (bare Rules values are used on
-// genesis and test paths); no provider registers chain ID 0.
 func rulesChainID(rules *chain.Rules) uint256.Int {
 	if rules.ChainID == nil {
 		return uint256.Int{}
@@ -133,8 +117,6 @@ func lookupProvider(chainID uint256.Int) (f PrecompilesFunc, ok bool) {
 	return f, ok
 }
 
-// mergedSetFor returns the cached (contracts, addresses) pair for
-// (chainID, fork, rules.L2Version), building and caching it on first miss.
 func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provider PrecompilesFunc) *mergedPrecompileSet {
 	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
 
