@@ -328,12 +328,16 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	var response bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
 
-	sentinel := &rotatingProbeSentinel{response: response.Bytes(), canceled: make(chan struct{})}
+	sentinel := &rotatingProbeSentinel{response: response.Bytes()}
 	// Outside the bubble: NewBeaconRpcP2P starts loops that outlive a request,
 	// and a bubble may not end while they are parked.
 	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil)
 
 	synctest.Test(t, func(t *testing.T) {
+		// synctest treats a receive as durably blocking only for a channel created
+		// inside the bubble, so this one cannot be built with the sentinel.
+		sentinel.canceled = make(chan struct{})
+
 		ctx := t.Context()
 		downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
 		processed := make(chan int, 1)
