@@ -53,33 +53,41 @@ func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 	return e.version
 }
 
+// Gloas encodes the execution requests as progressive lists, which are
+// semantically unbounded: the Electra per-payload maxima no longer cap them, so
+// the decode guard is sized by what a req/resp chunk can carry. The progressive
+// constructors double whatever they are given, so this returns half the count.
+func progressiveResourceLimit(bytesPerElement int) int {
+	return int(clparams.MaxChunkSize) / bytesPerElement / 2
+}
+
 func (e *ExecutionRequests) ensureLists() {
 	if e.cfg == nil {
 		panic("execution requests beacon config is nil")
 	}
 	progressive := e.effectiveVersion() >= clparams.GloasVersion
 	if e.Deposits == nil && progressive {
-		e.Deposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
+		e.Deposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](progressiveResourceLimit(solid.SizeDepositRequest), solid.SizeDepositRequest)
 	} else if e.Deposits == nil {
 		e.Deposits = solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
 	}
 	if e.Withdrawals == nil && progressive {
-		e.Withdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
+		e.Withdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](progressiveResourceLimit(solid.SizeWithdrawalRequest), solid.SizeWithdrawalRequest)
 	} else if e.Withdrawals == nil {
 		e.Withdrawals = solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
 	}
 	if e.Consolidations == nil && progressive {
-		e.Consolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
+		e.Consolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](progressiveResourceLimit(solid.SizeConsolidationRequest), solid.SizeConsolidationRequest)
 	} else if e.Consolidations == nil {
 		e.Consolidations = solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
 	}
 	if e.BuilderDeposits == nil && progressive {
-		e.BuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
+		e.BuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](progressiveResourceLimit(solid.SizeBuilderDepositRequest), solid.SizeBuilderDepositRequest)
 	} else if e.BuilderDeposits == nil {
 		e.BuilderDeposits = solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	}
 	if e.BuilderExits == nil && progressive {
-		e.BuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
+		e.BuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](progressiveResourceLimit(solid.SizeBuilderExitRequest), solid.SizeBuilderExitRequest)
 	} else if e.BuilderExits == nil {
 		e.BuilderExits = solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	}
@@ -213,11 +221,11 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	newBuilderDeposits := solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	newBuilderExits := solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	if e.effectiveVersion() >= clparams.GloasVersion {
-		newDeposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
-		newWithdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
-		newConsolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
-		newBuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
-		newBuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
+		newDeposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](progressiveResourceLimit(solid.SizeDepositRequest), solid.SizeDepositRequest)
+		newWithdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](progressiveResourceLimit(solid.SizeWithdrawalRequest), solid.SizeWithdrawalRequest)
+		newConsolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](progressiveResourceLimit(solid.SizeConsolidationRequest), solid.SizeConsolidationRequest)
+		newBuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](progressiveResourceLimit(solid.SizeBuilderDepositRequest), solid.SizeBuilderDepositRequest)
+		newBuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](progressiveResourceLimit(solid.SizeBuilderExitRequest), solid.SizeBuilderExitRequest)
 	}
 	c := struct {
 		Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
