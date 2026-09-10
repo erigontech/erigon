@@ -357,6 +357,10 @@ func (e *ExecModule) Close() {
 	}
 }
 
+func (e *ExecModule) ResetCurrentContext() {
+	e.closeModuleContext()
+}
+
 // closeModuleContext closes and clears e.currentContext. The nil swap happens
 // under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
 // never obtain a SharedDomains that is about to be closed.

@@ -927,8 +927,10 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	if sd.branchCache != nil {
 		sd.branchCache.Unwind(txNumUnwindTo)
 		if changeset != nil {
-			for _, diff := range changeset[kv.CommitmentDomain] {
-				sd.branchCache.Invalidate([]byte(diff.Key))
+			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+				for _, diff := range changeset[domain] {
+					sd.branchCache.Invalidate([]byte(diff.Key))
+				}
 			}
 		}
 	}

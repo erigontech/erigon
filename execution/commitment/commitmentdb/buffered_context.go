@@ -18,6 +18,7 @@ package commitmentdb
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -48,6 +49,14 @@ func (c *BufferedPatriciaContext) Account(plainKey []byte) (*commitment.Update, 
 
 func (c *BufferedPatriciaContext) Storage(plainKey []byte) (*commitment.Update, error) {
 	return c.inner.Storage(plainKey)
+}
+
+func (c *BufferedPatriciaContext) Code(plainKey []byte) ([]byte, error) {
+	provider, ok := c.inner.(interface{ Code([]byte) ([]byte, error) })
+	if !ok {
+		return nil, fmt.Errorf("%T serves no code", c.inner)
+	}
+	return provider.Code(plainKey)
 }
 
 func (c *BufferedPatriciaContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

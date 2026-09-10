@@ -796,17 +796,17 @@ different states and correctly report different roots.
 - Create: `execution/tests/pbt_dual_commitment_test.go`
 - Modify: `execution/tests/testutil/` fixtures as needed
 
-- [ ] build a `hex+bin` genesis fixture with `amsterdamTime` at genesis and `binaryTrieTime` a few blocks
+- [x] build a `hex+bin` genesis fixture with `amsterdamTime` at genesis and `binaryTrieTime` a few blocks
       past it
-- [ ] drive the chain through the flip and assert: hex root equals the header root before
+- [x] drive the chain through the flip and assert: hex root equals the header root before
       `binaryTrieTime`; bin root equals the header root from the flip block on
-- [ ] assert both domains hold the flip block and its parent
-- [ ] assert a reorg spanning the flip restores the correct canonical root from the predicate alone, with
+- [x] assert both domains hold the flip block and its parent
+- [x] assert a reorg spanning the flip restores the correct canonical root from the predicate alone, with
       no migration-specific rollback code
-- [ ] assert a shadow fold error leaves the block valid and marks the shadow stopped
-- [ ] assert an unwind across the run does not panic in the diffset reader
-- [ ] assert `debug_shadowStateRoot` returns the non-canonical root for a block on each side of the flip
-- [ ] run `make test-short` — must pass before task 27
+- [x] assert a shadow fold error leaves the block valid and marks the shadow stopped (covered by the dual-role committer test)
+- [x] assert an unwind across the run does not panic in the diffset reader
+- [x] assert `debug_shadowStateRoot` returns the non-canonical root for a block on each side of the flip
+- [x] run `make test-short` — must pass before task 27
 
 ### Task 27: Verify acceptance criteria
 
