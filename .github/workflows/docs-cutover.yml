@@ -199,12 +199,17 @@ jobs:
             # check it here.
             deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${target_branch}" \
               --jq '.content' 2>/dev/null | base64 -d || echo '')"
-            printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+            # Parse only when there is something to parse: running the script on
+            # an empty file logs "has no push: trigger" just above the accurate
+            # "carries no docs-deploy.yml" warning, which reads like two faults.
             pinned=no
-            if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
-               python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
-               | grep -Fxq "$target_branch"; then
-              pinned=yes
+            if [ -n "$deploy_yml" ]; then
+              printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+              if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+                 python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+                 | grep -Fxq "$target_branch"; then
+                pinned=yes
+              fi
             fi
 
             if [ -z "$deploy_yml" ]; then
@@ -563,6 +568,17 @@ jobs:
           DEPLOY_YML="${workdir}/.github/workflows/docs-deploy.yml" \
             python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" \
             --repoint "$TARGET_BRANCH"
+
+          # The script treats "already pinned" as a no-op, but the commit below
+          # would then fail with "nothing to commit" and turn the whole step red.
+          # That happens whenever a human lands the repoint between the state
+          # step's API read and this clone. Use `status --porcelain` rather than
+          # `diff --quiet`: on the seed path the file is new and untracked, which
+          # `diff` cannot see.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Nothing to repoint — ${TARGET_BRANCH} already pins itself. Done by someone else."
+            exit 0
+          fi
 
           git config user.name "erigon-release-bot[bot]"
           git config user.email "erigon-release-bot[bot]@users.noreply.github.com"

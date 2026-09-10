@@ -12,9 +12,14 @@ import os
 import re
 import sys
 
-# The file to read or edit. The callers point this at a temp copy fetched from
-# a branch, or at a clone's working copy; it is never assumed to be this repo's.
-PATH = os.environ.get('DEPLOY_YML', '.github/workflows/docs-deploy.yml')
+def target_path():
+    """File to read or edit.
+
+    Callers point DEPLOY_YML at a temp copy fetched from a branch, or at a
+    clone's working copy; it is never assumed to be this repo's own file.
+    Read per call rather than at import so tests can vary it.
+    """
+    return os.environ.get('DEPLOY_YML', '.github/workflows/docs-deploy.yml')
 
 
 def _is_skippable(line):
@@ -39,25 +44,32 @@ def _block_after(src, key_re, start=0):
 
 
 def branch_span(src):
-    push = _block_after(src, r'^(?P<i>[ \t]*)push:[ \t]*$')
+    push = _block_after(src, r'^(?P<i>[ \t]*)push:[ \t]*(?:#.*)?$')
     if not push:
         sys.exit('docs-deploy.yml has no push: trigger - refusing to edit blindly')
-    b = _block_after(src[:push[1]], r'^(?P<i>[ \t]*)branches:[ \t]*$', push[0])
+    b = _block_after(src[:push[1]], r'^(?P<i>[ \t]*)branches:[ \t]*(?:#.*)?$', push[0])
     if not b:
         sys.exit('the push: trigger has no branches: list - refusing to edit blindly')
     return b
 
 
-ENTRY = re.compile(r"^(?P<lead>[ \t]*-[ \t]*)(?P<q>['\"]?)(?P<name>[^'\"#\s]+)(?P=q)"
-                   r"(?P<trail>[ \t]*(?:#.*)?)$", re.M)
+# A '#' only starts a comment when whitespace precedes it (YAML requires that,
+# and git permits '#' inside a branch name) — otherwise `- release/3.6#keep`
+# would read as `release/3.6` and the trigger would be reported as pinned to a
+# branch it does not actually name.
+ENTRY = re.compile(
+    r"^(?P<lead>[ \t]*-[ \t]*)"
+    r"(?:(?P<q>['\"])(?P<qname>[^'\"]+)(?P=q)|(?P<name>\S+))"
+    r"(?P<trail>(?:[ \t]+#.*)?[ \t]*)$", re.M)
 
 
 def entries(block):
-    return [m.group('name') for m in ENTRY.finditer(block)]
+    return [m.group('qname') or m.group('name') for m in ENTRY.finditer(block)]
 
 
 def main():
-    src = open(PATH).read()
+    path = target_path()
+    src = open(path).read()
     lo, hi = branch_span(src)
     block = src[lo:hi]
     names = entries(block)
@@ -73,12 +85,17 @@ def main():
         # Not an error: the check and this rewrite read the same list, so this
         # means the state was satisfied between the two. Degrade to a no-op
         # rather than failing the job every day.
-        print(f'{PATH} already pins {new} - nothing to do')
+        print(f'{path} already pins {new} - nothing to do')
         return 0
-    patched = ENTRY.sub(lambda m: f"{m.group('lead')}{m.group('q')}{new}{m.group('q')}{m.group('trail')}", block)
-    open(PATH, 'w').write(src[:lo] + patched + src[hi:])
+    def swap(m):
+        q = m.group('q') or ''
+        return f"{m.group('lead')}{q}{new}{q}{m.group('trail')}"
+
+    patched = ENTRY.sub(swap, block)
+    open(path, 'w').write(src[:lo] + patched + src[hi:])
     print(f'repointed {names[0]} -> {new}')
     return 0
 
 
-sys.exit(main())
+if __name__ == '__main__':
+    sys.exit(main())
