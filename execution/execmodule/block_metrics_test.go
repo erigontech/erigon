@@ -113,6 +113,22 @@ func sendTo(t *testing.T, m *execmoduletester.ExecModuleTester, privKey *ecdsa.P
 	}
 }
 
+func sendThenDeploy(t *testing.T, m *execmoduletester.ExecModuleTester, privKey *ecdsa.PrivateKey, to common.Address, value uint64) func(int, *blockgen.BlockGen) {
+	send := sendTo(t, m, privKey, to, value)
+	return func(i int, b *blockgen.BlockGen) {
+		if i == 0 {
+			send(i, b)
+			return
+		}
+		txn, err := types.SignTx(
+			types.NewContractCreation(uint64(i), uint256.NewInt(0), 300_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), []byte{0x60, 0x01, 0x60, 0x00, 0xf3}),
+			*types.LatestSignerForChainID(nil), privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	}
+}
+
 func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	prevReadMetrics := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
@@ -123,7 +139,7 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	// New installs a root handler at LvlError, replacing any earlier collector.
 	collector := installCollector(t)
 
-	chainResult, err := m.GenerateChain(2, sendTo(t, m, privKey, senderAddr, 1_000))
+	chainResult, err := m.GenerateChain(2, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
 
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
@@ -132,7 +148,7 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	require.Len(t, records, len(chainResult.Blocks),
 		"exactly one record per block: a second emission site would double every block")
 
-	var sawStateHash, sawAccountReads bool
+	var sawStateHash, sawAccountReads, sawCodeWrites bool
 	for _, rec := range records {
 		block := rec["block"].(map[string]any)
 		assert.NotZero(t, block["number"], "block number must be filled in")
@@ -159,10 +175,16 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		if reads["accounts"].(float64) > 0 {
 			sawAccountReads = true
 		}
+
+		writes := rec["state_writes"].(map[string]any)
+		if code, ok := writes["code"].(float64); ok && code > 0 {
+			sawCodeWrites = true
+		}
 	}
 
 	assert.True(t, sawStateHash, "state_hash_ms was zero in every record — commitment timing is not reaching the emitter")
 	assert.True(t, sawAccountReads, "state_reads.accounts was zero in every record — the counters are not reaching the emitter")
+	assert.True(t, sawCodeWrites, "state_writes.code was zero across a contract deploy — the one code counter claimed real is not counted")
 }
 
 func TestSlowBlockThresholdRestoresReadMetrics(t *testing.T) {
