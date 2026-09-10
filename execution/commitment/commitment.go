@@ -636,19 +636,21 @@ func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, 
 	// PutBranch copies both key and record before it returns, so one scratch of each serves the node.
 	key := make([]byte, len(nodeKey)+1)
 	copy(key, nodeKey)
+	written, bytesOut := 0, 0
 	for bitset := changed; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		key[len(nodeKey)] = 0x80 | byte(nibble)
 		record := be.edgeRecordFor(afterMap, bit, nibble, cells)
 		if err := ctx.PutBranch(key, record, nil); err != nil {
+			publishBranchWrites(written, bytesOut, be.metrics)
 			return err
 		}
-		if be.metrics != nil {
-			be.metrics.updateBranch.Add(1)
-		}
+		written++
+		bytesOut += len(record)
 		bitset ^= bit
 	}
+	publishBranchWrites(written, bytesOut, be.metrics)
 	return nil
 }
 

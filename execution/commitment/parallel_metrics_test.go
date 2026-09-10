@@ -175,31 +175,33 @@ func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
 // where it lands and again from the round's snapshot is invisible in the trie's
 // own MetricValues, so this reads the published counter instead.
 func TestBranchWritesArePublishedOnce(t *testing.T) {
-	ms := NewMockState(t)
-	keys, upds := buildNibbleSpread(t, 16, 4)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	forEachFormat(t, func(t *testing.T, opts ...stateOpt) {
+		ms := newMockState(t, modeParallel, opts...)
+		keys, upds := buildNibbleSpread(t, 16, 4)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
-	tr := newParTrie(t, ms, 4)
-	defer tr.Release()
-	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer ut.Close()
-	for _, k := range keys {
-		ut.TouchPlainKey(string(k), nil, nil)
-	}
+		tr := newParTrie(t, ms, 4)
+		defer tr.Release()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
 
-	beforePuts := mxBranchPuts.GetValueUint64()
-	beforeBytes := mxWriteBytes.GetValueUint64()
+		beforePuts := mxBranchPuts.GetValueUint64()
+		beforeBytes := mxWriteBytes.GetValueUint64()
 
-	var got *CommitProgress
-	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
-	require.NoError(t, err)
-	require.NotNil(t, got)
+		var got *CommitProgress
+		_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotNil(t, got)
 
-	require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
-	assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
-		"commitment_branch_writes_total counts each write once")
-	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
-		"commitment_branch_write_bytes_total counts each write once")
+		require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
+		assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
+			"commitment_branch_writes_total counts each write once")
+		assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
+			"commitment_branch_write_bytes_total counts each write once")
+	})
 }
 
 func TestDeepFoldedStorageReachesRoundMetrics(t *testing.T) {
