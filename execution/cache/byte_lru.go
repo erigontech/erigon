@@ -33,10 +33,17 @@ import (
 // a time out of the shared cachebudget envelope, and stops rising for good once
 // the envelope refuses a chunk, so a full envelope costs nothing per Add.
 //
-// otter's executor is synchronous here, so onEvict has fired for every entry a
-// write displaced before Add returns — a caller's byte counter would otherwise
-// drift past a Purge. Eviction is W-TinyLFU, not LRU: a newcomer no hotter than
-// the coldest resident entry is rejected rather than admitted.
+// The synchronous executor buys ordering for InvalidateAll only: it drains
+// under the eviction mutex and runs every deletion notification before
+// returning, so no deferred onEvict fires after Purge/Close have zeroed the
+// counters and drives them negative. It does NOT make eviction synchronous with
+// Add: supplying an executor clears otter's hasDefaultExecutor, its drain is
+// scheduled behind a TryLock, and the reschedule that would retry a missed
+// drain is gated on that same flag. So under concurrent writers a layer can sit
+// over its ceiling until the next write; CleanUp forces the drain.
+//
+// Eviction is W-TinyLFU, not LRU: a newcomer no hotter than the coldest
+// resident entry is rejected rather than admitted.
 type byteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64
@@ -92,9 +99,11 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 
 func (b *byteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
-// Add reports whether value was admitted. A value larger than the whole budget
-// is not: onEvict will never fire for it, so a caller that accounts the entry
-// up-front must skip it rather than leak the cost.
+// Add reports whether the value could be offered to the cache, not whether it
+// is resident afterwards: W-TinyLFU may still reject a newcomer in favour of
+// the incumbent, and that path returns true. Only a value larger than the whole
+// budget returns false — onEvict never fires for it, so a caller that accounts
+// the entry up-front must refund it rather than leak the cost.
 func (b *byteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {

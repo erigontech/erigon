@@ -112,8 +112,9 @@ type codeSizeEntry struct {
 //   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
 //     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
 //
-// The content layers are bounded by the bytes they hold; full layers evict
-// until the new entry fits.
+// The content layers are bounded by the bytes they hold. A full layer makes
+// room for the newcomer or rejects it: eviction is W-TinyLFU, which protects
+// the incumbent, so admission is not guaranteed.
 //
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
 // same way as the account/storage/branch caches: a contract's code
@@ -185,6 +186,9 @@ type CodeCache struct {
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
+	// codeLayerCapB is what one content layer is bounded at, which is what the
+	// usage percentages must be read against.
+	codeLayerCapB datasize.ByteSize
 
 	// closed guards the single paired Close of the content layers so a double
 	// Close can't over-return their envelope reservations.
@@ -264,10 +268,14 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The content-addressed layers grow from a small start into the shared
 	// envelope, so a cache over few contracts (a test fixture) never pre-commits
 	// the full budget. onEvict keeps the byte/entry counters following residency.
-	// The two content layers hold the same code under different keys, so they
-	// split the budget rather than each taking it: the configured figure is what
-	// the cache costs, not half of it.
+	// The two content layers hold the same code under different keys and store
+	// the same slice, so most of the apparent double charge is phantom: only the
+	// entry structs duplicate. Their resident sets still diverge under
+	// independent eviction, and unsplit that reached 1.53x the configured figure
+	// in real heap. Splitting is the conservative bound: it costs distinct-code
+	// capacity to keep real bytes inside the budget.
 	perLayer := max(codeCapacityBytes/2, 1)
+	cc.codeLayerCapB = perLayer
 	cc.hashToCode = newByteLRU(perLayer, codeEntryResident,
 		func(k uint64, e codeEntry) { cc.codeSize.Add(-codeEntryResident(k, e)) })
 	cc.codeHashToCode = newByteLRU(perLayer, codeEntryResident,
@@ -677,8 +685,8 @@ func (c *CodeCache) PrintStatsAndReset() {
 	codeSizeB := c.codeSize.Load()
 	codeHashSizeB := c.codeHashCodeSize.Load()
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
-	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
-	codeHashUsagePct := float64(codeHashSizeB) / float64(c.codeCapacityB) * 100
+	codeUsagePct := float64(codeSizeB) / float64(c.codeLayerCapB) * 100
+	codeHashUsagePct := float64(codeHashSizeB) / float64(c.codeLayerCapB) * 100
 
 	log.Debug("CodeCache stats",
 		"addr_hits", addrHits,

@@ -33,7 +33,8 @@ import (
 // toward a byte-budget ceiling as it fills, funding each step from the shared
 // cachebudget envelope. It exists so a cache with a small working set never
 // pre-commits its full configured capacity — the same demand-growth the state
-// caches use — reused across the CodeCache's content and size layers.
+// caches use. The CodeCache's content layers moved to byteLRU; its size layer
+// still uses this.
 //
 // Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a

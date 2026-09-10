@@ -41,14 +41,24 @@ func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 			for i := range 4000 {
 				code := make([]byte, codeLen)
 				binary.BigEndian.PutUint64(code, uint64(i))
-				h := crypto.Keccak256(code)
-				cache.PutWithCodeHash(nil, code, h, uint64(i))
+				addr := make([]byte, 20)
+				binary.BigEndian.PutUint64(addr, uint64(i))
+				cache.PutWithCodeHash(addr, code, crypto.Keccak256(code), uint64(i))
 			}
+			cache.hashToCode.c.CleanUp()
+			cache.codeHashToCode.c.CleanUp()
 
-			require.LessOrEqual(t, cache.CodeSizeBytes(), int64(budget),
-				"resident code bytes exceed the configured budget")
-			require.LessOrEqual(t, cache.codeHashCodeSize.Load(), int64(budget),
-				"resident codeHash-layer bytes exceed the configured budget")
+			// Each layer is bounded at half the configured figure, and the pair
+			// must stay inside the whole of it. An addr is required or
+			// putCodeLocked never runs and codeSize stays 0 whatever the bound.
+			perLayer := int64(budget / 2)
+			require.NotZero(t, cache.CodeSizeBytes(), "hashToCode must be populated")
+			require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer,
+				"hashToCode exceeds its share of the budget")
+			require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer,
+				"codeHashToCode exceeds its share of the budget")
+			require.LessOrEqual(t, cache.CodeSizeBytes()+cache.codeHashCodeSize.Load(), int64(budget),
+				"the two layers together exceed the configured budget")
 		})
 	}
 }
@@ -65,14 +75,22 @@ func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 			for i := range 500 {
 				code := make([]byte, 64*1024)
 				binary.BigEndian.PutUint64(code, uint64(w*500+i))
-				cache.PutWithCodeHash(nil, code, crypto.Keccak256(code), 1)
+				addr := make([]byte, 20)
+				binary.BigEndian.PutUint64(addr, uint64(w*500+i))
+				cache.PutWithCodeHash(addr, code, crypto.Keccak256(code), 1)
 			}
 		})
 	}
 	wg.Wait()
+	// Eviction is not synchronous with Add under concurrent writers: otter
+	// schedules its drain behind a TryLock and does not reschedule a missed one
+	// with a custom executor. Force it before reading the bound.
+	cache.hashToCode.c.CleanUp()
+	cache.codeHashToCode.c.CleanUp()
 
-	require.LessOrEqual(t, cache.CodeSizeBytes(), int64(budget))
-	require.LessOrEqual(t, cache.codeHashCodeSize.Load(), int64(budget))
+	perLayer := int64(budget / 2)
+	require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer)
+	require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer)
 }
 
 // A harness builds one cache per fixture and closes it. A closed cache must
@@ -91,6 +109,19 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 		runtime.ReadMemStats(&m)
 		return float64(m.HeapAlloc) / 1048576
 	}
+
+	// Direct check first: a closed layer must hold nothing. The heap check below
+	// can only see the aggregate, so on its own it cannot say why.
+	one := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	for i := range 4000 {
+		code := make([]byte, 256)
+		binary.BigEndian.PutUint64(code, uint64(i))
+		one.Put(nil, code, uint64(i))
+	}
+	require.NotZero(t, one.hashToCode.Len(), "layer must be populated before Close")
+	one.Close()
+	require.Zero(t, one.hashToCode.Len(), "Close must drop the entries")
+	require.Zero(t, one.hashToCode.resident.Load(), "Close must zero the residency")
 
 	const caches = 200
 	base := heap()

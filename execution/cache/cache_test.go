@@ -362,10 +362,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode is bounded by bytes, so 1100 three-byte codes all fit in the
-	// 1MB budget — and residency stays inside it.
+	// hashToCode is bounded by bytes and gets half the configured figure, which
+	// 1100 small codes are nowhere near — they all stay resident.
 	assert.Equal(t, 1100, c.CodeLen())
-	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024))
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024)/2)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
