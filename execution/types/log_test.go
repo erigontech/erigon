@@ -395,7 +395,7 @@ func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
-func TestToRPCLogs(t *testing.T) {
+func TestAppendRPCLogs(t *testing.T) {
 	t.Parallel()
 
 	logs := Logs{
@@ -423,7 +423,7 @@ func TestToRPCLogs(t *testing.T) {
 		},
 	}
 
-	rpcLogs := logs.ToRPCLogs(1900000000)
+	rpcLogs := logs.AppendRPCLogs(nil, 1900000000)
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
@@ -432,12 +432,13 @@ func TestToRPCLogs(t *testing.T) {
 	}
 }
 
-func TestToRPCLogsEmpty(t *testing.T) {
+func TestAppendRPCLogsEmpty(t *testing.T) {
 	t.Parallel()
 
-	// Non-nil empty, so eth_getLogs/erigon_getLogs serialise `[]` and not `null`.
+	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
+	// stays non-nil and serialises `[]` and not `null`.
 	for _, logs := range []Logs{{}, nil} {
-		rpcLogs := logs.ToRPCLogs(1)
+		rpcLogs := logs.AppendRPCLogs(RPCLogs{}, 1)
 		require.NotNil(t, rpcLogs)
 		require.Len(t, rpcLogs, 0)
 	}
