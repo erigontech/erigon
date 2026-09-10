@@ -138,29 +138,6 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	require.False(t, got.ReadOnly)
 }
 
-func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
-	const chainID = 900403
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8a}))
-	calls := 0
-	rec := funcPrecompile{name: "REENTER",
-		run: func(input []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			calls++
-			if calls > 1100 {
-				return nil, nil
-			}
-			_, err := ctx.Call(gas, precompileAddr, input, gas.Remaining().Execution, uint256.Int{})
-			return nil, err
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
-
-	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
-	require.ErrorIs(t, err, vm.ErrDepth)
-	require.LessOrEqual(t, calls, 1030, "recursion must be cut off by the depth limit")
-}
-
 func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	const chainID = 900404
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8b}))
@@ -181,25 +158,6 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	require.Equal(t, uint64(460), remaining.State)
 	require.Equal(t, int64(40), gasUsed.State, "State consumption must be attributed to the State dimension")
 	require.Equal(t, uint64(100), gasUsed.Execution, "Execution usage must not absorb the State spend")
-}
-
-func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
-	const chainID = 900405
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8c}))
-	storeAddr := accounts.InternAddress(common.HexToAddress("0x5570"))
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: funcPrecompile{name: "NESTED",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			_, err := ctx.Call(gas, storeAddr, nil, gas.Remaining().Execution, uint256.Int{})
-			return nil, err
-		}}})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
-	require.NoError(t, cfg.State.CreateAccount(storeAddr, true))
-	require.NoError(t, cfg.State.SetCode(storeAddr, []byte{0x60, 0x01, 0x60, 0x01, 0x55, 0x00}, tracing.CodeChangeUnspecified)) // PUSH1 1 PUSH1 1 SSTORE STOP
-
-	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000})
-	require.ErrorIs(t, err, vm.ErrWriteProtection)
 }
 
 func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
@@ -288,83 +246,6 @@ func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 	require.Equal(t, uint64(110), remaining.State, "50 handed, 40 charged, 100 refunded")
 	require.Equal(t, int64(-60), gasUsed.State)
 	require.Equal(t, uint64(0), gasUsed.Execution, "a net state refund must not inflate execution usage")
-}
-
-// ctx.EVM skips the interpreter, where the CALL/CREATE static guard normally sits.
-func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
-	const chainID = 900410
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
-	target := accounts.InternAddress(common.HexToAddress("0x7a49"))
-	var callErr, createErr error
-	p := funcPrecompile{name: "ESCAPE",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			_, callErr = ctx.Call(gas, target, nil, gas.Remaining().Execution, *uint256.NewInt(5))
-			_, _, createErr = ctx.Create(gas, []byte{0x00}, gas.Remaining().Execution, uint256.Int{}, nil)
-			return nil, nil
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
-	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
-
-	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000})
-	require.NoError(t, err)
-	require.ErrorIs(t, callErr, vm.ErrWriteProtection, "a value-bearing CALL out of a static frame must be refused")
-	require.ErrorIs(t, createErr, vm.ErrWriteProtection, "CREATE out of a static frame must be refused")
-
-	balance, err := cfg.State.GetBalance(target)
-	require.NoError(t, err)
-	require.True(t, balance.IsZero(), "no value may leave a static frame")
-
-	// Control arm: the gate is the static context, not ctx.EVM.
-	callErr, createErr = nil, nil
-	cfg2 := newL2TestConfig(t, chainID)
-	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
-	require.NoError(t, cfg2.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
-
-	_, _, _, err = vmenv2.Call(cfg2.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.NoError(t, callErr)
-	require.NoError(t, createErr, "CREATE out of a writable frame must be allowed")
-	balance, err = cfg2.State.GetBalance(target)
-	require.NoError(t, err)
-	require.Equal(t, uint64(5), balance.Uint64())
-}
-
-func TestStatefulPrecompileCreateDeploysAndMovesEndowment(t *testing.T) {
-	const chainID = 900442
-	const endowment = uint64(9)
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xb4}))
-	initCode := []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x01, 0x60, 0x1f, 0xf3}
-	var created accounts.Address
-	var createErr error
-	p := funcPrecompile{name: "DEPLOYER",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			_, created, createErr = ctx.Create(gas, initCode, gas.Remaining().Execution, *uint256.NewInt(endowment), nil)
-			return nil, createErr
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
-	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
-
-	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
-		mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.NoError(t, createErr)
-	require.NotEqual(t, accounts.Address{}, created, "the wrapper has to hand back the deployed address")
-
-	code, err := cfg.State.GetCode(created)
-	require.NoError(t, err)
-	require.Equal(t, []byte{0x01}, code, "the init code's return value is the deployed runtime code")
-
-	balance, err := cfg.State.GetBalance(created)
-	require.NoError(t, err)
-	require.Equal(t, endowment, balance.Uint64(), "the endowment has to reach the new account")
-
-	require.Less(t, remaining.Execution, uint64(1_000_000), "the deployment has to cost the frame gas")
 }
 
 type reservoirChargeStatefulPrecompile struct {
@@ -489,36 +370,6 @@ func TestStatefulPrecompileMultiWrappedExceptionalBurnsFrameGas(t *testing.T) {
 	}
 }
 
-// A refused call must record no address access; EIP-7928 makes that consensus-visible.
-func TestStatefulPrecompileRefusedCallLeavesNoFrameTrace(t *testing.T) {
-	const chainID = 900414
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x93}))
-	target := accounts.InternAddress(common.HexToAddress("0x7a50"))
-	var callErr error
-	p := funcPrecompile{name: "REFUSED",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			_, callErr = ctx.Call(gas, target, nil, gas.Remaining().Execution, *uint256.NewInt(5))
-			return nil, nil
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
-
-	var entered []accounts.Address
-	cfg := newL2TestConfig(t, chainID)
-	cfg.EVMConfig.Tracer = &tracing.Hooks{
-		OnEnter: func(_ int, _ byte, _ accounts.Address, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
-			entered = append(entered, to)
-		},
-	}
-	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
-	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
-
-	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil,
-		mdgas.MdGas{Execution: 1_000_000, State: 1_000_000})
-	require.NoError(t, err)
-	require.ErrorIs(t, callErr, vm.ErrWriteProtection)
-	require.NotContains(t, entered, target, "a refused call must not open a frame on the target")
-}
-
 func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 	const chainID = 900415
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x94}))
@@ -540,48 +391,6 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 	require.Len(t, rec.calls, 1, "nil restores the chain's own set")
 }
 
-type reservoirHandoffPrecompile struct {
-	vm.NoStatelessRun
-	inner   accounts.Address
-	kind    string
-	callErr error
-}
-
-func (*reservoirHandoffPrecompile) Name() string { return "HANDOFF" }
-
-func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	switch p.kind {
-	case "staticcall":
-		_, p.callErr = ctx.StaticCall(gas, p.inner, nil, 50_000)
-	case "delegatecall":
-		_, p.callErr = ctx.DelegateCall(gas, p.inner, nil, 50_000)
-	default:
-		_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, uint256.Int{})
-	}
-	return nil, p.callErr
-}
-
-// MdGas is a value type: handing a child gas.Remaining() would leave the reservoir in both frames.
-func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
-	const chainID = 900416
-	const reservoir, charge = uint64(5_000), uint64(400)
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x95}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x96}))
-	outer := &reservoirHandoffPrecompile{inner: innerAddr}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: reservoirChargeStatefulPrecompile{amount: charge}})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
-
-	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
-		mdgas.MdGas{Execution: 100_000, State: reservoir}, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.NoError(t, outer.callErr)
-	require.Equal(t, reservoir-charge, remaining.State,
-		"the child's charge must come out of the one reservoir, not a copy of it")
-	require.Equal(t, int64(charge), gasUsed.State)
-}
-
 // No reservoir before Amsterdam, and pre-Amsterdam accounting drops used.State entirely.
 func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
 	const chainID = 900417
@@ -600,54 +409,6 @@ func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
 	require.Equal(t, uint64(charge), gasUsed.Execution,
 		"pre-Amsterdam the charge has to reach the execution dimension the receipt reads")
 	require.Equal(t, int64(0), gasUsed.State)
-}
-
-// Same reservoir handoff, on the re-entry kinds that keep their own caller identity.
-func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
-	const reservoir, charge = uint64(5_000), uint64(400)
-	for i, kind := range []string{"call", "staticcall", "delegatecall"} {
-		t.Run(kind, func(t *testing.T) {
-			chainID := uint64(900420 + i)
-			outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa0, byte(i)}))
-			innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa1, byte(i)}))
-			outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: kind}
-			registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: reservoirChargeStatefulPrecompile{amount: charge}})
-
-			cfg := newL2TestConfig(t, chainID)
-			vmenv := prepareStatefulCall(t, cfg, outerAddr)
-
-			_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
-				mdgas.MdGas{Execution: 100_000, State: reservoir}, uint256.Int{}, false)
-			require.NoError(t, err)
-			require.NoError(t, outer.callErr)
-			require.Equal(t, reservoir-charge, remaining.State,
-				"the child's charge must come out of the one reservoir, not a copy of it")
-			require.Equal(t, int64(charge), gasUsed.State)
-		})
-	}
-}
-
-// DELEGATECALL has no value operand: the value comes from the calling frame, not from the API.
-func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
-	const chainID = 900430
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa8}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa9}))
-	inner := &recordingStatefulPrecompile{}
-	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall"}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
-
-	value := *uint256.NewInt(7)
-	_, _, _, err := vmenv.Call(cfg.Origin, outerAddr, nil,
-		mdgas.MdGas{Execution: 100_000}, value, false)
-	require.NoError(t, err)
-	require.NoError(t, outer.callErr)
-	require.Len(t, inner.calls, 1)
-	delegateValue := inner.calls[0].Value
-	require.True(t, delegateValue.Eq(&value),
-		"the delegate frame must observe the calling frame's value")
 }
 
 // Erigon recovers execution panics, so a gas handle can outlive its frame.
@@ -757,162 +518,50 @@ func TestStatefulPrecompileCannotOverflowStateRefund(t *testing.T) {
 	require.Equal(t, uint64(10_000), remaining.Execution)
 }
 
-func TestStatefulPrecompileNestedUsageFoldCannotWrap(t *testing.T) {
-	const chainID = 900419
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9d}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9e}))
-	var accepted [2]bool
-	inner := funcPrecompile{name: "DEEPREFUNDINNER",
-		run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
-			accepted[0] = gas.RefundState(math.MaxInt64)
-			accepted[1] = gas.RefundState(1)
+func TestStatefulPrecompileCannotEscapeStaticContextThroughEVM(t *testing.T) {
+	const chainID = 900410
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
+	target := accounts.InternAddress(common.HexToAddress("0x7a49"))
+	var callErr, createErr error
+	p := funcPrecompile{name: "ESCAPE",
+		run: func(_ []byte, _ *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+			handed := mdgas.MdGas{Execution: 100_000}
+			_, _, _, callErr = ctx.EVM.Call(ctx.ActingAs, target, nil, handed, *uint256.NewInt(5), false)
+			_, _, _, _, createErr = ctx.EVM.Create(ctx.ActingAs, []byte{0x00}, handed, uint256.Int{}, nil, false)
 			return nil, nil
 		}}
-	var callErr error
-	outer := funcPrecompile{name: "DEEPREFUNDOUTER",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			if !gas.RefundState(1) {
-				return nil, errors.New("the outer refund was rejected")
-			}
-			_, callErr = ctx.Call(gas, innerAddr, nil, 50_000, uint256.Int{})
-			return nil, callErr
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
+	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
+	var entered []accounts.Address
 	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
+	cfg.EVMConfig.Tracer = &tracing.Hooks{
+		OnEnter: func(_ int, _ byte, _ accounts.Address, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			entered = append(entered, to)
+		},
+	}
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
 
-	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil, mdgas.MdGas{Execution: 100_000, State: 50}, uint256.Int{}, false)
-	require.Equal(t, [2]bool{true, true}, accepted, "each refund is representable in the child's own usage")
-	require.ErrorIs(t, callErr, vm.ErrGasUintOverflow, "a child usage the parent cannot adopt must fail the nested call")
-	require.ErrorIs(t, err, vm.ErrGasUintOverflow)
-	require.Equal(t, int64(-1), gasUsed.State, "only the parent's own refund reaches its usage")
-	require.Zero(t, gasUsed.StateClamped(), "a frame that only refunded must not report state gas at the block level")
-	require.Equal(t, uint64(50), remaining.State, "the entry reservoir goes back to the caller")
-}
+	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000})
+	require.NoError(t, err)
+	require.ErrorIs(t, callErr, vm.ErrWriteProtection, "a value-bearing CALL out of a static frame must be refused")
+	require.NotContains(t, entered, target, "a refused call must not open a frame on the target")
+	require.ErrorIs(t, createErr, vm.ErrWriteProtection, "CREATE out of a static frame must be refused")
 
-var unadoptedChildSlot = accounts.InternKey(common.BytesToHash([]byte{0x77}))
+	balance, err := cfg.State.GetBalance(target)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "no value may leave a static frame")
 
-func TestStatefulPrecompileCannotSwallowUnadoptableChildUsage(t *testing.T) {
-	const chainID = 900420
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9f}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa0}))
-	cfg := newL2TestConfig(t, chainID)
-	var refunds [2]bool
-	inner := funcPrecompile{name: "UNADOPTABLEWRITEINNER",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			if err := ctx.EVM.IntraBlockState().SetState(cfg.Origin, unadoptedChildSlot, *uint256.NewInt(42)); err != nil {
-				return nil, err
-			}
-			refunds[0] = gas.RefundState(math.MaxInt64)
-			refunds[1] = gas.RefundState(1)
-			return []byte{0xff}, nil
-		}}
-	var callRet []byte
-	var callErr error
-	outer := funcPrecompile{name: "SWALLOWINGOUTER",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			if !gas.RefundState(1) {
-				return nil, errors.New("the outer refund was rejected")
-			}
-			callRet, callErr = ctx.Call(gas, innerAddr, nil, 50_000, uint256.Int{})
-			return nil, nil
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
+	callErr, createErr = nil, nil
+	cfg2 := newL2TestConfig(t, chainID)
+	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
+	require.NoError(t, cfg2.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
 
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
-	ret, remaining, _, err := vmenv.Call(cfg.Origin, outerAddr, nil, mdgas.MdGas{Execution: 100_000, State: 50}, uint256.Int{}, false)
-	require.Equal(t, [2]bool{true, true}, refunds, "each refund is representable in the child's own usage")
-	require.ErrorIs(t, callErr, vm.ErrGasUintOverflow, "a child usage the parent cannot adopt must fail the nested call")
-	require.Nil(t, callRet, "a failed nested call returns no data")
-
-	slot, readErr := cfg.State.GetState(cfg.Origin, unadoptedChildSlot)
-	require.NoError(t, readErr)
-	require.True(t, slot.IsZero(), "the child's writes must not survive a usage the parent cannot adopt")
-
-	require.ErrorIs(t, err, vm.ErrGasUintOverflow, "swallowing the nested error must not let the frame commit")
-	require.Nil(t, ret, "an aborted frame returns no data")
-	require.Equal(t, uint64(50), remaining.State, "the frame's entry reservoir goes back to its caller, not the child's minted one")
-	require.Zero(t, remaining.Execution, "an unrepresentable frame consumes its execution gas")
-}
-
-func TestStatefulPrecompileNestedCallAbsorbsMisplacedStateGas(t *testing.T) {
-	const chainID = 900440
-	const charge = uint64(10)
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xb0}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xb1}))
-	inner := funcPrecompile{name: "RESERVOIRREFUND",
-		run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
-			if !gas.RefundState(charge) {
-				return nil, errors.New("the child refund was rejected")
-			}
-			return nil, nil
-		}}
-	var afterCall mdgas.MdGas
-	var callErr error
-	outer := funcPrecompile{name: "SPILLTHENCALL",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			if !gas.ChargeState(charge) {
-				return nil, vm.ErrOutOfGas
-			}
-			_, callErr = ctx.Call(gas, innerAddr, nil, 50_000, uint256.Int{})
-			afterCall = gas.Remaining()
-			return nil, callErr
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
-
-	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
-		mdgas.MdGas{Execution: 100_000, State: 0}, uint256.Int{}, false)
+	_, _, _, err = vmenv2.Call(cfg2.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.NoError(t, callErr)
-	require.Zero(t, afterCall.State,
-		"state gas the child left in the reservoir must move back to execution gas, not stay parked")
-	require.Equal(t, uint64(100_000), afterCall.Execution,
-		"the frame is whole again: the 10 it spilled came back through the child's refund")
-	require.Zero(t, gasUsed.StateSpill, "the absorbed spill must not be reported upward")
-	require.Equal(t, uint64(100_000), remaining.Execution)
-	require.Zero(t, remaining.State)
-}
-
-func TestStatefulPrecompileCannotRefundWhatAChildBurned(t *testing.T) {
-	const chainID = 900441
-	const burn = uint64(40_000)
-	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xb2}))
-	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xb3}))
-	inner := funcPrecompile{name: "BURNER",
-		run: func(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
-			if !gas.ChargeExecution(burn) {
-				return nil, vm.ErrOutOfGas
-			}
-			return nil, nil
-		}}
-	var reclaimed, ownRefund bool
-	var callErr error
-	outer := funcPrecompile{name: "RECLAIMER",
-		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-			_, callErr = ctx.Call(gas, innerAddr, nil, 50_000, uint256.Int{})
-			reclaimed = gas.RefundExecution(burn)
-			if !gas.ChargeExecution(100) {
-				return nil, vm.ErrOutOfGas
-			}
-			ownRefund = gas.RefundExecution(100)
-			return nil, nil
-		}}
-	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
-
-	cfg := newL2TestConfig(t, chainID)
-	vmenv := prepareStatefulCall(t, cfg, outerAddr)
-
-	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
-		mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, createErr, "CREATE out of a writable frame must be allowed")
+	balance, err = cfg2.State.GetBalance(target)
 	require.NoError(t, err)
-	require.NoError(t, callErr)
-	require.False(t, reclaimed, "gas a nested frame burned must not be refundable by this frame")
-	require.True(t, ownRefund, "the frame's own charge stays refundable")
-	require.Equal(t, uint64(100_000-burn), remaining.Execution,
-		"the child's burn stays spent")
-	require.Equal(t, burn, gasUsed.Execution)
+	require.Equal(t, uint64(5), balance.Uint64(), "the gate is the static context, not ctx.EVM")
 }

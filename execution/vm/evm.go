@@ -502,9 +502,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
-			if pgas.aborted != nil {
-				ret, err = nil, pgas.aborted
-			}
 			// Frame classification compares the bare sentinel: a wrapped
 			// revert would burn the frame's gas and drop the return data.
 			if err != nil && isRevert(err) {

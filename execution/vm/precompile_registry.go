@@ -167,7 +167,6 @@ type PrecompileGas struct {
 	amsterdam bool
 	// Execution gas charged through this handle and not yet given back.
 	chargedExecution uint64
-	aborted          error
 }
 
 // onGasChange mirrors useMdGas so a tracer sees the same event stream either way.
@@ -184,11 +183,6 @@ func (g *PrecompileGas) onGasChange(before mdgas.MdGas, spilled uint64, typ mdga
 // release detaches the handle when RunStateful returns: evm.call's named
 // returns die with the frame, and a stashed handle would mutate a dead copy.
 func (g *PrecompileGas) release() { g.remaining, g.used = nil, nil }
-
-func (g *PrecompileGas) abort(err error) {
-	g.aborted = err
-	g.release()
-}
 
 func (g *PrecompileGas) live() bool { return g.remaining != nil }
 
@@ -296,103 +290,10 @@ func (g *PrecompileGas) stateRefundFits(amount uint64) bool {
 // parallel-executor workers, so it must keep no per-call state on its receiver.
 // It must not mutate state when ctx.ReadOnly is set: the state surface reached
 // through ctx.EVM has no readOnly awareness, so a missed branch corrupts state
-// under STATICCALL instead of failing. Nested calls go through
-// PrecompileContext.Call, which carries the EIP-8037 reservoir handoff a bare
-// ctx.EVM.Call drops.
+// under STATICCALL instead of failing.
 type StatefulPrecompile interface {
 	PrecompiledContract
 	RunStateful(input []byte, gas *PrecompileGas, ctx *PrecompileContext) (ret []byte, err error)
-}
-
-// reenter runs one nested frame with the EIP-8037 reservoir handoff: hand the
-// whole reservoir down, restore from the child's leftover, adopt its usage.
-// MdGas passes by value, so a bare ctx.EVM call handed gas.Remaining() leaves
-// the reservoir standing here too and duplicates it once per nesting level.
-func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
-	run func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error),
-) ([]byte, error) {
-	if !gas.live() {
-		return nil, ErrOutOfGas
-	}
-	refundable := gas.chargedExecution
-	if !gas.ChargeExecution(executionGas) {
-		return nil, ErrOutOfGas
-	}
-	handed := mdgas.MdGas{Execution: executionGas, State: gas.remaining.State}
-	gas.remaining.State = 0
-
-	ret, leftover, usage, err := run(handed)
-
-	if err == nil && !gas.adoptChildUsage(usage) {
-		gas.abort(ErrGasUintOverflow)
-		return nil, ErrGasUintOverflow
-	}
-
-	// The child's revert already restored its entry reservoir into leftover.State.
-	gas.remaining.State = leftover.State
-	gas.RefundExecution(leftover.Execution)
-	gas.chargedExecution = refundable
-	if err == nil {
-		gas.absorbMisplacedStateGas()
-	}
-	return ret, err
-}
-
-func (g *PrecompileGas) absorbMisplacedStateGas() {
-	misplaced := min(g.remaining.State, g.used.StateSpill)
-	if misplaced == 0 {
-		return
-	}
-	before := g.remaining.Execution
-	g.remaining.State -= misplaced
-	g.remaining.Execution += misplaced
-	g.used.StateSpill -= misplaced
-	if g.tracer != nil && g.tracer.OnGasChange != nil {
-		g.tracer.OnGasChange(before, g.remaining.Execution, tracing.GasChangeCallStateGasReturned)
-	}
-}
-
-func (g *PrecompileGas) adoptChildUsage(usage mdgas.MdGasUsage) bool {
-	state := g.used.State + usage.State
-	if (usage.State > 0 && state < g.used.State) || (usage.State < 0 && state > g.used.State) {
-		return false
-	}
-	if usage.StateSpill > math.MaxUint64-g.used.StateSpill {
-		return false
-	}
-	g.used.State = state
-	g.used.StateSpill += usage.StateSpill
-	return true
-}
-
-func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value uint256.Int) ([]byte, error) {
-	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.Call(ctx.ActingAs, addr, input, handed, value, false)
-	})
-}
-
-func (ctx *PrecompileContext) StaticCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
-	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.StaticCall(ctx.ActingAs, addr, input, handed)
-	})
-}
-
-// DelegateCall runs a nested DELEGATECALL, which keeps this frame's identity,
-// caller and value — hence no value parameter.
-func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
-	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.Value, handed)
-	})
-}
-
-// Create runs a nested CREATE, or CREATE2 when salt is non-nil.
-func (ctx *PrecompileContext) Create(gas *PrecompileGas, code []byte, executionGas uint64, endowment uint256.Int, salt *uint256.Int) (ret []byte, created accounts.Address, err error) {
-	ret, err = ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		out, addr, leftover, usage, cerr := ctx.EVM.Create(ctx.ActingAs, code, handed, endowment, salt, false)
-		created = addr
-		return out, leftover, usage, cerr
-	})
-	return ret, created, err
 }
 
 // NoStatelessRun supplies the stateless half of PrecompiledContract: it is
