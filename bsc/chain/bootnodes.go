@@ -17,8 +17,8 @@
 package chain
 
 // chapelPeers are the enode URLs bsc-geth ships as `StaticNodes` in the
-// testnet.zip release asset, on the devp2p listener port 30311. Chapel
-// publishes no bootnodes and no DNS node list, so these seed discv4 as well as
+// testnet.zip release asset, on the devp2p listener port 30311. Chapel ships no
+// discv4 bootnodes of its own, so these double as discv4 seeds in addition to
 // being dialled persistently.
 var chapelPeers = []string{
 	"enode://db1e2c76e34f85b75fdc2460aad25a64947acc4adabb60b4c95f50c03066a4884f44f2d4d4c1607190712a0315681d30caa8a1c7d850e7aa643e29a6c1692739@52.199.214.252:30311",
