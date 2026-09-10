@@ -120,16 +120,14 @@ type RPCLog struct {
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
-// ToRPCLogs converts Logs to RPCLogs, adding a timestamp to each entry.
-func (logs Logs) ToRPCLogs(timestamp uint64) RPCLogs {
-	result := make(RPCLogs, len(logs))
+// AppendRPCLogs appends logs to dst as RPCLogs, adding a timestamp to each entry.
+func (logs Logs) AppendRPCLogs(dst RPCLogs, timestamp uint64) RPCLogs {
+	backing := make([]RPCLog, len(logs))
 	for i, l := range logs {
-		result[i] = &RPCLog{
-			Log:            *l,
-			BlockTimestamp: hexutil.Uint64(timestamp),
-		}
+		backing[i] = RPCLog{Log: *l, BlockTimestamp: hexutil.Uint64(timestamp)}
+		dst = append(dst, &backing[i])
 	}
-	return result
+	return dst
 }
 
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
