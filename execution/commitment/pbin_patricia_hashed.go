@@ -555,7 +555,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 	if err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
-	g.prevRecord[row] = data
+	g.prevRecord[row] = bytes.Clone(data)
 	// The record's own touch map is write-time bookkeeping; nothing in this run
 	// has touched the row yet.
 	if deleted {
