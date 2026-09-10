@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -116,7 +115,7 @@ func TestStateRootVerifyByHistoryRebuildsFromAccountAndStorageHistory(t *testing
 		roots[blockNum] = writeHistoryBlock(t, db, logger, blockNum, address, storageKey)
 	}
 
-	require.NoError(t, agg.BuildFiles2(ctx, db, 0, kv.Step(blocks*2+1), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false), false))
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, kv.Step(blocks*2+1), unboundedFinalityCtx, false))
 	agg.WaitForFiles()
 	samplerCfg, err := integrity.NewSamplerCfg(1, 1)
 	require.NoError(t, err)

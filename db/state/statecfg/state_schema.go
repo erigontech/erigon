@@ -209,10 +209,9 @@ func CommitmentEdgeRecords(fileVersion version.Version) bool {
 	return !fileVersion.Less(commitmentKVEdgeRecordsVersion)
 }
 
-// ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
-// (commitment.ModeParallel + VariantParallelHexPatricia). Default false; the
-// COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
+const DefaultParallelCommitment = true
+
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
 // ExperimentalCommitmentEdgeRecords selects the record format new commitment.kv files are written
 // in: v3 edge records, one per trie edge, or the legacy bundled row. The two are incompatible and a

@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -37,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
-
-//go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
 
 func init() {
 	register("callTracer", newCallTracer)
@@ -55,22 +52,22 @@ type callLog struct {
 type callFrame struct {
 	Type     vm.OpCode       `json:"-"`
 	From     common.Address  `json:"from"`
-	Gas      uint64          `json:"gas"`
-	GasUsed  uint64          `json:"gasUsed"`
-	To       *common.Address `json:"to,omitempty" rlp:"optional"`
-	Input    []byte          `json:"input" rlp:"optional"`
-	Output   []byte          `json:"output,omitempty" rlp:"optional"`
-	Error    string          `json:"error,omitempty" rlp:"optional"`
+	Gas      hexutil.Uint64  `json:"gas"`
+	GasUsed  hexutil.Uint64  `json:"gasUsed"`
+	To       *common.Address `json:"to,omitempty"`
+	Input    hexutil.Bytes   `json:"input"`
+	Output   hexutil.Bytes   `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
 	Revertal string          `json:"revertReason,omitempty"`
-	Calls    []callFrame     `json:"calls,omitempty" rlp:"optional"`
-	Logs     []callLog       `json:"logs,omitempty" rlp:"optional"`
-	// Placed at end on purpose. The RLP will be decoded to 0 instead of
-	// nil if there are non-empty elements after in the struct.
-	Value *big.Int `json:"value,omitempty" rlp:"optional"`
+	Calls    []callFrame     `json:"calls,omitempty"`
+	Logs     []callLog       `json:"logs,omitempty"`
+	Value    *hexutil.U256   `json:"value,omitempty"`
+	TypeStr  string          `json:"type"`
 }
 
-func (f *callFrame) TypeString() string {
-	return f.Type.String()
+// setType keeps the opcode and its wire spelling in step.
+func (f *callFrame) setType(op vm.OpCode) {
+	f.Type, f.TypeStr = op, op.String()
 }
 
 func (f *callFrame) failed() bool {
@@ -99,15 +96,6 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	}
 }
 
-type callFrameMarshaling struct {
-	TypeString string `json:"type"`
-	Gas        hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Value      *hexutil.Big
-	Input      hexutil.Bytes
-	Output     hexutil.Bytes
-}
-
 type callTracer struct {
 	callstack   []callFrame
 	config      callTracerConfig
@@ -115,9 +103,7 @@ type callTracer struct {
 	depth       int
 	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
 	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
-	logIndex    uint64
-	logGaps     map[uint64]int
-	precompiles []bool // keep track of whether scopes are for pre-compiles or not
+	precompiles []bool                // keep track of whether scopes are for pre-compiles or not
 }
 
 func defaultCallTracerConfig() callTracerConfig {
@@ -169,17 +155,18 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		toValue = &v
 	}
 	t.callstack[0] = callFrame{
-		Type:  vm.CALL,
 		From:  from.Value(),
 		To:    toValue,
 		Input: bytes.Clone(input),
-		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
+		Gas:   hexutil.Uint64(t.gasLimit), // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
-		t.callstack[0].Value = value.ToBig()
+		v := *value
+		t.callstack[0].Value = (*hexutil.U256)(&v)
 	}
+	t.callstack[0].setType(vm.CALL)
 	if create {
-		t.callstack[0].Type = vm.CREATE
+		t.callstack[0].setType(vm.CREATE)
 	}
 }
 
@@ -216,19 +203,19 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		toValue = &v
 	}
 	call := callFrame{
-		Type:  vm.OpCode(typ),
 		From:  from.Value(),
 		To:    toValue,
 		Input: bytes.Clone(input),
-		Gas:   gas,
+		Gas:   hexutil.Uint64(gas),
 	}
 
+	call.setType(vm.OpCode(typ))
 	if call.Type != vm.STATICCALL {
-		call.Value = value.ToBig()
+		call.Value = (*hexutil.U256)(&value)
 	}
 
 	if depth == 0 {
-		call.Gas = t.gasLimit
+		call.Gas = hexutil.Uint64(t.gasLimit)
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -263,7 +250,7 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
-	call.GasUsed = gasUsed
+	call.GasUsed = hexutil.Uint64(gasUsed)
 	call.processOutput(output, err)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
@@ -277,8 +264,6 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
-	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -293,14 +278,11 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 
-	t.callstack[0].GasUsed = receipt.GasUsed
+	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], addCumulativeGaps(t.logIndex, t.logGaps))
+		clearFailedLogs(&t.callstack[0], false)
 	}
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
@@ -316,8 +298,9 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
-	t.logIndex++
+	frame := &t.callstack[len(t.callstack)-1]
+	frame.Logs = append(frame.Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data,
+		Index: hexutil.Uint64(log.Index), Position: hexutil.Uint(len(frame.Calls))})
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -348,52 +331,14 @@ func (t *callTracer) Stop(err error) {
 	t.interrupt.Store(true)
 }
 
-// clearFailedLogs clears the logs of a callframe and all its children
-// in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
+// clearFailedLogs clears the logs of a callframe and all its children in case
+// of execution failure. Revert gave those indices back, so no renumbering.
+func clearFailedLogs(cf *callFrame, parentFailed bool) {
 	failed := cf.failed() || parentFailed
 	if failed {
-		lastIdx := len(cf.Logs) - 1
-		if lastIdx >= 0 && logGaps != nil {
-			idx := uint64(cf.Logs[lastIdx].Index)
-			logGaps[idx] = len(cf.Logs)
-		}
-		// Clear own logs
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, logGaps)
-	}
-}
-
-// Find the shift position of each potential logIndex
-func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
-	if len(logGaps) == 0 || logGaps == nil {
-		return nil
-	}
-	cumulativeGaps := make([]uint64, h)
-	for idx, gap := range logGaps {
-		if idx+1 < h {
-			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
-		}
-	}
-	for i := 1; i < int(h); i++ {
-		cumulativeGaps[i] += cumulativeGaps[i-1]
-	}
-	return cumulativeGaps
-}
-
-// Recursively shift log indices of callframe - self and children
-func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
-	if cumulativeGaps == nil {
-		return
-	}
-	if len(cf.Logs) > 0 {
-		for i := range cf.Logs {
-			cf.Logs[i].Index = hexutil.Uint64(uint64(cf.Logs[i].Index) - cumulativeGaps[cf.Logs[i].Index])
-		}
-	}
-	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], cumulativeGaps)
+		clearFailedLogs(&cf.Calls[i], failed)
 	}
 }

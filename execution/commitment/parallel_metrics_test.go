@@ -201,3 +201,29 @@ func TestBranchWritesArePublishedOnce(t *testing.T) {
 	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
 		"commitment_branch_write_bytes_total counts each write once")
 }
+
+func TestDeepFoldedStorageReachesRoundMetrics(t *testing.T) {
+	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
+	fk, fu := buildMixedCorpus(555, 200)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	require.Positive(t, tr.DeepLocalFolds(), "the whale must take the concurrent deep fold")
+	v := tr.metrics.AsValues()
+	assert.GreaterOrEqual(t, v.AddressKeys+v.StorageKeys, uint64(len(keys)),
+		"every touched key is traversed at least once, deep-folded storage included")
+}

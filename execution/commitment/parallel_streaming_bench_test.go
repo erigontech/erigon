@@ -155,6 +155,40 @@ func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int)
 	return ub.Build()
 }
 
+func buildStragglerCorpus(seed int64, accounts, stragglerSlots int) ([][]byte, []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	ub := NewUpdateBuilder()
+	for range accounts {
+		addRandomAccount(ub, rnd, 0)
+	}
+	addRandomAccount(ub, rnd, stragglerSlots)
+	return ub.Build()
+}
+
+func Benchmark_Commitment_HotContractStraggler(b *testing.B) {
+	for _, c := range []struct {
+		name           string
+		accounts       int
+		stragglerSlots int
+	}{
+		{"4k-accounts-200-slots", 4_000, 200},
+		{"20k-accounts-250-slots", 20_000, 250},
+		{"20k-accounts-500-slots", 20_000, 500},
+		{"20k-accounts-1000-slots", 20_000, 1_000},
+	} {
+		pk, updates := buildStragglerCorpus(int64(c.accounts)*7+int64(c.stragglerSlots), c.accounts, c.stragglerSlots)
+		b.Run(c.name+"/ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
+		workers := []int{4, runtime.NumCPU()}
+		slices.Sort(workers)
+		workers = slices.Compact(workers)
+		for _, w := range workers {
+			b.Run(fmt.Sprintf("%s/ModeParallel-w%d", c.name, w), func(b *testing.B) {
+				runParallelBench(b, pk, updates, w)
+			})
+		}
+	}
+}
+
 func Benchmark_Commitment_Clustered(b *testing.B) {
 	for _, c := range []struct {
 		name     string

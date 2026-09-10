@@ -593,10 +593,10 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			}
 
 			for _, list := range txn.GetAccessList() {
-				stateReader.ReadAccountData(accounts.InternAddress(list.Address))
+				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
+						_, _, _ = stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
 					}
 				}
 			}

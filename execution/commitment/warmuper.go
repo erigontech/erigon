@@ -277,15 +277,6 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 	return nil
 }
 
-func (w *Warmuper) Wait() error {
-	if !w.started.Load() || w.numWorkers <= 0 {
-		return nil
-	}
-	w.Close()
-	w.g.Wait()
-	return nil
-}
-
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
 	if !w.startTime.IsZero() {

@@ -139,7 +139,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
@@ -193,7 +193,7 @@ func TestHashSort_WarmupLap(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
 		require.GreaterOrEqual(t, ut.gen, uint64(3))
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
@@ -296,7 +296,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	release := make(chan struct{})
 	warmuper := testWarmuper(context.Background(), gatedCtxFactory(entered, release), 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
 	<-entered
@@ -363,7 +363,7 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 	warmuper := testWarmuper(context.Background(), noopCtxFactory, 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	done := make(chan struct{})
 	go func() {
@@ -715,8 +715,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper.Wait()
-	require.NoError(t, err)
+	warmuper.CloseAndWait()
 
 	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper2.Start()
@@ -730,8 +729,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper2.Wait()
-	require.NoError(t, err)
+	warmuper2.CloseAndWait()
 }
 
 type recordingCtx struct {
@@ -925,6 +923,30 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 	require.Equal(t, uint64(len(keys)), ut.Size())
 	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
 		"duplicate TouchPlainKey must not double-count in the trie")
+}
+
+func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
+	t.Parallel()
+
+	var hashCalls atomic.Int64
+	hasher := func(key []byte) []byte {
+		hashCalls.Add(1)
+		return KeyToHexNibbleHash(key)
+	}
+	require.False(t, hasherReusesAddrPrefix(hasher), "wrapped hasher must not alias KeyToHexNibbleHash")
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), hasher)
+	defer ut.Close()
+
+	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+	for range 3 {
+		ut.TouchPlainKey(key, nil, func(c *KeyUpdate, val []byte) {})
+	}
+
+	require.EqualValues(t, 1, hashCalls.Load(), "a repeat touch must not rehash the key")
+	require.Equal(t, uint64(1), ut.Size())
+	require.NotNil(t, ut.parallel.trie.root)
+	require.EqualValues(t, 1, ut.parallel.trie.root.subtreeCount)
 }
 
 func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {

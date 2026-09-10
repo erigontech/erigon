@@ -20,9 +20,11 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -337,3 +339,142 @@ func TestUndeliveredResponseIsCounted(t *testing.T) {
 	require.Greater(t, undeliveredGauge.GetValueUint64(), before,
 		"a response the client never received was not recorded")
 }
+
+// TestHTTPRequestFraming covers what the server answers for the shapes of body
+// that reach it, including the ones that are not valid JSON.
+func TestHTTPRequestFraming(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string // substring the response must contain, empty means no response
+	}{
+		{"call", `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}`, `"result"`},
+		{"call with surrounding space", "  \n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"test_echo\",\"params\":[\"x\",3]}\n ", `"result"`},
+		{"batch", `[{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}]`, `"result"`},
+		{"empty body", ``, ``},
+		{"whitespace only", "   \n\t ", ``},
+		{"truncated object", `{"jsonrpc":"2.0","id":1,"method":"test_echo"`, `parse error`},
+		{"not json", `hello`, `parse error`},
+		// JSON whitespace is space, tab, CR and LF only. Unicode whitespace is a body.
+		{"vertical tab body", "\v", `parse error`},
+		{"form feed body", "\f", `parse error`},
+		{"no-break space body", "\u00a0", `parse error`},
+		{"unbalanced bracket", `[{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}`, `parse error`},
+		{"control character in string", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"test_\x01echo\",\"params\":[]}", `parse error`},
+		// A body holding more than one value is rejected. The decoder this
+		// replaced stopped after the first value and ignored the rest.
+		{"trailing second value", `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}{"a":1}`, `parse error`},
+		{"trailing garbage", `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]} oops`, `parse error`},
+		// Valid JSON that is not an object reaches the handler as a zero message
+		// and is an invalid request, not a parse error.
+		{"bare number body", `1`, `"code":-32600`},
+		{"bare string body", `"str"`, `"code":-32600`},
+		{"bare bool body", `true`, `"code":-32600`},
+		// Only the offending field is dropped, so the id still comes back and the
+		// caller can match the error to its request.
+		{"wrong-type field keeps the id", `{"jsonrpc":"2.0","id":7,"method":123,"params":["a",1]}`, `"id":7`},
+	}
+
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
+			req.Header.Set("content-type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			body := rec.Body.String()
+			if tc.want == "" {
+				require.Empty(t, strings.TrimSpace(body), "want no response")
+				return
+			}
+			require.Contains(t, body, tc.want)
+		})
+	}
+}
+
+// TestHTTPRequestFramingChunked checks a body with no content length, which is
+// the case the size hint cannot help with.
+func TestHTTPRequestFramingChunked(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["` + strings.Repeat("x", 40000) + `",3]}`
+	req, err := http.NewRequestWithContext(t.Context(), "POST", ts.URL, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = -1 // forces chunked transfer encoding
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), strings.Repeat("x", 40000))
+}
+
+// TestHTTPBatchRequestFraming checks a batch whose items each carry a sizeable
+// argument. Every message in a batch points into the same buffer, so this would
+// catch one item's arguments bleeding into another's.
+func TestHTTPBatchRequestFraming(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+
+	var items []string
+	for i := range 8 {
+		arg := strings.Repeat(string(rune('a'+i)), 5000)
+		items = append(items, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q,%d]}`, i+1, arg, i))
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader("["+strings.Join(items, ",")+"]"))
+	req.Header.Set("content-type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	var arr []json.RawMessage
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &arr))
+	require.Len(t, arr, 8)
+	for i := range arr {
+		var m struct {
+			ID     int `json:"id"`
+			Result struct {
+				String string `json:"String"`
+				Int    int    `json:"Int"`
+			} `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(arr[i], &m))
+		require.Equal(t, i+1, m.ID, "response %d is out of order", i)
+		require.Equal(t, strings.Repeat(string(rune('a'+i)), 5000), m.Result.String, "argument %d bled", i)
+		require.Equal(t, i, m.Result.Int, "argument %d bled", i)
+	}
+}
+
+// TestReadAllBody checks the body reader against io.ReadAll for both a helpful
+// and an unhelpful size hint.
+func TestReadAllBody(t *testing.T) {
+	for _, size := range []int{0, 1, 511, 512, 513, 40000} {
+		want := make([]byte, size)
+		for i := range want {
+			want[i] = byte(i)
+		}
+		// an oversized hint is what a lying Content-Length produces
+		for _, hint := range []int{0, size, size * 2, 1, int(maxBodySizeHint)} {
+			got, err := readAllBody(bytes.NewReader(want), hint)
+			require.NoError(t, err)
+			require.Equal(t, want, got, "size %d hint %d", size, hint)
+		}
+	}
+}
+
+// TestReadAllBodyError checks that a read failure is reported rather than
+// treated as the end of the body.
+func TestReadAllBodyError(t *testing.T) {
+	_, err := readAllBody(&errReader{}, 0)
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+type errReader struct{}
+
+func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }

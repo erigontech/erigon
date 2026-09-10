@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -746,7 +745,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	}
 
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
-	if s.blockReader.FrozenBlocks() == 0 {
+	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
 		if err != nil {
@@ -1104,36 +1103,6 @@ func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Ad
 		(&res).SetBytes(enc)
 	}
 	return res, len(enc) > 0, nil
-}
-
-func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-
-	// Check the RAM batch first: storage written by prior simulated blocks lives only in the
-	// in-memory btree and is not yet visible via RangeAsOf(firstMinTxNum).
-	if r.sd.GetMemBatch().HasPrefixInRAM(kv.StorageDomain, addressValue[:]) {
-		return true, nil
-	}
-
-	to, ok := kv.NextSubtree(addressValue[:])
-	if !ok {
-		to = nil
-	}
-	it, err := r.roTx.RangeAsOf(kv.StorageDomain, addressValue[:], to, r.firstMinTxNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return false, err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return false, err
-		}
-		if len(v) != 0 {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (r *simulationIntraBlockStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
