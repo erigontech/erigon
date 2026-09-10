@@ -1094,6 +1094,8 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
 	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
+	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
 	results := make(chan dualFoldResult, 2)
 	var wg sync.WaitGroup
 	for _, arm := range []*commitmentFoldArm{&hexArm, &binArm} {

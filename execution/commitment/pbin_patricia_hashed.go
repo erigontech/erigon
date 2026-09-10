@@ -95,6 +95,8 @@ func (pph *PBinPatriciaHashed) SetTraceWriter(w io.Writer) { pph.traceW = w }
 // EnableCsvMetrics is a no-op: the binary engine collects no metrics.
 func (pph *PBinPatriciaHashed) EnableCsvMetrics(string) {}
 
+func (pph *PBinPatriciaHashed) SetMetricsEnabled(bool) {}
+
 // CodeStats reports the code the last Process chunkified. Reset and Release
 // clear it, so it has to be read before the engine is reused.
 func (pph *PBinPatriciaHashed) CodeStats() PBinCodeStats { return pph.updateStream.codeStats }

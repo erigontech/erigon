@@ -56,6 +56,11 @@ func (p *ParallelPatriciaHashed) DeepLocalFolds() uint64 { return p.deepLocalFol
 // Metrics exposes the round's counters; see HexPatriciaHashed.Metrics.
 func (p *ParallelPatriciaHashed) Metrics() *Metrics { return p.metrics }
 
+func (p *ParallelPatriciaHashed) SetMetricsEnabled(enabled bool) {
+	p.metrics.SetMetricsEnabled(enabled)
+	p.template.SetMetricsEnabled(enabled)
+}
+
 func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
@@ -293,7 +298,7 @@ func (p *ParallelPatriciaHashed) Process(
 	out := make([]byte, len(rh))
 	copy(out, rh)
 	p.rootHash.Store(&out)
-	flushTrieStateRates()
+	metricsSinkFor(p.metrics).flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
 		n := updates.Size()
 		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})

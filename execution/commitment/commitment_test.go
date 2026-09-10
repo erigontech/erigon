@@ -50,6 +50,16 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+type metricsPatriciaContext struct{ noopPatriciaContext }
+
+func (m *metricsPatriciaContext) Account([]byte) (*Update, error) {
+	return &Update{Flags: BalanceUpdate}, nil
+}
+
+func (m *metricsPatriciaContext) Storage([]byte) (*Update, error) {
+	return &Update{Flags: StorageUpdate}, nil
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
@@ -918,6 +928,47 @@ func TestModeString(t *testing.T) {
 	require.Equal(t, "update", ModeUpdate.String())
 	require.Equal(t, "parallel", ModeParallel.String())
 	require.Equal(t, "unknown", Mode(99).String())
+}
+
+func TestCommitmentMetricsSinkSeparatesFolds(t *testing.T) {
+	keysBefore := mxTrieProcessedKeys.GetValueUint64()
+	branchesBefore := mxTrieBranchesUpdated.GetValueUint64()
+	loadsBefore := mxTrieStateLoadRate.GetValueUint64()
+	skipsBefore := mxTrieStateSkipRate.GetValueUint64()
+
+	key := make([]byte, length.Addr)
+	key[0] = 1
+	key2 := slices.Clone(key)
+	key2[0] = 2
+	ctx := &metricsPatriciaContext{}
+
+	binUpdates := NewBinUpdates(t.TempDir(), map[string]struct{}{string(key): {}, string(key2): {}})
+	binTrie := NewPBinPatriciaHashed(ctx)
+	binTrie.SetMetricsEnabled(false)
+	_, err := binTrie.Process(t.Context(), binUpdates, "bin", nil, WarmupConfig{})
+	require.NoError(t, err)
+	binUpdates.Close()
+	binTrie.Release()
+
+	require.Equal(t, keysBefore, mxTrieProcessedKeys.GetValueUint64())
+	require.Equal(t, branchesBefore, mxTrieBranchesUpdated.GetValueUint64())
+	require.Equal(t, loadsBefore, mxTrieStateLoadRate.GetValueUint64())
+	require.Equal(t, skipsBefore, mxTrieStateSkipRate.GetValueUint64())
+
+	hexUpdates := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+	hexUpdates.TouchPlainKey(string(key), nil, nil)
+	hexUpdates.TouchPlainKey(string(key2), nil, nil)
+	hexTrie := NewHexPatriciaHashed(length.Addr, ctx, DefaultTrieConfig())
+	hexTrie.SetMetricsEnabled(true)
+	_, err = hexTrie.Process(t.Context(), hexUpdates, "hex", nil, WarmupConfig{})
+	require.NoError(t, err)
+	hexUpdates.Close()
+	hexTrie.Release()
+
+	require.Greater(t, mxTrieProcessedKeys.GetValueUint64(), keysBefore)
+	require.Greater(t, mxTrieBranchesUpdated.GetValueUint64(), branchesBefore)
+	require.Greater(t, mxTrieStateLoadRate.GetValueUint64(), loadsBefore)
+	require.GreaterOrEqual(t, mxTrieStateSkipRate.GetValueUint64(), skipsBefore)
 }
 
 func TestUpdatesModeParallel_NewAllocates(t *testing.T) {

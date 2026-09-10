@@ -747,16 +747,25 @@ different states and correctly report different roots.
 
 **Files:**
 - Modify: `execution/commitment/commitment.go`
+- Modify: `execution/commitment/metrics.go`
+- Modify: `execution/commitment/hex_patricia_hashed.go`
+- Modify: `execution/commitment/parallel_mount.go`
+- Modify: `execution/commitment/parallel_patricia_hashed.go`
+- Modify: `execution/commitment/streaming_deep_fold.go`
+- Modify: `execution/commitment/pbin_patricia_hashed.go`
+- Modify: `execution/commitment/commitmentdb/commitment_context.go`
+- Modify: `execution/stagedsync/committer.go`
 - Modify: `execution/stagedsync/exec3_metrics.go`
 - Modify: `execution/commitment/commitment_test.go`
+- Create: `execution/stagedsync/exec3_metrics_test.go`
 
-- [ ] give the fold a metrics sink so the shadow arm does not write the package-level commitment
+- [x] give the fold a metrics sink so the shadow arm does not write the package-level commitment
       counters (`domain_commitment_keys`, `domain_commitment_updates_applied`, `trie_state_skip_rate`,
       the per-level counters)
-- [ ] make the exec metrics read the canonical commitment domain's entry
-- [ ] write tests: a bin fold leaves the shared counters unchanged while a hex fold advances them
-- [ ] write tests: the exec metrics report the canonical domain before and after the flip
-- [ ] run `make test-short` — must pass before task 25
+- [x] make the exec metrics read the canonical commitment domain's entry
+- [x] write tests: a bin fold leaves the shared counters unchanged while a hex fold advances them
+- [x] write tests: the exec metrics report the canonical domain before and after the flip
+- [x] run `make test-short` — must pass before task 25
 
 ### Task 25: Freeze the hex domain on an explicit operator action
 

@@ -258,8 +258,9 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 	return root, nil
 }
 
-func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
+func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer, sink *metricsSink) (*HexPatriciaHashed, func()) {
 	w := NewHexPatriciaHashed(accountKeyLen, nil, cfg)
+	w.metrics.setSink(sink)
 	wctx, cleanup := factory(ctx)
 	w.ResetContext(wctx)
 	w.SetTraceWriter(traceW)

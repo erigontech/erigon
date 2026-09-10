@@ -89,11 +89,75 @@ var (
 	}
 )
 
+type metricsSink struct {
+	processedKeys                 metrics.Counter
+	branchesUpdated               metrics.Counter
+	stateSkipRate                 metrics.Counter
+	stateLoadRate                 metrics.Counter
+	stateLevelledSkipRatesAccount [6]metrics.Counter
+	stateLevelledSkipRatesStorage [6]metrics.Counter
+	stateLevelledLoadRatesAccount [6]metrics.Counter
+	stateLevelledLoadRatesStorage [6]metrics.Counter
+
+	hadToLoad         atomic.Uint64
+	skippedLoad       atomic.Uint64
+	hadToReset        atomic.Uint64
+	rateFlushMu       sync.Mutex
+	loadRatePublished uint64
+	skipRatePublished uint64
+}
+
+var defaultMetricsSink = &metricsSink{
+	processedKeys:                 mxTrieProcessedKeys,
+	branchesUpdated:               mxTrieBranchesUpdated,
+	stateSkipRate:                 mxTrieStateSkipRate,
+	stateLoadRate:                 mxTrieStateLoadRate,
+	stateLevelledSkipRatesAccount: mxTrieStateLevelledSkipRatesAccount,
+	stateLevelledSkipRatesStorage: mxTrieStateLevelledSkipRatesStorage,
+	stateLevelledLoadRatesAccount: mxTrieStateLevelledLoadRatesAccount,
+	stateLevelledLoadRatesStorage: mxTrieStateLevelledLoadRatesStorage,
+}
+
+var disabledMetricsSink = &metricsSink{}
+
+func metricsSinkFor(m *Metrics) *metricsSink {
+	if m == nil || m.sink == nil {
+		return defaultMetricsSink
+	}
+	return m.sink
+}
+
+func (s *metricsSink) recordProcessedKey() {
+	if s.processedKeys != nil {
+		s.processedKeys.Inc()
+	}
+}
+
+func (s *metricsSink) recordBranchUpdate(n int) {
+	if s.branchesUpdated != nil {
+		s.branchesUpdated.AddInt(n)
+	}
+}
+
+func (s *metricsSink) flushTrieStateRates() {
+	s.rateFlushMu.Lock()
+	defer s.rateFlushMu.Unlock()
+	if l := s.hadToLoad.Load(); l > s.loadRatePublished && s.stateLoadRate != nil {
+		s.stateLoadRate.AddUint64(l - s.loadRatePublished)
+		s.loadRatePublished = l
+	}
+	if skipped := s.skippedLoad.Load(); skipped > s.skipRatePublished && s.stateSkipRate != nil {
+		s.stateSkipRate.AddUint64(skipped - s.skipRatePublished)
+		s.skipRatePublished = skipped
+	}
+}
+
 type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
+	SetMetricsEnabled(enabled bool)
 
 	Variant() TrieVariant
 
@@ -443,7 +507,7 @@ func ApplyDeferredBranchUpdates(
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
+		metricsSinkFor(m).recordBranchUpdate(written)
 		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
@@ -488,7 +552,7 @@ func ApplyDeferredBranchUpdates(
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
+	metricsSinkFor(m).recordBranchUpdate(written)
 	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
@@ -538,7 +602,7 @@ func (be *BranchEncoder) CollectUpdate(
 		return err
 	}
 	publishBranchWrites(1, len(updateCopy), be.metrics)
-	mxTrieBranchesUpdated.Inc()
+	metricsSinkFor(be.metrics).recordBranchUpdate(1)
 	return nil
 }
 
