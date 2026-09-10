@@ -23,6 +23,11 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
+      # The checker guards the repo, so it is itself guarded: a regression that
+      # makes it answer "nothing found" for every input fails here first.
+      - name: Test the large-file checker
+        run: make test-check-large-files
+
       - name: Check for large files in PR
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

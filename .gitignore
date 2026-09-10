@@ -140,3 +140,27 @@ _artifacts
 gocache
 .claude/scheduled_tasks.lock
 test-fixtures-cache
+
+# `go build ./cmd/<name>` from the repo root drops the binary here; the real
+# build writes to build/bin. `scripts` is omitted: it is a tracked directory.
+/abigen
+/bootnode
+/bumper
+/capcli
+/caplin
+/commitment-regime
+/downloader
+/erigon
+/evm
+/integration
+/mcp
+/pics
+/prometheus
+/rlpdump
+/rpcdaemon
+/rpctest
+/sentinel
+/sentry
+/snapshots
+/txnbench
+/txpool
