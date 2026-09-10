@@ -1185,7 +1185,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]common.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
-		amounts = append(amounts, w.Amount)
+		amounts = append(amounts, uint64(w.Amount))
 		addresses = append(addresses, w.Address)
 	}
 

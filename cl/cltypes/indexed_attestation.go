@@ -123,9 +123,21 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	return i.DecodeSSZWithConfig(buf, version, nil)
 }
 
+func (i *IndexedAttestation) DecodeSSZStrict(buf []byte, version int) error {
+	return i.DecodeSSZStrictWithConfig(buf, version, nil)
+}
+
 // DecodeSSZWithConfig ssz unmarshals the IndexedAttestation object with preset-aware limits.
 // If cfg is nil, mainnet defaults are used.
 func (i *IndexedAttestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return i.decodeSSZWithConfig(buf, version, cfg, false)
+}
+
+func (i *IndexedAttestation) DecodeSSZStrictWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return i.decodeSSZWithConfig(buf, version, cfg, true)
+}
+
+func (i *IndexedAttestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig, strict bool) error {
 	i.version = clparams.StateVersion(version)
 	i.Data = &solid.AttestationData{}
 	if version >= int(clparams.ElectraVersion) {
@@ -138,6 +150,9 @@ func (i *IndexedAttestation) DecodeSSZWithConfig(buf []byte, version int, cfg *c
 		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
 	}
 
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
+	}
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
