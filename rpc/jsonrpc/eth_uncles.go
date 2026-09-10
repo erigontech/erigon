@@ -31,7 +31,7 @@ import (
 
 // GetUncleByBlockNumberAndIndex implements eth_getUncleByBlockNumberAndIndex. Returns information about an uncle given a block's number and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rpc.BlockNumber, index hexutil.Uint) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 
 // GetUncleByBlockHashAndIndex implements eth_getUncleByBlockHashAndIndex. Returns information about an uncle given a block's hash and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), hash)
+	block, err := api.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return &n, err
 	}
@@ -125,7 +125,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -139,14 +139,13 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 // GetUncleCountByBlockHash implements eth_getUncleCountByBlockHash. Returns the number of uncles in the block, if any.
 func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return &n, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithOverlay(tx)
 
-	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +153,12 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, *number)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, *number)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, overlayTx, hash, *number)
+	block, err := api.blockWithSenders(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}

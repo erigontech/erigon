@@ -60,7 +60,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--ethstats value`: The reporting URL for an ethstats service.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
 * `--prune.include-receipts, --persist.receipts, --experiment.persist.receipts.v2`: Downloads and caches historical receipts. Without it, receipts and logs are re-derived on demand from state history, so the related RPC calls still work, just with higher latency.
-  * Default: `false` (disabled) in every prune mode
+  * Default: `true` (enabled) in every prune mode, on fresh datadirs
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
@@ -505,10 +505,10 @@ Flags for configuring the parallel block execution engine.
 * `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   * Default: `true`
 
-**Commitment-trie construction.** The following flags change how the commitment (state-root) trie is computed during execution. Both default off and are intended for comparing root hashes against a sequential sync before enabling broadly.
+**Commitment-trie construction.** The following flags change how the commitment (state-root) trie is computed during execution.
 
-* `--experimental.parallel-commitment` *(New in v3.6)* (experimental): Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Equivalent to the `COMMITMENT_PARALLEL=true` environment variable.
-  * Default: `false`
+* `--experimental.parallel-commitment` *(New in v3.6)*: Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Pass `--experimental.parallel-commitment=false`, or set `COMMITMENT_PARALLEL=false`, to fall back to the sequential `HexPatriciaHashed` trie.
+  * Default: `true`
 * `--experimental.streaming-commitment` *(New in v3.6)* (experimental): Compute the commitment trie with the `StreamingCommitter`, which overlaps trie folding with block execution. If set, takes precedence over `--experimental.parallel-commitment`. No environment-variable equivalent.
   * Default: `false`
 

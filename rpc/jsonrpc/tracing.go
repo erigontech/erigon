@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -268,6 +269,14 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	defer ibs.Close()
 
+	// The state is built from history at txnIndex, so the earlier transactions of
+	// the block never ran and the log counter they left has to be handed in.
+	firstLogIndex, err := rawtemporaldb.FirstLogIndex(tx, txNum, txnIndex)
+	if err != nil {
+		return err
+	}
+	ibs.ResumeLogIndexAt(firstLogIndex)
+
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
 		if config.BlockOverrides != nil {
@@ -488,8 +497,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
-		// do not reset ibs, because we want to keep the overrides and state change
-		// ibs.Reset()
+		// A bundle is a block of its own, so its logs number from zero. Only the
+		// logs are reset: the overrides and state changes have to survive.
+		ibs.ResetLogs()
 		for txnIndex := range bundle.Transactions {
 			txn := &bundle.Transactions[txnIndex]
 			if txn.Gas == nil || *txn.Gas == 0 {
