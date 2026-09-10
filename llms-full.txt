@@ -2363,6 +2363,8 @@ Options for configuring the [transaction pool](/fundamentals/modules/txpool).
 * `--txpool.queued.dormancy value`: Evicts queued transactions from senders with no on-chain state changes for at least this duration (e.g. `3h`, `2h30m`).
   * Default: `3h0m0s`
   * Set to `0` to disable dormancy-based eviction.
+* `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
+  * Default: `false`
 
 ### Network and Peers
 
@@ -2387,7 +2389,9 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
 * `--staticpeers value`: Comma-separated enode URLs to connect to.
 * `--trustedpeers value`: Comma-separated enode URLs for trusted peers.
 * `--maxpeers value`: The maximum number of network peers.
-  * Default: `32`
+  * Default: `64`
+* `--maxpendpeers value`: The maximum number of peers still completing the handshake, counted separately for inbound and outbound connections.
+  * Default: `1000`
 
 ### RPC & API
 
@@ -2397,6 +2401,12 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `127.0.0.1:9090`
 * `--private.api.ratelimit value`: Limits the number of simultaneous internal API requests.
   * Default: `31872`
+* `--tls`: Secures the internal gRPC API (`--private.api.addr`) with TLS. This does not affect the JSON-RPC HTTP server.
+  * Default: `false`
+  * `--tls.cert` and `--tls.key` are both required when this is set. If either is missing Erigon logs a warning and continues without TLS — and because it abandons the rest of that setup step, `--healthcheck` is silently dropped too.
+* `--tls.cert value`: Path to the certificate presented on the internal gRPC API.
+* `--tls.key value`: Path to the private key for `--tls.cert`.
+* `--tls.cacert value`: Path to the certificate authority used to verify gRPC clients. Setting it switches the server to mutual TLS: every gRPC client of `--private.api.addr` must then present a certificate signed by this CA, or the handshake is rejected. Leave it unset for server-only TLS. Read only when `--tls` is set.
 * `--http`: Enables the JSON-RPC HTTP server.
   * Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
@@ -2502,6 +2512,16 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
+* `--http.trace`: Logs every HTTP RPC request at INFO level.
+  * Default: `false`
+* `--http.dbg.single`: Accepts the `dbg: true` HTTP header on an RPC request and logs how that request was executed. Intended for debugging a single call, not for continuous use.
+  * Default: `false`
+* `--trace.maxtraces value`: Caps the number of traces `trace_filter` may return.
+  * Default: `200`
+* `--trace.compat`: Reproduces OpenEthereum's quirks in the `trace_` namespace, for consumers that depend on them.
+  * Default: `false`
+* `--ots.search.max.pagesize value`: Caps the page size accepted by the Otterscan (`ots_`) search methods.
+  * Default: `25`
 
 ### MCP Server
 
@@ -2640,6 +2660,12 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
+
+The two flags below are registered but hidden, so they do not appear in `erigon --help`, and neither changes any behaviour. They are listed here so their presence in an old command line is not mistaken for a working setting.
+
+* `--torrent.staticpeers value`: Accepted but currently unused — nothing in the binary reads the value.
+* `--torrent.download.slots value`: Accepted but inert — the binary marks it deprecated; it no longer affects how many files download in parallel. Unlike `--torrent.staticpeers`, setting it logs a `[DEPRECATED]` warning on every startup.
+  * Default: `32`
 
 ### Fork Choice Update (FCU)
 
@@ -2844,6 +2870,26 @@ What that means for sizing: each of these state caches starts at 1024 entries, o
 
 Budgets summing past the envelope therefore mean it *can* saturate, not that it will — that depends on the working set. With 32 GiB available to Erigon after limits the whole envelope is 1 GiB — below the roughly 2.2 GiB the envelope-backed caches can reserve under the defaults (accounts, storage, twice the code budget, and the size-only layer) — so a large enough working set saturates it; past that point raising the envelope-backed budgets together adds no aggregate capacity and only changes which cache wins the space left. Where more is available the envelope may never saturate, and there raising them does help. Mind that the figure follows the *lowest* of physical RAM, the cgroup limit and `GOMEMLIMIT`: a 32 GiB host running Erigon in an 8 GiB container gets a 256 MiB envelope, not 1 GiB. `STATE_CACHE_CODE_INDEX` sits outside the envelope altogether — its entry cap is fixed up front from the budget, so above the 1024-entry floor noted above, raising it adds index capacity independently of how saturated the envelope is.
 
+### Snapshot Download Variables
+
+These tune the downloader's HTTP and BitTorrent transport. They are read once at startup and have no CLI-flag equivalent; reach for them when snapshot downloads stall or a network path misbehaves.
+
+The four switches below are **presence-checked, not parsed** — the downloader tests them with `!= ""`, so any non-empty value turns the behaviour on. `DOWNLOADER_HTTP3=false` and `DOWNLOADER_HTTP3=0` both *enable* HTTP/3. Unset the variable to turn it off.
+
+* `DOWNLOADER_HTTP3` - Uses HTTP/3 for webseed requests
+* `DOWNLOADER_FORCE_IPV4` - Restricts webseed connections to IPv4
+* `DOWNLOADER_DISABLE_HTTP2` - Stops HTTP/2 being negotiated automatically, forcing HTTP/1.1
+* `DOWNLOADER_DISABLE_KEEP_ALIVES` - Disables connection reuse, giving one request per connection
+
+Setting `DOWNLOADER_HTTP3` replaces the whole HTTP transport, so the other six HTTP variables below and above are then ignored — they are still parsed, and an unparseable integer still panics.
+
+The four below are parsed as base-10 integers. **An unparseable value panics at startup** rather than falling back to the default, so set them to a bare number with no unit suffix.
+
+* `DOWNLOADER_MAX_CONNS_PER_HOST` - Concurrent connections per webseed host (default: `10`)
+* `DOWNLOADER_HTTP_READ_BUFFER_SIZE` - Read buffer for webseed HTTP responses, in bytes (default: `2097152`, i.e. 2 MiB)
+* `DOWNLOADER_TCP_READ_BUFFER_SIZE` - TCP read buffer size, in bytes (default: `0`, leaving the OS default in place)
+* `DOWNLOADER_NETWORK_CHUNK_SIZE` - BitTorrent chunk request size, in bytes (default: `262144`, i.e. 256 KiB)
+
 ### Memory and Debugging Variables
 
 **Memory Management:**
@@ -3020,6 +3066,7 @@ Here is a comprehensive list of port-related options:
 
 * `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 * `--caplin.discovery.tcpport [value]`: TCP Port for Caplin DISCV5 protocol (default: `4001`)
+* `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
 
@@ -3467,7 +3514,7 @@ Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from
 ```
 
 ```yaml
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
+      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --log.dir.path=/logs/node1
     ports:
       - "8551:8551"
     volumes:
