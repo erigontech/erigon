@@ -524,18 +524,23 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
+	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	var embeddedBuilder *epbs.Runtime
 	if config.EpbsBuilder.Enabled {
 		if executionModule == nil {
 			return errors.New("embedded ePBS builder requires the in-process execution module")
 		}
 		embeddedBuilder, err = epbs.NewRuntime(config.EpbsBuilder, epbs.RuntimeDependencies{
-			BeaconConfig: beaconConfig,
-			Clock:        ethClock,
-			Head:         syncedDataManager,
-			Forkchoice:   forkChoice,
-			Assembler:    eladapter.NewAdapter(executionModule, beaconConfig),
-			Publisher:    gossipManager,
+			BeaconConfig:     beaconConfig,
+			Clock:            ethClock,
+			Head:             syncedDataManager,
+			Forkchoice:       forkChoice,
+			Assembler:        eladapter.NewAdapter(executionModule, beaconConfig),
+			Publisher:        gossipManager,
+			BidProcessor:     executionPayloadBidService,
+			PayloadProcessor: executionPayloadService,
+			AcceptedBlocks:   forkChoice,
+			Events:           emitters,
 		})
 		if err != nil {
 			return fmt.Errorf("initialize embedded ePBS builder: %w", err)
@@ -550,7 +555,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		emitters,
 		embeddedBuilder,
 	)
-	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
