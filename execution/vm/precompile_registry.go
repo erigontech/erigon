@@ -36,13 +36,17 @@ import (
 type PrecompilesFunc func(l2Version uint64) PrecompiledContracts
 
 var (
-	registryMu sync.RWMutex
-	providers  = map[uint256.Int]PrecompilesFunc{}
-	// Keeps the common no-provider path off registryMu: it is hit 2-3 times
-	// per transaction and an RWMutex read lock anti-scales with workers.
-	providerCount atomic.Int64
-	mergedCache   = map[precompileCacheKey]*mergedPrecompileSet{}
+	registryMu  sync.Mutex
+	providers   atomic.Pointer[map[uint256.Int]PrecompilesFunc]
+	mergedCache sync.Map
 )
+
+func providerSnapshot() map[uint256.Int]PrecompilesFunc {
+	if m := providers.Load(); m != nil {
+		return *m
+	}
+	return nil
+}
 
 // RegisterPrecompiles registers f as chainID's precompile provider; its entries
 // overlay the fork-selected built-ins and win on address collision. Must return
@@ -59,12 +63,16 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := providers[*chainID]; exists {
+	if _, exists := providerSnapshot()[*chainID]; exists {
 		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s already registered", chainID))
 	}
-	providers[*chainID] = f
-	providerCount.Add(1)
-	dropCachedLocked(*chainID)
+	next := maps.Clone(providerSnapshot())
+	if next == nil {
+		next = map[uint256.Int]PrecompilesFunc{}
+	}
+	next[*chainID] = f
+	providers.Store(&next)
+	dropCached(*chainID)
 }
 
 // UnregisterPrecompiles removes chainID's provider and its cached merged sets.
@@ -74,19 +82,21 @@ func UnregisterPrecompiles(chainID *uint256.Int) {
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := providers[*chainID]; exists {
-		delete(providers, *chainID)
-		providerCount.Add(-1)
+	if _, exists := providerSnapshot()[*chainID]; exists {
+		next := maps.Clone(providerSnapshot())
+		delete(next, *chainID)
+		providers.Store(&next)
 	}
-	dropCachedLocked(*chainID)
+	dropCached(*chainID)
 }
 
-func dropCachedLocked(chainID uint256.Int) {
-	for k := range mergedCache {
-		if k.chainID == chainID {
-			delete(mergedCache, k)
+func dropCached(chainID uint256.Int) {
+	mergedCache.Range(func(k, _ any) bool {
+		if k.(precompileCacheKey).chainID == chainID {
+			mergedCache.Delete(k)
 		}
-	}
+		return true
+	})
 }
 
 type precompileCacheKey struct {
@@ -102,25 +112,17 @@ func rulesChainID(rules *chain.Rules) uint256.Int {
 	return *rules.ChainID
 }
 
-func lookupProvider(chainID uint256.Int) (f PrecompilesFunc, ok bool) {
-	if providerCount.Load() == 0 {
-		return nil, false
-	}
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	f, ok = providers[chainID]
+func lookupProvider(chainID uint256.Int) (PrecompilesFunc, bool) {
+	f, ok := providerSnapshot()[chainID]
 	return f, ok
 }
 
 func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provider PrecompilesFunc) *mergedPrecompileSet {
 	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
 
-	registryMu.RLock()
-	if set, ok := mergedCache[key]; ok {
-		registryMu.RUnlock()
-		return set
+	if set, ok := mergedCache.Load(key); ok {
+		return set.(*mergedPrecompileSet)
 	}
-	registryMu.RUnlock()
 
 	overlay := provider(rules.L2Version)
 	for addr, p := range overlay {
@@ -132,13 +134,8 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 	maps.Copy(contracts, overlay)
 	set := &mergedPrecompileSet{contracts: contracts, addresses: slices.Collect(maps.Keys(contracts))}
 
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if existing, ok := mergedCache[key]; ok {
-		return existing
-	}
-	mergedCache[key] = set
-	return set
+	actual, _ := mergedCache.LoadOrStore(key, set)
+	return actual.(*mergedPrecompileSet)
 }
 
 func isNilContract(p PrecompiledContract) bool {
