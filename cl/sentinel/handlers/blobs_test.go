@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -97,7 +96,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, nil)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
@@ -221,7 +220,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, ethClock)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 

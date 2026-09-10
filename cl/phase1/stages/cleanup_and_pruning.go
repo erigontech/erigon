@@ -27,33 +27,38 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	cfg.blobStore.Prune()
-	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
-	if columnKeepSlots == 0 {
-		columnKeepSlots = specColumnKeepSlots(cfg.beaconCfg)
+	currentSlot := cfg.ethClock.GetCurrentSlot()
+	pruneBlobDistance := uint64(128600)
+	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {
+		pruneBlobDistance = math.MaxUint64
 	}
-	cfg.peerDas.Prune(columnKeepSlots)
+	if err := cfg.blobStore.PruneBelow(floorFor(currentSlot, pruneBlobDistance)); err != nil {
+		logger.Warn("failed to prune blob sidecars", "err", err)
+	}
+	columnFloor := specColumnFloor(currentSlot, cfg.beaconCfg)
+	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {
+		columnFloor = floorFor(currentSlot, keep)
+	}
+	if err := cfg.peerDas.PruneBelow(columnFloor); err != nil {
+		logger.Warn("failed to prune data column sidecars", "err", err)
+	}
 	return nil
 }
 
-// specColumnKeepSlots is the retention distance for MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS.
-// The window is stated in epochs and measured from the start of current_epoch - MIN_EPOCHS, so an
-// exact epochs * SLOTS_PER_EPOCH distance cuts above that boundary whenever the head sits inside
-// an epoch. The extra epoch keeps the cut at or below it, which matters because this distance also
-// sets the earliest slot we advertise as servable.
-//
-// A custom chain config supplies both inputs unchecked, and zero here means "keep nothing", so
-// anything unrepresentable saturates to keeping everything rather than wrapping into a distance
-// that prunes the whole store.
-func specColumnKeepSlots(beaconCfg *clparams.BeaconChainConfig) uint64 {
-	epochs := beaconCfg.MinEpochsForDataColumnSidecarsRequests
-	slotsPerEpoch := beaconCfg.SlotsPerEpoch
-	if slotsPerEpoch == 0 || epochs == math.MaxUint64 {
-		return math.MaxUint64
+func specColumnFloor(currentSlot uint64, beaconCfg *clparams.BeaconChainConfig) uint64 {
+	if beaconCfg.SlotsPerEpoch == 0 {
+		return 0
 	}
-	epochs++
-	if epochs > math.MaxUint64/slotsPerEpoch {
-		return math.MaxUint64
+	epoch := currentSlot / beaconCfg.SlotsPerEpoch
+	if epoch <= beaconCfg.MinEpochsForDataColumnSidecarsRequests {
+		return 0
 	}
-	return epochs * slotsPerEpoch
+	return (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
+}
+
+func floorFor(head, keep uint64) uint64 {
+	if head <= keep {
+		return 0
+	}
+	return head - keep
 }

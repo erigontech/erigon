@@ -26,23 +26,26 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
-func pruningCfg(t *testing.T, ctrl *gomock.Controller, beaconCfg *clparams.BeaconChainConfig, caplinCfg clparams.CaplinConfig) (*Cfg, *das_mock_services.MockPeerDas) {
+func pruningCfg(t *testing.T, ctrl *gomock.Controller, beaconCfg *clparams.BeaconChainConfig, caplinCfg clparams.CaplinConfig, currentSlot uint64) (*Cfg, *blob_mock_services.MockBlobStorage, *das_mock_services.MockPeerDas) {
 	t.Helper()
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
 	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
-	blobStore.EXPECT().Prune().Return(nil)
 	peerDas := das_mock_services.NewMockPeerDas(ctrl)
 	return &Cfg{
 		indiciesDB:   memdb.NewTestDB(t, dbcfg.ChainDB),
 		beaconCfg:    beaconCfg,
+		ethClock:     clock,
 		blobStore:    blobStore,
 		peerDas:      peerDas,
 		caplinConfig: caplinCfg,
-	}, peerDas
+	}, blobStore, peerDas
 }
 
 // An unset --caplin.columns-keep-slots must resolve to the chain's own window rather than a
@@ -53,46 +56,67 @@ func TestCleanupAndPruningDerivesColumnRetentionFromTheChainConfig(t *testing.T)
 	beaconCfg.SlotsPerEpoch = 16
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
 
-	cfg, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{})
-	peerDas.EXPECT().Prune(uint64(65_552)).Return(nil)
+	const currentSlot = 20_000*16 + 5
+	cfg, blobStore, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{}, currentSlot)
+	blobStore.EXPECT().PruneBelow(uint64(currentSlot - 128600)).Return(nil)
+	peerDas.EXPECT().PruneBelow(uint64((20_000 - 4096) * 16)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
 }
 
-// An explicit value is a slot count and must reach the pruner unchanged.
+// An explicit value is a slot count and must reach the pruner as that distance below the head.
 func TestCleanupAndPruningKeepsAnExplicitColumnSlotCount(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	beaconCfg := clparams.MainnetBeaconConfig
 
-	cfg, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{ColumnKeepSlots: 4_242})
-	peerDas.EXPECT().Prune(uint64(4_242)).Return(nil)
+	const currentSlot = 500_000
+	cfg, blobStore, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{ColumnKeepSlots: 4_242}, currentSlot)
+	blobStore.EXPECT().PruneBelow(uint64(currentSlot - 128600)).Return(nil)
+	peerDas.EXPECT().PruneBelow(uint64(currentSlot - 4_242)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
 }
 
-// The serving window starts at the first slot of current_epoch - MIN_EPOCHS, and the distance
-// also sets the earliest slot we advertise as servable, so it must never cut above that
-// boundary for any head position inside an epoch.
-func TestSpecColumnKeepSlotsNeverCutsAboveTheEpochBoundary(t *testing.T) {
+// Archive and pruning-disabled nodes must keep every blob, so the floor stays at zero.
+func TestCleanupAndPruningKeepsAllBlobsWhenPruningIsOff(t *testing.T) {
+	for name, caplinCfg := range map[string]clparams.CaplinConfig{
+		"archive blobs":         {ArchiveBlobs: true},
+		"blob pruning disabled": {BlobPruningDisabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			beaconCfg := clparams.MainnetBeaconConfig
+
+			cfg, blobStore, peerDas := pruningCfg(t, ctrl, &beaconCfg, caplinCfg, 500_000)
+			blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+			peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+		})
+	}
+}
+
+// The serving window starts at the first slot of current_epoch - MIN_EPOCHS, and the floor also
+// sets the earliest slot we advertise as servable, so it must never cut above that boundary for
+// any head position inside an epoch.
+func TestSpecColumnFloorNeverCutsAboveTheEpochBoundary(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 16
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
-	keep := specColumnKeepSlots(&beaconCfg)
 
 	const epoch = 5000
+	required := (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
 	for offset := uint64(0); offset < beaconCfg.SlotsPerEpoch; offset++ {
 		head := epoch*beaconCfg.SlotsPerEpoch + offset
-		required := (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
-		require.LessOrEqual(t, head-keep, required,
+		require.LessOrEqual(t, specColumnFloor(head, &beaconCfg), required,
 			"head %d cuts above the first slot the node must still serve", head)
 	}
 }
 
-// Both inputs arrive as plain uint64 from --caplin.custom-config, so the derived distance must
-// not wrap. A distance of zero is the dangerous outcome: it makes Prune delete every bucket
-// below the head and advertise nothing as available, so anything unrepresentable has to
-// saturate towards retaining instead.
-func TestSpecColumnKeepSlotsSaturatesInsteadOfWrapping(t *testing.T) {
+// Both inputs arrive as plain uint64 from --caplin.custom-config, so the derived floor must not
+// wrap. A floor at the head is the dangerous outcome: it deletes every bucket below the head and
+// advertises nothing as available, so anything unrepresentable has to fall back to retaining.
+func TestSpecColumnFloorSaturatesInsteadOfWrapping(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		minEpochs     uint64
@@ -107,23 +131,28 @@ func TestSpecColumnKeepSlotsSaturatesInsteadOfWrapping(t *testing.T) {
 			beaconCfg.MinEpochsForDataColumnSidecarsRequests = test.minEpochs
 			beaconCfg.SlotsPerEpoch = test.slotsPerEpoch
 
-			require.Equal(t, uint64(math.MaxUint64), specColumnKeepSlots(&beaconCfg),
+			require.Zero(t, specColumnFloor(500_000, &beaconCfg),
 				"an unrepresentable window must retain everything, never prune everything")
 		})
 	}
 }
 
-// The distance reaches PeerDas.Prune directly, where zero means "keep nothing", so no config
-// may produce it.
-func TestSpecColumnKeepSlotsIsNeverZero(t *testing.T) {
+// The floor also sets the earliest slot we advertise as servable, so no config may push it past
+// the start of the current epoch.
+func TestSpecColumnFloorStaysAtOrBelowTheCurrentEpoch(t *testing.T) {
+	const head = 5_000_000
 	for _, minEpochs := range []uint64{0, 1, 4096, math.MaxUint64 - 1, math.MaxUint64} {
 		for _, slotsPerEpoch := range []uint64{0, 1, 12, 16, 32, math.MaxUint64} {
 			beaconCfg := clparams.MainnetBeaconConfig
 			beaconCfg.MinEpochsForDataColumnSidecarsRequests = minEpochs
 			beaconCfg.SlotsPerEpoch = slotsPerEpoch
 
-			require.NotZero(t, specColumnKeepSlots(&beaconCfg),
-				"MIN_EPOCHS=%d SLOTS_PER_EPOCH=%d resolved to a destructive zero distance",
+			epochStart := uint64(0)
+			if slotsPerEpoch != 0 {
+				epochStart = head / slotsPerEpoch * slotsPerEpoch
+			}
+			require.LessOrEqual(t, specColumnFloor(head, &beaconCfg), epochStart,
+				"MIN_EPOCHS=%d SLOTS_PER_EPOCH=%d resolved to a destructive floor",
 				minEpochs, slotsPerEpoch)
 		}
 	}

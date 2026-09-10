@@ -19,6 +19,7 @@ package httpreqresp
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -265,10 +266,18 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		cancelled := make(chan struct{})
+		stopCancellation := context.AfterFunc(r.Context(), func() {
+			defer close(cancelled)
+			_ = stream.Reset()
+		})
 		// The successful path hands the stream off to the response body, which closes it; on every
 		// other path this deferred close releases it.
 		streamTransferred := false
 		defer func() {
+			if !stopCancellation() {
+				<-cancelled
+			}
 			if !streamTransferred {
 				stream.Close()
 			}
