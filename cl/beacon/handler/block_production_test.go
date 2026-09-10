@@ -1766,7 +1766,7 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []*types.Withdrawal{{
 		Index:     0,
-		Validator: state.ConvertBuilderIndexToValidatorIndex(3),
+		Validator: hexutil.Uint64(state.ConvertBuilderIndexToValidatorIndex(3)),
 		Address:   common.Address{0xbb},
 		Amount:    12,
 	}}, withdrawals)
