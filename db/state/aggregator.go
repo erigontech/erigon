@@ -435,6 +435,7 @@ func (a *Aggregator) referencesInCommitmentBranches() bool {
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
 // consumes it via a local Schema copy) and updates the live commitment domain post-configure.
 func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
+	refs = refs && a.trieVariant != TrieVariantBin
 	if !a.configured {
 		a.commitmentRefsOverride = &refs
 		return
@@ -548,6 +549,9 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.commitmentRefsOverride != nil {
 		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
 	}
+	if a.trieVariant == TrieVariantBin {
+		schema.CommitmentDomain.ReferencesInCommitmentBranches = false
+	}
 	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
@@ -556,7 +560,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated
 	// by USE_STATE_CACHE, nil = disabled. Skipped for ephemeral aggregators that
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
-	if dbg.UseStateCache && !a.branchCacheDisabled {
+	if dbg.UseStateCache && !a.branchCacheDisabled && a.trieVariant != TrieVariantBin {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
 			if !dbg.DisableAdaptivePin {
@@ -2257,7 +2261,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// With referenced commitment files present, concurrent dereference does random reads; read through
 	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
-	needCommitmentTransform := comVals.needMerge &&
+	needCommitmentTransform := at.a.trieVariant != TrieVariantBin && comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
 
 	accStorageMerged := new(sync.WaitGroup)

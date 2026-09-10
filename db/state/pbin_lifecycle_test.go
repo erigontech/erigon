@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -288,4 +289,127 @@ func TestPBinDisabledDependenciesDoNotRetainFiles(t *testing.T) {
 			require.False(t, checker.CheckDependentPresent(dependency, Any, 0, 1))
 		})
 	}
+}
+
+func TestPBinPrunePreservesCommitmentWithoutSnapshots(t *testing.T) {
+	for _, lifecycle := range []string{"frozen", "stopped", "live"} {
+		t.Run(lifecycle, func(t *testing.T) {
+			agg := pbinDualAggregator(t)
+			agg.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+			before := agg.BeginFilesRo()
+			writer := before.d[kv.CommitmentDomain].NewWriter()
+			defer writer.Close()
+			values := map[string][]byte{string(commitment.KeyCommitmentState): {1, 2, 3}, "branch": {4, 5, 6}}
+			require.NoError(t, agg.db.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+				for key, value := range values {
+					require.NoError(t, writer.PutWithPrev([]byte(key), value, 1, nil))
+				}
+				return writer.Flush(t.Context(), tx)
+			}))
+			before.Close()
+			switch lifecycle {
+			case "frozen":
+				agg.setFrozenAtTxNums(map[string]uint64{kv.CommitmentDomain.String(): 1})
+			case "stopped":
+				agg.StopCommitmentDomain(kv.CommitmentDomain)
+			}
+			generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 2}})
+			generateDomainFiles(t, "commitment-bin", agg.Dirs(), []testFileRange{{0, 2}})
+			require.NoError(t, agg.OpenFolder())
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			require.EqualValues(t, 2*alignStepSize, agg.EndTxNumMinimax())
+			require.Empty(t, at.d[kv.CommitmentDomain].files)
+			require.NoError(t, agg.db.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+				_, err := at.prune(t.Context(), tx, 0, false, nil)
+				return err
+			}))
+			require.NoError(t, agg.db.View(t.Context(), func(tx kv.Tx) error {
+				for key, value := range values {
+					got, _, ok, err := at.d[kv.CommitmentDomain].GetLatest([]byte(key), tx)
+					require.NoError(t, err)
+					require.True(t, ok, key)
+					require.Equal(t, value, got)
+				}
+				return nil
+			}))
+		})
+	}
+}
+
+func TestPBinOnlyMergePreservesBranchRecords(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	agg.trieVariant = TrieVariantBin
+	for _, domain := range kv.StateDomains(kv.CommitmentDomain) {
+		agg.d[domain].Compression = seg.CompressNone
+	}
+	span := uint64(commitment.DefaultKeyReferencingMinSteps)
+	agg.erigondbDomainStepsInFrozenFile = 2 * span
+	cell := append([]byte{18, 0}, bytes.Repeat([]byte{7}, 32)...)
+	branch := append(bytes.Clone(cell), cell...)
+	key := []byte{0}
+	for _, from := range []uint64{0, span} {
+		for _, domain := range kv.StateDomains(kv.CommitmentDomain) {
+			path := filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("v1.0-%s.%d-%d.kv", domain, from, from+span))
+			c, err := seg.NewCompressor(t.Context(), t.Name(), path, agg.Dirs().Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			require.NoError(t, err)
+			t.Cleanup(c.Close)
+			require.NoError(t, c.AddUncompressedWord(key))
+			value := []byte{1}
+			if domain == kv.CommitmentDomain {
+				value = branch
+			}
+			require.NoError(t, c.AddUncompressedWord(value))
+			require.NoError(t, c.Compress())
+			c.Close()
+		}
+	}
+	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	check := func() {
+		t.Helper()
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		require.NoError(t, agg.db.View(t.Context(), func(tx kv.Tx) error {
+			got, _, ok, err := at.GetLatest(kv.CommitmentDomain, key, tx, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, branch, got)
+			got, ok, _, _, err = at.DebugGetLatestFromFiles(kv.CommitmentDomain, key, 2*span*alignStepSize)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, branch, got)
+			return nil
+		}))
+	}
+	check()
+	merged, err := agg.mergeLoopStep(t.Context(), agg.EndTxNumMinimax())
+	require.NoError(t, err)
+	require.True(t, merged)
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.Len(t, at.d[kv.CommitmentDomain].files, 1)
+	check()
+}
+
+func TestPBinOnlyDomainDisablesHexReferences(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantBin
+	refs := true
+	settings := &ErigonDBSettings{
+		StepSize:                       alignStepSize,
+		StepsInFrozenFile:              8,
+		TrieVariant:                    &variant,
+		ReferencesInCommitmentBranches: &refs,
+	}
+	require.NoError(t, WriteErigonDBSettings(dirs, settings))
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	agg := NewTest(dirs).WithErigonDBSettings(settings).MustOpen(t.Context(), db)
+	defer agg.Close()
+	require.False(t, agg.d[kv.CommitmentDomain].ReferencesInCommitmentBranches)
+	require.Equal(t, version.V2_2, agg.d[kv.CommitmentDomain].kvWriteVersion())
+	require.Nil(t, agg.d[kv.CommitmentDomain].branchCache)
+	agg.applyReferencesInCommitmentBranches(true)
+	require.False(t, agg.referencesInCommitmentBranches())
+	require.Equal(t, version.V2_2, agg.d[kv.CommitmentDomain].kvWriteVersion())
 }

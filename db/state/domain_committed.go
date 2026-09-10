@@ -93,6 +93,9 @@ func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
+	if at.a.trieVariant == TrieVariantBin {
+		return false
+	}
 	stepSize := at.StepSize()
 	commitmentDomain := kv.CommitmentDomain
 	if at.d[commitmentDomain] == nil {
@@ -150,7 +153,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if at.a.trieVariant == TrieVariantBin || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
 		aggTx.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...) == 0 {
 
 		return branch, nil // do not transform, return as is

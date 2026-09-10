@@ -78,6 +78,9 @@ func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	switch s.TrieVariantName() {
 	case TrieVariantBin:
+		if s.RefsInCommitmentBranches() {
+			return errors.New("the bin commitment trie does not support references_in_commitment_branches; set it to false")
+		}
 		if statecfg.ExperimentalHexBinCommitment {
 			statecfg.ExperimentalHexBinCommitment = false
 		}

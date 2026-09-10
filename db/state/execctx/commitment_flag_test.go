@@ -234,9 +234,13 @@ func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
 }
 
 func TestAggregatorBranchCachesAreDomainScoped(t *testing.T) {
-	origBin := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = origBin })
+	origBin, origHexBin := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = origBin
+		statecfg.ExperimentalHexBinCommitment = origHexBin
+	})
 	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
 
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(t.Context())
