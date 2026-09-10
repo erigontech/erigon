@@ -322,12 +322,12 @@ func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
 			ub1 := NewUpdateBuilder().Balance(a, 1)
 			ubf := NewUpdateBuilder().Balance(a, 2)
 			for _, loc := range surv {
-				ub1.Storage(a, loc, "01")
-				ubf.Storage(a, loc, "01")
+				ub1.Storage(a, loc, loc)
+				ubf.Storage(a, loc, loc)
 			}
 			ub2 := NewUpdateBuilder().Balance(a, 2)
 			for _, loc := range gone {
-				ub1.Storage(a, loc, "02")
+				ub1.Storage(a, loc, loc)
 				ub2.DeleteStorage(a, loc)
 			}
 			k1, u1 := ub1.Build()
@@ -350,7 +350,7 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	all := append(append(storageLocsForNibble(0x2, 2, 2), storageLocsForNibble(0x8, 6, 2000)...), storageLocsForNibble(0xd, 6, 2000000)...)
 	ub1 := NewUpdateBuilder().Balance(a, 1)
 	for _, loc := range all {
-		ub1.Storage(a, loc, "01")
+		ub1.Storage(a, loc, loc)
 	}
 	k1, u1 := ub1.Build()
 
