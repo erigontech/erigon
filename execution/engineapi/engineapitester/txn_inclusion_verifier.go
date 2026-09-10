@@ -165,7 +165,7 @@ func (v TxnInclusionVerifier) WaitForPending(
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return fmt.Errorf("txn %s not pending in pool: %w (last query error: %v)", hash, ctx.Err(), lastErr)
+				return fmt.Errorf("txn %s not pending in pool: %w (last query error: %w)", hash, ctx.Err(), lastErr)
 			}
 			return fmt.Errorf("txn %s not pending in pool: %w", hash, ctx.Err())
 		case <-time.After(20 * time.Millisecond):
