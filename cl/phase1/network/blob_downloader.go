@@ -819,20 +819,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			return nil, 0, err
 		}
 		if commitments.Len() == int(blobsCount) {
-			complete := true
-			for i := range commitments.Len() {
-				exists, err := b.blobStorage.BlobSidecarExists(b.ctx, block.Block.Slot, blockRoot, uint64(i))
-				if err != nil {
-					return nil, 0, err
-				}
-				if !exists {
-					complete = false
-					break
-				}
-			}
-			if complete {
-				continue
-			}
+			continue
 		}
 		batch = append(batch, block)
 	}
