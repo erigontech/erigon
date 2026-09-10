@@ -61,7 +61,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		if err != nil {
 			return err
 		}
-		effectiveMask, err := base.unfoldRecordsIntoRow(0, d+1, records, present)
+		effectiveMask, err := base.unfoldRecordsIntoRow(0, d+1, records, present, 0, false)
 		if err != nil {
 			return err
 		}

@@ -1629,7 +1629,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNodeRecords(reader BranchRecordReader,
 	}
 	hph.metrics.AddBranchRead(read)
 
-	effectiveMask, err := hph.unfoldRecordsIntoRow(row, depth, records, present)
+	effectiveMask, err := hph.unfoldRecordsIntoRow(row, depth, records, present, mask, maskKnown)
 	if err != nil {
 		return fmt.Errorf("prefix [%x]: %w", hph.currentKey[:hph.currentKeyLen], err)
 	}
@@ -2957,7 +2957,10 @@ func (hph *HexPatriciaHashed) recordReader() BranchRecordReader {
 
 // unfoldRecordsIntoRow decodes a node's edge records straight into grid[row], skipping the legacy
 // row a v3 read would otherwise build and immediately take apart. Caller resets the row first.
-func (hph *HexPatriciaHashed) unfoldRecordsIntoRow(row int, depth int16, records [16][]byte, present uint16) (uint16, error) {
+func (hph *HexPatriciaHashed) unfoldRecordsIntoRow(row int, depth int16, records [16][]byte, present, mask uint16, maskKnown bool) (uint16, error) {
+	if missing := mask &^ present; maskKnown && missing != 0 {
+		return 0, fmt.Errorf("missing record for mask bit %d", bits.TrailingZeros16(missing))
+	}
 	var tombstones uint16
 	for bitset := present; bitset != 0; bitset &= bitset - 1 {
 		bit := bitset & -bitset
