@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -35,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -191,6 +194,24 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 	return nil
 }
 
+// verifyFetchedSidecars applies the checks VerifyAgainstIdentifiersAndInsertIntoTheBlobStore
+// applies, so a dry run cannot report a slot as fillable that a commit would then reject.
+func verifyFetchedSidecars(sidecars []*cltypes.BlobSidecar) error {
+	blobs := make([]*goethkzg.Blob, len(sidecars))
+	commitments := make([]goethkzg.KZGCommitment, len(sidecars))
+	proofs := make([]goethkzg.KZGProof, len(sidecars))
+	for i, sidecar := range sidecars {
+		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof,
+			sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return fmt.Errorf("inclusion proof does not verify at index %d", sidecar.Index)
+		}
+		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+		commitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+	}
+	return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs)
+}
+
 func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader,
 	store blob_storage.BlobStorage, src *beaconAPISource, slot uint64, tally *blobFetchTally) error {
 	// The canonical root from the index, never block.HashSSZ(): a block read out of a
@@ -285,6 +306,27 @@ func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblo
 			tally.rejected++
 			return nil
 		}
+	}
+	// From Fulu on, EIP-7594 moved proofs into the data columns, so a beacon API has no
+	// single-blob proof to serve and returns the point at infinity. The commitment check above
+	// authenticates the blob, so recompute the proof from it, exactly as Erigon's own column
+	// recovery does before storing a recovered sidecar.
+	for _, sidecar := range sidecars {
+		blob := goethkzg.Blob(sidecar.Blob)
+		proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, goethkzg.KZGCommitment(sidecar.KzgCommitment), 0)
+		if err != nil {
+			log.Error("Could not compute the blob proof, skipping", "slot", slot, "index", sidecar.Index, "err", err)
+			tally.rejected++
+			return nil
+		}
+		sidecar.KzgProof = common.Bytes48(proof)
+	}
+	// Verify before the commit gate so a dry run reports what a commit would actually do; the
+	// insert applies the same two checks and would otherwise only fail under --commit.
+	if err := verifyFetchedSidecars(sidecars); err != nil {
+		log.Error("Sidecars failed verification, skipping", "slot", slot, "err", err)
+		tally.rejected++
+		return nil
 	}
 
 	if !c.Commit {
