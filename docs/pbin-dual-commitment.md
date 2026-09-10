@@ -38,6 +38,20 @@ RPC paths.
 | `bin` | `binaryTrieTime` equals genesis time | Existing commitment domain, using the binary trie |
 | `hex+bin` | `binaryTrieTime` is after genesis time | Hex in `kv.CommitmentDomain`; binary in `kv.CommitmentBinDomain` |
 
+To initialize a new migration datadir, set `COMMITMENT_HEX_BIN=true` on the first invocation.
+The genesis must schedule `amsterdamTime` no later than `binaryTrieTime`, and `binaryTrieTime`
+must be after the genesis timestamp. For example, with a migration genesis at `./pbt-genesis.json`:
+
+```sh
+COMMITMENT_HEX_BIN=true ./build/bin/erigon init --datadir=./pbt-data ./pbt-genesis.json
+./build/bin/erigon --datadir=./pbt-data
+```
+
+Initialization records `trie_variant = "hex+bin"` in `./pbt-data/snapshots/erigondb.toml`;
+subsequent starts read the stored mode. Setting `COMMITMENT_BIN` alone selects binary-only storage
+and does not enable a post-genesis migration. Select the mode before initializing the datadir;
+changing an existing datadir's mode requires rebuilding it from genesis.
+
 The binary hash suite is stored as `trie_hash`; it is meaningful only when the datadir contains a
 binary trie. The domain schemas are defined in `db/state/statecfg/state_schema.go`. The binary domain
 does not use references in commitment branches, history snapshots, or the hex branch cache.
@@ -54,10 +68,14 @@ worker read transaction pinned to the parent view. Binary branch writes are held
 `BufferedPatriciaContext` (`execution/commitment/commitmentdb/buffered_context.go`) until both folds
 join, then replayed on the calculator goroutine.
 
+Dual mode uses this calculator for every block, including when parallel execution and BAL options
+are disabled. The touched-key collector remains hex-owned across the swap. BAL compute-ahead reads
+changed accounts, storage, and code from the BAL and unchanged values from the block's starting state.
+
 The canonical arm checks the header root and reports `ErrWrongTrieRoot` on a mismatch. The shadow arm
 records its root and does not invalidate the block if its fold fails; it is marked stopped for the
-run. A shadow failure is therefore observable without turning a migration comparison into a consensus
-failure.
+run, including later execution batches and context recreation. A shadow failure is therefore
+observable without turning a migration comparison into a consensus failure.
 
 Shadow roots are stored by `WriteShadowStateRoot` (`db/rawdb/accessors_shadow_root.go`) under
 `dbutils.BlockBodyKey(number, hash)`. The block hash is part of the key, so competing blocks at one
@@ -86,11 +104,12 @@ the hyphenated type through `db/snaptype/files.go` and `db/snaptype/type.go`.
 Freezing is explicit and operator-triggered:
 
 ```text
-integration commitment freeze --trie hex
+./build/bin/integration commitment freeze --datadir=./pbt-data --trie hex
 ```
 
-The command calls `Aggregator.FreezeDomain` (`db/state/aggregator.go`) at the current transaction
-number and persists the result in `erigondb.toml`. After the freeze, the hex domain's files remain
+The command requires aligned commitment domains after activation. It calls `Aggregator.FreezeDomain`
+(`db/state/aggregator.go`) at the saved commitment transaction number and persists the result in
+`erigondb.toml`. After the freeze, the hex domain's files remain
 available but the committer does not fold it, `DomainPut` rejects writes to it, merges skip it, and an
 unwind below the freeze point is rejected. The frozen state survives restart. There is no automatic
 finality trigger in this migration implementation.

@@ -388,12 +388,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 	}
 	commitmentDomain := commitmentDomains[0]
-	if p, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
-		candidate := p.CanonicalCommitmentDomain()
-		if slices.Contains(commitmentDomains, candidate) {
-			commitmentDomain = candidate
-		}
-	}
 	if o.commitmentDomain != nil {
 		requestedDomain := *o.commitmentDomain
 		if requestedDomain == kv.CommitmentBinDomain && o.trieCfg.Variant == commitment.VariantBinPatriciaTrie && !slices.Contains(commitmentDomains, requestedDomain) {
@@ -603,6 +597,9 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	if p, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(sd.commitmentDomainValue()) {
+		return nil
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData, nil)
 	}
@@ -616,6 +613,9 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return nil
 	}
 	defer upd.Clear()
+	if p, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(sd.commitmentDomainValue()) {
+		return nil
+	}
 
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPut(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData)

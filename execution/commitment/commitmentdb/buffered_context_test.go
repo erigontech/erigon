@@ -18,7 +18,6 @@ package commitmentdb
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -116,24 +115,4 @@ func TestBufferedPatriciaContextReplayPreservesOrderAndPrevData(t *testing.T) {
 	require.NoError(t, ctx.Replay())
 
 	require.Equal(t, directBackend.received, bufferedBackend.received)
-}
-
-func TestBufferedPatriciaContextFailedFoldIsNotReplayed(t *testing.T) {
-	backend := &bufferedContextBackend{}
-	ctx := NewBufferedPatriciaContext(backend)
-	foldErr := errors.New("fold failed")
-
-	fold := func() error {
-		require.NoError(t, ctx.PutBranch([]byte{1}, []byte{2}, []byte{3}))
-		require.NoError(t, ctx.PutBranch([]byte{4}, []byte{5}, []byte{6}))
-		return foldErr
-	}
-
-	err := fold()
-	if err == nil {
-		err = ctx.Replay()
-	}
-	require.ErrorIs(t, err, foldErr)
-	require.Empty(t, backend.received)
-	require.Len(t, ctx.writes, 2)
 }

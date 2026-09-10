@@ -1000,41 +1000,77 @@ type commitmentStateCandidate struct {
 func SeekCommitments(ctx context.Context, tx kv.TemporalTx, contexts ...*SharedDomainsCommitmentContext) (txNum, blockNum uint64, err error) {
 	activeContexts := make([]*SharedDomainsCommitmentContext, 0, len(contexts))
 	candidates := make([]commitmentStateCandidate, 0, len(contexts))
+	frozenCandidates := make([]commitmentStateCandidate, 0, len(contexts))
+	frozenProvider, _ := tx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+	})
+	stoppedProvider, _ := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
 	for _, sdc := range contexts {
 		if sdc == nil {
 			continue
 		}
-		activeContexts = append(activeContexts, sdc)
+		domain := sdc.CommitmentDomain()
+		if stoppedProvider != nil && stoppedProvider.CommitmentDomainStopped(domain) {
+			sdc.ResetPendingUpdates()
+			continue
+		}
+		var frozenAt uint64
+		var frozen bool
+		if frozenProvider != nil {
+			frozenAt, frozen = frozenProvider.IsDomainFrozen(domain)
+		}
+		if !frozen {
+			activeContexts = append(activeContexts, sdc)
+		}
 		trieContext := sdc.trieContext(tx, 0, 0, ctx, nil)
 		candidateBlock, candidateTx, state, candidateErr := sdc.LatestCommitmentState(trieContext)
 		if candidateErr != nil {
 			return 0, 0, candidateErr
 		}
+		if frozen && (state == nil || candidateTx != frozenAt) {
+			return 0, 0, fmt.Errorf("%w: frozen domain %s must have commitment state at tx %d, got tx %d", ErrTornCommitmentDatadir, domain, frozenAt, candidateTx)
+		}
+		if frozen {
+			trieContext.stateReader = NewCommitmentSplitStateReader(trieContext.stateReader, NewHistoryStateReader(tx, frozenAt+1), domain, true)
+		}
 		if state == nil {
 			continue
 		}
-		candidates = append(candidates, commitmentStateCandidate{
+		candidate := commitmentStateCandidate{
 			context:  sdc,
-			domain:   sdc.CommitmentDomain(),
+			domain:   domain,
 			state:    state,
 			txNum:    candidateTx,
 			blockNum: candidateBlock,
-		})
+		}
+		if frozen {
+			frozenCandidates = append(frozenCandidates, candidate)
+		} else {
+			candidates = append(candidates, candidate)
+		}
 	}
 
-	if len(candidates) != 0 {
+	if len(candidates) != 0 || len(frozenCandidates) != 0 {
 		if len(candidates) != len(activeContexts) {
 			return 0, 0, fmt.Errorf("%w: commitment state is missing for one or more domains", ErrTornCommitmentDatadir)
 		}
-		first := candidates[0]
-		for _, candidate := range candidates[1:] {
+		allCandidates := make([]commitmentStateCandidate, 0, len(candidates)+len(frozenCandidates))
+		allCandidates = append(allCandidates, candidates...)
+		allCandidates = append(allCandidates, frozenCandidates...)
+		first := allCandidates[0]
+		for _, candidate := range candidates {
 			if candidate.txNum != first.txNum || candidate.blockNum != first.blockNum {
 				return 0, 0, fmt.Errorf("%w: %s is at block %d tx %d, %s is at block %d tx %d",
 					ErrTornCommitmentDatadir, first.domain, first.blockNum, first.txNum,
 					candidate.domain, candidate.blockNum, candidate.txNum)
 			}
 		}
-		for _, candidate := range candidates {
+		for _, candidate := range frozenCandidates {
+			if candidate.txNum > first.txNum {
+				return 0, 0, fmt.Errorf("%w: frozen domain %s at tx %d is ahead of live commitment at tx %d", ErrTornCommitmentDatadir, candidate.domain, candidate.txNum, first.txNum)
+			}
+		}
+		for _, candidate := range allCandidates {
 			if _, _, restoreErr := candidate.context.restorePatriciaState(candidate.state); restoreErr != nil {
 				return 0, 0, restoreErr
 			}

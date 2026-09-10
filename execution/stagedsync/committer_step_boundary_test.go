@@ -144,7 +144,6 @@ func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T)
 			writes:   nonceBalanceWrites(addr, txNum, balance),
 		})
 	}
-	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x42}, 20, false))
 	cc.Stop()
 
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {

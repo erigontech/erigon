@@ -411,6 +411,19 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 }
 
 func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
+	testCommitmentCalculatorBALDualFold(t, nil, false)
+}
+
+func TestCommitmentCalculatorBALDualFoldWithCode(t *testing.T) {
+	testCommitmentCalculatorBALDualFold(t, []byte{0x60, 0x00}, false)
+}
+
+func TestCommitmentCalculatorBALDualFoldWithStorage(t *testing.T) {
+	testCommitmentCalculatorBALDualFold(t, nil, true)
+}
+
+func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage bool) {
+	t.Helper()
 	originalBin := statecfg.ExperimentalBinCommitment
 	originalHexBin := statecfg.ExperimentalHexBinCommitment
 	originalParallel := statecfg.ExperimentalParallelCommitment
@@ -432,10 +445,14 @@ func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
 
 	key := accounts.InternAddress(common.Address{2})
 	keyBytes := key.Value()
-	account := accounts.Account{Nonce: 2}
-	accountBytes := accounts.SerialiseV3(&account)
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, keyBytes[:], accountBytes, 1, nil))
-
+	changes := types.AccountChanges{Address: key, NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}}}
+	if code != nil {
+		changes.CodeChanges = []*types.CodeChange{{Index: 0, Bytecode: code}}
+	}
+	storageKey := accounts.InternKey(common.Hash{1})
+	if withStorage {
+		changes.StorageChanges = []types.SlotChanges{{Slot: storageKey, Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(7)}}}}
+	}
 	cc := &commitmentCalculator{
 		doms:        doms,
 		db:          db,
@@ -445,23 +462,38 @@ func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
 		logger:      log.New(),
 	}
 	t.Cleanup(cc.updates.Close)
-	root, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
+	result, err := cc.computeRootFromBALResult(t.Context(), &blockRequest{
 		blockNum:   1,
 		blockHash:  common.Hash{2},
 		lastTxNum:  1,
 		firstTxNum: 1,
-		bal: types.BlockAccessList{{
-			Address:      key,
-			NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}},
-		}},
+		bal:        types.BlockAccessList{changes},
 	}, math.MaxUint32, false, false, commitTarget{blockNum: 1, blockHash: common.Hash{2}, lastTxNum: 1})
 	require.NoError(t, err)
-	require.NotNil(t, root)
+	require.NotEmpty(t, result.shadowRoot)
+
+	reference, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	t.Cleanup(reference.Close)
+	account := accounts.Account{Nonce: 2, CodeHash: accounts.InternCodeHash(empty.CodeHash)}
+	if code != nil {
+		account.CodeHash = accounts.NewCode(code).Hash
+		require.NoError(t, reference.DomainPut(kv.CodeDomain, tx, keyBytes[:], code, 1, nil))
+	}
+	require.NoError(t, reference.DomainPut(kv.AccountsDomain, tx, keyBytes[:], accounts.SerialiseV3(&account), 1, nil))
+	if withStorage {
+		slot := storageKey.Value()
+		composite := append(bytes.Clone(keyBytes[:]), slot[:]...)
+		require.NoError(t, reference.DomainPut(kv.StorageDomain, tx, composite, []byte{7}, 1, nil))
+	}
+	wantBin, err := reference.ComputeCommitment(t.Context(), tx, false, 1, 1, "test", nil)
+	require.NoError(t, err)
+	require.Equal(t, wantBin, result.shadowRoot)
 	hexRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().RootHash()
 	require.NoError(t, err)
 	binRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
 	require.NoError(t, err)
-	require.Equal(t, hexRoot, root)
+	require.Equal(t, hexRoot, result.canonicalRoot)
 	require.NotEqual(t, hexRoot, binRoot)
 }
 
@@ -612,7 +644,6 @@ func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
 	activation := uint64(10)
 	cc := &commitmentCalculator{
 		chainConfig:   &chain.Config{BinaryTrieTime: &activation},
-		shadowRoots:   make(map[common.Hash][]byte),
 		shadowStopped: make(map[kv.Domain]bool),
 	}
 	preTarget := commitTarget{blockHash: common.Hash{1}, blockTime: 9}
@@ -624,9 +655,6 @@ func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
 	require.Equal(t, kv.CommitmentDomain, pre.canonicalDomain)
 	require.Equal(t, []byte{0x11}, pre.canonicalRoot)
 	require.Equal(t, []byte{0x22}, pre.shadowRoot)
-	shadowRoot, ok := cc.ShadowRoot(preTarget.blockHash)
-	require.True(t, ok)
-	require.Equal(t, []byte{0x22}, shadowRoot)
 
 	postTarget := commitTarget{blockHash: common.Hash{2}, blockTime: 10}
 	post, err := cc.finishDualFolds(postTarget, kv.CommitmentBinDomain, kv.CommitmentDomain, []dualFoldResult{
@@ -657,7 +685,7 @@ func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
 
 func TestCommitmentCalculatorUpdatesAggregatorCanonicalDomain(t *testing.T) {
 	activation := uint64(10)
-	db, tx, doms := setupStepTest(t)
+	db, tx, doms := dualCalculatorTest(t)
 	cc := &commitmentCalculator{chainConfig: &chain.Config{BinaryTrieTime: &activation}, roTx: tx, doms: doms}
 
 	cc.setCanonicalCommitmentDomain(11)

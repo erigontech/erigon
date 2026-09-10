@@ -127,8 +127,12 @@ on its own.
 | mode | config | domains registered |
 |---|---|---|
 | `hex` | no `binaryTrieTime` | `kv.CommitmentDomain` |
-| `bin` | `binaryTrieTime == genesisTime` | `kv.CommitmentBinDomain` |
+| `bin` | `binaryTrieTime == genesisTime` | `kv.CommitmentDomain`, using the binary trie |
 | `hex+bin` | `binaryTrieTime > genesisTime` | both, written from block 0 |
+
+**Compatibility adjustment:** binary-only datadirs keep their binary trie in the existing
+`kv.CommitmentDomain`. Only `hex+bin` registers `kv.CommitmentBinDomain`. This preserves existing
+binary datadir tables and snapshot filenames while adding the second domain for migration.
 
 **Lockstep, computed concurrently.** Two folds per block over one touched plain-key set, joined before
 publish; each arm takes its own RO txn from `beginWorkerRo`, pinned to the main tx's file generation.

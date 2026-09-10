@@ -77,9 +77,87 @@ func (seekSharedDomains) HasSharedBranchCache() bool { return false }
 type seekTemporalTx struct {
 	kv.TemporalTx
 	progress []byte
+	agg      any
 }
 
 func (tx *seekTemporalTx) GetOne(string, []byte) ([]byte, error) { return tx.progress, nil }
+func (tx *seekTemporalTx) AggTx() any                            { return tx.agg }
+
+type seekCommitmentLifecycle struct {
+	frozen  map[kv.Domain]uint64
+	stopped map[kv.Domain]bool
+}
+
+func (s seekCommitmentLifecycle) IsDomainFrozen(domain kv.Domain) (uint64, bool) {
+	txNum, ok := s.frozen[domain]
+	return txNum, ok
+}
+
+func (s seekCommitmentLifecycle) CommitmentDomainStopped(domain kv.Domain) bool {
+	return s.stopped[domain]
+}
+
+func TestSeekCommitmentsRestoresFrozenHexAndAdvancedBin(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 9, 28, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 28, txNum)
+	require.EqualValues(t, 9, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.True(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsIgnoresStoppedShadowOnRecreation(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 9, 28, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 7, 22, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{stopped: map[kv.Domain]bool{kv.CommitmentBinDomain: true}}}
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 28, txNum)
+	require.EqualValues(t, 9, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.False(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsRejectsInvalidFrozenCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		txNum     uint64
+		withState bool
+	}{
+		{name: "before freeze", txNum: 21, withState: true},
+		{name: "after freeze", txNum: 23, withState: true},
+		{name: "missing state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, tc.txNum, tc.withState)
+			binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 9, 28, true)
+			tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+			_, _, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+			require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+			require.ErrorContains(t, err, "frozen domain commitment must have commitment state at tx 22")
+			require.False(t, hexCtx.justRestored.Load())
+			require.False(t, binCtx.justRestored.Load())
+		})
+	}
+}
+
+func TestSeekCommitmentsRejectsLiveStateBehindFreeze(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 6, 19, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+	_, _, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+	require.ErrorContains(t, err, "ahead of live commitment")
+}
 
 func seekContext(t *testing.T, domain kv.Domain, variant commitment.TrieVariant, blockNum, txNum uint64, withState bool) *SharedDomainsCommitmentContext {
 	t.Helper()

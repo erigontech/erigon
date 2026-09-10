@@ -1606,6 +1606,7 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 				keys[key] = struct{}{}
 			}
 		}
+		return keys
 	default:
 		return nil
 	}

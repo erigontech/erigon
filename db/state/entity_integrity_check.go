@@ -70,9 +70,10 @@ type DependencyIntegrityChecker struct {
 }
 
 type DependentInfo struct {
-	entity      UniversalEntity
-	filesGetter DirtyFilesGetter
-	accessors   statecfg.Accessors
+	requiredForVisibility func() bool
+	entity                UniversalEntity
+	filesGetter           DirtyFilesGetter
+	accessors             statecfg.Accessors
 }
 
 // dependency/referred: account/storage
@@ -134,6 +135,9 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 	}
 
 	for _, dependent := range arr {
+		if allOrAny.All() && dependent.requiredForVisibility != nil && !dependent.requiredForVisibility() {
+			continue
+		}
 		dependentFiles := dependent.filesGetter()
 		file, found := dependentFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 

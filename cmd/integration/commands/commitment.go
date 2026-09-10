@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -213,18 +212,61 @@ var cmdCommitmentFreeze = &cobra.Command{
 			return
 		}
 		defer tx.Rollback()
-		_, txNum, err := rawdbv3.TxNums.Last(tx)
-		if err != nil {
-			logger.Error("Failed to read current txnum", "error", err)
-			return
-		}
 		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-		if err := agg.FreezeDomain(kv.CommitmentDomain, txNum); err != nil {
+		txNum, err := freezeHexCommitment(tx, agg)
+		if err != nil {
 			logger.Error("Failed to freeze commitment domain", "error", err)
 			return
 		}
 		fmt.Printf("froze %s at txnum %d\n", kv.CommitmentDomain, txNum)
 	},
+}
+
+func freezeHexCommitment(tx kv.TemporalTx, agg *dbstate.Aggregator) (uint64, error) {
+	if !slices.Contains(agg.CommitmentDomains(), kv.CommitmentBinDomain) {
+		return 0, errors.New("freezing hex commitment requires a hex+bin datadir")
+	}
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if len(state) < 18 {
+		return 0, errors.New("hex commitment state is missing or truncated")
+	}
+	txNum, blockNum := commitmentdb.DecodeTxBlockNums(state)
+	binaryState, _, err := tx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if len(binaryState) < 18 {
+		return 0, errors.New("binary commitment state is missing or truncated")
+	}
+	binaryTxNum, binaryBlockNum := commitmentdb.DecodeTxBlockNums(binaryState)
+	if binaryTxNum != txNum || binaryBlockNum != blockNum {
+		return 0, errors.New("binary commitment is not aligned with hex commitment")
+	}
+	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return 0, err
+	}
+	config, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return 0, err
+	}
+	if config == nil {
+		return 0, errors.New("chain configuration is missing")
+	}
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if header == nil {
+		return 0, fmt.Errorf("header for commitment block %d is missing", blockNum)
+	}
+	if !config.IsBinaryTrie(header.Time) {
+		return 0, errors.New("hex commitment is still canonical")
+	}
+	if err := agg.FreezeDomain(kv.CommitmentDomain, txNum); err != nil {
+		return 0, err
+	}
+	return txNum, nil
 }
 
 // integration commitment branch
