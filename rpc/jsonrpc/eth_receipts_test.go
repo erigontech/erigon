@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,6 +62,7 @@ func TestAppendRPCLogs(t *testing.T) {
 		{name: "above limit", receiptLogs: logsWithIndexes(4), maxResults: 3, wantErr: true},
 		{name: "limit counts logs appended earlier", logs: rpcLogsWithIndexes(2), receiptLogs: logsWithIndexes(2), maxResults: 3, wantErr: true},
 		{name: "nothing to append at limit", logs: rpcLogsWithIndexes(2), maxResults: 2, wantLen: 2},
+		{name: "cap at math.MaxInt", receiptLogs: logsWithIndexes(3), maxResults: math.MaxInt, wantLen: 3},
 	}
 
 	for _, tc := range cases {
