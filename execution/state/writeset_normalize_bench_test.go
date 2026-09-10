@@ -146,3 +146,71 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 }
 
 var sinkNormalized *WriteSet
+
+// emptyPathMaps counts how many of the nine per-address maps AllHeaders walks
+// before storage are empty.
+func emptyPathMaps(ws *WriteSet) (n int) {
+	for _, size := range []int{
+		len(ws.address), len(ws.balance), len(ws.nonce), len(ws.incarnation),
+		len(ws.selfDestruct), len(ws.createContract), len(ws.code),
+		len(ws.codeHash), len(ws.codeSize),
+	} {
+		if size == 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// buildTransferInput is the per-tx write set of a plain value transfer once the
+// fee credit has merged in: sender balance+nonce, recipient balance, coinbase
+// balance and the AddressPath sibling that credit carries. Six of the nine
+// per-path maps AllHeaders walks are empty in this shape.
+func buildTransferInput(txIndex int) *WriteSet {
+	ws := &WriteSet{}
+	ver := Version{TxIndex: txIndex, Incarnation: 0}
+	sender, recipient, coinbase := benchAddr(0), benchAddr(1), benchAddr(2)
+	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: ver},
+		Val:         *uint256.NewInt(41),
+	})
+	ws.SetNonce(sender, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: ver},
+		Val:         7,
+	})
+	ws.SetBalance(recipient, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: recipient, Path: BalancePath, Version: ver},
+		Val:         *uint256.NewInt(59),
+	})
+	coinbaseBal := uint256.NewInt(3)
+	ws.SetBalance(coinbase, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: coinbase, Path: BalancePath, Version: ver},
+		Val:         *coinbaseBal,
+	})
+	ws.SetAddress(coinbase, &VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: coinbase, Path: AddressPath, Version: ver},
+		Val:         &accounts.Account{Balance: *coinbaseBal},
+	})
+	return ws
+}
+
+func BenchmarkWriteSetNormalizeTransfer(b *testing.B) {
+	const txIndex = 1
+	ws := buildTransferInput(txIndex)
+	// Guard the shape the numbers describe: the skip this benchmark measures
+	// only pays while most per-path maps stay empty.
+	if empty, storage := emptyPathMaps(ws), countStorage(ws); empty != 6 || storage != 0 {
+		b.Fatalf("fixture shape changed: %d of nine per-path maps empty, %d storage writes", empty, storage)
+	}
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true, "")
+	reader := &minimalStateReader{}
+	b.ReportAllocs()
+	for b.Loop() {
+		out, err := ws.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		sinkNormalized = out
+	}
+}

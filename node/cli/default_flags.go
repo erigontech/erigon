@@ -195,6 +195,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderAddrFlag,
 	&utils.DisableIPV4,
 	&utils.DisableIPV6,
+	&utils.DisableTCP,
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
