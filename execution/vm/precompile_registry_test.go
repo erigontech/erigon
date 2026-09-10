@@ -212,14 +212,29 @@ func TestPrecompilesNilChainID(t *testing.T) {
 	})
 }
 
-// Guards the no-provider fast path: registryMu on the rules path anti-scales with core count.
+// Guards the rules path against anti-scaling. The bystander arm is the one that
+// bites: a provider registered for any chain must not cost every other chain.
 func BenchmarkActivePrecompilesParallel(b *testing.B) {
-	rules := &chain.Rules{ChainID: uint256.NewInt(1), IsOsaka: true}
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_ = ActivePrecompiles(rules)
-		}
+	mainnet := &chain.Rules{ChainID: uint256.NewInt(1), IsOsaka: true}
+	resolve := func(b *testing.B, rules *chain.Rules) {
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = ActivePrecompiles(rules)
+			}
+		})
+	}
+
+	b.Run("none_registered", func(b *testing.B) { resolve(b, mainnet) })
+
+	chainID := uint256.NewInt(900904)
+	RegisterPrecompiles(chainID, func(uint64) PrecompiledContracts { return PrecompiledContracts{} })
+	defer UnregisterPrecompiles(chainID)
+
+	b.Run("provider_chain", func(b *testing.B) {
+		resolve(b, &chain.Rules{ChainID: chainID, IsOsaka: true})
 	})
+	b.Run("bystander_chain", func(b *testing.B) { resolve(b, mainnet) })
 }
 
 func TestChargeStateRejectsUnrepresentableAmounts(t *testing.T) {
