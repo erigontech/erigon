@@ -617,14 +617,14 @@ different states and correctly report different roots.
 - Modify: `execution/stagedsync/stage_snapshots.go`
 - Create: `execution/stagedsync/canonical_commitment_test.go`
 
-- [ ] the snapshot step-misalignment guard in `exec3.go` takes the canonical commitment domain
-- [ ] `lastFrozenStep` in `exec3.go` and `exec3_serial.go` takes the canonical domain
-- [ ] add the bin domain to `RetireCutoffs.PerDomain` with the commitment cutoff, so it does not fall to
+- [x] the snapshot step-misalignment guard in `exec3.go` takes the canonical commitment domain
+- [x] `lastFrozenStep` in `exec3.go` and `exec3_serial.go` takes the canonical domain
+- [x] add the bin domain to `RetireCutoffs.PerDomain` with the commitment cutoff, so it does not fall to
       the history default and get retired on the history schedule
-- [ ] the snapshot stage reads `KeyCommitmentState` from the canonical domain
-- [ ] write tests: with hex frozen and bin canonical, the misalignment guard reads bin and does not fire
-- [ ] write tests: the bin domain's retire cutoff equals the commitment cutoff, not the history one
-- [ ] run `make test-short` — must pass before task 18
+- [x] the snapshot stage reads `KeyCommitmentState` from the canonical domain
+- [x] write tests: with hex frozen and bin canonical, the misalignment guard reads bin and does not fire
+- [x] write tests: the bin domain's retire cutoff equals the commitment cutoff, not the history one
+- [x] run `make test-short` — must pass before task 18
 
 ### Task 18: Genesis writes both commitments and accepts a post-genesis schedule
 

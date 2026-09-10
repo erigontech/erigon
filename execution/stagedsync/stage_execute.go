@@ -752,8 +752,9 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader dbservices.
 	return kv.RetireCutoffs{
 		Default: historyTxNum,
 		PerDomain: map[kv.Domain]uint64{
-			kv.CommitmentDomain: commitmentTxNum,
-			kv.RCacheDomain:     rcacheTxNum,
+			kv.CommitmentDomain:    commitmentTxNum,
+			kv.CommitmentBinDomain: commitmentTxNum,
+			kv.RCacheDomain:        rcacheTxNum,
 		},
 	}, nil
 }

@@ -459,7 +459,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
 	var lastFrozenStep kv.Step
 	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
-		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
+		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(canonicalCommitmentDomain(stepCheckTx)))
 		stepCheckTx.Rollback()
 	}
 
@@ -480,6 +480,29 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	}
 
 	return execErr
+}
+
+func canonicalCommitmentDomain(tx interface{ AggTx() any }) kv.Domain {
+	if p, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+		return p.CanonicalCommitmentDomain()
+	}
+	return kv.CommitmentDomain
+}
+
+func snapshotStepAlignment(tx interface {
+	AggTx() any
+	StepsInFiles(...kv.Domain) kv.Step
+}) (kv.Step, error) {
+	cmtStep := tx.StepsInFiles(canonicalCommitmentDomain(tx))
+	acctStep := tx.StepsInFiles(kv.AccountsDomain)
+	storStep := tx.StepsInFiles(kv.StorageDomain)
+	codeStep := tx.StepsInFiles(kv.CodeDomain)
+	maxStateStep := max(acctStep, storStep, codeStep)
+	if maxStateStep > cmtStep {
+		return 0, fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+			acctStep, storStep, codeStep, cmtStep)
+	}
+	return cmtStep, nil
 }
 
 type txExecutor struct {
@@ -690,16 +713,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 		// Use the max of all state domain steps (not just commitment) to
 		// determine which txNums need history reads.
-		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
-		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
-		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
-		codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
-		maxStateStep := max(acctStep, storStep, codeStep)
-		if maxStateStep > cmtStep {
-			return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
-				acctStep, storStep, codeStep, cmtStep)
+		lastFrozenStep, err := snapshotStepAlignment(execRoTx)
+		if err != nil {
+			return err
 		}
-		lastFrozenStep := cmtStep
 
 		var lastFrozenTxNum uint64
 		if lastFrozenStep > 0 {
