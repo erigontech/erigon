@@ -2304,11 +2304,12 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
+		unfoldErr := hph.unfold(hashedKey, unfolding)
 		if unfoldDone != nil {
 			unfoldDone()
+		}
+		if unfoldErr != nil {
+			return fmt.Errorf("unfold: %w", unfoldErr)
 		}
 		if printLater {
 			fmt.Fprintf(hph.traceW, "[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
