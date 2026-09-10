@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -505,6 +506,84 @@ func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
 	binRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
 	require.NoError(t, err)
 	require.NotEqual(t, hexRoot, binRoot)
+}
+
+func TestCommitmentCalculatorCanonicalArmFollowsBlockTime(t *testing.T) {
+	activation := uint64(10)
+	cc := &commitmentCalculator{chainConfig: &chain.Config{BinaryTrieTime: &activation}}
+
+	require.Equal(t, kv.CommitmentDomain, cc.canonicalCommitmentDomain(9))
+	require.Equal(t, kv.CommitmentBinDomain, cc.canonicalCommitmentDomain(10))
+	require.Equal(t, kv.CommitmentBinDomain, cc.canonicalCommitmentDomain(11))
+}
+
+func TestCommitmentCalculatorCanonicalRootMismatch(t *testing.T) {
+	target := commitTarget{blockNum: 7, stateRoot: common.Hash{0x01}}
+
+	require.NoError(t, canonicalRootError(target, target.stateRoot[:]))
+	require.ErrorIs(t, canonicalRootError(target, []byte{0x02}), ErrWrongTrieRoot)
+}
+
+func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
+	activation := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:   &chain.Config{BinaryTrieTime: &activation},
+		shadowRoots:   make(map[common.Hash][]byte),
+		shadowStopped: make(map[kv.Domain]bool),
+	}
+	preTarget := commitTarget{blockHash: common.Hash{1}, blockTime: 9}
+	pre, err := cc.finishDualFolds(preTarget, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+		{domain: kv.CommitmentDomain, root: []byte{0x11}},
+		{domain: kv.CommitmentBinDomain, root: []byte{0x22}},
+	}, &commitmentFoldArm{})
+	require.NoError(t, err)
+	require.Equal(t, kv.CommitmentDomain, pre.canonicalDomain)
+	require.Equal(t, []byte{0x11}, pre.canonicalRoot)
+	require.Equal(t, []byte{0x22}, pre.shadowRoot)
+	shadowRoot, ok := cc.ShadowRoot(preTarget.blockHash)
+	require.True(t, ok)
+	require.Equal(t, []byte{0x22}, shadowRoot)
+
+	postTarget := commitTarget{blockHash: common.Hash{2}, blockTime: 10}
+	post, err := cc.finishDualFolds(postTarget, kv.CommitmentBinDomain, kv.CommitmentDomain, []dualFoldResult{
+		{domain: kv.CommitmentBinDomain, root: []byte{0x33}},
+		{domain: kv.CommitmentDomain, root: []byte{0x44}},
+	}, &commitmentFoldArm{})
+	require.NoError(t, err)
+	require.Equal(t, kv.CommitmentBinDomain, post.canonicalDomain)
+	require.Equal(t, []byte{0x33}, post.canonicalRoot)
+	require.Equal(t, []byte{0x44}, post.shadowRoot)
+
+	shadowFailure, err := cc.finishDualFolds(commitTarget{blockHash: common.Hash{3}, blockTime: 9}, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+		{domain: kv.CommitmentDomain, root: []byte{0x55}},
+		{domain: kv.CommitmentBinDomain, err: errors.New("shadow fold")},
+	}, &commitmentFoldArm{})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x55}, shadowFailure.canonicalRoot)
+	require.Nil(t, shadowFailure.shadowRoot)
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
+
+	canonicalFailure, err := cc.finishDualFolds(commitTarget{blockHash: common.Hash{4}, blockTime: 9}, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+		{domain: kv.CommitmentDomain, err: ErrWrongTrieRoot},
+		{domain: kv.CommitmentBinDomain, root: []byte{0x66}},
+	}, &commitmentFoldArm{})
+	require.ErrorIs(t, err, ErrWrongTrieRoot)
+	require.Nil(t, canonicalFailure.canonicalRoot)
+}
+
+func TestCommitmentCalculatorUpdatesAggregatorCanonicalDomain(t *testing.T) {
+	activation := uint64(10)
+	db, tx, doms := setupStepTest(t)
+	cc := &commitmentCalculator{chainConfig: &chain.Config{BinaryTrieTime: &activation}, roTx: tx, doms: doms}
+
+	cc.setCanonicalCommitmentDomain(11)
+	canonical, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain })
+	require.True(t, ok)
+	require.Equal(t, kv.CommitmentBinDomain, canonical.CanonicalCommitmentDomain())
+
+	cc.setCanonicalCommitmentDomain(9)
+	require.Equal(t, kv.CommitmentDomain, canonical.CanonicalCommitmentDomain())
+	_ = db
 }
 
 // TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the

@@ -1787,6 +1787,10 @@ func (at *AggregatorRoTx) CanonicalCommitmentDomain() kv.Domain {
 	return at.a.CanonicalCommitmentDomain()
 }
 
+func (at *AggregatorRoTx) SetCanonicalCommitmentDomain(domain kv.Domain) {
+	at.a.SetCanonicalCommitmentDomain(domain)
+}
+
 func (at *AggregatorRoTx) CommitmentDomains() []kv.Domain {
 	return at.a.CommitmentDomains()
 }

@@ -570,23 +570,24 @@ different states and correctly report different roots.
 
 **Files:**
 - Modify: `execution/stagedsync/committer.go`
+- Modify: `execution/stagedsync/exec3_parallel.go`
 - Modify: `db/state/aggregator.go`
 - Modify: `execution/stagedsync/committer_test.go`
 
-- [ ] decide the canonical arm per block from `Config.IsBinaryTrie` on the header time
-- [ ] canonical arm: header check, publish, and `cc.fail` on error, exactly as today
-- [ ] shadow arm: record the root, bump a metric, and on error mark the shadow domain broken for the run
+- [x] decide the canonical arm per block from `Config.IsBinaryTrie` on the header time
+- [x] canonical arm: header check, publish, and `cc.fail` on error, exactly as today
+- [x] shadow arm: record the root, bump a metric, and on error mark the shadow domain broken for the run
       — never `cc.fail`
-- [ ] move the aggregator's canonical-commitment accessor when the committer crosses `binaryTrieTime`;
+- [x] move the aggregator's canonical-commitment accessor when the committer crosses `binaryTrieTime`;
       it stays derived, so a restart re-resolves it from the head header rather than reading a stored
       value
-- [ ] write tests: pre-flip the header is checked against the hex root and the bin root is recorded;
+- [x] write tests: pre-flip the header is checked against the hex root and the bin root is recorded;
       post-flip the reverse
-- [ ] write tests: a shadow fold error leaves the block valid, marks the shadow stopped, and does not
+- [x] write tests: a shadow fold error leaves the block valid, marks the shadow stopped, and does not
       unwind
-- [ ] write tests: a canonical fold mismatch still produces `ErrWrongTrieRoot`
-- [ ] write tests: restarting on either side of the flip re-derives the same canonical domain
-- [ ] run `make test-short` — must pass before task 16
+- [x] write tests: a canonical fold mismatch still produces `ErrWrongTrieRoot`
+- [x] write tests: restarting on either side of the flip re-derives the same canonical domain
+- [x] run `make test-short` — must pass before task 16
 
 ### Task 16: Checkpoint step edges on both arms
 

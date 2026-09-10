@@ -1838,6 +1838,7 @@ func (be *blockExecutor) takeSuperseded() supersededWrites {
 type txResult struct {
 	blockNum              uint64
 	blockHash             common.Hash
+	blockTime             uint64
 	txNum                 uint64
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
@@ -3141,6 +3142,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
+				blockTime:             be.block.Time(),
 				traceFroms:            result.TraceFroms,
 				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
@@ -3347,6 +3349,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
+				blockTime:             be.block.Time(),
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
 				writes:                finalizeWrites,
