@@ -104,13 +104,13 @@ func TestPrefixSeedMatchesFullBinarySearch(t *testing.T) {
 				require.Equalf(t, base.klo, got.klo, "probe %d (%x): klo", i, x)
 				require.Equalf(t, base.khi, got.khi, "probe %d (%x): khi", i, x)
 
-				wantV, wantOK, wantOff, err := bt.bplus.Get(g, x)
+				wantV, wantOK, wantOff, err := bt.bplus.Get(g, x, nil)
 				require.NoError(t, err)
 				wantSeek := seekSnapshot(t, bt, g, x)
 
 				saveLo := bt.bplus.prefixLo
 				bt.bplus.prefixLo = nil
-				gotV, gotOK, gotOff, err := bt.bplus.Get(g, x)
+				gotV, gotOK, gotOff, err := bt.bplus.Get(g, x, nil)
 				require.NoError(t, err)
 				gotSeek := seekSnapshot(t, bt, g, x)
 				bt.bplus.prefixLo = saveLo
