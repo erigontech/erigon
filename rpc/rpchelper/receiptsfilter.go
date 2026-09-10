@@ -154,7 +154,7 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 }
 
 // distributeReceipt processes a receipt and distributes it to matching filters
-func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) error {
+func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) {
 	a.receiptsFilterLock.RLock()
 	defer a.receiptsFilterLock.RUnlock()
 
@@ -174,6 +174,4 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 		filter.sender.Send(receipt)
 		return nil
 	})
-
-	return nil
 }

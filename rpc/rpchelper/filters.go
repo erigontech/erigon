@@ -989,7 +989,7 @@ func (ff *Filters) invalidateStalePendingBlock(header *types.Header) {
 
 // OnReceipts handles a new receipt event from the remote and processes it.
 func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
-	_ = ff.receiptsSubs.distributeReceipt(reply)
+	ff.receiptsSubs.distributeReceipt(reply)
 }
 
 // OnNewTx handles a new transaction event from the transaction pool and processes it.

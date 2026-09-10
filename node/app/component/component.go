@@ -128,11 +128,12 @@ func (c typedComponent[P]) Activate(ctx context.Context, handler ...ActivityHand
 }
 
 func (c typedComponent[P]) Deactivate(ctx context.Context, handler ...ActivityHandler[P]) error {
-	return c.deactivate(ctx, func(ctx context.Context, _ *component, err error) {
+	c.deactivate(ctx, func(ctx context.Context, _ *component, err error) {
 		if len(handler) > 0 {
 			handler[0].OnActivity(ctx, c, c.state, err)
 		}
 	})
+	return nil
 }
 
 var deactivatoinWaiters = struct {
@@ -657,7 +658,9 @@ func asComponent(r relation) *component {
 }
 
 func (c *component) AddDependency(dependency relation) relation {
-	_ = asComponent(dependency).addDependent(c, false)
+	if err := asComponent(dependency).addDependent(c, false); err != nil {
+		liblog.Warn("AddDependency failed", "component", app.LogInstance(c), "dependency", app.LogInstance(dependency), "err", err)
+	}
 	return c
 }
 
@@ -964,7 +967,7 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 					"dependency", app.LogInstance(dependency))
 			}
 			if err := dependency.activate(ctx, noopHanlder); err != nil {
-				onActivity(ctx, dependency, err)
+				c.log.Warn("Activating dependency failed", "component", app.LogInstance(c), "dependency", app.LogInstance(dependency), "err", err)
 			}
 		}
 	}
@@ -1043,7 +1046,7 @@ func awaitDeactivationChannels() {
 				waiters.Unlock()
 
 				if ok {
-					_ = c.deactivate(context.Background(), noopHanlder)
+					c.deactivate(context.Background(), noopHanlder)
 				}
 				return false, false
 			}, nil)
@@ -1051,18 +1054,17 @@ func awaitDeactivationChannels() {
 }
 
 // deactivate sends a deactivation message to the actor. Returns immediately.
-func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
+func (c *component) deactivate(ctx context.Context, onActivity onActivity) {
 	c.RLock()
 	alreadyDeactivated := c.state.IsDeactivated()
 	c.RUnlock()
 
 	if alreadyDeactivated {
 		onActivity(ctx, c, nil)
-		return nil
+		return
 	}
 
 	c.inbox <- actorMsg{kind: msgDeactivate, ctx: ctx, onActivity: onActivity}
-	return nil
 }
 
 // doDeactivate is the actual deactivation logic, run inside the actor goroutine.
@@ -1116,7 +1118,7 @@ DEPENDENCIES:
 			deactivatoinWaiters.Unlock()
 			awaitDeactivationChannels()
 
-			_ = dependency.deactivate(ctx, noopHanlder)
+			dependency.deactivate(ctx, noopHanlder)
 		}
 	}
 }
