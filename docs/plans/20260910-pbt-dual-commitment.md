@@ -281,18 +281,18 @@ different states and correctly report different roots.
 - Modify: `db/state/changeset/state_changeset.go`
 - Modify: `db/state/changeset/state_changeset_test.go`
 
-- [ ] add a version byte and a domain count ahead of the per-domain blocks in `serializeKeys`
-- [ ] rewrite `deserializeKeys` to read the count from the record, place blocks by index into
+- [x] add a version byte and a domain count ahead of the per-domain blocks in `serializeKeys`
+- [x] rewrite `deserializeKeys` to read the count from the record, place blocks by index into
       `[kv.DomainLen]`, and tolerate a count below `DomainLen` (missing domains stay nil)
-- [ ] keep reading the old unversioned format: detect it and read exactly the old domain count
-- [ ] add a length guard so a truncated record returns an error instead of panicking inside
+- [x] keep reading the old unversioned format: detect it and read exactly the old domain count
+- [x] add a length guard so a truncated record returns an error instead of panicking inside
       `binary.BigEndian.Uint32`
-- [ ] write tests: round-trip at the current domain count
-- [ ] write tests: a record whose count is below `kv.DomainLen` decodes with the trailing slots nil and
+- [x] write tests: round-trip at the current domain count
+- [x] write tests: a record whose count is below `kv.DomainLen` decodes with the trailing slots nil and
       no panic — this is the shape a pre-bump record takes after Task 5
-- [ ] write tests: an old-format fixture still decodes
-- [ ] write tests: a truncated record returns an error, not a panic
-- [ ] run `make test-short` — must pass before task 3
+- [x] write tests: an old-format fixture still decodes
+- [x] write tests: a truncated record returns an error, not a panic
+- [x] run `make test-short` — must pass before task 3
 
 ### Task 3: Make the datadir trie variant a three-state set
 

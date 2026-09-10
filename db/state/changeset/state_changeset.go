@@ -36,6 +36,11 @@ type StateChangeSet struct {
 	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
+const (
+	diffSetFormatVersion = byte(1)
+	legacyDomainCount    = 6
+)
+
 func (s *StateChangeSet) Copy() *StateChangeSet {
 	res := *s
 	for i := range s.Diffs {
@@ -244,7 +249,7 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 }
 
 func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
-	// Do  diff_length + diffSet
+	out = append(out, diffSetFormatVersion, byte(len(d.Diffs)))
 	ret := out
 	tmp := make([]byte, 4)
 	for i := range d.Diffs {
@@ -306,15 +311,32 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	return ret
 }
 
-func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
+func deserializeKeys(in []byte) ([kv.DomainLen][]kv.DomainEntryDiff, error) {
 	var ret [kv.DomainLen][]kv.DomainEntryDiff
-	for i := range ret {
-		diffSetLen := binary.BigEndian.Uint32(in)
+	domainCount := legacyDomainCount
+	if len(in) >= 2 && in[0] == diffSetFormatVersion {
+		domainCount = int(in[1])
+		in = in[2:]
+		if domainCount > len(ret) {
+			return ret, fmt.Errorf("changeset domain count %d exceeds supported count %d", domainCount, len(ret))
+		}
+	}
+	if domainCount > len(ret) {
+		return ret, fmt.Errorf("legacy changeset domain count %d exceeds supported count %d", domainCount, len(ret))
+	}
+	for i := 0; i < domainCount; i++ {
+		if len(in) < 4 {
+			return ret, fmt.Errorf("truncated changeset domain %d length", i)
+		}
+		diffSetLen := binary.BigEndian.Uint32(in[:4])
 		in = in[4:]
+		if uint64(diffSetLen) > uint64(len(in)) {
+			return ret, fmt.Errorf("truncated changeset domain %d: need %d bytes, have %d", i, diffSetLen, len(in))
+		}
 		ret[i] = DeserializeDiffSet(in[:diffSetLen])
 		in = in[diffSetLen:]
 	}
-	return ret
+	return ret, nil
 }
 
 const DiffChunkKeyLen = 48
@@ -415,7 +437,11 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 		val = append(val, chunk...)
 	}
 
-	return deserializeKeys(val), true, nil
+	diffs, err := deserializeKeys(val)
+	if err != nil {
+		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, err
+	}
+	return diffs, true, nil
 }
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	//TODO: move this function somewhere from `commitment`/`state` pkg
