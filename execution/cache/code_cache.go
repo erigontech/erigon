@@ -38,8 +38,12 @@ func hash32(b []byte) [32]byte {
 }
 
 const (
-	// DefaultCodeCacheBytes is the byte limit for the code cache.
-	DefaultCodeCacheBytes = 512 * datasize.MB
+	// DefaultCodeCacheBytes is the byte limit for the code cache. It is drawn
+	// from the shared cachebudget envelope and now means what it says, so it
+	// buys residency against the account and storage caches rather than on top
+	// of them: on 64KB-contract fixtures the suite peaks here and falls off in
+	// both directions.
+	DefaultCodeCacheBytes = 256 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
 	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
