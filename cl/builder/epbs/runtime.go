@@ -56,6 +56,9 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	if deps.BeaconConfig.SlotsPerEpoch == 0 {
 		return nil, errors.New("epbs/runtime: slots per epoch must be positive")
 	}
+	if uint64(cfg.MaxPending) < deps.BeaconConfig.SlotsPerEpoch {
+		return nil, errors.New("epbs/runtime: pending capacity must cover one epoch")
+	}
 	if deps.BeaconConfig.GloasForkEpoch == deps.BeaconConfig.FarFutureEpoch {
 		return nil, errors.New("epbs/runtime: Gloas is not configured")
 	}
