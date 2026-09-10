@@ -597,14 +597,6 @@ byte:  0        1 ............................ 32       33
       +----+------------------------------------+------+
       | 00 |          stem = H(addr32)          | sub  |
       +----+------------------------------------+------+
-
-sub    0        BASIC_DATA    packed from account state
-       1        CODE_HASH     32 raw bytes
-       2        DELEGATION    the 23-byte indicator, right-padded with nine zeros
-       3 ..  63 reserved      not packed; leaf carries 32 verbatim bytes
-                              (pbinLeafValue -> pbinRecordLeafValue)
-      64 .. 127 storage slots 0..63, value left-padded
-     128 .. 255 unallocated   no key this embedding derives lands here
 ```
 
 Constants in `pbin_keys.go`; the dispatch that turns a sub-index into a leaf value is
@@ -615,19 +607,9 @@ Sub-indices 128..255 held the first 128 code chunks before every chunk moved int
 carries its 32 bytes verbatim rather than being packed from state, which is the right answer for a
 sub-index whose meaning is not yet defined.
 
-BASIC_DATA packing (`pbinEncodeBasicData` and its offset constants, `pbin_values.go`),
-big-endian throughout:
-
-```
-off:  0    1   2   3    4          8                16                      32
-     +----+-----------+-----------+----------------+-----------------------+
-     |ver | reserved  | code_size |     nonce      |    balance (128 bit)  |
-     | 0  |  0  0  0  |    u32    |      u64       |        16 bytes       |
-     +----+-----------+-----------+----------------+-----------------------+
-```
-
-Bytes 0..3 are never written; the zero value of the array supplies them. A balance over 128 bits or
-a code size over 2^32-1 is an error, not a truncation — a silent truncation would commit a wrong
+BASIC_DATA is packed by `pbinEncodeBasicData` and its offset constants (`pbin_values.go`),
+big-endian throughout. Bytes 0..3 are never written; the zero value of the array supplies them.
+A balance over 128 bits or a code size over 2^32-1 is an error, not a truncation — a silent truncation would commit a wrong
 root (`pbinEncodeBasicData`).
 
 The CODE_HASH leaf is the raw 32-byte hash, with the zero hash mapped to `keccak256("")` for a
@@ -681,9 +663,7 @@ outright — `codeFromLeaves` re-checks the reassembled code against CODE_HASH
 ## 9. The storage sub-trie
 
 `pbinSlotInHeader` (`pbin_keys.go`) decides: slot bytes `[0:31]` all zero **and**
-`slot[31] < HEADER_STORAGE_SLOTS = 64`. So slots 0..63 only. The spec's invariant is
-`HEADER_STORAGE_OFFSET + HEADER_STORAGE_SLOTS <= STEM_SUBTREE_WIDTH`, which pins the header slots
-to sub-indices 64..127.
+`slot[31] < HEADER_STORAGE_SLOTS = 64`. So slots 0..63 only.
 
 Header slots take an account-zone key at sub-index `64 + slot` (`storageKey`, `pbin_keys.go`) — same
 34-byte shape, same stem, no extra hash. Everything else goes to zone `0xFF`, 66 bytes
@@ -731,14 +711,8 @@ group preimage for slot 300:
 ## 10. The code sub-trie
 
 A chunk value is 32 bytes: byte 0 is metadata, bytes 1..31 are code
-(`pbinChunkDataLen = 31`, `pbin_code.go`).
-
-```
-+----+---------------------------------+
-| n  |       31 bytes of bytecode      |
-+----+---------------------------------+
-  ^ leading bytes of this chunk that are PUSHDATA, clamped to 31
-```
+(`pbinChunkDataLen = 31`, `pbin_code.go`). Byte 0 counts the leading bytes of the chunk that are
+PUSHDATA, clamped to 31.
 
 The code is zero-padded to a multiple of 31 **before** the PUSHDATA scan
 (`pbinChunkifyCode`, `pbin_code.go`). That ordering buys two things: the last chunk is always a
@@ -748,21 +722,6 @@ still PUSHDATA; the table is allocated a whole chunk past the padded code so a P
 byte has room, and `chunk[0] = min(pushdataAt[pos], 31)`. A PUSH is any opcode in `[0x60, 0x7f]`
 (`pbinPush1` .. `pbinPush32`). The scan runs over the whole code, so residual PUSHDATA carries
 across chunk boundaries — which is exactly what the byte reports.
-
-```
-code (40 bytes), PUSH2 at offset 0 and PUSH32 at offset 30 so its data crosses the boundary:
-  61aabb 000000000000000000000000000000000000000000000000000000 7f f0f1f2f3f4f5f6f7f8
-         ^ 27 zero bytes, offsets 3..29
-
-chunk 0 = 00 61aabb0000000000000000000000000000000000000000000000000000007f
-          ^^ offset 0 is an opcode
-chunk 1 = 1f f0f1f2f3f4f5f6f7f800000000000000000000000000000000000000000000
-          ^^ 31: every byte of this chunk is PUSH32 data, clamped from 32;
-             the tail is padding added before the scan
-
-short code 000102 -> one chunk:  00 000102 0000…00
-empty code       -> zero chunks (pbinChunkifyCode)
-```
 
 **Every** chunk lives in the code zone; the account header holds none. One deriver takes a code hash
 and a chunk id (`codeChunkKey`, `pbin_keys.go`):
@@ -815,11 +774,8 @@ truncate to `code_size`, verify against the CODE_HASH leaf (`pbin_witness_state.
 
 ## 11. There is no storage root
 
-Nothing computes one. The engine doc comment says so (`PBinPatriciaHashed`) and the
-witness account type says so (`PBinAccount`) — those two comments are all
-`grep -i "storage root" pbin_*.go` finds. The absence of code is a different grep, over the
-identifier: `grep -n "storageRoot\|StorageRoot" pbin_*.go` returns nothing at all — no producer, no
-consumer. `PBinAccount` is exactly Nonce, Balance, CodeSize, CodeHash
+Nothing computes one, and no `pbin_*.go` names the identifier — no producer, no consumer.
+`PBinAccount` is exactly Nonce, Balance, CodeSize, CodeHash
 (`pbin_witness_state.go`). BASIC_DATA has no room for one either:
 `1 + 3 + 4 + 8 + 16 = 32`, fully accounted (`pbin_values.go`).
 
@@ -844,12 +800,8 @@ code chunk 0       : 01 |073be869…9f969b5a| 00
                         ^^^^^^^^^^^^^^^^^^ H(codeHash || 0), no stem at all
 ```
 
-Compare the hex engine in the same package, where the MPT structure is explicit:
-`accountForHashing(buffer, storageRootHash)` writes the 32-byte root into the account RLP
-(`hex_patricia_hashed.go`), called from `computeCellHash` and
-`witnessComputeCellHashWithStorage`; both derive `storageRootHash` down the fold, the witness one
-threading a `storageRootHashIsSet` flag with it, and both give a storage-less account
-`empty.RootHash`. The pbin fold has no equivalent variable.
+The hex engine in the same package writes a storage root into the account RLP
+(`accountForHashing`, `hex_patricia_hashed.go`); the pbin fold has no equivalent variable.
 
 The near-miss worth naming so it is not mistaken for one: the subtree under the 264-bit prefix
 `0xFF || stem` does hold exactly one account's non-header slots, and the cell at that point has a
