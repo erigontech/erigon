@@ -17,18 +17,12 @@
 package runtime
 
 import (
-	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -39,17 +33,10 @@ import (
 
 func newL2TestConfig(t *testing.T, chainID uint64) *Config {
 	t.Helper()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
-
-	st := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	versionMap := state.NewVersionMap(nil)
+	st := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
 	t.Cleanup(st.Close)
+	st.SetTxContext(1, -1)
 
 	cfg := &Config{
 		ChainConfig: &chain.Config{
