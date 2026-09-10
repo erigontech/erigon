@@ -576,8 +576,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}()
 	}
 
-	if hook := st.evm.Context.StartTx; hook != nil {
-		if done, result, hookErr := hook(st.state, st.msg); done {
+	if l2 := st.evm.Context.L2; l2 != nil && l2.StartTx != nil {
+		if done, result, hookErr := l2.StartTx(st.state, st.msg); done {
 			if result == nil && hookErr == nil {
 				return nil, fmt.Errorf("%w: StartTx hook short-circuited with neither result nor error", ErrTxnExecutionFailed)
 			}
@@ -636,8 +636,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 
-	if hook := st.evm.Context.GasCharging; hook != nil {
-		adjustedGasRemaining, tipRecipient, hookErr := hook(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
+	if l2 := st.evm.Context.L2; l2 != nil && l2.GasCharging != nil {
+		adjustedGasRemaining, tipRecipient, hookErr := l2.GasCharging(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
 		if hookErr != nil {
 			return nil, hookErr
 		}
@@ -730,8 +730,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	totalGasUsed := gasUsed.total()
 	switch {
 	case refunds && !gasBailout:
-		if hook := st.evm.Context.ComputeRefund; hook != nil {
-			rr := hook(totalGasUsed, intrinsicGas, intrinsicGasResult, st.state.GetRefund(), rules)
+		if l2 := st.evm.Context.L2; l2 != nil && l2.ComputeRefund != nil {
+			rr := l2.ComputeRefund(totalGasUsed, intrinsicGas, intrinsicGasResult, st.state.GetRefund(), rules)
 			if rr.TxnGasUsed > st.msg.Gas() {
 				return nil, fmt.Errorf("%w: ComputeRefund hook claims %d gas used, above the tx limit %d", ErrTxnExecutionFailed, rr.TxnGasUsed, st.msg.Gas())
 			}

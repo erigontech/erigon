@@ -40,9 +40,11 @@ type BlockContext struct {
 	// GetHash returns the hash corresponding to n
 	GetHash          GetHashFunc
 	PostApplyMessage PostApplyMessageFunc
-	StartTx          StartTxFunc
-	GasCharging      GasChargingFunc
-	ComputeRefund    ComputeRefundFunc
+
+	// L2 carries the L2 stack's version and tx lifecycle hooks; nil on L1.
+	// A pointer, not inline fields: BlockContext is embedded by value in EVM,
+	// which sits exactly on a malloc size class.
+	L2 *L2
 
 	// Block information
 	Coinbase    accounts.Address // Provides information for COINBASE
@@ -55,10 +57,28 @@ type BlockContext struct {
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
 	SlotNumber  uint64           // Provides information for SLOTNUM
+}
 
-	// L2Version is populated by the chain's engine/block-context construction
-	// for L2 chains; zero otherwise.
-	L2Version uint64
+// L2 is the per-block L2 context a rules engine installs through
+// AmendBlockContext. Every field is optional.
+type L2 struct {
+	// Version is the L2 stack's own upgrade version, feeding fork resolution.
+	Version uint64
+
+	// StartTx runs at the very top of TxnExecutor.Execute, before intrinsic
+	// gas or preCheck. When done is true it short-circuits the whole
+	// transition, returning result and err as-is (system/deposit txs).
+	StartTx StartTxFunc
+
+	// GasCharging runs once gas has been purchased and split for execution,
+	// letting a chain charge extra cost out of the tx's own gas budget (via
+	// ibs) and redirect the tip recipient. A non-nil error aborts the
+	// transaction before execution starts.
+	GasCharging GasChargingFunc
+
+	// ComputeRefund, when non-nil, replaces TxnExecutor's built-in refund
+	// ladder for this tx.
+	ComputeRefund ComputeRefundFunc
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -134,19 +154,10 @@ type (
 	// Used to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 
-	// StartTxFunc runs at the very top of TxnExecutor.Execute, before
-	// intrinsic gas or preCheck. When done is true it short-circuits the
-	// whole transition, returning result and err as-is (system/deposit txs).
 	StartTxFunc func(ibs IntraBlockState, msg Message) (done bool, result *ExecutionResult, err error)
 
-	// GasChargingFunc runs once gas has been purchased and split for
-	// execution, letting a chain charge extra cost out of the tx's own gas
-	// budget (via ibs) and redirect the tip recipient. A non-nil error
-	// aborts the transaction before execution starts.
 	GasChargingFunc func(ibs IntraBlockState, msg Message, gasRemaining mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult) (adjustedGasRemaining mdgas.MdGas, tipRecipient accounts.Address, err error)
 
-	// ComputeRefundFunc, when non-nil, replaces TxnExecutor's built-in
-	// refund ladder for this tx.
 	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, intrinsicGas uint64, intrinsicGasResult mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
 )
 

@@ -70,15 +70,9 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	var transferFunc evmtypes.TransferFunc
 	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
-	var startTxFunc evmtypes.StartTxFunc
-	var gasChargingFunc evmtypes.GasChargingFunc
-	var computeRefundFunc evmtypes.ComputeRefundFunc
 	if engine != nil {
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
-		startTxFunc = engine.GetStartTxFunc()
-		gasChargingFunc = engine.GetGasChargingFunc()
-		computeRefundFunc = engine.GetComputeRefundFunc()
 	} else {
 		transferFunc = misc.Transfer
 	}
@@ -93,9 +87,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Transfer:         transferFunc,
 		GetHash:          blockHashFunc,
 		PostApplyMessage: postApplyMessageFunc,
-		StartTx:          startTxFunc,
-		GasCharging:      gasChargingFunc,
-		ComputeRefund:    computeRefundFunc,
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,

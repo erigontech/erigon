@@ -32,7 +32,7 @@ import (
 
 // fakeAmendEngine implements only the rules.EngineReader methods
 // NewEVMBlockContext calls when an explicit author is supplied, standing in
-// for an L2 rules engine that populates BlockContext.L2Version.
+// for an L2 rules engine that populates BlockContext.L2.
 type fakeAmendEngine struct {
 	rules.EngineReader
 	l2Version uint64
@@ -40,15 +40,12 @@ type fakeAmendEngine struct {
 
 func (f fakeAmendEngine) GetTransferFunc() evmtypes.TransferFunc                 { return misc.Transfer }
 func (f fakeAmendEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc { return nil }
-func (f fakeAmendEngine) GetStartTxFunc() evmtypes.StartTxFunc                   { return nil }
-func (f fakeAmendEngine) GetGasChargingFunc() evmtypes.GasChargingFunc           { return nil }
-func (f fakeAmendEngine) GetComputeRefundFunc() evmtypes.ComputeRefundFunc       { return nil }
 
 func (f fakeAmendEngine) AmendBlockContext(bc *evmtypes.BlockContext, _ *types.Header) {
-	bc.L2Version = f.l2Version
+	bc.L2 = &evmtypes.L2{Version: f.l2Version}
 }
 
-// fakeL2Config resolves Rules.L2Version straight from BlockContext.L2Version,
+// fakeL2Config resolves Rules.L2Version straight from BlockContext.L2.Version,
 // mirroring the fork-oracle commit's evmtypes rules_test fake.
 type fakeL2Config struct{}
 
@@ -60,7 +57,7 @@ func (fakeL2Config) ResolveRules(l2Version, _, _ uint64, r *chain.Rules) {
 
 // TestNewEVMBlockContext_AmendBlockContextReachesRules verifies that
 // NewEVMBlockContext calls the engine's AmendBlockContext after building the
-// context, and that the L2Version it sets flows through to Rules resolution.
+// context, and that the L2 version it sets flows through to Rules resolution.
 func TestNewEVMBlockContext_AmendBlockContextReachesRules(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +67,7 @@ func TestNewEVMBlockContext_AmendBlockContextReachesRules(t *testing.T) {
 	cfg := &chain.Config{L2: fakeL2Config{}}
 
 	bc := NewEVMBlockContext(header, nil, engine, author, cfg)
-	require.Equal(t, uint64(7), bc.L2Version)
+	require.Equal(t, uint64(7), bc.L2.Version)
 
 	r := bc.Rules(cfg)
 	require.Equal(t, uint64(7), r.L2Version)
@@ -87,5 +84,5 @@ func TestNewEVMBlockContext_NilEngineSkipsAmend(t *testing.T) {
 	cfg := &chain.Config{}
 
 	bc := NewEVMBlockContext(header, nil, nil, author, cfg)
-	require.Zero(t, bc.L2Version)
+	require.Nil(t, bc.L2)
 }

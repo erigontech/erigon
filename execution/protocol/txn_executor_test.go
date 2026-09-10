@@ -929,8 +929,10 @@ func TestStartTxHook_ShortCircuits(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		StartTx: func(_ evmtypes.IntraBlockState, _ evmtypes.Message) (bool, *evmtypes.ExecutionResult, error) {
-			return true, wantResult, nil
+		L2: &evmtypes.L2{
+			StartTx: func(_ evmtypes.IntraBlockState, _ evmtypes.Message) (bool, *evmtypes.ExecutionResult, error) {
+				return true, wantResult, nil
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
@@ -960,8 +962,10 @@ func TestGasChargingHook_ErrorAbortsTx(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
-			return gasRemaining, accounts.NilAddress, wantErr
+		L2: &evmtypes.L2{
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				return gasRemaining, accounts.NilAddress, wantErr
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
@@ -990,12 +994,14 @@ func TestComputeRefundHook_ReplacesLadder(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		ComputeRefund: func(_ mdgas.MdGasUsage, _ uint64, _ mdgas.IntrinsicGasCalcResult, _ uint64, _ *chain.Rules) evmtypes.RefundResult {
-			return evmtypes.RefundResult{
-				BlockExecutionGasUsed: overriddenGasUsed,
-				TxnGasUsedB4Refunds:   overriddenGasUsed,
-				TxnGasUsed:            overriddenGasUsed,
-			}
+		L2: &evmtypes.L2{
+			ComputeRefund: func(_ mdgas.MdGasUsage, _ uint64, _ mdgas.IntrinsicGasCalcResult, _ uint64, _ *chain.Rules) evmtypes.RefundResult {
+				return evmtypes.RefundResult{
+					BlockExecutionGasUsed: overriddenGasUsed,
+					TxnGasUsedB4Refunds:   overriddenGasUsed,
+					TxnGasUsed:            overriddenGasUsed,
+				}
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
@@ -1050,8 +1056,10 @@ func TestStartTxHook_NilResultIsError(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		StartTx: func(_ evmtypes.IntraBlockState, _ evmtypes.Message) (bool, *evmtypes.ExecutionResult, error) {
-			return true, nil, nil
+		L2: &evmtypes.L2{
+			StartTx: func(_ evmtypes.IntraBlockState, _ evmtypes.Message) (bool, *evmtypes.ExecutionResult, error) {
+				return true, nil, nil
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
@@ -1076,10 +1084,12 @@ func TestGasChargingHook_RaisesGasAboveBudgetIsError(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
-			raised := gasRemaining
-			raised.Execution += 1_000_000
-			return raised, accounts.NilAddress, nil
+		L2: &evmtypes.L2{
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				raised := gasRemaining
+				raised.Execution += 1_000_000
+				return raised, accounts.NilAddress, nil
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
@@ -1104,12 +1114,14 @@ func TestComputeRefundHook_GasUsedAboveLimitIsError(t *testing.T) {
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
-		ComputeRefund: func(_ mdgas.MdGasUsage, _ uint64, _ mdgas.IntrinsicGasCalcResult, _ uint64, _ *chain.Rules) evmtypes.RefundResult {
-			return evmtypes.RefundResult{
-				BlockExecutionGasUsed: 200_000,
-				TxnGasUsedB4Refunds:   200_000,
-				TxnGasUsed:            200_000, // above the 100k tx gas limit
-			}
+		L2: &evmtypes.L2{
+			ComputeRefund: func(_ mdgas.MdGasUsage, _ uint64, _ mdgas.IntrinsicGasCalcResult, _ uint64, _ *chain.Rules) evmtypes.RefundResult {
+				return evmtypes.RefundResult{
+					BlockExecutionGasUsed: 200_000,
+					TxnGasUsedB4Refunds:   200_000,
+					TxnGasUsed:            200_000, // above the 100k tx gas limit
+				}
+			},
 		},
 	}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
