@@ -118,10 +118,6 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	}
 }
 
-// TestRegisteredProviderForkDimension pins the fork dimension of the cache
-// key. Without it, an L2 crossing a fork boundary keeps being served the
-// merged set built at the earlier tier — the Osaka repricings and the 0x0100
-// entry would never appear.
 func TestRegisteredProviderForkDimension(t *testing.T) {
 	const chainID = 900501
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x55}))
@@ -134,8 +130,7 @@ func TestRegisteredProviderForkDimension(t *testing.T) {
 	cancun := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true}
 	osaka := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true, IsPrague: true, IsOsaka: true}
 
-	// Resolve Cancun first, so a key that ignored the fork would serve its set
-	// to Osaka as well.
+	// Resolve Cancun first: a fork-blind key would then serve that set to Osaka too.
 	_, ok := Precompiles(cancun)[osakaOnly]
 	require.False(t, ok, "0x0100 is not a Cancun built-in")
 
@@ -146,9 +141,6 @@ func TestRegisteredProviderForkDimension(t *testing.T) {
 	require.True(t, ok, "the overlay must still be applied at the later fork")
 }
 
-// TestRegisteredProviderWinsOnCollision pins the documented precedence: a
-// provider entry replaces a built-in at the same address. Swapping the
-// maps.Copy operands leaves every other test green.
 func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	const chainID = 900502
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
@@ -186,9 +178,7 @@ func TestRegisterSweepsStaleCache(t *testing.T) {
 	require.False(t, ok, "the unregistered provider's overlay must not survive re-registration")
 }
 
-// TestProviderNilContractPanics pins that a nil entry is rejected where it is
-// merged, naming the chain and address, rather than reaching evm.call and
-// nil-dereferencing inside RunPrecompiledContract on a transaction.
+// Rejected where the sets merge, not at evm.call on a live transaction.
 func TestProviderNilContractPanics(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -220,9 +210,7 @@ func TestPrecompilesNilChainID(t *testing.T) {
 	})
 }
 
-// BenchmarkActivePrecompilesParallel guards the no-provider fast path. Rules
-// resolution runs a few times per transaction on every worker, so taking
-// registryMu here anti-scales with core count.
+// Guards the no-provider fast path: registryMu on the rules path anti-scales with core count.
 func BenchmarkActivePrecompilesParallel(b *testing.B) {
 	rules := &chain.Rules{ChainID: uint256.NewInt(1), IsOsaka: true}
 	b.RunParallel(func(pb *testing.PB) {

@@ -74,11 +74,8 @@ func (l2VersionRules) ResolveRules(l2Version, _, _ uint64, rules *chain.Rules) {
 	rules.L2Version = l2Version
 }
 
-// runtime.Execute and runtime.Call start the tracer themselves, so a partial
-// VMContext there is invisible to a test that drives OnTxStart directly. The
-// 4byte, flat-call and JS tracers rebuild Rules from this context: a dropped
-// L2Version misclassifies a version-gated precompile, and a nil ChainConfig
-// panics them outright.
+// Execute and Call start the tracer themselves, so a partial VMContext there is
+// invisible to a test that drives OnTxStart directly.
 func TestRuntimeStartsTracerWithFullVMContext(t *testing.T) {
 	const chainID = 900434
 	const activeAt = 30

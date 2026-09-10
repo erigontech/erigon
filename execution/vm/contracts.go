@@ -112,9 +112,6 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 	}
 }
 
-// activeSet resolves the fork-selected built-ins for chainRules, overlaid with
-// any provider registered for chainRules.ChainID. With no registered provider
-// it is the built-in set itself.
 func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
 	fork := forkTierFor(chainRules)
 	chainID := rulesChainID(chainRules)
@@ -234,10 +231,8 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
-// Deprecated: prefer ActivePrecompiles, which reflects a registered provider's
-// overlay. These are the built-in address sets for a fork and nothing else, and
-// are kept because they are exported API that chains outside this repo compile
-// against.
+// Deprecated: prefer ActivePrecompiles, which includes a registered provider's
+// overlay. These are the built-in addresses for a fork and nothing else.
 var (
 	PrecompiledAddressesHomestead []accounts.Address
 	PrecompiledAddressesByzantium []accounts.Address
