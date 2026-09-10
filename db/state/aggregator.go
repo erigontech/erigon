@@ -82,6 +82,7 @@ type Aggregator struct {
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
 	commitmentRefsMu    sync.RWMutex
 	canonicalCommitment atomic.Uint32
+	trieVariant         string
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -160,6 +161,16 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger lo
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
+	}
+	a.trieVariant = TrieVariantHex
+	if statecfg.ExperimentalBinCommitment {
+		a.trieVariant = TrieVariantBin
+	}
+	if statecfg.ExperimentalHexBinCommitment {
+		a.trieVariant = TrieVariantHexBin
+	}
+	if settings, settingsErr := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)); settingsErr == nil {
+		a.trieVariant = settings.TrieVariantName()
 	}
 	a.canonicalCommitment.Store(uint32(kv.CommitmentDomain))
 	empty := &aggregatorVisible{}
@@ -286,6 +297,16 @@ func (a *Aggregator) CanonicalCommitmentDomain() kv.Domain {
 
 func (a *Aggregator) SetCanonicalCommitmentDomain(domain kv.Domain) {
 	a.canonicalCommitment.Store(uint32(domain))
+}
+
+func (a *Aggregator) CommitmentDomains() []kv.Domain {
+	if a.trieVariant == TrieVariantHexBin {
+		return []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
+	}
+	if a.trieVariant == TrieVariantBin {
+		return []kv.Domain{kv.CommitmentDomain}
+	}
+	return []kv.Domain{kv.CommitmentDomain}
 }
 
 // SetErigondbDomainStepsInFrozenFile applies a domain-only merge cap override at runtime.
@@ -1764,6 +1785,10 @@ func (at *AggregatorRoTx) Agg() *Aggregator { return at.a }
 
 func (at *AggregatorRoTx) CanonicalCommitmentDomain() kv.Domain {
 	return at.a.CanonicalCommitmentDomain()
+}
+
+func (at *AggregatorRoTx) CommitmentDomains() []kv.Domain {
+	return at.a.CommitmentDomains()
 }
 
 func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint64) {

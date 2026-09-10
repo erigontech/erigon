@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -333,6 +334,10 @@ func (sd *SharedDomains) commitmentDomainValue() kv.Domain {
 	return kv.CommitmentDomain
 }
 
+func (sd *SharedDomains) HasSharedBranchCacheFor(domain kv.Domain) bool {
+	return domain == kv.CommitmentDomain && sd.branchCache != nil
+}
+
 // cacheUnwindState records the lowest boundary that the next durable cache
 // publication must invalidate. It is separate from mem-batch changesets
 // because an unwind without changesets must still revoke cache entries;
@@ -369,20 +374,25 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	for _, opt := range opts {
 		opt(&o)
 	}
-	if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
-		if o.hexCommitmentOnly {
+	commitmentDomains := []kv.Domain{kv.CommitmentDomain}
+	if p, ok := tx.AggTx().(interface{ CommitmentDomains() []kv.Domain }); ok {
+		commitmentDomains = p.CommitmentDomains()
+	} else if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		commitmentDomains = []kv.Domain{kv.CommitmentBinDomain}
+	}
+	if o.hexCommitmentOnly {
+		if len(commitmentDomains) == 1 && (statecfg.ExperimentalBinCommitment || o.trieCfg.Variant == commitment.VariantBinPatriciaTrie) {
 			return nil, ErrBinCommitmentUnsupported
 		}
-		// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
-		// commitment-context ctor refuses a bin SD that shares the cache.
-		WithoutSharedBranchCache()(&o)
+		commitmentDomains = []kv.Domain{kv.CommitmentDomain}
+		o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 	}
-	trieCfg := o.trieCfg
-	commitmentDomain := kv.CommitmentDomain
+	commitmentDomain := commitmentDomains[0]
 	if p, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
-		commitmentDomain = p.CanonicalCommitmentDomain()
-	} else if trieCfg.Variant == commitment.VariantBinPatriciaTrie {
-		commitmentDomain = kv.CommitmentBinDomain
+		candidate := p.CanonicalCommitmentDomain()
+		if slices.Contains(commitmentDomains, candidate) {
+			commitmentDomain = candidate
+		}
 	}
 
 	generationTx := cacheGenerationTx(tx)
@@ -410,21 +420,35 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	} else {
 		sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
 	}
-	// Fetch the aggregator-scope branch cache (lives on the commitment
-	// Domain, shared across all SharedDomains derived from this
-	// aggregator). The duck-typed BranchCacheProvider lookup avoids
-	// importing db/state directly — db/state already imports execctx, so
-	// the reverse import would create a cycle.
+	// Fetch the aggregator-scope branch cache for the selected canonical domain.
 	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache && (len(commitmentDomains) > 1 || o.trieCfg.Variant != commitment.VariantBinPatriciaTrie) {
 		branchCache = p.BranchCache(commitmentDomain)
 	}
 	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitmentDomain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
-	sd.commitmentCtxs[commitmentDomain] = sd.sdCtx
+	for _, domain := range commitmentDomains {
+		cfg := o.trieCfg
+		if domain == kv.CommitmentBinDomain {
+			cfg.Variant = commitment.VariantBinPatriciaTrie
+		} else if len(commitmentDomains) > 1 && cfg.Variant == commitment.VariantBinPatriciaTrie {
+			if statecfg.ExperimentalParallelCommitment {
+				cfg.Variant = commitment.VariantParallelHexPatricia
+			} else {
+				cfg.Variant = commitment.VariantHexPatriciaTrie
+			}
+		}
+		ctx := commitmentdb.NewSharedDomainsCommitmentContext(sd, domain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, cfg)
+		sd.commitmentCtxs[domain] = ctx
+		if domain == commitmentDomain {
+			sd.sdCtx = ctx
+		}
+	}
+	if sd.sdCtx == nil {
+		sd.sdCtx = sd.commitmentCtxs[commitmentDomains[0]]
+	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -971,6 +995,10 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 	return sd.sdCtx
 }
 
+func (sd *SharedDomains) GetCommitmentCtxForDomain(domain kv.Domain) *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.commitmentCtxs[domain]
+}
+
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache hands this SD the process-global state cache to manage:
@@ -1109,7 +1137,10 @@ func (sd *SharedDomains) Close() {
 
 	sd.CloseBlockOverlay()
 
-	sd.sdCtx.Close()
+	for domain, ctx := range sd.commitmentCtxs {
+		ctx.Close()
+		delete(sd.commitmentCtxs, domain)
+	}
 	sd.sdCtx = nil
 }
 
@@ -2054,7 +2085,9 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.EnableParaTrieDB(db)
+	for _, ctx := range sd.commitmentCtxs {
+		ctx.EnableParaTrieDB(db)
+	}
 	if sd.adaptivePinController != nil {
 		sd.adaptivePinController.Bind()
 	}

@@ -472,18 +472,23 @@ different states and correctly report different roots.
 - Modify: `db/state/execctx/domain_shared.go`
 - Modify: `db/state/execctx/options.go`
 - Modify: `db/state/execctx/domain_shared_test.go`
+- Modify: `db/state/aggregator.go`
+- Modify: `db/state/erigondb_settings.go`
+- Modify: `db/state/statecfg/state_schema.go`
+- Modify: `execution/commitment/commitmentdb/commitment_context.go`
+- Modify: `db/state/execctx/pbin_options_test.go`
 
-- [ ] under `hex+bin`, construct both a hex and a bin `SharedDomainsCommitmentContext`, each with its own
+- [x] under `hex+bin`, construct both a hex and a bin `SharedDomainsCommitmentContext`, each with its own
       `Trie` and `Updates` from `InitializeTrieAndUpdates`
-- [ ] replace the global `WithoutSharedBranchCache` side-effect with the per-domain cache selection from
+- [x] replace the global `WithoutSharedBranchCache` side-effect with the per-domain cache selection from
       Task 7
-- [ ] keep `ErrBinCommitmentUnsupported` meaningful: under `hex+bin` a `WithHexCommitmentOnly` caller
+- [x] keep `ErrBinCommitmentUnsupported` meaningful: under `hex+bin` a `WithHexCommitmentOnly` caller
       gets the hex context, and a caller needing a block-correct trie must ask for one by block (Task 21)
       rather than inheriting the process default
-- [ ] write tests: `hex` builds one context; `bin` builds one bin context; `hex+bin` builds both and they
+- [x] write tests: `hex` builds one context; `bin` builds one bin context; `hex+bin` builds both and they
       address different domains
-- [ ] write tests: `WithHexCommitmentOnly` under `bin` still returns `ErrBinCommitmentUnsupported`
-- [ ] run `make test-short` — must pass before task 11
+- [x] write tests: `WithHexCommitmentOnly` under `bin` still returns `ErrBinCommitmentUnsupported`
+- [x] run `make test-short` — must pass before task 11
 
 ### Task 11: Give the bin domain its own changeset diff slot
 

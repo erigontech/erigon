@@ -219,6 +219,8 @@ var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 // starts, so a flagless restart of a bin datadir stays bin.
 var ExperimentalBinCommitment = dbg.EnvBool("COMMITMENT_BIN", false)
 
+var ExperimentalHexBinCommitment = dbg.EnvBool("COMMITMENT_HEX_BIN", false)
+
 // BinCommitmentHash names H for the binary trie ("keccak" or "blake3", empty
 // meaning keccak). Persisted and adopted exactly like ExperimentalBinCommitment:
 // roots are incomparable across a change, so a datadir keeps the hash it was

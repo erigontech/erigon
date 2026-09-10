@@ -73,6 +73,7 @@ func (s *ErigonDBSettings) TrieHashName() string {
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	switch s.TrieVariantName() {
 	case TrieVariantBin:
+		statecfg.ExperimentalHexBinCommitment = false
 		if statecfg.ExperimentalParallelCommitment {
 			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
 		}
@@ -96,6 +97,7 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			}
 		}
 	case TrieVariantHexBin:
+		statecfg.ExperimentalHexBinCommitment = true
 		if !statecfg.ExperimentalBinCommitment {
 			logger.Info("datadir includes the bin commitment trie; enabling it for this process")
 			statecfg.ExperimentalBinCommitment = true
@@ -111,6 +113,7 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			}
 		}
 	case TrieVariantHex:
+		statecfg.ExperimentalHexBinCommitment = false
 		if s.TrieHash != nil {
 			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
 		}
@@ -220,6 +223,9 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 	var trieVariant, trieHash *string
 	if statecfg.ExperimentalBinCommitment || binTrieScheduled {
 		v := TrieVariantBin
+		if statecfg.ExperimentalHexBinCommitment {
+			v = TrieVariantHexBin
+		}
 		trieVariant = &v
 		h := statecfg.BinCommitmentHash
 		if h == "" {

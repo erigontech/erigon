@@ -249,7 +249,11 @@ func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode c
 		// The shared BranchCache indexes trunk slots by hex compact prefixes;
 		// distinct bin bit-path keys collapse onto one slot, so a shared cache
 		// would serve another node's record as a well-formed hit.
-		if sd != nil && sd.HasSharedBranchCache() {
+		sharedBranchCache := sd != nil && sd.HasSharedBranchCache()
+		if domainAware, ok := sd.(interface{ HasSharedBranchCacheFor(kv.Domain) bool }); ok {
+			sharedBranchCache = domainAware.HasSharedBranchCacheFor(commitmentDomain)
+		}
+		if sharedBranchCache {
 			panic("commitment variant " + string(variant) + " cannot use the shared branch cache: bit-path keys collide in its trunk slots")
 		}
 	}
