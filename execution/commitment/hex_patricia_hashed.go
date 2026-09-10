@@ -554,6 +554,9 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
 	cell.loaded = upCell.loaded
+	if cell.accountAddrLen == 0 {
+		cell.loaded &^= cellLoadAccount
+	}
 }
 
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
