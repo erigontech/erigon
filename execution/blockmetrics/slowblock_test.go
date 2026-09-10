@@ -312,7 +312,7 @@ func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 var (
 	ansiPattern    = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	consolePattern = regexp.MustCompile(
-		`^\[?(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\s*\]?\s*(?:\[[^\]]+\]\s*)?\s*(\{.+\})\s*$`)
+		`^\[?\w+\s*\]?\s*(?:\[[^\]]+\]\s*)?(\{.+\})\s*$`)
 )
 
 func consolePayload(t *testing.T, line string) string {
