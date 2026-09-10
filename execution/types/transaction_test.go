@@ -787,7 +787,9 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
@@ -812,7 +814,9 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTrailingBytes(t *testing.T) {
