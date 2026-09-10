@@ -89,6 +89,13 @@ jobs:
       target_branch: ${{ steps.compare.outputs.target_branch }}
       target_series: ${{ steps.compare.outputs.target_series }}
     steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
       - name: Resolve the newest stable series and compare with the deploy variable
         id: compare
         env:
@@ -190,25 +197,19 @@ jobs:
             # 06:20 cron does — quietly, for as long as nobody notices. The
             # state machine below never looks at the branch in this case, so
             # check it here.
-          # Extract the branches of the PUSH trigger only. The `on:` block can
-          # carry other triggers with their own branch filters, and a match in
-          # one of those is not a deploy trigger: a file whose push list still
-          # names the old branch would read as pinned, the variable would flip,
-          # and merges would never publish. Comparing with `grep -Fx` against
-          # this list also removes every regex-escaping question.
-          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
-          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
-          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
-          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
-          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
-          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
-          AWKEOF
             deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${target_branch}" \
               --jq '.content' 2>/dev/null | base64 -d || echo '')"
+            printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+            pinned=no
+            if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+               python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+               | grep -Fxq "$target_branch"; then
+              pinned=yes
+            fi
+
             if [ -z "$deploy_yml" ]; then
               echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
-            elif ! printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
-                   | grep -Fxq "$target_branch"; then
+            elif [ "$pinned" = no ]; then
               echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
               echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
             else
@@ -265,6 +266,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
       - name: Generate GitHub App token
         id: app_token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
@@ -424,21 +432,10 @@ jobs:
           fi
           echo "seed=false" >> "$GITHUB_OUTPUT"
           # Only the push-trigger block matters; workflow_dispatch ignores it.
-          # Extract the branches of the PUSH trigger only. The `on:` block can
-          # carry other triggers with their own branch filters, and a match in
-          # one of those is not a deploy trigger: a file whose push list still
-          # names the old branch would read as pinned, the variable would flip,
-          # and merges would never publish. Comparing with `grep -Fx` against
-          # this list also removes every regex-escaping question.
-          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
-          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
-          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
-          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
-          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
-          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
-          AWKEOF
-          if printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
-               | grep -Fxq "$TARGET_BRANCH"; then
+          printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+          if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+             python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+             | grep -Fxq "$TARGET_BRANCH"; then
             repointed=true
           else
             repointed=false
@@ -557,61 +554,15 @@ jobs:
             echo "Seeded docs-deploy.yml from ${CURRENT_BRANCH}."
           fi
 
-          # Rewrite the pinned branch inside the `on:` block only, so a match in a
-          # comment or a job condition further down is left alone.
-          #
-          # The entry is matched as "whatever release/N.N is pinned", NOT as the
-          # value of DOCS_DEPLOY_BRANCH. Those differ whenever a previous cutover
-          # stalled: the variable can still read release/3.5 while this branch
-          # already inherited release/3.6. Anchoring on the variable would make the
-          # detector and this rewrite disagree, and the step would fail daily.
-          python3 - "$TARGET_BRANCH" <<'PY'
-          import re, sys
-          new = sys.argv[1]
-          path = '.github/workflows/docs-deploy.yml'
-          src = open(path).read()
-
-          # Scope to the PUSH trigger's branch list, matching the shell check.
-          # The `on:` block may hold other triggers with their own branch
-          # filters; rewriting one of those would leave the deploy trigger
-          # pointing at the old branch while everything reported success.
-          m = re.search(r'^(?P<i>[ \t]+)push:[ \t]*$', src, re.M)
-          if not m:
-              sys.exit('docs-deploy.yml has no push: trigger - refusing to edit blindly')
-          pind = len(m.group('i'))
-          rest = src[m.end():]
-          end = len(rest)
-          for line in re.finditer(r'^(?P<i>[ \t]*)\S.*$', rest, re.M):
-              if len(line.group('i')) <= pind:
-                  end = line.start()
-                  break
-          push_block = rest[:end]
-
-          bm = re.search(r'^(?P<i>[ \t]+)branches:[ \t]*$', push_block, re.M)
-          if not bm:
-              sys.exit('the push: trigger has no branches: list - refusing to edit blindly')
-          bind = len(bm.group('i'))
-          tail_of_block = push_block[bm.end():]
-          bend = len(tail_of_block)
-          for line in re.finditer(r'^(?P<i>[ \t]*)\S.*$', tail_of_block, re.M):
-              if len(line.group('i')) <= bind:
-                  bend = line.start()
-                  break
-          branches = tail_of_block[:bend]
-
-          entries = re.findall(r"^[ \t]*-[ \t]*['\"]?(\S+?)['\"]?[ \t]*$", branches, re.M)
-          if len(entries) != 1:
-              sys.exit(f'expected exactly one push branch entry, found {entries}')
-          if entries[0] == new:
-              sys.exit(f'{path} already pins {new} - nothing to repoint')
-
-          patched_branches = re.sub(r"^([ \t]*-[ \t]*)['\"]?\S+?['\"]?([ \t]*)$",
-                                    rf'\g<1>{new}\g<2>', branches, flags=re.M)
-          out = (src[:m.end()] + push_block[:bm.end()] + patched_branches
-                 + tail_of_block[bend:] + rest[end:])
-          open(path, 'w').write(out)
-          print(f'repointed {entries[0]} -> {new}')
-          PY
+          # One parser for both the check above and this rewrite. Two parsers of
+          # the same list disagreeing is a daily-failing job: the check says
+          # "not pinned", the rewrite says "already pinned" and exits non-zero,
+          # and the cutover never advances. The script comes from GITHUB_WORKSPACE
+          # (this workflow's own ref), never from the branch being edited, so a
+          # release branch cannot supply code that runs against a write token.
+          DEPLOY_YML="${workdir}/.github/workflows/docs-deploy.yml" \
+            python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" \
+            --repoint "$TARGET_BRANCH"
 
           git config user.name "erigon-release-bot[bot]"
           git config user.email "erigon-release-bot[bot]@users.noreply.github.com"
@@ -709,6 +660,13 @@ jobs:
     # without touching this file.
     environment: release-branch-management
     steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
       - name: Generate GitHub App token
         id: app_token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
@@ -824,20 +782,9 @@ jobs:
             echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
             exit 1
           fi
-          # Extract the branches of the PUSH trigger only. The `on:` block can
-          # carry other triggers with their own branch filters, and a match in
-          # one of those is not a deploy trigger: a file whose push list still
-          # names the old branch would read as pinned, the variable would flip,
-          # and merges would never publish. Comparing with `grep -Fx` against
-          # this list also removes every regex-escaping question.
-          cat > "${RUNNER_TEMP}/push-branches.awk" <<'AWKEOF'
-          /^[[:blank:]]*push:[[:blank:]]*$/ { p=1; pind=match($0,/[^ \t]/); next }
-          p && /^[[:blank:]]*[^ \t#-]/ { if (match($0,/[^ \t]/) <= pind) { p=0; b=0 } }
-          p && /^[[:blank:]]*branches:[[:blank:]]*$/ { b=1; next }
-          p && b && /^[[:blank:]]*-/ { gsub(/^[[:blank:]]*-[[:blank:]]*/,""); gsub(/['"'"'"]/,""); gsub(/[[:blank:]]*$/,""); print; next }
-          p && b && /^[[:blank:]]*[^ \t-]/ { b=0 }
-          AWKEOF
-          if ! printf '%s' "$deploy_yml" | awk -f "${RUNNER_TEMP}/push-branches.awk" \
+          printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+          if ! DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+               python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
                | grep -Fxq "$TARGET_BRANCH"; then
             echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
             exit 1
