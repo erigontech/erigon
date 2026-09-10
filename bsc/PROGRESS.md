@@ -24,10 +24,19 @@ headers+bodies over devp2p and hands them to the exec module via `InsertBlocks` 
 `UpdateForkChoice`. Model was Caplin's `execution_client_direct.go`.
 
 - **Loop** (`bsc/sync/{driver,fetch,verify,resume}.go`): from `max(FrozenBlocks, CurrentHeader)`,
-  fetch `[head+1, head+1024]` from a peer (`ListPeersMayHaveBlockNum`), verify
-  (`SanityCheck`+`HashCheck`, no EVM/seal), `InsertBlocks`, and `UpdateForkChoice` every
-  `LoopBlockLimit` blocks (+ at target). Bounded by `--sync.target-block`. Simple alternating
-  loop (only network Fetch is off the exec semaphore).
+  verify (`SanityCheck`+`HashCheck`+parent-linkage, no EVM/seal), `InsertBlocks`, and
+  `UpdateForkChoice` every `LoopBlockLimit` blocks (+ at target). Bounded by `--sync.target-block`.
+  Only network fetch is off the exec semaphore.
+- **Parallel range downloader** (`bsc/sync/rangedownloader.go`): a generalized fork of bor's deleted
+  `polygon/sync` block downloader (`downloadBlocksUsingWaypoints`). Waypoints → block-number ranges
+  (default 1024 ≈ 1GB/worker at 1MB/block, matching bor; RAM-bounded worker count scales with the
+  range size), generated lazily from a cursor (no up-front ~123k-entry list for a full-chain sync);
+  worker pool `min(maxWorkers, peers, ranges)` fetches ranges concurrently across peers; per-range
+  `verifyChain` (= bor's `blocksVerifier` + the boundary linkage waypoints gave for free); gap
+  truncation (cursor rewinds to the failed range); peer-poll backoff. Ordered batches go to the same
+  `InsertBlocks`+FCU seam (= bor's `store.InsertBlocks`). Used for bounded bulk (target>0); the
+  single-peer sequential loop remains for the tip-less (target==0) fallback. Verified on Chapel:
+  multi-peer parallel fetch (`workers>1`), resume-on-restart, no `BadBlock`.
 - **Blocks-only mode** (the one execution-side edit): reuses `StagesOnlyBlocks` (set for Parlia in backend), which no-ops the Execution stage
   and makes `Finish` advance the head to the **Senders** frontier (not the never-advancing
   Execution frontier), so `UpdateForkChoice` returns `Success` instead of `BadBlock` with

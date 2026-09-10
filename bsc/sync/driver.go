@@ -37,6 +37,7 @@ import (
 const (
 	fetchChunk       = 1024 // headers per FetchHeaders round (eth.MaxHeadersServe)
 	defaultFcuBlocks = 8192 // fallback FCU interval when LoopBlockLimit is unset
+	defaultRangeSize = 1024 // blocks per worker range (~1GB/worker at 1MB/block, matching bor)
 	peerBackoff      = 3 * time.Second
 )
 
@@ -44,8 +45,9 @@ const (
 type Config struct {
 	ChainRW     chainreader.ChainReaderWriterEth1
 	Svc         *bscp2p.Service
-	TargetBlock uint64 // exclusive-of-nothing upper bound; sync stops once head >= TargetBlock. 0 = no bound (until later phases add tip-following).
+	TargetBlock uint64 // upper bound; bounded bulk uses the parallel downloader. 0 = tip-less sequential fallback (until tip-following lands).
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
+	RangeSize   uint64 // per-worker range in the parallel downloader
 }
 
 // RunBlockDownloader runs the p2p service and the forward download loop until ctx
@@ -53,6 +55,9 @@ type Config struct {
 func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) error {
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
+	}
+	if cfg.RangeSize == 0 {
+		cfg.RangeSize = defaultRangeSize
 	}
 	errCh := make(chan error, 2)
 	go func() { errCh <- cfg.Svc.Run(ctx) }()
@@ -67,8 +72,46 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 
 func runLoop(ctx context.Context, logger log.Logger, cfg Config) error {
 	head, parent := computeResume(ctx, cfg.ChainRW)
-	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock)
+	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", cfg.RangeSize)
+	if cfg.TargetBlock == 0 {
+		// No target: fall back to the single-peer sequential loop (crude tip
+		// follow). Parallel bulk needs a finite target to lay out ranges.
+		return runSequential(ctx, logger, cfg, head, parent)
+	}
+	return runParallel(ctx, logger, cfg, head, parent)
+}
 
+// runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
+// downloader, persisting each assembled batch and advancing the head via FCU.
+func runParallel(ctx context.Context, logger log.Logger, cfg Config, head uint64, parent *types.Header) error {
+	if head >= cfg.TargetBlock {
+		logger.Info("[bsc] reached target", "block", head)
+		return nil
+	}
+	lastFcu := head
+	insert := func(ctx context.Context, blocks []*types.Block) error {
+		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
+			return err
+		}
+		last := blocks[len(blocks)-1]
+		head = last.NumberU64()
+		if head-lastFcu >= cfg.FcuInterval || head >= cfg.TargetBlock {
+			if err := commitHead(ctx, logger, cfg, last); err != nil {
+				return err
+			}
+			lastFcu = head
+		}
+		return nil
+	}
+	d := newRangeDownloader(logger, cfg.Svc, cfg.RangeSize)
+	if err := d.download(ctx, head+1, cfg.TargetBlock, parent, insert); err != nil {
+		return err
+	}
+	logger.Info("[bsc] reached target", "block", cfg.TargetBlock)
+	return nil
+}
+
+func runSequential(ctx context.Context, logger log.Logger, cfg Config, head uint64, parent *types.Header) error {
 	lastFcu := head
 	for {
 		if ctx.Err() != nil {
