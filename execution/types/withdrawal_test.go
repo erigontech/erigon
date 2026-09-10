@@ -95,9 +95,11 @@ func TestWithdrawalJSONGolden(t *testing.T) {
 	assert.Equal(t, ws, back)
 }
 
-// The rejection comes from hexutil.Uint64 and common.Address carrying their own
-// UnmarshalJSON, not from reflection: encoding/json ignores a null literal for a
-// plain uint64 field, which is what the generated pointer-decoder relied on.
+// Null is rejected because hexutil.Uint64 and common.Address carry their own
+// UnmarshalJSON. The generated decoder tolerated it for the opposite reason: it
+// decoded into pointer fields, and encoding/json nils the pointer on null
+// without reaching the element type at all, which its non-nil guard then read
+// as an absent field.
 func TestWithdrawalJSONRejectsNull(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{
