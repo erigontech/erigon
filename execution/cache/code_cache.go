@@ -264,9 +264,9 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The content-addressed layers grow from a small start into the shared
 	// envelope, so a cache over few contracts (a test fixture) never pre-commits
 	// the full budget. onEvict keeps the byte/entry counters following residency.
-	// Both layers store the same slice, so the counters double-charge it; only
-	// the entry structs truly duplicate. Their resident sets still diverge, so
-	// splitting is the conservative bound on real bytes.
+	// Both layers store the same slice, so the counters double-charge it. But
+	// nothing keeps their resident sets equal, and disjoint sets really do cost
+	// twice — the split bounds that worst case.
 	perLayer := max(codeCapacityBytes/2, 1)
 	cc.codeLayerCapB = perLayer
 	cc.hashToCode = newByteLRU(perLayer, codeEntryResident,
