@@ -157,10 +157,11 @@ func (v TxnInclusionVerifier) WaitForPending(
 	var lastErr error
 	for {
 		pending, err := v.rpcApiClient.TxpoolPendingHashesFrom(sender)
-		if err != nil {
-			lastErr = err
-		} else if _, ok := pending[hash]; ok {
-			return nil
+		lastErr = err
+		if err == nil {
+			if _, ok := pending[hash]; ok {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
