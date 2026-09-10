@@ -369,6 +369,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		WithoutSharedBranchCache()(&o)
 	}
 	trieCfg := o.trieCfg
+	commitmentDomain := kv.CommitmentDomain
+	if trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
 
 	generationTx := cacheGenerationTx(tx)
 	if generationTx == nil {
@@ -400,7 +404,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// the reverse import would create a cycle.
 	var branchCache *commitment.BranchCache
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
-		branchCache = p.BranchCache()
+		branchCache = p.BranchCache(commitmentDomain)
 	}
 	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
@@ -411,7 +415,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
 	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
-		sd.adaptivePinController = p.AdaptivePinController()
+		sd.adaptivePinController = p.AdaptivePinController(commitmentDomain)
 	}
 
 	// After adaptivePinController is assigned: the wrapper binds it, and the

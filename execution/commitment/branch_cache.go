@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
@@ -195,11 +196,11 @@ const DefaultBranchCacheTailCapacity = 50000 // ~50k * ~500B = ~25MB at mainnet 
 // BranchCacheProvider: returning nil means no shared cache; callers must
 // treat that as disabled, not panic.
 type BranchCacheProvider interface {
-	BranchCache() *BranchCache
+	BranchCache(domain kv.Domain) *BranchCache
 }
 
 type AdaptivePinControllerProvider interface {
-	AdaptivePinController() *AdaptivePinController
+	AdaptivePinController(domain kv.Domain) *AdaptivePinController
 }
 
 const branchCacheTailShards = 256

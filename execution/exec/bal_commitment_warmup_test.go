@@ -87,7 +87,7 @@ type commitmentBranchCacheProvider struct {
 	cache *commitment.BranchCache
 }
 
-func (p commitmentBranchCacheProvider) BranchCache() *commitment.BranchCache {
+func (p commitmentBranchCacheProvider) BranchCache(kv.Domain) *commitment.BranchCache {
 	return p.cache
 }
 

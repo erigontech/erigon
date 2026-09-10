@@ -193,10 +193,12 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
-			if bc := aggTx.BranchCache(); bc != nil {
-				bc.Clear()
+			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+				if bc := aggTx.BranchCache(domain); bc != nil {
+					bc.Clear()
+					branchCacheCleared = true
+				}
 			}
-			branchCacheCleared = true
 		}
 	}
 	if !branchCacheCleared {

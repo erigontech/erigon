@@ -970,7 +970,7 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 
 	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
-	branchCache := provider.BranchCache()
+	branchCache := provider.BranchCache(kv.CommitmentDomain)
 	require.NotNil(t, branchCache)
 	branchCache.Clear()
 	t.Cleanup(branchCache.Clear)

@@ -434,11 +434,17 @@ func (a *Aggregator) ConfigureDomains() error {
 	// by USE_STATE_CACHE, nil = disabled. Skipped for ephemeral aggregators that
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
 	if dbg.UseStateCache && !a.branchCacheDisabled {
-		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
-			if !dbg.DisableAdaptivePin {
-				cd.adaptivePinController = commitment.NewAdaptivePinController(
-					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			if domain != kv.CommitmentDomain {
+				continue
+			}
+			cd := a.d[domain]
+			if cd != nil && cd.branchCache == nil {
+				cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+				if !dbg.DisableAdaptivePin {
+					cd.adaptivePinController = commitment.NewAdaptivePinController(
+						cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)
+				}
 			}
 		}
 	}
@@ -748,9 +754,11 @@ func (a *Aggregator) Close() {
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
 	// BranchCaches size their trunk depth against real concurrency.
-	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
-		cd.branchCache.Clear()
-		cd.branchCache.Close()
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if cd := a.d[domain]; cd != nil && cd.branchCache != nil {
+			cd.branchCache.Clear()
+			cd.branchCache.Close()
+		}
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -2686,20 +2694,20 @@ func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
 }
 
 // BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
-func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
-	if at.d[kv.CommitmentDomain] == nil {
+func (at *AggregatorRoTx) BranchCache(domain kv.Domain) *commitment.BranchCache {
+	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[kv.CommitmentDomain].d.branchCache
+	return at.d[domain].d.BranchCache(domain)
 }
 
 // AdaptivePinController attached to the commitment domain (implements
 // commitment.AdaptivePinControllerProvider).
-func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinController {
-	if at.d[kv.CommitmentDomain] == nil {
+func (at *AggregatorRoTx) AdaptivePinController(domain kv.Domain) *commitment.AdaptivePinController {
+	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[kv.CommitmentDomain].d.adaptivePinController
+	return at.d[domain].d.AdaptivePinController(domain)
 }
 
 // MetricsCollector exposes the aggregator-scope KV-read metrics collector,
@@ -2771,11 +2779,11 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64) {
+func (at *AggregatorRoTx) cacheLatestBranch(domain kv.Domain, enabled bool, k, v []byte, step kv.Step, txNum uint64) {
 	if !enabled || len(v) == 0 {
 		return
 	}
-	if branchCache := at.BranchCache(); branchCache != nil {
+	if branchCache := at.BranchCache(domain); branchCache != nil {
 		branchCache.Put(k, v, uint64(step), txNum)
 	}
 }
@@ -2795,7 +2803,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()))
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, step.LastTxNum(at.StepSize()))
 		return v, step, true, nil
 	}
 	var found bool
@@ -2810,7 +2818,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum)
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, fileEndTxNum)
 	}
 	return v, step, found, err
 }

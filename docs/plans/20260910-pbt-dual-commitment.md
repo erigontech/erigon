@@ -399,19 +399,19 @@ different states and correctly report different roots.
 - Modify: `rpc/jsonrpc/eth_call_test.go`
 - Modify: `rpc/jsonrpc/trace_view_consistency_test.go`
 
-- [ ] give `BranchCache` and `AdaptivePinController` a domain parameter **on the interface** as well as
+- [x] give `BranchCache` and `AdaptivePinController` a domain parameter **on the interface** as well as
       the concrete type — the provider is reached through a duck-typed assertion, so changing only one
       side compiles and silently disables the cache
-- [ ] change the cache constructor and teardown to walk the registered commitment domains rather than
+- [x] change the cache constructor and teardown to walk the registered commitment domains rather than
       hardcoding `kv.CommitmentDomain`
-- [ ] leave the bin domain's cache nil — the trunk is 16^depth nibble-indexed and a bit path cannot use
+- [x] leave the bin domain's cache nil — the trunk is 16^depth nibble-indexed and a bit path cannot use
       it
-- [ ] update every caller, test files included
-- [ ] write tests: the hex domain's cache is **non-nil**, takes a put, and serves it back — this is the
+- [x] update every caller, test files included
+- [x] write tests: the hex domain's cache is **non-nil**, takes a put, and serves it back — this is the
       assertion that fails if the duck-typed assertion stops matching
-- [ ] write tests: `BranchCache` for the bin domain is nil and every caller tolerates that
-- [ ] write tests: a branch write against the bin domain does not appear in the hex domain's cache
-- [ ] run `make test-short` — must pass before task 8
+- [x] write tests: `BranchCache` for the bin domain is nil and every caller tolerates that
+- [x] write tests: a branch write against the bin domain does not appear in the hex domain's cache
+- [x] run `make test-short` — must pass before task 8
 
 ### Task 8: Parameterize the commitment context on its domain
 

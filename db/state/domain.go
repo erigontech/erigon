@@ -146,13 +146,19 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 // BranchCache returns the long-lived commitment-trie branch cache attached
 // to this domain. Non-nil only on the commitment domain. Lifetime is the
 // owning Aggregator's lifetime.
-func (d *Domain) BranchCache() *commitment.BranchCache {
+func (d *Domain) BranchCache(domain kv.Domain) *commitment.BranchCache {
+	if d.Name != domain {
+		return nil
+	}
 	return d.branchCache
 }
 
 // AdaptivePinController returns the aggregator-lifetime pin controller
 // co-located with BranchCache. Non-nil only on the commitment domain.
-func (d *Domain) AdaptivePinController() *commitment.AdaptivePinController {
+func (d *Domain) AdaptivePinController(domain kv.Domain) *commitment.AdaptivePinController {
+	if d.Name != domain {
+		return nil
+	}
 	return d.adaptivePinController
 }
 

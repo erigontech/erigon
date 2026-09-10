@@ -122,7 +122,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 		}
 		var cache *commitment.BranchCache
 		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
-			cache = provider.BranchCache()
+			cache = provider.BranchCache(kv.CommitmentDomain)
 		}
 		return &balCommitmentContext{
 			tx:         txTemporal,
