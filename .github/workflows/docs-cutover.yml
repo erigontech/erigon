@@ -108,14 +108,30 @@ jobs:
           #     sort by semantic version;
           #   - tag SHAPE decides pre-release, because releases do not reliably
           #     set the API's `prerelease` flag; any hyphen disqualifies a tag.
-          newest="$(gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' \
+          # NOT --paginate, and majors are bounded. Both matter:
+          #
+          # Erigon shipped CALENDAR-versioned releases in 2022 (v2022.07.02 ...
+          # v2022.10.01). They are real releases, not drafts, not pre-releases,
+          # and they match the semver shape — so a paginated numeric sort picks
+          # 2022.10.01 as "newest" (2022 > 3) and this workflow would chase
+          # release/2022.10 forever. Verified against the live release list.
+          #
+          # The API returns releases newest-first by publish date, so the first
+          # page is the recent window the docs site itself looks at
+          # (docs/site/src/releases.js reads one page too). The major bound is
+          # the belt to that braces: a docs cutover advances at most one major,
+          # so anything outside [current, current+1] is not a candidate however
+          # it got tagged.
+          major_now="$(echo "$DEPLOY_BRANCH" | sed 's|release/||' | cut -d. -f1)"
+          newest="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
             | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 >= m && $1 <= m + 1' \
             | sort -t. -k1,1n -k2,2n -k3,3n \
             | tail -n1 || true)"
-          # `|| true`: with no match `grep` exits 1 and pipefail would abort the
-          # assignment, killing the step before the diagnostic below can print.
+          # `|| true`: with no match `grep`/`awk` exit non-zero and pipefail would
+          # abort the assignment, killing the step before the diagnostic prints.
 
           if [ -z "$newest" ]; then
             echo "::error::No stable release found. Refusing to guess a target series."
@@ -147,7 +163,23 @@ jobs:
 
           if [ "$DEPLOY_BRANCH" = "$target_branch" ]; then
             echo "diverged=false" >> "$GITHUB_OUTPUT"
-            echo "Docs deploy branch is current. Nothing to do."
+
+            # "Variable is current" is not the same as "the cutover finished".
+            # If someone flipped the variable by hand without repointing the
+            # push trigger, merges to this branch never publish and only the
+            # 06:20 cron does — quietly, for as long as nobody notices. The
+            # state machine below never looks at the branch in this case, so
+            # check it here.
+            deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${target_branch}" \
+              --jq '.content' 2>/dev/null | base64 -d || echo '')"
+            if [ -z "$deploy_yml" ]; then
+              echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
+            elif ! echo "$deploy_yml" | sed -n '/^on:/,/^permissions:/p' | grep -qE "^ *- *${target_branch}\$"; then
+              echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
+              echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
+            else
+              echo "Docs deploy branch is current and its push trigger pins itself. Nothing to do."
+            fi
             exit 0
           fi
 
@@ -199,6 +231,11 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-actions: write
+          # The repoint commit modifies .github/workflows/docs-deploy.yml, and
+          # GitHub rejects a workflow-file push from an App token without this
+          # (release.yml requests it for the same reason). Scoping the token
+          # without it would break the push that scoping was applied to.
+          permission-workflows: write
 
       - name: Read the desired end state off the target branch
         id: state
@@ -304,7 +341,7 @@ jobs:
           # version bump, and both race to open competing PRs from the same base.
           inflight="$(gh run list --workflow docs-version-bump.yml --branch "$TARGET_BRANCH" \
             --limit 20 --json status,databaseId \
-            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "requested" or .status == "waiting")] | length' || echo 0)"
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "requested" or .status == "waiting" or .status == "pending")] | length' || echo 0)"
           if [ "$inflight" != "0" ]; then
             echo "A docs-version-bump run is already in flight on ${TARGET_BRANCH}. Waiting for it."
             exit 0
@@ -500,7 +537,12 @@ jobs:
           rules="$(gh api "repos/{owner}/{repo}/environments/release-branch-management" \
             --jq '[.protection_rules[]?.type] | join(",")' 2>/dev/null || echo "__unreadable__")"
           if [ "$rules" = "__unreadable__" ]; then
-            echo "::warning::Could not read the environment's protection rules with this token; continuing."
+            # Fail CLOSED. The unreadable case and the unprotected case look the
+            # same from here, and proceeding would flip the published docs with
+            # no approval in exactly the misconfiguration this asserts against.
+            echo "::error::Could not read protection rules for release-branch-management."
+            echo "Refusing to flip the published docs series without confirming the approval gate."
+            exit 1
           elif ! echo "$rules" | grep -q 'required_reviewers'; then
             echo "::error::Environment release-branch-management has no required_reviewers rule (rules: ${rules:-none})."
             echo "This job would flip the published docs series with no human approval. Refusing."
@@ -514,11 +556,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          DEPLOY_BRANCH: ${{ vars.DOCS_DEPLOY_BRANCH }}
           TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
           TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
         run: |
           set -euo pipefail
+
+          # Read the variable from the API, not from the `vars` context: whether
+          # that context is materialised before or after the approval wait is a
+          # runner detail, and this guarantee must not depend on it. (An
+          # environment-scoped variable of the same name would also shadow the
+          # repository one in the context, but not here.)
+          DEPLOY_BRANCH="$(gh api "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" --jq '.value')"
 
           # Everything in `needs.*` was computed BEFORE the approval wait, which
           # can last up to the 30-day environment timeout. Approving a stale run
@@ -528,10 +576,14 @@ jobs:
           #
           # Selection duplicated from the `detect` job on purpose: the two must
           # agree, and a shared step would need a composite action for three lines.
-          newest="$(gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' \
+          # Same bounded selection as `detect` — see the comment there for why
+          # --paginate and an unbounded major are both wrong.
+          major_now="$(echo "$DEPLOY_BRANCH" | sed 's|release/||' | cut -d. -f1)"
+          newest="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
             | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 >= m && $1 <= m + 1' \
             | sort -t. -k1,1n -k2,2n -k3,3n \
             | tail -n1 || true)"
           if [ -z "$newest" ]; then
@@ -547,7 +599,10 @@ jobs:
           fi
 
           if [ "$DEPLOY_BRANCH" = "$TARGET_BRANCH" ]; then
-            echo "DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — someone completed the cutover. Nothing to do."
+            # Someone flipped it by hand while this waited. The variable alone
+            # does not publish anything, so the site can still be serving the
+            # old series; dispatch a deploy rather than declaring victory.
+            echo "::warning::DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — flipped outside this run."
             echo "already_done=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -602,7 +657,10 @@ jobs:
           echo "DOCS_DEPLOY_BRANCH: ${CURRENT_BRANCH} -> ${TARGET_BRANCH}"
 
       - name: Publish the new series
-        if: steps.revalidate.outputs.already_done == 'false'
+        # Runs on the already-flipped path too: a variable set by hand publishes
+        # nothing on its own, so skipping this would leave the site on the old
+        # series until the 06:20 cron while this run reported success.
+        if: steps.revalidate.outputs.already_done != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
