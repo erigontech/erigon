@@ -533,16 +533,16 @@ different states and correctly report different roots.
 - Create: `execution/commitment/commitmentdb/buffered_context.go`
 - Create: `execution/commitment/commitmentdb/buffered_context_test.go`
 
-- [ ] add a `PatriciaContext` wrapper that forwards reads and **collects** `PutBranch` calls in order
+- [x] add a `PatriciaContext` wrapper that forwards reads and **collects** `PutBranch` calls in order
       instead of writing them, with an explicit replay entry point
-- [ ] this is required because the deferred-update primitives on `BranchEncoder` are hex-only:
+- [x] this is required because the deferred-update primitives on `BranchEncoder` are hex-only:
       `PBinPatriciaHashed` uses `pbinBranchEncoder`, which has no deferral, and calls `ctx.PutBranch`
       inline
-- [ ] preserve `prev` values so the replayed writes produce the same diffs a direct write would
-- [ ] write tests: reads pass through; puts do not reach the underlying context until replay
-- [ ] write tests: replay produces the same branch values and the same `prev` pairing as a direct write
-- [ ] write tests: a fold that errors mid-way replays nothing
-- [ ] run `make test-short` — must pass before task 14
+- [x] preserve `prev` values so the replayed writes produce the same diffs a direct write would
+- [x] write tests: reads pass through; puts do not reach the underlying context until replay
+- [x] write tests: replay produces the same branch values and the same `prev` pairing as a direct write
+- [x] write tests: a fold that errors mid-way replays nothing
+- [x] run `make test-short` — must pass before task 14
 
 ### Task 14: Fan the committer out to two concurrent folds
 
