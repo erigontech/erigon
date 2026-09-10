@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestRefsInCommitmentBranchesAccessor(t *testing.T) {
@@ -80,6 +81,49 @@ func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 			require.Equal(t, variant != TrieVariantHex, got.HasTrieVariant(TrieVariantBin))
 		})
 	}
+}
+
+func TestErigonDBSettingsFrozenCommitmentRoundTrip(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "erigondb.toml")
+	variant := TrieVariantHexBin
+	hash := "blake3"
+	settings := &ErigonDBSettings{
+		StepSize:          100,
+		StepsInFrozenFile: 8,
+		TrieVariant:       &variant,
+		TrieHash:          &hash,
+		FrozenAtTxNum: map[string]uint64{
+			kv.CommitmentDomain.String():    120,
+			kv.CommitmentBinDomain.String(): 240,
+		},
+	}
+	require.NoError(t, writeErigonDBSettings(path, settings))
+
+	got, err := readErigonDBSettings(path)
+	require.NoError(t, err)
+	require.Equal(t, uint64(120), got.FrozenAtTxNum[kv.CommitmentDomain.String()])
+	require.Equal(t, uint64(240), got.FrozenAtTxNum[kv.CommitmentBinDomain.String()])
+	frozenAt, frozen := got.FrozenAt(kv.CommitmentDomain)
+	require.True(t, frozen)
+	require.Equal(t, uint64(120), frozenAt)
+}
+
+func TestErigonDBSettingsFrozenCommitmentSurvivesAggregatorOpen(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantHex
+	settings := &ErigonDBSettings{
+		StepSize:          config3.DefaultStepSize,
+		StepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		TrieVariant:       &variant,
+		FrozenAtTxNum:     map[string]uint64{kv.CommitmentDomain.String(): 16},
+	}
+	require.NoError(t, WriteErigonDBSettings(dirs, settings))
+
+	agg := openTestAggForRefs(t, dirs, settings)
+	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+	require.True(t, frozen)
+	require.Equal(t, uint64(16), frozenAt)
 }
 
 func TestErigonDBSettingsAbsentFieldUnmarshalsNil(t *testing.T) {

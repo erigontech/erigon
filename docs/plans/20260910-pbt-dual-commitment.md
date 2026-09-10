@@ -771,22 +771,24 @@ different states and correctly report different roots.
 
 **Files:**
 - Modify: `db/state/erigondb_settings.go`
+- Modify: `db/state/aggregator2.go`
 - Modify: `db/state/aggregator.go`
+- Modify: `db/state/execctx/domain_shared.go`
 - Modify: `execution/stagedsync/committer.go`
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `db/state/erigondb_settings_test.go`
 - Modify: `execution/stagedsync/committer_test.go`
 
-- [ ] add `frozen_at_txnum` per commitment domain to `erigondb.toml`, seeded at open
-- [ ] stop folding a frozen domain in the committer; refuse `DomainPut` against it; skip it in merge
-- [ ] refuse an unwind below `frozen_at_txnum` — that is a finality violation, not a recoverable state
-- [ ] expose the freeze as an explicit `integration commitment freeze --trie hex` action; no automatic
+- [x] add `frozen_at_txnum` per commitment domain to `erigondb.toml`, seeded at open
+- [x] stop folding a frozen domain in the committer; refuse `DomainPut` against it; skip it in merge
+- [x] refuse an unwind below `frozen_at_txnum` — that is a finality violation, not a recoverable state
+- [x] expose the freeze as an explicit `integration commitment freeze --trie hex` action; no automatic
       finality trigger (see design decision 6)
-- [ ] write tests: after the freeze the hex domain stops advancing while accounts/storage continue, and
+- [x] write tests: after the freeze the hex domain stops advancing while accounts/storage continue, and
       the aggregator's minimax is unaffected
-- [ ] write tests: a `DomainPut` against a frozen domain errors; an unwind below the freeze point errors
-- [ ] write tests: the freeze survives a restart (read back from `erigondb.toml`, no resumed folding)
-- [ ] run `make test-short` — must pass before task 26
+- [x] write tests: a `DomainPut` against a frozen domain errors; an unwind below the freeze point errors
+- [x] write tests: the freeze survives a restart (read back from `erigondb.toml`, no resumed folding)
+- [x] run `make test-short` — must pass before task 26
 
 ### Task 26: End-to-end hex+bin flip test
 

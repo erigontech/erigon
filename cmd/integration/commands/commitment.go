@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -72,6 +73,7 @@ import (
 var (
 	branchPrefixFlag string
 	txnumFlag        uint64
+	freezeTrieFlag   string
 )
 
 // visualize command flags
@@ -127,6 +129,12 @@ func init() {
 		"steps one rebuild shard covers; 0 sizes it from the machine's RAM")
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
+	withChain(cmdCommitmentFreeze)
+	withDataDir(cmdCommitmentFreeze)
+	withConfig(cmdCommitmentFreeze)
+	cmdCommitmentFreeze.Flags().StringVar(&freezeTrieFlag, "trie", dbstate.TrieVariantHex, "commitment trie to freeze")
+	commitmentCmd.AddCommand(cmdCommitmentFreeze)
+
 	// commitment print
 	withChain(cmdCommitmentPrint)
 	withDataDir(cmdCommitmentPrint)
@@ -180,6 +188,43 @@ func init() {
 var commitmentCmd = &cobra.Command{
 	Use:   "commitment",
 	Short: "Commitment domain commands",
+}
+
+var cmdCommitmentFreeze = &cobra.Command{
+	Use:   "freeze",
+	Short: "Freeze a commitment trie at the current state",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		if freezeTrieFlag != dbstate.TrieVariantHex {
+			logger.Error("only the hex commitment trie can be frozen", "trie", freezeTrieFlag)
+			return
+		}
+		dirs := datadir.New(datadirCli)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			logger.Error("Failed to begin temporal tx", "error", err)
+			return
+		}
+		defer tx.Rollback()
+		_, txNum, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			logger.Error("Failed to read current txnum", "error", err)
+			return
+		}
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		if err := agg.FreezeDomain(kv.CommitmentDomain, txNum); err != nil {
+			logger.Error("Failed to freeze commitment domain", "error", err)
+			return
+		}
+		fmt.Printf("froze %s at txnum %d\n", kv.CommitmentDomain, txNum)
+	},
 }
 
 // integration commitment branch

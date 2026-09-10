@@ -819,6 +819,9 @@ func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context
 		return result, nil
 	}
 	sdCtx := cc.doms.GetCommitmentContext()
+	if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
+		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is frozen", sdCtx.CommitmentDomain())
+	}
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(reader)
@@ -965,6 +968,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()
+	if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
+		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %scommitment domain %s is frozen", m.label, sdCtx.CommitmentDomain())})
+		return
+	}
 	sdCtx.SetUpdates(cc.handOffUpdates())
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
@@ -1094,12 +1102,16 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
 	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	if cc.domainFrozenAfter(canonicalDomain, t.lastTxNum) {
+		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is frozen", canonicalDomain)
+	}
 	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
 	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
 	results := make(chan dualFoldResult, 2)
 	var wg sync.WaitGroup
 	for _, arm := range []*commitmentFoldArm{&hexArm, &binArm} {
-		if arm.ctx.CommitmentDomain() == shadowDomain && cc.shadowStopped[shadowDomain] {
+		if cc.domainFrozenAfter(arm.ctx.CommitmentDomain(), t.lastTxNum) ||
+			(arm.ctx.CommitmentDomain() == shadowDomain && cc.shadowStopped[shadowDomain]) {
 			continue
 		}
 		wg.Add(1)
@@ -1209,6 +1221,20 @@ func (cc *commitmentCalculator) setCanonicalCommitmentDomain(blockTime uint64) {
 	if p, ok := cc.roTx.AggTx().(interface{ SetCanonicalCommitmentDomain(kv.Domain) }); ok {
 		p.SetCanonicalCommitmentDomain(domain)
 	}
+}
+
+func (cc *commitmentCalculator) domainFrozenAfter(domain kv.Domain, txNum uint64) bool {
+	if cc.roTx == nil {
+		return false
+	}
+	p, ok := cc.roTx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+	})
+	if !ok {
+		return false
+	}
+	frozenAt, frozen := p.IsDomainFrozen(domain)
+	return frozen && txNum > frozenAt
 }
 
 func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
@@ -1347,6 +1373,9 @@ func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target 
 
 func (cc *commitmentCalculator) isUnfrozenStepEdge(txNum uint64) bool {
 	for _, domain := range cc.doms.CommitmentDomains() {
+		if cc.domainFrozenAfter(domain, txNum) {
+			continue
+		}
 		if cc.doms.IsUnfrozenStepEdge(cc.roTx, domain, txNum) {
 			return true
 		}

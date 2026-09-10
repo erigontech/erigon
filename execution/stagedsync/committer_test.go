@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -515,6 +516,89 @@ func TestCommitmentCalculatorCanonicalArmFollowsBlockTime(t *testing.T) {
 	require.Equal(t, kv.CommitmentDomain, cc.canonicalCommitmentDomain(9))
 	require.Equal(t, kv.CommitmentBinDomain, cc.canonicalCommitmentDomain(10))
 	require.Equal(t, kv.CommitmentBinDomain, cc.canonicalCommitmentDomain(11))
+}
+
+func TestCommitmentCalculatorFrozenShadowAndWrites(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
+
+	db, tx, doms := setupStepTest(t)
+	settings := &dbstate.ErigonDBSettings{
+		StepSize:          16,
+		StepsInFrozenFile: 8,
+		ReferencesInCommitmentBranches: func() *bool {
+			v := true
+			return &v
+		}(),
+		TrieVariant: func() *string {
+			v := dbstate.TrieVariantHexBin
+			return &v
+		}(),
+		TrieHash: func() *string {
+			v := commitment.PBinHashBlake3
+			return &v
+		}(),
+	}
+	require.NoError(t, dbstate.WriteErigonDBSettings(tx.Debug().Dirs(), settings))
+	aggProvider, ok := tx.AggTx().(interface{ Agg() *dbstate.Aggregator })
+	require.True(t, ok)
+	agg := aggProvider.Agg()
+	require.NoError(t, agg.ReloadErigonDBSettings(true))
+	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, 10))
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	err = doms.DomainPut(kv.CommitmentDomain, tx, []byte("branch"), []byte("value"), 11, nil)
+	require.ErrorContains(t, err, "frozen at txnum 10")
+
+	key := string(bytes.Repeat([]byte{0x12}, 20))
+	account := accounts.Account{Nonce: 1}
+	accountBytes := accounts.SerialiseV3(&account)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, []byte(key), accountBytes, 11, nil))
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	t.Cleanup(updates.Close)
+	updates.TouchPlainKey(key, accountBytes, updates.TouchAccount)
+
+	cc := &commitmentCalculator{
+		doms:   doms,
+		db:     db,
+		roTx:   roTx,
+		logger: log.New(),
+		chainConfig: &chain.Config{
+			BinaryTrieTime: func() *uint64 {
+				v := uint64(1)
+				return &v
+			}(),
+		},
+	}
+	root, err := cc.computeDualFromUpdates(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 11, blockTime: 1}, updates,
+		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain},
+		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	require.NoError(t, err)
+	require.NotEmpty(t, root)
+	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	require.False(t, ok)
+	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+
+	var changeset [kv.DomainLen][]kv.DomainEntryDiff
+	unwinder, ok := tx.AggTx().(interface {
+		Unwind(context.Context, kv.RwTx, uint64, *[kv.DomainLen][]kv.DomainEntryDiff) error
+	})
+	require.True(t, ok)
+	err = unwinder.Unwind(t.Context(), tx, 9, &changeset)
+	require.ErrorContains(t, err, "would cross frozen domain commitment at txnum 10")
 }
 
 func TestCommitmentCalculatorCanonicalRootMismatch(t *testing.T) {

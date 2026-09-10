@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -33,7 +34,8 @@ type ErigonDBSettings struct {
 	TrieVariant *string `toml:"trie_variant,omitempty"`
 	// TrieHash is H for a datadir containing a binary trie ("keccak" or "blake3"); absent means
 	// keccak. Meaningless under "hex", which has no choice of hash.
-	TrieHash *string `toml:"trie_hash,omitempty"`
+	TrieHash      *string           `toml:"trie_hash,omitempty"`
+	FrozenAtTxNum map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -67,6 +69,14 @@ func (s *ErigonDBSettings) TrieHashName() string {
 		return commitment.PBinHashKeccak
 	}
 	return *s.TrieHash
+}
+
+func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
+	if s == nil || s.FrozenAtTxNum == nil {
+		return 0, false
+	}
+	txNum, ok := s.FrozenAtTxNum[domain.String()]
+	return txNum, ok
 }
 
 // reconcileTrieVariant applies the datadir's trie variant to the process.

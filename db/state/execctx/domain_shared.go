@@ -790,6 +790,9 @@ type commitmentBranchDiffWriter interface {
 // exactly one writer (the parallel commitment calculator), so this needs no
 // lock to stay race-free — see TemporalMemBatch.PutCommitmentBranchDiff.
 func (sd *SharedDomains) DomainPutCommitmentDiff(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
+		return err
+	}
 	if v == nil {
 		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
 	}
@@ -1934,6 +1937,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 }
 
 func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
+		return err
+	}
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1951,6 +1957,17 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+}
+
+func (sd *SharedDomains) ensureDomainWritable(tx kv.TemporalTx, domain kv.Domain) error {
+	if p, ok := tx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+	}); ok {
+		if frozenAt, frozen := p.IsDomainFrozen(domain); frozen {
+			return fmt.Errorf("DomainPut: %s is frozen at txnum %d", domain, frozenAt)
+		}
+	}
+	return nil
 }
 
 // resolvePrevVal runs DomainPut's shared prologue: touches ks for the
