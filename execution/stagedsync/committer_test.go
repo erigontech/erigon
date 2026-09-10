@@ -29,7 +29,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -332,6 +336,175 @@ func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
 	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
 	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
 	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
+}
+
+func TestCommitmentCalculatorDualFold(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalParallelCommitment = originalParallel
+	})
+
+	db, tx, doms := setupStepTest(t)
+	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain))
+	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	key := string(bytes.Repeat([]byte{0x11}, 20))
+	account := accounts.Account{Nonce: 1}
+	accountBytes := accounts.SerialiseV3(&account)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, []byte(key), accountBytes, 1, nil))
+
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	t.Cleanup(updates.Close)
+	updates.TouchPlainKey(key, accountBytes, updates.TouchAccount)
+
+	var binWritesBeforeReplay bool
+	cc := &commitmentCalculator{
+		doms:   doms,
+		db:     db,
+		roTx:   roTx,
+		logger: log.New(),
+		onDualArmComplete: func(domain kv.Domain) {
+			if domain != kv.CommitmentBinDomain {
+				return
+			}
+			_, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+			binWritesBeforeReplay = !ok
+		},
+	}
+
+	target := commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1}
+	dualRoot, err := cc.computeDualFromUpdates(t.Context(), target, updates, &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	require.NoError(t, err)
+	require.NotNil(t, dualRoot)
+	require.True(t, binWritesBeforeReplay, "binary branch writes must remain buffered until both folds join")
+	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok, "binary commitment state must be replayed after the join")
+
+	single, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithHexCommitmentOnly())
+	require.NoError(t, err)
+	t.Cleanup(single.Close)
+	single.SetDisableInlineTouchKey(true)
+	require.NoError(t, single.DomainPut(kv.AccountsDomain, tx, []byte(key), accountBytes, 1, nil))
+	singleUpdates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	t.Cleanup(singleUpdates.Close)
+	singleUpdates.TouchPlainKey(key, accountBytes, singleUpdates.TouchAccount)
+	single.GetCommitmentContext().SetUpdates(singleUpdates)
+	singleRoTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(singleRoTx.Rollback)
+	singleRoot, err := single.GetCommitmentContext().ComputeCommitmentWithDiffAndReader(t.Context(), singleRoTx, false, 1, 1, "test", nil, nil, &asOfStateReader{sd: single, roTx: singleRoTx, commitmentDomain: kv.CommitmentDomain}, nil)
+	require.NoError(t, err)
+	require.Equal(t, singleRoot, dualRoot, "the hex arm must match the single-arm root")
+}
+
+func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalParallelCommitment = originalParallel
+	})
+
+	db, tx, doms := setupStepTest(t)
+	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain))
+	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	key := accounts.InternAddress(common.Address{2})
+	keyBytes := key.Value()
+	account := accounts.Account{Nonce: 2}
+	accountBytes := accounts.SerialiseV3(&account)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, keyBytes[:], accountBytes, 1, nil))
+
+	cc := &commitmentCalculator{
+		doms:        doms,
+		db:          db,
+		roTx:        roTx,
+		chainConfig: &chain.Config{},
+		updates:     commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash),
+		logger:      log.New(),
+	}
+	t.Cleanup(cc.updates.Close)
+	root, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
+		blockNum:   1,
+		blockHash:  common.Hash{2},
+		lastTxNum:  1,
+		firstTxNum: 1,
+		bal: types.BlockAccessList{{
+			Address:      key,
+			NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}},
+		}},
+	}, math.MaxUint32, false, false, commitTarget{blockNum: 1, blockHash: common.Hash{2}, lastTxNum: 1})
+	require.NoError(t, err)
+	require.NotNil(t, root)
+	hexRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().RootHash()
+	require.NoError(t, err)
+	binRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	require.Equal(t, hexRoot, root)
+	require.NotEqual(t, hexRoot, binRoot)
+}
+
+func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalParallelCommitment = originalParallel
+	})
+
+	db, _, doms := setupStepTest(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}
+	addr := accounts.InternAddress(common.Address{3})
+	cs := newCalcState(asOfReader, log.New(), "test")
+	cs.accounts[addr] = &calcAccountState{Nonce: 3, CodeHash: empty.CodeHash, dirty: true}
+	cc := &commitmentCalculator{
+		doms:       doms,
+		db:         db,
+		roTx:       roTx,
+		asOfReader: asOfReader,
+		state:      cs,
+		updates:    commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash),
+		spare:      commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash),
+		logger:     log.New(),
+	}
+	t.Cleanup(cc.updates.Close)
+	t.Cleanup(cc.spare.Close)
+
+	cc.compute(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{3}, lastTxNum: 1}, computeMode{})
+	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	hexRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().RootHash()
+	require.NoError(t, err)
+	binRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	require.NotEqual(t, hexRoot, binRoot)
 }
 
 // TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the

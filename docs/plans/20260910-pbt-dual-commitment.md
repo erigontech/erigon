@@ -551,20 +551,20 @@ different states and correctly report different roots.
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `execution/stagedsync/committer_test.go`
 
-- [ ] fan `commitmentCalculator.compute` out to two arms and join before the header check — this is the
+- [x] fan `commitmentCalculator.compute` out to two arms and join before the header check — this is the
       mainline path, and it installs `sdCtx` inline rather than going through
       `computeRootFromUpdates`
-- [ ] fan `computeRootFromUpdates` out too, for the BAL compute-ahead and `shadowCrossCheck` paths
-- [ ] give each arm its own RO txn from `beginWorkerRo`, pinned to the main tx's visible-file generation
-- [ ] run the bin arm behind the Task 13 buffering context and replay the buffer after the join, on the
+- [x] fan `computeRootFromUpdates` out too, for the BAL compute-ahead and `shadowCrossCheck` paths
+- [x] give each arm its own RO txn from `beginWorkerRo`, pinned to the main tx's visible-file generation
+- [x] run the bin arm behind the Task 13 buffering context and replay the buffer after the join, on the
       calculator goroutine
-- [ ] keep the single-arm path untouched for `hex` and `bin` datadirs
-- [ ] write tests: both arms produce a root for the same block, and the hex root equals the root the
+- [x] keep the single-arm path untouched for `hex` and `bin` datadirs
+- [x] write tests: both arms produce a root for the same block, and the hex root equals the root the
       single-arm path produces for the same input
-- [ ] write tests: no bin branch write reaches `sd` before the join — assert on the underlying context,
+- [x] write tests: no bin branch write reaches `sd` before the join — assert on the underlying context,
       not on a `-race` pass, which would be green whether or not the buffering exists
-- [ ] write tests: the BAL compute-ahead path also produces both roots
-- [ ] run `make test-short` — must pass before task 15
+- [x] write tests: the BAL compute-ahead path also produces both roots
+- [x] run `make test-short` — must pass before task 15
 
 ### Task 15: Split the role and the failure policy
 
