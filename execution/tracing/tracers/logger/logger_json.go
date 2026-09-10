@@ -23,9 +23,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -33,6 +32,24 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+// jsonStructLog is the EIP-3155 wire form of a StructLog. The wire types live
+// here rather than on StructLog so that encoding stays off the json.Marshaler
+// path, which re-scans and copies every entry.
+type jsonStructLog struct {
+	Pc            uint64              `json:"pc"`
+	Op            vm.OpCode           `json:"op"`
+	Gas           math.HexOrDecimal64 `json:"gas"`
+	GasCost       math.HexOrDecimal64 `json:"gasCost"`
+	Memory        hexutil.Bytes       `json:"memory"`
+	MemorySize    int                 `json:"memSize"`
+	Stack         []hexutil.U256      `json:"stack"`
+	ReturnData    hexutil.Bytes       `json:"returnData"`
+	Depth         int                 `json:"depth"`
+	RefundCounter uint64              `json:"refund"`
+	OpName        string              `json:"opName"`
+	ErrorString   string              `json:"error,omitempty"`
+}
 
 type JSONLogger struct {
 	encoder *json.Encoder
@@ -76,23 +93,27 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 	stack := scope.StackData()
 	op := vm.OpCode(typ)
 
-	log := StructLog{
+	log := jsonStructLog{
 		Pc:            pc,
 		Op:            op,
-		Gas:           gas,
-		GasCost:       cost,
+		Gas:           math.HexOrDecimal64(gas),
+		GasCost:       math.HexOrDecimal64(cost),
 		MemorySize:    len(memory),
-		Storage:       nil,
 		Depth:         depth,
 		RefundCounter: l.env.IntraBlockState.GetRefund(),
-		Err:           err,
+		OpName:        op.String(),
+	}
+	if err != nil {
+		log.ErrorString = err.Error()
 	}
 	if l.cfg.EnableMemory {
 		log.Memory = memory
 	}
 	if !l.cfg.DisableStack {
-		logstack := make([]uint256.Int, len(stack))
-		copy(logstack, stack)
+		logstack := make([]hexutil.U256, len(stack))
+		for i := range stack {
+			logstack[i] = hexutil.U256(stack[i])
+		}
 		log.Stack = logstack
 	}
 	if l.cfg.EnableReturnData {
