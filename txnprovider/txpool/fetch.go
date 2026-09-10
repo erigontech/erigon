@@ -183,12 +183,6 @@ const announcedSizeSlack = 8
 // (see announcedSizeSlack). Unannounced txs (including those announced by a
 // different peer) are skipped — only a self-contradicting announcement is a
 // violation.
-func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) {
-	if _, err := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: peerID, Penalty: sentryproto.PenaltyKind_Kick}); err != nil {
-		f.logger.Debug("[txpool] penalize peer failed", "peer", peerID, "err", err)
-	}
-}
-
 func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) error {
 	if f.announcements == nil {
 		return nil
@@ -214,6 +208,12 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 	// One-shot: drop the entry so the same announcement can't be replayed.
 	f.announcements.Delete(k[:])
 	return nil
+}
+
+func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) {
+	if _, err := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: peerID, Penalty: sentryproto.PenaltyKind_Kick}); err != nil {
+		f.logger.Debug("[txpool] penalize peer failed", "peer", peerID, "err", err)
+	}
 }
 
 // checkBlobSidecar verifies EIP-4844 per-commitment invariants on a blob tx

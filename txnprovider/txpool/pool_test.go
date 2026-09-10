@@ -352,7 +352,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
-func TestGetCachedBlobTxnLockedPropagatesParseError(t *testing.T) {
+func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	hash := common.Hash{0xAB, 0xCD}
@@ -367,7 +367,7 @@ func TestGetCachedBlobTxnLockedPropagatesParseError(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		mt, err := pool.getCachedBlobTxnLocked(tx, hash[:])
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Nil(t, mt)
 		return nil
 	}))

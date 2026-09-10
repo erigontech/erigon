@@ -19,13 +19,14 @@ package rpc
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestStdioConnWriteJSON(t *testing.T) {
-	codec := NewCodec(stdioConn{in: io.LimitReader(nil, 0), out: io.Discard})
+	codec := NewCodec(stdioConn{in: strings.NewReader(""), out: io.Discard})
 	defer codec.Close()
 
 	err := codec.WriteJSON(context.Background(), map[string]string{"jsonrpc": "2.0"})

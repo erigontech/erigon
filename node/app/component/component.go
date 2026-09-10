@@ -1116,9 +1116,7 @@ DEPENDENCIES:
 			deactivatoinWaiters.Unlock()
 			awaitDeactivationChannels()
 
-			if err := dependency.deactivate(ctx, noopHanlder); err != nil {
-				onActivity(ctx, dependency, err)
-			}
+			_ = dependency.deactivate(ctx, noopHanlder)
 		}
 	}
 }

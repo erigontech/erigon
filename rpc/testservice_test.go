@@ -212,9 +212,7 @@ func (s *notificationTestService) HangSubscription(ctx context.Context, val int)
 	subscription := notifier.CreateSubscription()
 
 	go func() {
-		if err := notifier.Notify(subscription.ID, val); err != nil {
-			return
-		}
+		_ = notifier.Notify(subscription.ID, val)
 	}()
 	return subscription, nil
 }

@@ -149,12 +149,12 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 						return fmt.Errorf("recv: %w", err)
 					}
 
-					streamServer.Send(message) //nolint:errcheck
+					_ = streamServer.Send(message)
 				}
 			})
 		}
 
-		g.Wait() //nolint:errcheck
+		_ = g.Wait()
 	}()
 
 	return &SentryStreamC[T]{Ch: ch, Ctx: ctx}

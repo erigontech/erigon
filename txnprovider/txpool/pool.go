@@ -721,7 +721,8 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error)
 	parseCtx.WithSender(false)
 	txnSlot := &TxnSlot{}
 	if _, err := parseCtx.ParseTransaction(txnRlp, 0, txnSlot, nil, false, true, nil); err != nil {
-		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: ParseTransaction: %d, %w", len(hash), err)
+		p.logger.Warn("[txpool] getCachedBlobTxnLocked: parseTransaction", "hash", hex.EncodeToString(hash), "err", err)
+		return nil, nil
 	}
 	return newMetaTxn(txnSlot, false, 0), nil
 }
