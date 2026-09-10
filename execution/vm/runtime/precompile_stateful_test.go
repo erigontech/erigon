@@ -20,7 +20,6 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -30,18 +29,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -63,48 +54,6 @@ func (r *recordingStatefulPrecompile) RunStateful(input []byte, gas *vm.Precompi
 		return nil, vm.ErrOutOfGas
 	}
 	return []byte{0x2a}, nil
-}
-
-func newStatefulTestConfig(t *testing.T, chainID uint64) *Config {
-	t.Helper()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
-
-	st := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	t.Cleanup(st.Close)
-
-	cfg := &Config{
-		ChainConfig: &chain.Config{
-			ChainID:               uint256.NewInt(chainID),
-			HomesteadBlock:        new(uint64),
-			TangerineWhistleBlock: new(uint64),
-			SpuriousDragonBlock:   new(uint64),
-			ByzantiumBlock:        new(uint64),
-			ConstantinopleBlock:   new(uint64),
-			PetersburgBlock:       new(uint64),
-			IstanbulBlock:         new(uint64),
-			MuirGlacierBlock:      new(uint64),
-			BerlinBlock:           new(uint64),
-			LondonBlock:           new(uint64),
-			ArrowGlacierBlock:     new(uint64),
-			GrayGlacierBlock:      new(uint64),
-			ShanghaiTime:          new(uint64),
-			CancunTime:            new(uint64),
-			PragueTime:            new(uint64),
-			OsakaTime:             new(uint64),
-			AmsterdamTime:         new(uint64),
-		},
-		Origin: accounts.InternAddress(common.HexToAddress("0xcafe")),
-		State:  st,
-	}
-	setDefaults(cfg)
-	return cfg
 }
 
 func prepareStatefulCall(t *testing.T, cfg *Config, precompileAddr accounts.Address) *vm.EVM {
@@ -141,7 +90,7 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	rec := &recordingStatefulPrecompile{}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	gas := mdgas.MdGas{Execution: 100000}
@@ -161,7 +110,7 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	require.True(t, gotValue.Eq(&value))
 	require.False(t, got.ReadOnly)
 
-	cfg2 := newStatefulTestConfig(t, chainID)
+	cfg2 := newL2TestConfig(t, chainID)
 	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
 
 	_, _, _, err = vmenv2.StaticCall(cfg2.Origin, precompileAddr, []byte{0x01}, gas)
@@ -176,7 +125,7 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	rec := &recordingStatefulPrecompile{}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	delegator := accounts.InternAddress(common.HexToAddress("0xde1e"))
@@ -210,7 +159,7 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
@@ -232,7 +181,7 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 			return nil, nil
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 500}, uint256.Int{}, false)
@@ -256,7 +205,7 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 			return nil, err
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 	require.NoError(t, cfg.State.CreateAccount(storeAddr, true))
 	require.NoError(t, cfg.State.SetCode(storeAddr, []byte{0x60, 0x01, 0x60, 0x01, 0x55, 0x00}, tracing.CodeChangeUnspecified)) // PUSH1 1 PUSH1 1 SSTORE STOP
@@ -275,7 +224,7 @@ func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
 	rec := &recordingStatefulPrecompile{}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	value := *uint256.NewInt(5)
@@ -305,7 +254,7 @@ func TestStatefulPrecompileStateGasSpill(t *testing.T) {
 			return nil, nil
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 10}, uint256.Int{}, false)
@@ -332,7 +281,7 @@ func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
 			return nil, vm.ErrExecutionReverted
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 10}, uint256.Int{}, false)
@@ -357,7 +306,7 @@ func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 			return nil, nil
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 50}, uint256.Int{}, false)
@@ -384,7 +333,7 @@ func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
 
@@ -400,7 +349,7 @@ func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	// Control arm: the same precompile under a plain CALL still moves value,
 	// so the gate is scoped to the static context and not to ctx.EVM.
 	callErr, createErr = nil, nil
-	cfg2 := newStatefulTestConfig(t, chainID)
+	cfg2 := newL2TestConfig(t, chainID)
 	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
 	require.NoError(t, cfg2.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
 
@@ -427,7 +376,7 @@ func TestStatefulPrecompileCreateDeploysAndMovesEndowment(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
 
@@ -475,7 +424,7 @@ func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
 	type gasEvent struct{ from, to uint64 }
 	var events []gasEvent
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	cfg.EVMConfig.Tracer = &tracing.Hooks{
 		OnGasChange: func(from, to uint64, _ tracing.GasChangeReason) {
 			events = append(events, gasEvent{from, to})
@@ -524,7 +473,7 @@ func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: handed}, uint256.Int{}, false)
@@ -549,7 +498,7 @@ func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
 			return nil, fmt.Errorf("precompile failed: %w", vm.ErrExecutionReverted)
 		}}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
@@ -576,7 +525,7 @@ func TestStatefulPrecompileRefusedCallLeavesNoFrameTrace(t *testing.T) {
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
 	var entered []accounts.Address
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	cfg.EVMConfig.Tracer = &tracing.Hooks{
 		OnEnter: func(_ int, _ byte, _ accounts.Address, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
 			entered = append(entered, to)
@@ -602,7 +551,7 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 	rec := &recordingStatefulPrecompile{}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: rec})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 	gas := mdgas.MdGas{Execution: 10_000}
 
@@ -650,7 +599,7 @@ func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
 	outer := &reservoirHandoffPrecompile{inner: innerAddr}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: reservoirChargeStatefulPrecompile{amount: charge}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
@@ -673,7 +622,7 @@ func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x97}))
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: reservoirChargeStatefulPrecompile{amount: charge}})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	cfg.ChainConfig.AmsterdamTime = nil
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
@@ -700,7 +649,7 @@ func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
 			outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: kind}
 			registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: reservoirChargeStatefulPrecompile{amount: charge}})
 
-			cfg := newStatefulTestConfig(t, chainID)
+			cfg := newL2TestConfig(t, chainID)
 			vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 			_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
@@ -726,7 +675,7 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall"}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 	value := *uint256.NewInt(7)
@@ -755,7 +704,7 @@ func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	func() {
@@ -770,17 +719,6 @@ func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
 	require.Equal(t, mdgas.MdGas{}, stashed.Remaining(),
 		"a handle that outlived its frame must report nothing")
 	require.False(t, stashed.ChargeExecution(1), "and must refuse to charge")
-}
-
-// l2VersionRules stands in for an L2 stack's version oracle: it stamps the
-// block context's version onto the resolved rules, which is what gates a
-// registered provider.
-type l2VersionRules struct{}
-
-func (l2VersionRules) Name() string { return "test-l2" }
-
-func (l2VersionRules) ResolveRules(l2Version, _, _ uint64, rules *chain.Rules) {
-	rules.L2Version = l2Version
 }
 
 // TestVersionGatedPrecompileIsPrecompiledToTracers pins that an address the EVM
@@ -802,7 +740,7 @@ func TestVersionGatedPrecompileIsPrecompiledToTracers(t *testing.T) {
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	cfg.ChainConfig.L2 = l2VersionRules{}
 	cfg.L2Version = activeAt
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -826,55 +764,6 @@ func TestVersionGatedPrecompileIsPrecompiledToTracers(t *testing.T) {
 	res, err = tracer.GetResult()
 	require.NoError(t, err)
 	require.JSONEq(t, `{"0x01020304-0":1}`, string(res), "a plain call still records its selector")
-}
-
-// runtime.Execute and runtime.Call start the tracer themselves, so a partial
-// VMContext there is invisible to a test that drives OnTxStart directly. The
-// 4byte, flat-call and JS tracers rebuild Rules from this context: a dropped
-// L2Version misclassifies a version-gated precompile, and a nil ChainConfig
-// panics them outright.
-func TestRuntimeStartsTracerWithFullVMContext(t *testing.T) {
-	const chainID = 900434
-	const activeAt = 30
-
-	newCfg := func(t *testing.T) (*Config, *tracing.VMContext) {
-		t.Helper()
-		cfg := newStatefulTestConfig(t, chainID)
-		cfg.ChainConfig.L2 = l2VersionRules{}
-		cfg.L2Version = activeAt
-		var got tracing.VMContext
-		cfg.EVMConfig.Tracer = &tracing.Hooks{
-			OnTxStart: func(vmctx *tracing.VMContext, _ types.Transaction, _ accounts.Address) {
-				if vmctx != nil {
-					got = *vmctx
-				}
-			},
-		}
-		return cfg, &got
-	}
-
-	assertFull := func(t *testing.T, got *tracing.VMContext) {
-		t.Helper()
-		require.NotNil(t, got.IntraBlockState, "the tracer must be started at all")
-		require.NotNil(t, got.ChainConfig, "a nil ChainConfig panics the 4byte and flat tracers")
-		require.NotNil(t, got.Rules, "a dropped rule set evaluates version-gated providers at 0")
-		require.Equal(t, uint64(activeAt), got.Rules.L2Version,
-			"the traced rules must be the ones the EVM resolved")
-	}
-
-	t.Run("Call", func(t *testing.T) {
-		cfg, got := newCfg(t)
-		_, _, err := Call(accounts.InternAddress(common.BytesToAddress([]byte{0x9b})), nil, cfg)
-		require.NoError(t, err)
-		assertFull(t, got)
-	})
-
-	t.Run("Execute", func(t *testing.T) {
-		cfg, got := newCfg(t)
-		_, _, err := Execute([]byte{byte(vm.STOP)}, nil, cfg, t.TempDir())
-		require.NoError(t, err)
-		assertFull(t, got)
-	})
 }
 
 func TestStatefulPrecompileCannotOverflowStateRefund(t *testing.T) {
@@ -903,7 +792,7 @@ func TestStatefulPrecompileCannotOverflowStateRefund(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{precompileAddr: p})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 50}, uint256.Int{}, false)
@@ -936,7 +825,7 @@ func TestStatefulPrecompileNestedUsageFoldCannotWrap(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil, mdgas.MdGas{Execution: 100_000, State: 50}, uint256.Int{}, false)
@@ -954,7 +843,7 @@ func TestStatefulPrecompileCannotSwallowUnadoptableChildUsage(t *testing.T) {
 	const chainID = 900420
 	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9f}))
 	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa0}))
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	var refunds [2]bool
 	inner := funcPrecompile{name: "UNADOPTABLEWRITEINNER",
 		run: func(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
@@ -1018,7 +907,7 @@ func TestStatefulPrecompileNestedCallAbsorbsMisplacedStateGas(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
@@ -1060,7 +949,7 @@ func TestStatefulPrecompileCannotRefundWhatAChildBurned(t *testing.T) {
 		}}
 	registerPrecompiles(t, chainID, vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner})
 
-	cfg := newStatefulTestConfig(t, chainID)
+	cfg := newL2TestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, outerAddr)
 
 	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
