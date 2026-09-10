@@ -2324,11 +2324,12 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
-		if err := hph.fold(); err != nil {
-			return fmt.Errorf("fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return fmt.Errorf("fold: %w", foldErr)
 		}
 	}
 	// Now unfold the path so the cell at hashedKey is reachable.
@@ -2379,11 +2380,12 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			return hph.grid[0][hph.mountedNib], nil
 		}
 		foldDone := hph.metrics.StartFolding(nil)
-		if err := hph.fold(); err != nil {
-			return cell{}, fmt.Errorf("final fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return cell{}, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2628,11 +2630,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return nil, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
