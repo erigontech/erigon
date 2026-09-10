@@ -732,24 +732,11 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 		commitedBlockDur = interval / time.Duration(committedDiffBlocks)
 	}
 
-	lastProgress.Metrics.RLock()
-	cacheBranchHits := lastProgress.Metrics.CacheBranch
-	cacheAccountHits := lastProgress.Metrics.CacheAccount
-	cacheStorageHits := lastProgress.Metrics.CacheStorage
-	missBranchCount := lastProgress.Metrics.MissBranch
-	missAccountCount := lastProgress.Metrics.MissAccount
-	missStorageCount := lastProgress.Metrics.MissStorage
-	lastProgress.Metrics.RUnlock()
-
-	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
-	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
-
 	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
-		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
 	rs.Domains().Metrics().RUnlock()
 

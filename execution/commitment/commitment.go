@@ -90,7 +90,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -278,10 +277,7 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
-	// Metrics is the producing trie's, carried so the later apply still reaches
-	// that trie's log and CSV counters. The Prometheus counters do not depend on
-	// it — publishBranchWrites bills those where the write lands.
-	Metrics *Metrics
+	Metrics   *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
@@ -378,12 +374,6 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
-// were written. Writes are published to the branch-write counters as they land,
-// not against a round: the caller-owned path applies from SharedDomains after the
-// producing round has already closed, so there is no round left to bill. m, when
-// non-nil, additionally carries them into that trie's log and CSV counters.
-//
 // putBranch must copy prefix and data rather than retain them: they are pooled and
 // reused for a later, unrelated update. prevData is cloned per update and carries
 // no such constraint.
