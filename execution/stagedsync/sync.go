@@ -466,11 +466,11 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, fina
 	return nil
 }
 
-func (s *Sync) StageTiming(id stages.SyncStage) time.Duration {
+func (s *Sync) LastStageTiming(id stages.SyncStage) time.Duration {
 	var took time.Duration
 	for _, t := range s.timings {
 		if t.stage == id && !t.isUnwind && !t.isPrune {
-			took += t.took
+			took = t.took
 		}
 	}
 	return took

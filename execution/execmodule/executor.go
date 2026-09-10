@@ -321,13 +321,13 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 }
 
 // lastValidationExecStageTiming reports the Execution stage duration of the most
-// recent ValidateBlock. StateStep resets the stage timings per header, so on a
-// multi-header fork this is the last block's, not the whole validation's.
+// recent ValidateBlock, so on a multi-header fork this is the last block's, not
+// the whole validation's.
 func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
 	if pe.validationSync == nil {
 		return 0
 	}
-	return pe.validationSync.StageTiming(stages.Execution)
+	return pe.validationSync.LastStageTiming(stages.Execution)
 }
 
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
