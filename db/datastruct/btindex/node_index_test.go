@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 )
 
@@ -73,15 +74,28 @@ func TestDecodeListNodesV0SkipsStoredDi(t *testing.T) {
 		blob = append(blob, k...)
 	}
 
-	offs, gotStride, end, err := decodeListNodesV0(blob)
+	nd, end, err := decodeListNodesV0(blob)
 	require.NoError(t, err)
-	require.Equal(t, stride, gotStride)
-	require.Len(t, offs, len(keys))
+	require.Equal(t, stride, nd.stride)
+	require.Len(t, nd.nodeOfft, len(keys))
 	require.Equal(t, len(blob), end)
 
-	b := &BpsTree{keysBlob: blob, nodeOfft: offs, nodeStride: stride}
+	b := &BpsTree{keysBlob: blob, nodeOfft: nd.nodeOfft, nodeStride: stride}
 	for i := range keys {
 		require.Equalf(t, keys[i], b.nodeKey(i), "nodeKey(%d)", i)
 		require.Equalf(t, uint64(i)*stride, b.nodeDi(i), "nodeDi(%d)", i)
 	}
+}
+
+func TestResetNoReadBoundsTargetDi(t *testing.T) {
+	ef := eliasfano32.NewEliasFano(2, 128)
+	ef.AddOffset(0)
+	ef.AddOffset(128)
+	ef.Build()
+
+	c := &Cursor{ef: ef}
+	require.ErrorIs(t, c.resetNoRead(2, nil), ErrBtIndexLookupBounds)
+	require.ErrorIs(t, c.resetNoRead(99, nil), ErrBtIndexLookupBounds)
+	require.Zero(t, c.d)
+	require.Nil(t, c.getter)
 }

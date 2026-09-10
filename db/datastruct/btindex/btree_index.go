@@ -19,6 +19,7 @@ package btindex
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -264,6 +265,9 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	// every M-th key (di==0 included) is kept as a B-tree node
 	if di%btw.args.M != 0 {
 		return nil
+	}
+	if nodeOff := btw.writer.written - 1; nodeOff > math.MaxUint32 {
+		return fmt.Errorf("[index] %s: node section offset %d exceeds the %d-byte reader limit; rebuild with a larger M", btw.indexFileName, nodeOff, uint64(math.MaxUint32))
 	}
 	if err := (Node{key: key}).Encode(btw.writer, btw.nodeHeaderBuf[:]); err != nil {
 		return err
@@ -515,9 +519,8 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 	defer func() { _ = mmap.MadviseRandom(idx.m) }()
 	idx.data = idx.m[:idx.size]
 
-	var nodeOfft []uint32
+	var nd pivots
 	var keysBlob []byte
-	var nodeStride uint64
 	m := DefaultBtreeMLegacy // newer format ("use footer") carry m in the file itself
 	switch idx.data[0] {
 	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
@@ -525,11 +528,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
 			keysBlob = idx.data[pos:]
-			if nodeOfft, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
+			if nd, _, err = decodeListNodesV0(keysBlob); err != nil {
 				return nil, err
 			}
-			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
-				nodeStride = m
+			if nd.stride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
+				nd.stride = m
 			}
 		}
 	case btFirstByteUseFooter: // footer-based layout: [leadingByte][nodes][EF][footer][anchor]
@@ -554,11 +557,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 			nodesCount = (footer.Meta.KeysCount-1)/m + 1
 		}
 		keysBlob = idx.data[1:]
-		nodeStride = m
 		var nodesEnd int
-		if nodeOfft, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
+		if nd, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
 		}
+		nd.stride = m
 		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
 			return nil, fmt.Errorf("btindex: corrupt footer in %s: ef_offset=%d but nodes end at %d", indexPath, footer.Meta.EfOffset, alignUp(1+nodesEnd, btEFAlign))
 		}
@@ -577,10 +580,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if nodeOfft == nil {
+	if nd.nodeOfft == nil {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, m, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nodeOfft, nodeStride)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nd)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 
