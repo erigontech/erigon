@@ -276,9 +276,23 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
 	// the slot charge already covers.
 	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
-		uint32(cc.codeSizeCapEntries), 0,
+		uint32(cc.codeSizeCapEntries), codeSizeStartEntries(codeCapacityBytes), 0,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
 	return cc
+}
+
+// codeSizeStartEntries is the birth capacity of the size-only layer. That layer
+// answers EXTCODESIZE and EXTCODEHASH without the bytes, so it has to outlive
+// eviction from the content layers — but those reserve on every code write and
+// leave it nothing to grow into, so it claims its working size at birth. The
+// size deliberately over-provisions against the content budget — an entry is
+// 80 bytes against the 64KB it lets us not read — and the cap keeps the charge
+// near 10MB whatever the budget. Sharding needs the slack: freelru bounds each
+// shard, so a capacity merely equal to the key count still evicts.
+func codeSizeStartEntries(codeCapacityBytes datasize.ByteSize) uint32 {
+	const minCachedCodeBytes = 4 * datasize.KB
+	const maxStartEntries = 64 * 1024
+	return uint32(min(uint64(codeCapacityBytes/minCachedCodeBytes), maxStartEntries))
 }
 
 // NewDefaultCodeCache creates a new CodeCache with the default sizes.
