@@ -31,10 +31,12 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	nodecli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -149,6 +151,9 @@ func runMCP(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+
+	go mem.LogMemStats(ctx, logger)
+	go disk.UpdateDiskStats(ctx, logger)
 
 	dataDir := cmd.String(dataDirFlag.Name)
 	transport := cmd.String(transportFlag.Name)
