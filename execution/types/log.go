@@ -121,18 +121,6 @@ type RPCLog struct {
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
-// ToRPCLogs converts Logs to RPCLogs, adding a timestamp to each entry.
-func (logs Logs) ToRPCLogs(timestamp uint64) RPCLogs {
-	result := make(RPCLogs, len(logs))
-	for i, l := range logs {
-		result[i] = &RPCLog{
-			Log:            *l,
-			BlockTimestamp: hexutil.Uint64(timestamp),
-		}
-	}
-	return result
-}
-
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
 func (l *RPCLog) UnmarshalJSON(input []byte) error {
 	if err := l.Log.UnmarshalJSON(input); err != nil {
@@ -209,31 +197,40 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 	return topicMap
 }
 
+// matchFilter reports whether the log is worth considering (right address, enough
+// topics) and, separately, whether its topics match. A maxLogs budget is spent on
+// every considered log, so the two cannot be collapsed into one bool.
+func (l *Log) matchFilter(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}) (considered, matched bool) {
+	if len(addrMap) != 0 {
+		if _, ok := addrMap[l.Address]; !ok {
+			return false, false
+		}
+	}
+	if len(topicMap) > len(l.Topics) {
+		return false, false
+	}
+	for idx, topicSet := range topicMap {
+		if len(topicSet) == 0 {
+			continue
+		}
+		if _, ok := topicSet[l.Topics[idx]]; !ok {
+			return true, false
+		}
+	}
+	return true, true
+}
+
 // FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
 // in a loop with the same topics to avoid rebuilding the map on every call.
 func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 	for _, v := range logs {
-		if len(addrMap) != 0 {
-			if _, ok := addrMap[v.Address]; !ok {
-				continue
-			}
-		}
-		if len(topicMap) > len(v.Topics) {
+		considered, matched := v.matchFilter(addrMap, topicMap)
+		if !considered {
 			continue
 		}
-		found := true
-		for idx, topicSet := range topicMap {
-			if len(topicSet) == 0 {
-				continue
-			}
-			if _, ok := topicSet[v.Topics[idx]]; !ok {
-				found = false
-				break
-			}
-		}
-		if found {
+		if matched {
 			o = append(o, v)
 		}
 		logCount++
@@ -242,6 +239,21 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 		}
 	}
 	return o
+}
+
+// AppendFilteredRPCLogs appends the logs matching addrMap and topicMap to dst as RPCLogs,
+// adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
+// enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
+func (logs Logs) AppendFilteredRPCLogs(dst RPCLogs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) RPCLogs {
+	for _, l := range logs {
+		if limit != 0 && len(dst) >= limit {
+			break
+		}
+		if _, matched := l.matchFilter(addrMap, topicMap); matched {
+			dst = append(dst, &RPCLog{Log: *l, BlockTimestamp: hexutil.Uint64(timestamp)})
+		}
+	}
+	return dst
 }
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
