@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -89,6 +90,7 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 
 	var blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
 	if slowBlockThreshold != nil {
+		dbg.KVReadLevelledMetrics = true
 		blockMetricsCache, err = lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
 		if err != nil {
 			panic(err)

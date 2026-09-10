@@ -520,7 +520,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			prevReadMetrics := dbg.KVReadLevelledMetrics
 			tb.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
 		}
-		dbg.KVReadLevelledMetrics = true
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
