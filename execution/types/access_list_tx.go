@@ -269,19 +269,16 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-// countAccessList walks the encoded tuples' headers for exact counts, which size
-// the decode. Requiring each key list to end inside its own tuple is what bounds
-// the totals by the input: rlp.Prefix alone checks a length against the whole
-// payload, which would let overlapping tuples count the same bytes repeatedly.
-// On malformed input it stops early and leaves the error to the decoder.
+// countAccessList walks the tuple headers for exact counts. A key list must end
+// inside its own tuple: rlp.Prefix only checks a length against the whole
+// payload, so overlapping tuples could otherwise count the same bytes twice.
 func countAccessList(raw []byte) (tuples, keys int) {
 	for pos := 0; pos < len(raw); {
 		tuplePos, tupleLen, isList, err := rlp.Prefix(raw, pos)
 		if err != nil || !isList {
 			return
 		}
-		// A valid tuple starts with a 20-byte address, encoded in 21 bytes. A
-		// malformed one only skews the count, which is a capacity hint.
+		// A valid tuple opens with a 20-byte address, encoded in 21 bytes.
 		keyPos, keyLen, isList, err := rlp.Prefix(raw, tuplePos+21)
 		if err != nil || !isList || keyPos+keyLen > tuplePos+tupleLen {
 			return
@@ -298,10 +295,9 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
 	}
-	*al = (*al)[:0] // decoding replaces, and both paths below must agree
-	// One arena backs every tuple's StorageKeys, so a tuple costs no allocation
-	// of its own. Walk the tuple headers first to size both slices exactly; a
-	// non-slice reader can't be walked, so there both stay nil and grow.
+	*al = (*al)[:0] // both paths below must agree
+	// One arena backs every tuple's StorageKeys. A non-slice reader can't be
+	// walked, so there both slices stay nil and grow.
 	var keys []common.Hash
 	if raw := s.Peek(); uint64(len(raw)) >= l {
 		nTuples, nKeys := countAccessList(raw[:l])

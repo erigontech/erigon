@@ -400,9 +400,8 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 // pre-allocate, so a crafted length prefix cannot size the allocation.
 const maxDecodePreAlloc = 128
 
-// decodeHashListTo appends an RLP list of 32-byte values to dst, growing it only
-// when dst is too short, so one buffer can back several lists. Pass nil for a
-// fresh slice.
+// decodeHashListTo appends an RLP list of 32-byte values to dst, so one buffer
+// can back several lists. Pass nil for a fresh slice.
 func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 	l, err := s.List()
 	if err != nil {
