@@ -9,6 +9,7 @@
 package epbs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clutils "github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -37,6 +39,14 @@ type AcceptedBlockReader interface {
 	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
 }
 
+type PersistedEnvelopeReader interface {
+	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+}
+
+type CanonicalHeadReader interface {
+	GetHeadNode() (forkchoice.ForkChoiceNode, error)
+}
+
 type revealKey struct {
 	beaconBlockRoot common.Hash
 	signedBidRoot   common.Hash
@@ -48,19 +58,27 @@ type revealRequest struct {
 	slot     uint64
 }
 
+type revealTracking struct {
+	slot   uint64
+	active bool
+}
+
 type revealRunner struct {
 	beaconCfg     *clparams.BeaconChainConfig
 	clock         LiveSlotClock
 	signer        Signer
 	coordinator   *Coordinator
 	blocks        AcceptedBlockReader
+	persisted     PersistedEnvelopeReader
+	head          CanonicalHeadReader
 	processor     PayloadProcessor
 	publisher     GossipPublisher
 	retryInterval time.Duration
 	requests      chan revealRequest
 
-	mu      sync.Mutex
-	tracked map[revealKey]uint64
+	mu          sync.Mutex
+	tracked     map[revealKey]revealTracking
+	activeCount int
 }
 
 func (r *revealRunner) maxQueue() int {
@@ -75,13 +93,15 @@ func newRevealRunner(
 	blocks AcceptedBlockReader,
 	processor PayloadProcessor,
 	publisher GossipPublisher,
+	persisted PersistedEnvelopeReader,
+	head CanonicalHeadReader,
 	retryInterval time.Duration,
 	maxQueued int,
 ) *revealRunner {
 	return &revealRunner{
 		beaconCfg: beaconCfg, clock: clock, signer: signer, coordinator: coordinator, blocks: blocks,
-		processor: processor, publisher: publisher, retryInterval: retryInterval,
-		requests: make(chan revealRequest, maxQueued), tracked: make(map[revealKey]uint64),
+		processor: processor, publisher: publisher, persisted: persisted, head: head, retryInterval: retryInterval,
+		requests: make(chan revealRequest, maxQueued), tracked: make(map[revealKey]revealTracking),
 	}
 }
 
@@ -94,18 +114,51 @@ func (r *revealRunner) Run(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case request := <-r.requests:
-					if err := r.reveal(ctx, request); err != nil && !errors.Is(err, context.Canceled) {
-						log.Warn("Embedded builder payload reveal failed", "slot", request.slot, "blockRoot", request.key.beaconBlockRoot, "err", err)
-					}
+					r.runRequest(ctx, request)
 				}
 			}
 		})
 	}
-	<-ctx.Done()
-	workers.Wait()
+	ticker := time.NewTicker(r.retryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			workers.Wait()
+			r.releaseActiveTracking()
+			return
+		case <-ticker.C:
+			r.reconcileCanonicalHead(ctx)
+		}
+	}
+}
+
+func (r *revealRunner) runRequest(ctx context.Context, request revealRequest) {
+	defer r.finishRequest(request.key)
+	if err := r.reveal(ctx, request); err != nil && !errors.Is(err, context.Canceled) {
+		log.Warn("Embedded builder payload reveal failed", "slot", request.slot, "blockRoot", request.key.beaconBlockRoot, "err", err)
+	}
 }
 
 func (r *revealRunner) SubmitAcceptedBlock(blockRoot common.Hash) bool {
+	return r.submitAcceptedBlock(blockRoot, false)
+}
+
+func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
+	if ctx.Err() != nil || isNilDependency(r.head) {
+		return
+	}
+	head, err := r.head.GetHeadNode()
+	if err != nil || head.Root == (common.Hash{}) || ctx.Err() != nil {
+		return
+	}
+	r.submitAcceptedBlock(head.Root, true)
+}
+
+func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactive bool) bool {
+	if r.tracksBlockRoot(blockRoot) {
+		return false
+	}
 	r.pruneTracked(r.clock.GetCurrentSlot())
 	block, ok := r.blocks.GetBlock(blockRoot)
 	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
@@ -132,24 +185,109 @@ func (r *revealRunner) SubmitAcceptedBlock(blockRoot common.Hash) bool {
 	}
 	key := revealKey{beaconBlockRoot: blockRoot, signedBidRoot: common.Hash(signedBidRoot)}
 	r.mu.Lock()
-	if _, exists := r.tracked[key]; exists || len(r.tracked) >= cap(r.requests) {
+	if _, exists := r.tracked[key]; exists || r.activeCount >= cap(r.requests) {
 		r.mu.Unlock()
 		return false
 	}
-	r.tracked[key] = signedBid.Message.Slot
-	r.mu.Unlock()
-	r.requests <- revealRequest{key: key, identity: identity, slot: signedBid.Message.Slot}
-	return true
+	var evictedKey revealKey
+	var evictedTracking revealTracking
+	var evicted bool
+	if len(r.tracked) >= cap(r.requests) {
+		if !replaceInactive {
+			r.mu.Unlock()
+			return false
+		}
+		evictedKey, evictedTracking, evicted = r.inactiveEvictionCandidate()
+		if !evicted {
+			r.mu.Unlock()
+			return false
+		}
+		delete(r.tracked, evictedKey)
+	}
+	r.tracked[key] = revealTracking{slot: signedBid.Message.Slot, active: true}
+	r.activeCount++
+	request := revealRequest{key: key, identity: identity, slot: signedBid.Message.Slot}
+	select {
+	case r.requests <- request:
+		r.mu.Unlock()
+		return true
+	default:
+		delete(r.tracked, key)
+		r.activeCount--
+		if evicted {
+			r.tracked[evictedKey] = evictedTracking
+		}
+		r.mu.Unlock()
+		return false
+	}
+}
+
+func (r *revealRunner) tracksBlockRoot(blockRoot common.Hash) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.tracked {
+		if key.beaconBlockRoot == blockRoot {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *revealRunner) inactiveEvictionCandidate() (revealKey, revealTracking, bool) {
+	var candidateKey revealKey
+	var candidateTracking revealTracking
+	found := false
+	for key, tracking := range r.tracked {
+		if tracking.active {
+			continue
+		}
+		if !found || tracking.slot < candidateTracking.slot ||
+			(tracking.slot == candidateTracking.slot && revealKeyLess(key, candidateKey)) {
+			candidateKey = key
+			candidateTracking = tracking
+			found = true
+		}
+	}
+	return candidateKey, candidateTracking, found
+}
+
+func revealKeyLess(left, right revealKey) bool {
+	if compared := bytes.Compare(left.beaconBlockRoot[:], right.beaconBlockRoot[:]); compared != 0 {
+		return compared < 0
+	}
+	return bytes.Compare(left.signedBidRoot[:], right.signedBidRoot[:]) < 0
 }
 
 func (r *revealRunner) pruneTracked(currentSlot uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for key, slot := range r.tracked {
-		if slot < currentSlot {
+	for key, tracking := range r.tracked {
+		if !tracking.active && tracking.slot < currentSlot {
 			delete(r.tracked, key)
 		}
 	}
+}
+
+func (r *revealRunner) finishRequest(key revealKey) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tracking, ok := r.tracked[key]
+	if !ok || !tracking.active {
+		return
+	}
+	tracking.active = false
+	r.tracked[key] = tracking
+	r.activeCount--
+}
+
+func (r *revealRunner) releaseActiveTracking() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, tracking := range r.tracked {
+		tracking.active = false
+		r.tracked[key] = tracking
+	}
+	r.activeCount = 0
 }
 
 func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error {
@@ -163,6 +301,18 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 	if hasBlobData(retained) {
 		return errors.New("epbs/reveal: blob payload reveal is not supported")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, ok := payloadRevealDeadline(r.clock, r.beaconCfg, request.slot)
+	if !ok {
+		return errors.New("epbs/reveal: invalid payload reveal deadline")
+	}
+	if !time.Now().Before(deadline) {
+		return ErrRevealExpired
+	}
+	revealCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
 	envelope := cltypes.NewExecutionPayloadEnvelope(r.beaconCfg)
 	envelope.Payload = retained.Assembled.Eth1Block
 	envelope.ExecutionRequests = retained.ExecutionRequests
@@ -177,7 +327,13 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 	if err != nil {
 		return fmt.Errorf("epbs/reveal: envelope signing root: %w", err)
 	}
-	signature, err := r.signer.SignEnvelope(ctx, common.Hash(signingRoot))
+	signature, err := r.signer.SignEnvelope(revealCtx, common.Hash(signingRoot))
+	if contextErr := revealContextError(ctx, revealCtx, deadline); contextErr != nil {
+		if err != nil {
+			return errors.Join(contextErr, fmt.Errorf("epbs/reveal: sign envelope: %w", err))
+		}
+		return contextErr
+	}
 	if err != nil {
 		return fmt.Errorf("epbs/reveal: sign envelope: %w", err)
 	}
@@ -193,36 +349,67 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 	if err := localEnvelope.DecodeSSZStrict(encoded, int(clparams.GloasVersion)); err != nil {
 		return fmt.Errorf("epbs/reveal: decode envelope: %w", err)
 	}
-	deadline, ok := payloadRevealDeadline(r.clock, r.beaconCfg, request.slot)
-	if !ok {
-		return errors.New("epbs/reveal: invalid payload reveal deadline")
-	}
 	localAccepted := false
 	var attemptErr error
 	for {
-		if err := ctx.Err(); err != nil {
+		if err := revealContextError(ctx, revealCtx, deadline); err != nil {
 			return errors.Join(err, attemptErr)
 		}
 		if !localAccepted {
-			attemptErr = r.processor.ProcessMessage(ctx, nil, localEnvelope)
+			attemptErr = r.processor.ProcessMessage(revealCtx, nil, localEnvelope)
 			localAccepted = attemptErr == nil
+			if localAccepted {
+				continue
+			}
+			if r.persistedEnvelopeMatches(request.key.beaconBlockRoot, encoded) {
+				localAccepted = true
+				continue
+			}
 		} else {
-			attemptErr = r.publisher.Publish(ctx, gossip.TopicNameExecutionPayload, encoded)
+			attemptErr = r.publisher.Publish(revealCtx, gossip.TopicNameExecutionPayload, encoded)
 			if attemptErr == nil {
+				if err := revealContextError(ctx, revealCtx, deadline); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
-		if !time.Now().Before(deadline) {
-			return errors.Join(ErrRevealExpired, attemptErr)
+		if err := revealContextError(ctx, revealCtx, deadline); err != nil {
+			return errors.Join(err, attemptErr)
 		}
-		timer := time.NewTimer(r.retryInterval)
+		timer := time.NewTimer(min(r.retryInterval, time.Until(deadline)))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return errors.Join(ctx.Err(), attemptErr)
+		case <-revealCtx.Done():
+			timer.Stop()
+			return errors.Join(revealContextError(ctx, revealCtx, deadline), attemptErr)
 		case <-timer.C:
 		}
 	}
+}
+
+func revealContextError(parentCtx, revealCtx context.Context, deadline time.Time) error {
+	if err := parentCtx.Err(); err != nil {
+		return err
+	}
+	if !time.Now().Before(deadline) || errors.Is(revealCtx.Err(), context.DeadlineExceeded) {
+		return ErrRevealExpired
+	}
+	return revealCtx.Err()
+}
+
+func (r *revealRunner) persistedEnvelopeMatches(blockRoot common.Hash, encoded []byte) bool {
+	if isNilDependency(r.persisted) {
+		return false
+	}
+	persisted, err := r.persisted.ReadEnvelopeFromDisk(blockRoot)
+	if err != nil || persisted == nil || persisted.Message == nil {
+		return false
+	}
+	persistedEncoded, err := persisted.EncodeSSZ(nil)
+	return err == nil && bytes.Equal(persistedEncoded, encoded)
 }
 
 func builderDomain(beaconCfg *clparams.BeaconChainConfig, slot uint64, genesisRoot common.Hash) ([]byte, error) {

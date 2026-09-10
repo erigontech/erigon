@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/big"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,39 @@ type runnerOutcome struct {
 type runnerCall struct {
 	slot uint64
 	root common.Hash
+}
+
+type retryingBidProcessor struct {
+	mu     sync.Mutex
+	errors []error
+	calls  int
+}
+
+func (p *retryingBidProcessor) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadBid) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if len(p.errors) == 0 {
+		return nil
+	}
+	err := p.errors[0]
+	p.errors = p.errors[1:]
+	return err
+}
+
+func (p *retryingBidProcessor) Calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+type observedBidPublisher struct {
+	published chan []byte
+}
+
+func (p *observedBidPublisher) Publish(_ context.Context, _ string, data []byte) error {
+	p.published <- append([]byte(nil), data...)
+	return nil
 }
 
 type recordingPreferencesCoordinator struct {
@@ -229,6 +263,55 @@ func TestValidatedPreferencesRunnerRetriesOnlyOnCadence(t *testing.T) {
 
 	ticker.tick()
 	waitForRunnerCalls(t, coordinator, 2)
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
+func TestValidatedPreferencesRunnerRetriesAfterLocalBidProcessingFailure(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	processor := &retryingBidProcessor{errors: []error{errors.New("head unavailable")}}
+	gossipPublisher := &observedBidPublisher{published: make(chan []byte, 1)}
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 1, payload: assembled},
+		newValidatedBidPublisher(processor, gossipPublisher, minValidatedPreferencesRetryInterval),
+		1,
+	)
+	live := NewLiveCoordinator(
+		coordinator,
+		&staticSlotInputResolver{input: input},
+		new(countingSlotInputFreshness),
+	)
+	clock := &manualRunnerClock{slot: input.Slot - 1}
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time, 1)}
+	runner, err := newValidatedPreferencesRunner(live, clock, 1, time.Second, func(time.Duration) runnerTicker { return ticker })
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	runner.SubmitValidatedPreferences(input.ValidatedPreferences)
+	require.Eventually(t, func() bool { return processor.Calls() == 1 }, time.Second, time.Millisecond)
+	waitForRunnerIdle(t, runner)
+	_, retained, lookupErr := coordinator.Payload(payloadIdentity(input, assembled))
+	require.NoError(t, lookupErr)
+	require.False(t, retained)
+	select {
+	case <-gossipPublisher.published:
+		t.Fatal("locally rejected bid was gossiped")
+	default:
+	}
+
+	ticker.tick()
+	select {
+	case <-gossipPublisher.published:
+	case <-time.After(time.Second):
+		t.Fatal("retry did not publish the locally accepted bid")
+	}
+	require.Equal(t, 2, processor.Calls())
 	stopTestPreferencesRunner(t, cancel, done)
 }
 

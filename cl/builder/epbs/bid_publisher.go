@@ -24,6 +24,8 @@ type BidProcessor interface {
 	ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadBid) error
 }
 
+var errLocalBidNotAccepted = errors.New("local bid not accepted")
+
 type validatedBidPublisher struct {
 	processor     BidProcessor
 	publisher     GossipPublisher
@@ -41,10 +43,10 @@ func (p *validatedBidPublisher) Publish(ctx context.Context, topic string, data 
 	owned := bytes.Clone(data)
 	bid := &cltypes.SignedExecutionPayloadBid{}
 	if err := bid.DecodeSSZStrict(owned, int(clparams.GloasVersion)); err != nil {
-		return fmt.Errorf("epbs/bid publisher: decode bid: %w", err)
+		return fmt.Errorf("epbs/bid publisher: %w: decode bid: %w", errLocalBidNotAccepted, err)
 	}
 	if err := p.processor.ProcessMessage(ctx, nil, bid); err != nil {
-		return fmt.Errorf("epbs/bid publisher: process local bid: %w", err)
+		return fmt.Errorf("epbs/bid publisher: %w: %w", errLocalBidNotAccepted, err)
 	}
 	var publishErr error
 	for {

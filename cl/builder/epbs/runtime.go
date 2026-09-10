@@ -73,7 +73,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	}
 	reveals := newRevealRunner(
 		deps.BeaconConfig, deps.Clock, signer, coordinator, deps.AcceptedBlocks, deps.PayloadProcessor,
-		deps.Publisher, cfg.RetryInterval, cfg.MaxRetained,
+		deps.Publisher, deps.Forkchoice, deps.Forkchoice, cfg.RetryInterval, cfg.MaxRetained,
 	)
 	return &Runtime{coordinator: coordinator, runner: runner, reveals: reveals, events: deps.Events}, nil
 }
