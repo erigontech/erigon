@@ -59,6 +59,29 @@ func TestErigonDBSettingsRoundTrip(t *testing.T) {
 	require.True(t, *got.ReferencesInCommitmentBranches)
 }
 
+func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
+	t.Parallel()
+	for _, variant := range []string{TrieVariantHex, TrieVariantBin, TrieVariantHexBin} {
+		t.Run(variant, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "erigondb.toml")
+			tr := true
+			hash := "blake3"
+			s := &ErigonDBSettings{TrieVariant: &variant, ReferencesInCommitmentBranches: &tr}
+			if variant != TrieVariantHex {
+				s.TrieHash = &hash
+			}
+			require.NoError(t, writeErigonDBSettings(path, s))
+
+			got, err := readErigonDBSettings(path)
+			require.NoError(t, err)
+			require.Equal(t, variant, got.TrieVariantName())
+			require.Equal(t, variant != TrieVariantBin, got.HasTrieVariant(TrieVariantHex))
+			require.Equal(t, variant != TrieVariantHex, got.HasTrieVariant(TrieVariantBin))
+		})
+	}
+}
+
 func TestErigonDBSettingsAbsentFieldUnmarshalsNil(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "erigondb.toml")

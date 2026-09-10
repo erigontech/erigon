@@ -122,21 +122,30 @@ func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
 	require.ErrorContains(t, err, "sequential-only")
 }
 
-func TestPBinVariantRefusesReferences(t *testing.T) {
-	t.Run("persisted", func(t *testing.T) {
-		pbinWithVariantFlags(t, false, false)
-		dirs := datadir.New(t.TempDir())
-		pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
-		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.ErrorContains(t, err, "references_in_commitment_branches")
-	})
-	t.Run("first_start", func(t *testing.T) {
-		pbinWithVariantFlags(t, true, false)
-		dirs := datadir.New(t.TempDir())
-		refs := true
-		_, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, &refs)
-		require.ErrorContains(t, err, "references_in_commitment_branches")
-	})
+func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
+	pbinWithVariantFlags(t, false, true)
+	dirs := datadir.New(t.TempDir())
+	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"hex+bin\"\ntrie_hash = \"blake3\"\n")
+
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, TrieVariantHexBin, settings.TrieVariantName())
+	require.True(t, settings.HasTrieVariant(TrieVariantHex))
+	require.True(t, settings.HasTrieVariant(TrieVariantBin))
+	require.True(t, settings.RefsInCommitmentBranches())
+	require.True(t, statecfg.ExperimentalParallelCommitment)
+	require.True(t, statecfg.ExperimentalBinCommitment)
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+}
+
+func TestPBinVariantAllowsReferencesSetting(t *testing.T) {
+	pbinWithVariantFlags(t, true, false)
+	dirs := datadir.New(t.TempDir())
+	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
+
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	require.True(t, settings.RefsInCommitmentBranches())
 }
 
 func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {

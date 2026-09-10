@@ -300,18 +300,18 @@ different states and correctly report different roots.
 - Modify: `db/state/erigondb_settings.go`
 - Modify: `db/state/erigondb_settings_test.go`
 
-- [ ] extend `TrieVariantName` and `reconcileTrieVariant` to a third value `hex+bin` alongside `hex` and
+- [x] extend `TrieVariantName` and `reconcileTrieVariant` to a third value `hex+bin` alongside `hex` and
       `bin`, and expose a mode accessor the aggregator and `NewSharedDomains` can read
-- [ ] move the refs-vs-bin refusal from a whole-datadir rule to a per-`DomainCfg` one: under `hex+bin`
+- [x] move the refs-vs-bin refusal from a whole-datadir rule to a per-`DomainCfg` one: under `hex+bin`
       the hex domain keeps `ReferencesInCommitmentBranches` and the bin domain does not
-- [ ] resolve the parallel-commitment refusal under `hex+bin`: the bin trie is sequential-only, so the
+- [x] resolve the parallel-commitment refusal under `hex+bin`: the bin trie is sequential-only, so the
       flag must apply to the hex arm without banning the mode outright
-- [ ] keep `trie_hash` meaningful only when `bin` is in the set
-- [ ] write tests: each of the three values round-trips through the settings file
-- [ ] write tests: `hex+bin` with `--experimental.parallel-commitment` is accepted and applies the flag
+- [x] keep `trie_hash` meaningful only when `bin` is in the set
+- [x] write tests: each of the three values round-trips through the settings file
+- [x] write tests: `hex+bin` with `--experimental.parallel-commitment` is accepted and applies the flag
       to the hex arm only
-- [ ] write tests: `hex` with `--experimental.bin-commitment` is still refused
-- [ ] run `make test-short` — must pass before task 4
+- [x] write tests: `hex` with `--experimental.bin-commitment` is still refused
+- [x] run `make test-short` — must pass before task 4
 
 ### Task 4: Canonical-commitment selector plumbing (no new domain yet)
 
