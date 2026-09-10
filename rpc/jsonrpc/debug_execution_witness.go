@@ -19,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -938,9 +937,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Witness capture is served by the sequential HexPatriciaHashed and by
 	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
 	// cannot serve it and is demoted.
-	if agg, ok := tx.AggTx().(*dbstate.AggregatorRoTx); ok {
-		tx = witnessReconstructionTx{TemporalTx: tx, agg: witnessReconstructionAgg{agg}}
-	}
+	tx = commitmentReconstructionView(tx)
 	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New(), execctx.WithCommitmentDomain(commitmentDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return nil, err
@@ -1024,23 +1021,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	})
 
 	return result, nil
-}
-
-// Witness folds reconstruct historical branches in private memory; the source
-// transaction stays read-only and its frozen domain is never updated.
-type witnessReconstructionTx struct {
-	kv.TemporalTx
-	agg witnessReconstructionAgg
-}
-
-func (tx witnessReconstructionTx) AggTx() any { return &tx.agg }
-
-type witnessReconstructionAgg struct {
-	*dbstate.AggregatorRoTx
-}
-
-func (*witnessReconstructionAgg) IsDomainFrozen(kv.Domain) (uint64, bool) {
-	return 0, false
 }
 
 // appendLegacyEmptyStorageNode appends the empty storage-trie node (0x80) once when some

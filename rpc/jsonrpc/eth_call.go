@@ -486,6 +486,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
 
+	if !isLatest {
+		roTx = commitmentReconstructionView(roTx)
+	}
 	domains, err := execctx.NewSharedDomains(ctx, roTx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err

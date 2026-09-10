@@ -732,6 +732,10 @@ func (s *simulator) computeSimulatedStateRoot(
 		canonicalDomain = kv.CommitmentBinDomain
 	}
 	if latest || s.commitmentHistory {
+		foldTx := tx
+		if !latest {
+			foldTx = commitmentReconstructionView(tx)
+		}
 		for _, domain := range sharedDomains.CommitmentDomains() {
 			if p, ok := tx.AggTx().(interface {
 				IsDomainFrozen(kv.Domain) (uint64, bool)
@@ -752,7 +756,7 @@ func (s *simulator) computeSimulatedStateRoot(
 				if len(ancestors) == 0 {
 					commitmentCtx.SetHistoryStateReader(tx, minTxNum)
 					var err error
-					commitTxNum, _, err = commitmentCtx.SeekCommitment(ctx, tx)
+					commitTxNum, _, err = commitmentCtx.SeekCommitment(ctx, foldTx)
 					if err != nil {
 						return err
 					}
@@ -773,7 +777,7 @@ func (s *simulator) computeSimulatedStateRoot(
 					}
 				}
 			}
-			stateRoot, err := commitmentCtx.ComputeCommitment(ctx, tx, false, block.NumberU64(), commitTxNum, "eth_simulateV1", nil)
+			stateRoot, err := commitmentCtx.ComputeCommitment(ctx, foldTx, false, block.NumberU64(), commitTxNum, "eth_simulateV1", nil)
 			if err != nil {
 				return err
 			}

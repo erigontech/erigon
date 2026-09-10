@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -220,4 +221,34 @@ func TestPBinFrozenHexHistoricalWitness(t *testing.T) {
 	currentState, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, state, currentState)
+}
+
+func TestPBinFrozenHexHistoricalProof(t *testing.T) {
+	_, m := pbinDualWitnessFixture(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	selector := rpc.BlockNumberOrHashWithNumber(2)
+	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	keys := []hexutil.Bytes{{0}}
+	before, err := api.GetProof(t.Context(), address, keys, &selector)
+	require.NoError(t, err)
+	require.NotEmpty(t, before.AccountProof)
+	require.Len(t, before.StorageProof, 1)
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	saved, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	saved = bytes.Clone(saved)
+	txNum, _ := commitmentdb.DecodeTxBlockNums(saved)
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
+	after, err := api.GetProof(t.Context(), address, keys, &selector)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	current, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, saved, current)
+	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+	require.True(t, frozen)
+	require.Equal(t, txNum, frozenAt)
 }

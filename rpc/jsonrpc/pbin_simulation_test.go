@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -100,20 +101,42 @@ func TestPBinDualSimulation(t *testing.T) {
 	})
 
 	t.Run("frozen_hex", func(t *testing.T) {
-		request := SimulationRequest{BlockStateCalls: []SimulatedBlock{call(5)}}
-		selector := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-		before, err := api.SimulateV1(t.Context(), request, selector)
-		require.NoError(t, err)
+		cases := []struct {
+			name   string
+			base   rpc.BlockNumber
+			blocks []SimulatedBlock
+		}{
+			{"latest", rpc.LatestBlockNumber, []SimulatedBlock{call(5)}},
+			{"pre_activation", 1, []SimulatedBlock{call(2)}},
+			{"cross_activation", 1, []SimulatedBlock{call(2), call(3), call(4)}},
+		}
+		before := make([]SimulationResult, len(cases))
+		for i, tc := range cases {
+			var err error
+			before[i], err = api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: tc.blocks}, rpc.BlockNumberOrHashWithNumber(tc.base))
+			require.NoError(t, err)
+		}
 		tx, err := m.DB.BeginTemporalRo(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
 		state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
+		state = bytes.Clone(state)
 		txNum, _ := commitmentdb.DecodeTxBlockNums(state)
 		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
-		after, err := api.SimulateV1(t.Context(), request, selector)
+		for i, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				after, err := api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: tc.blocks}, rpc.BlockNumberOrHashWithNumber(tc.base))
+				require.NoError(t, err)
+				require.Equal(t, before[i], after)
+			})
+		}
+		current, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
-		require.Equal(t, before, after)
+		require.Equal(t, state, current)
+		frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+		require.True(t, frozen)
+		require.Equal(t, txNum, frozenAt)
 	})
 }

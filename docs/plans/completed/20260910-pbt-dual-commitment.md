@@ -711,6 +711,8 @@ different states and correctly report different roots.
       writable temporary storage isolated from the source datadir's freeze metadata
 - [x] ➕ isolate historical witness folds from durable freeze checks and verify that pre-activation
       witnesses remain available after hex is frozen without changing its saved state
+- [x] ➕ keep historical `eth_getProof` and pre-activation or activation-crossing `eth_simulateV1`
+      requests available after hex freeze, without changing durable commitment state or freeze metadata
 - [x] ➕ select the payload builder's commitment domain by the proposed timestamp; validate built
       payloads before, at, and after activation, after hex freeze, and in binary-only mode
 - [x] write tests: a witness request for a pre-flip block selects hex and for a post-flip block selects
