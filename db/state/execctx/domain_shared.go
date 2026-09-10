@@ -595,7 +595,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	}
 	defer upd.Clear()
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
+		return sd.DomainPutCommitmentDiff(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData, nil)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
@@ -641,7 +641,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// Apply deferred branch writes under the pending update's block
 		// changeset, then save it back. All accesses under changesetMu —
 		// see concurrency contract on the wrappers above.
-		defer sd.SwapCommitmentDiffLocked(cs)()
+		defer sd.SwapCommitmentDiffLocked(sd.commitmentDomainValue(), cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
 			return err
@@ -771,7 +771,7 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 // silently drops the explicit diff and records into whatever
 // SetChangesetAccumulator last installed.
 type commitmentBranchDiffWriter interface {
-	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
+	PutCommitmentBranchDiff(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
 }
 
 // DomainPutCommitmentDiff is DomainPut(kv.CommitmentDomain, ...) with an
@@ -779,19 +779,19 @@ type commitmentBranchDiffWriter interface {
 // recently installed on the commitment writer. The commitment domain has
 // exactly one writer (the parallel commitment calculator), so this needs no
 // lock to stay race-free — see TemporalMemBatch.PutCommitmentBranchDiff.
-func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+func (sd *SharedDomains) DomainPutCommitmentDiff(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
 	if v == nil {
 		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
 	}
 	ks := string(k)
-	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, k, ks, v, prevVal)
+	prevVal, err := sd.resolvePrevVal(domain, roTx, k, ks, v, prevVal)
 	if err != nil {
 		return err
 	}
 	if bytes.Equal(prevVal, v) {
 		return nil
 	}
-	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
+	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(domain, ks, v, txNum, prevVal, diff)
 }
 
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
@@ -801,26 +801,27 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // (the only real caller) only ever writes kv.CommitmentDomain.
 type commitmentDiffPutDel struct {
 	temporalPutDel
-	diff *kv.DomainDiff
+	commitmentDomain kv.Domain
+	diff             *kv.DomainDiff
 }
 
 func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	if domain == kv.CommitmentDomain {
-		return p.sd.DomainPutCommitmentDiff(p.tx, k, v, txNum, prevVal, p.diff)
+	if domain == p.commitmentDomain {
+		return p.sd.DomainPutCommitmentDiff(domain, p.tx, k, v, txNum, prevVal, p.diff)
 	}
 	return p.temporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	if domain == kv.CommitmentDomain {
-		panic("commitmentDiffPutDel.DomainDel called for kv.CommitmentDomain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
+	if domain == p.commitmentDomain {
+		panic("commitmentDiffPutDel.DomainDel called for commitment domain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
 	}
 	return p.temporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
-	if domain == kv.CommitmentDomain {
-		panic("commitmentDiffPutDel.DomainDelPrefix called for kv.CommitmentDomain: not supported by the explicit-diff routing path")
+	if domain == p.commitmentDomain {
+		panic("commitmentDiffPutDel.DomainDelPrefix called for commitment domain: not supported by the explicit-diff routing path")
 	}
 	return p.temporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
@@ -828,17 +829,17 @@ func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, 
 // AsPutDelWithDiff is AsPutDel, but commitment-domain writes route
 // through diff explicitly rather than the shared SetChangesetAccumulator
 // target — see commitmentDiffPutDel.
-func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
-	return &commitmentDiffPutDel{temporalPutDel{sd, tx}, diff}
+func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff, commitmentDomain kv.Domain) kv.TemporalPutDel {
+	return &commitmentDiffPutDel{temporalPutDel: temporalPutDel{sd, tx}, commitmentDomain: commitmentDomain, diff: diff}
 }
 
 // commitmentDiffSwapper must be implemented by every mem batch behind
 // SharedDomains: the only alternative is redirecting all domain writers,
 // which is unsafe now that DomainPut takes no lock.
 type commitmentDiffSwapper interface {
-	SetCommitmentDiff(acc *changeset.StateChangeSet)
-	SetCommitmentDiffRaw(d *kv.DomainDiff)
-	CommitmentDiff() *kv.DomainDiff
+	SetCommitmentDiff(domain kv.Domain, acc *changeset.StateChangeSet)
+	SetCommitmentDiffRaw(domain kv.Domain, d *kv.DomainDiff)
+	CommitmentDiff(domain kv.Domain) *kv.DomainDiff
 }
 
 // SwapCommitmentDiffLocked points the commitment writer's diff at acc and
@@ -846,11 +847,11 @@ type commitmentDiffSwapper interface {
 // alone, so apply-side writes need no lock. Callers must hold changesetMu.
 // Used only by flushPendingUpdates's hash-aware routing — a call with a known
 // target diff should use DomainPutCommitmentDiff instead, which needs no lock.
-func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
+func (sd *SharedDomains) SwapCommitmentDiffLocked(domain kv.Domain, acc *changeset.StateChangeSet) (restore func()) {
 	h := sd.mem.(commitmentDiffSwapper)
-	prev := h.CommitmentDiff()
-	h.SetCommitmentDiff(acc)
-	return func() { h.SetCommitmentDiffRaw(prev) }
+	prev := h.CommitmentDiff(domain)
+	h.SetCommitmentDiff(domain, acc)
+	return func() { h.SetCommitmentDiffRaw(domain, prev) }
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block

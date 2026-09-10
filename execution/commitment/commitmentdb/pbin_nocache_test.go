@@ -51,7 +51,7 @@ func (s *pbinStubSharedDomains) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.D
 	return nil
 }
 func (s *pbinStubSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil }
-func (s *pbinStubSharedDomains) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff) kv.TemporalPutDel {
+func (s *pbinStubSharedDomains) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff, kv.Domain) kv.TemporalPutDel {
 	return nil
 }
 func (s *pbinStubSharedDomains) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {

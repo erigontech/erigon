@@ -37,7 +37,7 @@ func (s *pbinStateStubSD) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainM
 	return nil
 }
 func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil }
-func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff) kv.TemporalPutDel {
+func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff, kv.Domain) kv.TemporalPutDel {
 	return nil
 }
 func (s *pbinStateStubSD) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {

@@ -499,18 +499,18 @@ different states and correctly report different roots.
 - Modify: `execution/stagedsync/committer.go`
 - Modify: `db/state/execctx/domain_shared_test.go`
 
-- [ ] give `DomainPutCommitmentDiff` a domain parameter
-- [ ] give `PutCommitmentBranchDiff` and the `SetCommitmentDiff` / `CommitmentDiff` /
+- [x] give `DomainPutCommitmentDiff` a domain parameter
+- [x] give `PutCommitmentBranchDiff` and the `SetCommitmentDiff` / `CommitmentDiff` /
       `SetCommitmentDiffRaw` accessors on the mem batch a domain parameter, replacing their hardcoded
       `acc.Diffs[kv.CommitmentDomain]`; update the flush callback
-- [ ] update `execution/blockreplay/witnessmembatch.go`, which carries its own copy of the interface plus
+- [x] update `execution/blockreplay/witnessmembatch.go`, which carries its own copy of the interface plus
       a forwarder
-- [ ] select `cs.Diffs[...]` / `live.Diffs[...]` by the arm's commitment domain in the committer instead
+- [x] select `cs.Diffs[...]` / `live.Diffs[...]` by the arm's commitment domain in the committer instead
       of hardcoding `kv.CommitmentDomain`
-- [ ] write tests: a bin branch write lands in `Diffs[kv.CommitmentBinDomain]` and a hex write in
+- [x] write tests: a bin branch write lands in `Diffs[kv.CommitmentBinDomain]` and a hex write in
       `Diffs[kv.CommitmentDomain]`
-- [ ] write tests: an unwind over a block that wrote both domains restores both domains' branch values
-- [ ] run `make test-short` — must pass before task 12
+- [x] write tests: an unwind over a block that wrote both domains restores both domains' branch values
+- [x] run `make test-short` — must pass before task 12
 
 ### Task 12: Expose the touched plain-key set to the bin collector
 

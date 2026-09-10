@@ -156,16 +156,16 @@ func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, 
 // The commitment domain has exactly one writer (the parallel commitment
 // calculator, one block at a time), so routing its diff this way needs no
 // lock against SetChangesetAccumulator, unlike DomainPut/DomainDel.
-func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
-	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, v, txNum)
+func (sd *TemporalMemBatch) PutCommitmentBranchDiff(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
+	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
 	kb := common.ToBytesZeroCopy(k)
 	if sameTxNumUpdate {
-		return sd.domainWriters[kv.CommitmentDomain].addValue(kb, v, kv.Step(txNum/sd.stepSize))
+		return sd.domainWriters[domain].addValue(kb, v, kv.Step(txNum/sd.stepSize))
 	}
 	if len(v) == 0 {
-		return sd.domainWriters[kv.CommitmentDomain].DeleteWithPrevDiff(kb, txNum, preval, diff)
+		return sd.domainWriters[domain].DeleteWithPrevDiff(kb, txNum, preval, diff)
 	}
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrevDiff(kb, v, txNum, preval, diff)
+	return sd.domainWriters[domain].PutWithPrevDiff(kb, v, txNum, preval, diff)
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
@@ -499,20 +499,20 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 
 // SetCommitmentDiff redirects only the commitment writer's diff, leaving every
 // other domain writer pointed at the live accumulator.
-func (sd *TemporalMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
+func (sd *TemporalMemBatch) SetCommitmentDiff(domain kv.Domain, acc *changeset.StateChangeSet) {
 	if acc == nil {
-		sd.domainWriters[kv.CommitmentDomain].SetDiff(nil)
+		sd.domainWriters[domain].SetDiff(nil)
 		return
 	}
-	sd.domainWriters[kv.CommitmentDomain].SetDiff(&acc.Diffs[kv.CommitmentDomain])
+	sd.domainWriters[domain].SetDiff(&acc.Diffs[domain])
 }
 
-func (sd *TemporalMemBatch) CommitmentDiff() *kv.DomainDiff {
-	return sd.domainWriters[kv.CommitmentDomain].Diff()
+func (sd *TemporalMemBatch) CommitmentDiff(domain kv.Domain) *kv.DomainDiff {
+	return sd.domainWriters[domain].Diff()
 }
 
-func (sd *TemporalMemBatch) SetCommitmentDiffRaw(d *kv.DomainDiff) {
-	sd.domainWriters[kv.CommitmentDomain].SetDiff(d)
+func (sd *TemporalMemBatch) SetCommitmentDiffRaw(domain kv.Domain, d *kv.DomainDiff) {
+	sd.domainWriters[domain].SetDiff(d)
 }
 
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {

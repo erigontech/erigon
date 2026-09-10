@@ -956,7 +956,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		defer cc.doms.SwapCommitmentDiffLocked(nil)()
+		defer cc.doms.SwapCommitmentDiffLocked(cc.doms.GetCommitmentContext().CommitmentDomain(), nil)()
 		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
 	}(); err != nil {
 		return nil, err
@@ -1089,12 +1089,13 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Using nil here would silently drop this step's writes.
 	live := cc.doms.GetChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+	commitmentDomain := cc.doms.GetCommitmentContext().CommitmentDomain()
 
 	var diff *kv.DomainDiff
 	if cs != nil {
-		diff = &cs.Diffs[kv.CommitmentDomain]
+		diff = &cs.Diffs[commitmentDomain]
 	} else if live != nil {
-		diff = &live.Diffs[kv.CommitmentDomain]
+		diff = &live.Diffs[commitmentDomain]
 	}
 	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff)
 }

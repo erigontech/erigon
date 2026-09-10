@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -76,6 +77,87 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 
 func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
+}
+
+func TestSharedDomainsCommitmentDiffUsesDomain(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+	})
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	for domain, value := range map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {1},
+		kv.CommitmentBinDomain: {2},
+	} {
+		key := []byte{byte(domain), 0xaa}
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, value, 1, nil, &cs.Diffs[domain]))
+		got, _, err := sd.GetLatest(domain, rwTx, key)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+
+	require.Len(t, cs.Diffs[kv.CommitmentDomain].GetDiffSet(), 1)
+	require.Len(t, cs.Diffs[kv.CommitmentBinDomain].GetDiffSet(), 1)
+}
+
+func TestSharedDomainsCommitmentDiffUnwindUsesBothDomains(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+	})
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	keys := map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {0xaa, 0x01},
+		kv.CommitmentBinDomain: {0xbb, 0x01},
+	}
+	for domain, key := range keys {
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, []byte{byte(domain + 1)}, 1, nil, &cs.Diffs[domain]))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for domain := range keys {
+		diffs[domain] = cs.Diffs[domain].GetDiffSet()
+	}
+	require.NoError(t, rwTx.Unwind(t.Context(), 0, &diffs))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for domain, key := range keys {
+		value, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
