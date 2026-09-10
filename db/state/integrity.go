@@ -68,6 +68,11 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 		if err != nil {
 			return err
 		}
+	case kv.CommitmentBinHistoryIdx:
+		err := at.d[kv.CommitmentBinDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
 	default:
 		// check the ii
 		if v := at.searchII(name); v != nil {

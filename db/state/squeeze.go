@@ -150,6 +150,12 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				history: HistoryRanges{},
 				aggStep: stepSize,
 			},
+			kv.CommitmentBinDomain: {
+				name:    kv.CommitmentBinDomain,
+				values:  MergeRange{"", true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: stepSize,
+			},
 		},
 	}
 	sf, err := at.filesInRange(rng)

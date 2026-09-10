@@ -349,21 +349,21 @@ different states and correctly report different roots.
 - Modify: `db/state/statecfg/state_schema_test.go`
 - Create: `db/kv/domain_name_test.go`
 
-- [ ] add `CommitmentBinDomain Domain = 6` and bump `DomainLen` to 7
-- [ ] add the `Domain.String` case `"commitment-bin"` and the matching `String2Domain` case
-- [ ] add `TblCommitmentBinVals` and the history/index tables, following the `TblCommitment*` shape
-- [ ] add the bin `DomainCfg` mirroring `kv.CommitmentDomain`'s with `ReferencesInCommitmentBranches:
+- [x] add `CommitmentBinDomain Domain = 6` and bump `DomainLen` to 7
+- [x] add the `Domain.String` case `"commitment-bin"` and the matching `String2Domain` case
+- [x] add `TblCommitmentBinVals` and the history/index tables, following the `TblCommitment*` shape
+- [x] add the bin `DomainCfg` mirroring `kv.CommitmentDomain`'s with `ReferencesInCommitmentBranches:
       false`, `Hist.SnapshotsDisabled` / `Hist.HistoryDisabled` true, and its own `KVWriteVersion`; add
       its `version_schema` and `gen_version` entries
-- [ ] register the domain in `Configure` conditionally on the Task 3 datadir mode, and register **no**
+- [x] register the domain in `Configure` conditionally on the Task 3 datadir mode, and register **no**
       `AddDependencyBtwnDomains` for it
-- [ ] add the bin entry to the keyed `mxsKVGet` literal — a missing key leaves a nil slice and
+- [x] add the bin entry to the keyed `mxsKVGet` literal — a missing key leaves a nil slice and
       `domainReadMetric` panics on the first bin file read
-- [ ] audit every other keyed `[kv.DomainLen]` literal for the same hole
-- [ ] write tests: `Domain.String` / `String2Domain` round-trip for every domain including the new one
-- [ ] write tests: `domainReadMetric` returns a usable summary for every domain at every level
-- [ ] write tests: a `hex`-only datadir registers exactly the six domains it registers today
-- [ ] run `make test-short` — must pass before task 6
+- [x] audit every other keyed `[kv.DomainLen]` literal for the same hole
+- [x] write tests: `Domain.String` / `String2Domain` round-trip for every domain including the new one
+- [x] write tests: `domainReadMetric` returns a usable summary for every domain at every level
+- [x] write tests: a `hex`-only datadir registers exactly the six domains it registers today
+- [x] run `make test-short` — must pass before task 6
 
 ### Task 6: Teach the name tables and the snapshot type parser about commitment-bin
 

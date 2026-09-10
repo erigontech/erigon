@@ -667,7 +667,7 @@ func (a *Aggregator) openFolder() error {
 
 	eg, ctx := errgroup.WithContext(a.ctx)
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled {
 			continue
 		}
 
@@ -900,6 +900,9 @@ func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 		return res
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		res = append(res, d.Files()...)
 	}
 	for _, ii := range at.standaloneIIs() {
@@ -933,6 +936,9 @@ func (a *Aggregator) LS() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		doLS(d.dirtyFiles)
 		doLS(d.History.dirtyFiles)
 		doLS(d.History.InvertedIndex.dirtyFiles)
@@ -997,6 +1003,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts
 	}()
 
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
 	}
 
@@ -1089,7 +1098,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step, finalityCtx d
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled {
 			continue
 		}
 
@@ -1366,6 +1375,9 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
 	for id, ii := range a.standaloneIIs() {
@@ -1440,6 +1452,9 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 		return false
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		if d.CanPruneUntil(tx, untilTx) {
 			return true
 		}
@@ -1546,6 +1561,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	steps := make([]string, 0, len(at.d)+at.iisCount)
 	for _, dt := range at.d {
+		if dt == nil {
+			continue
+		}
 		a1, a2 := dt.stepsRangeInDB(tx)
 		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.FilenameBase, a2-a1))
 	}
@@ -1664,6 +1682,9 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	}
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
+		if d == nil {
+			continue
+		}
 		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
 		//	if true { //d.d.Name != kv.CommitmentDomain {
 		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
@@ -1807,6 +1828,9 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		res = append(res, d.dirtyFiles.Len())
 	}
 	for _, ii := range a.standaloneIIs() {
@@ -1988,7 +2012,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if d == nil || !d.d.Enabled {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -2080,7 +2104,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if !at.d[id].d.Enabled {
+		if at.d[id] == nil || !at.d[id].d.Enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2154,7 +2178,7 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled {
 			continue
 		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
@@ -2187,7 +2211,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	var deleted []string
 	var retired []*FilesItem
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if d == nil || !d.d.Enabled {
 			continue
 		}
 		var names []string
@@ -2433,6 +2457,9 @@ func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		if d.d.HistoryIdx == name {
 			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
@@ -2688,6 +2715,9 @@ func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
+	if d == nil {
+		return 0
+	}
 	if d.d.HistoryDisabled {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
@@ -2698,6 +2728,9 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 }
 func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
 	d := at.d[name]
+	if d == nil {
+		return 0, false
+	}
 	if d.d.HistoryDisabled {
 		return 0, false
 	}
@@ -2811,6 +2844,9 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
+		if d == nil {
+			continue
+		}
 		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
 			return err
 		}
@@ -2830,6 +2866,9 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 		return at
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		d.files.MadvNormal()
 		d.ht.files.MadvNormal()
 		d.ht.iit.files.MadvNormal()
@@ -2844,6 +2883,9 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		return
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		d.files.DisableReadAhead()
 		d.ht.files.DisableReadAhead()
 		d.ht.iit.files.DisableReadAhead()
@@ -2856,6 +2898,9 @@ func (a *Aggregator) MadvNormal() *Aggregator {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.dirtyFiles.MadvNormal()
 		d.History.dirtyFiles.MadvNormal()
 		d.History.InvertedIndex.dirtyFiles.MadvNormal()
@@ -2869,6 +2914,9 @@ func (a *Aggregator) DisableReadAhead() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.dirtyFiles.DisableReadAhead()
 		d.History.dirtyFiles.DisableReadAhead()
 		d.History.InvertedIndex.dirtyFiles.DisableReadAhead()

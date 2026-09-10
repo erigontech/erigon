@@ -48,6 +48,11 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
 		return err
 	}
+	if ExperimentalBinCommitment {
+		if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentBinDomain), salt, dirs, logger); err != nil {
+			return err
+		}
+	}
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -90,6 +95,7 @@ type SchemaGen struct {
 	StorageDomain         DomainCfg
 	CodeDomain            DomainCfg
 	CommitmentDomain      DomainCfg
+	CommitmentBinDomain   DomainCfg
 	ReceiptDomain         DomainCfg
 	RCacheDomain          DomainCfg
 	LogAddrIdx            InvIdxCfg
@@ -104,7 +110,7 @@ type SchemaGen struct {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
@@ -136,6 +142,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) DomainCfg {
 		v = s.CodeDomain
 	case kv.CommitmentDomain:
 		v = s.CommitmentDomain
+	case kv.CommitmentBinDomain:
+		v = s.CommitmentBinDomain
 	case kv.ReceiptDomain:
 		v = s.ReceiptDomain
 	case kv.RCacheDomain:
@@ -193,6 +201,10 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
+	return version.V2_2
+}
+
+func commitmentBinKVWriteVersion(*DomainCfg) version.Version {
 	return version.V2_2
 }
 
@@ -304,6 +316,34 @@ var Schema = SchemaGen{
 			IiCfg: InvIdxCfg{
 				Enabled:      true,
 				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
+				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
+			},
+		},
+	},
+	CommitmentBinDomain: DomainCfg{
+		Name: kv.CommitmentBinDomain, ValuesTable: kv.TblCommitmentBinVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: false,
+		KVWriteVersion:                 commitmentBinKVWriteVersion,
+
+		Hist: HistCfg{
+			ValuesTable:   kv.TblCommitmentBinHistoryVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
+			HistoryIdx: kv.CommitmentBinHistoryIdx,
+			Accessors:  AccessorHashMap,
+
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 64,
+
+			SnapshotsDisabled: true,
+			HistoryDisabled:   true,
+
+			IiCfg: InvIdxCfg{
+				Enabled:      true,
+				FilenameBase: kv.CommitmentBinDomain.String(), KeysTable: kv.TblCommitmentBinHistoryKeys, ValuesTable: kv.TblCommitmentBinIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},

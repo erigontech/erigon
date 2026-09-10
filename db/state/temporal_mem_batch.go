@@ -116,6 +116,9 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	}
 
 	for id, d := range aggTx.d {
+		if d == nil {
+			continue
+		}
 		sd.domains[id] = map[string][]dataWithTxNum{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
@@ -483,6 +486,9 @@ func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
+		if sd.domainWriters[idx] == nil {
+			continue
+		}
 		if sd.currentChangesAccumulator == nil {
 			sd.domainWriters[idx].SetDiff(nil)
 		} else {
@@ -665,7 +671,9 @@ func (sd *TemporalMemBatch) Close() {
 	}
 	for _, ds := range sd.pastDomainWriters {
 		for _, d := range ds {
-			d.Close()
+			if d != nil {
+				d.Close()
+			}
 		}
 	}
 	for _, iiWriter := range sd.iiWriters {
@@ -893,6 +901,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 	aggTx := AggTx(tx)
 	for _, ws := range sd.pastDomainWriters {
 		for _, w := range slices.Backward(ws) {
+			if w == nil {
+				continue
+			}
 			if err := w.Flush(ctx, tx); err != nil {
 				return err
 			}

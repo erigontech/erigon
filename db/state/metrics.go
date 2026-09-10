@@ -104,6 +104,14 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment"}`),
 		},
+		kv.CommitmentBinDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment-bin"}`),
+		},
 		kv.ReceiptDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="receipt"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="receipt"}`),
