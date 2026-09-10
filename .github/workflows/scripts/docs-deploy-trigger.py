@@ -53,14 +53,23 @@ def branch_span(src):
     return b
 
 
-# A '#' only starts a comment when whitespace precedes it (YAML requires that,
-# and git permits '#' inside a branch name) — otherwise `- release/3.6#keep`
-# would read as `release/3.6` and the trigger would be reported as pinned to a
-# branch it does not actually name.
+# Shapes are matched the way a YAML parser reads them, because the cost of
+# being lenient is asymmetric: listing a branch that `on.push.branches` does
+# not actually contain reports a pin the deploy trigger does not have, and the
+# cutover then flips the variable to a branch that never publishes.
+#
+#   - the dash needs whitespace after it: `-release/3.6` is the scalar
+#     "-release/3.6", not a one-item list;
+#   - indentation must be spaces, since a tab makes the document invalid;
+#   - a plain scalar cannot begin with a quote, so a half-quoted entry is
+#     not a name at all;
+#   - a '#' starts a comment only when whitespace precedes it (git permits '#'
+#     inside a branch name, so `- release/3.6#keep` is that whole name) —
+#     except after a closing quote, which has already ended the name.
 ENTRY = re.compile(
-    r"^(?P<lead>[ \t]*-[ \t]*)"
+    r"^(?P<lead>[ ]*-[ \t]+)"
     r"(?:(?P<q>['\"])(?P<qname>[^'\"]+)(?P=q)(?P<qtrail>[ \t]*(?:#.*)?)"
-    r"|(?P<name>\S+)(?P<trail>(?:[ \t]+#.*)?[ \t]*))$", re.M)
+    r"|(?P<name>[^'\"\s]\S*)(?P<trail>(?:[ \t]+#.*)?[ \t]*))$", re.M)
 
 
 def entries(block):

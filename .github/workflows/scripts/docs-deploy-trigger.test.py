@@ -28,7 +28,14 @@ spec.loader.exec_module(mod)
 FAILURES = []
 
 
+CHECKS = 0
+
+
 def check(name, got, want):
+    """Record one assertion. Counted, not hardcoded — a hand-maintained total
+    drifts, and then a real failure prints a denominator nobody trusts."""
+    global CHECKS
+    CHECKS += 1
     if got != want:
         FAILURES.append(f"{name}: got {got!r}, want {want!r}")
 
@@ -88,7 +95,6 @@ ACCEPTED = [
      "    branches:\n# publishing branch\n      - release/3.6\n", ["release/3.6"]),
     ("blank line in the list", "    branches:\n\n      - release/3.6\n", ["release/3.6"]),
     ("dash at the key's indent", "    branches:\n    - release/3.6\n", ["release/3.6"]),
-    ("tab-indented entry", "    branches:\n\t- release/3.6\n", ["release/3.6"]),
     ("extra spaces after dash", "    branches:\n      -    release/3.6\n", ["release/3.6"]),
     ("trailing whitespace", "    branches:\n      - release/3.6   \n", ["release/3.6"]),
     ("comment on the branches: key",
@@ -101,6 +107,16 @@ ACCEPTED = [
 
 # Shapes YAML itself does not read as a branches list. Accepting one would
 # report a pin the deploy trigger does not have.
+# Shapes a real YAML parser does not read as a one-branch list. The parser must
+# not name a branch for any of them: reporting a pin the deploy trigger does not
+# have is the failure that flips the variable to a branch that never publishes.
+NOT_A_PIN = [
+    ("tab indentation — invalid YAML", "    branches:\n\t- release/3.6\n", []),
+    ("no space after the dash", "    branches:\n      -release/3.6\n", []),
+    ("trailing junk after the name", "    branches:\n      - release/3.6 x\n", []),
+    ("mismatched quotes", "    branches:\n      - 'release/3.6\"\n", []),
+]
+
 REJECTED = [
     ("branches:#c — not a key in YAML",
      "    branches:#c\n      - release/3.6\n", REFUSE_NO_LIST),
@@ -111,7 +127,7 @@ REJECTED = [
 
 
 def run():
-    for name, body, want in ACCEPTED + REJECTED:
+    for name, body, want in ACCEPTED + NOT_A_PIN + REJECTED:
         check(name, parse(HEAD + body + TAIL), want)
 
     check("comment on the push: key",
@@ -129,10 +145,20 @@ def run():
               "  push:\n    branches:\n      - release/3.6\n" + TAIL)
     check("pull_request before push", parse(before), ["release/3.6"])
 
-    # --list is the contract the workflow greps with `-Fxq`: one name per line.
+    # A comment at the key's own indent must not close the block.
+    keyc = ("on:\n  push:\n    # which branch publishes\n    branches:\n"
+            "      - release/3.6\n    paths:  # only the site\n      - x\n" + TAIL)
+    check("comment at key indent, comment on closing key", parse(keyc), ["release/3.6"])
+
+    # --list is the contract the workflow greps with `-Fxq`: ONE NAME PER LINE.
+    # Verified with two entries, because a single entry cannot distinguish a
+    # newline-joined list from a space-joined one.
     rc, out, _ = run_cli(HEAD + "    branches:\n      - release/3.6\n" + TAIL, ["--list"])
     check("--list rc", rc, 0)
     check("--list output", out, "release/3.6\n")
+    _, out2, _ = run_cli(
+        HEAD + "    branches:\n      - release/3.6\n      - release/3.5\n" + TAIL, ["--list"])
+    check("--list is one name per line", out2, "release/3.6\nrelease/3.5\n")
 
     # Repointing rewrites the name and nothing else.
     src = ("on:\n  push:\n    branches:\n      # publishing branch\n"
@@ -149,16 +175,30 @@ def run():
     check("already-pinned is a no-op", result, pinned)
     check("already-pinned says so", "already pins release/3.7" in out, True)
 
+    # A quoted entry with no trailing comment must round trip unchanged apart
+    # from the name — the trail group is empty here, not absent.
+    q = HEAD + "    branches:\n      - 'release/3.6'\n" + TAIL
+    rc, _, result = run_cli(q, ["--repoint", "release/3.7"])
+    check("quoted entry, no trail, rc", rc, 0)
+    check("quoted entry, no trail", result, q.replace("'release/3.6'", "'release/3.7'"))
+
+    # A list the parser cannot read must refuse, not traceback or guess.
+    empty = HEAD + "    branches:\n      -release/3.6\n" + TAIL
+    rc, out, result = run_cli(empty, ["--repoint", "release/3.7"])
+    check("unreadable list refuses", rc != 0, True)
+    check("unreadable list unchanged", result, empty)
+
     # An ambiguous list must not be rewritten by guesswork.
     two = HEAD + "    branches:\n      - release/3.6\n      - release/3.5\n" + TAIL
     rc, out, result = run_cli(two, ["--repoint", "release/3.7"])
-    check("two entries refuses", rc != 0 or "expected exactly one" in out, True)
+    # rc, not the message: a mutant that prints the refusal and returns 0 would
+    # let the step go on to commit an unchanged tree and fail there instead.
+    check("two entries refuses", rc != 0, True)
     check("two entries unchanged", result, two)
 
-    total = len(ACCEPTED) + len(REJECTED) + 12
     for f in FAILURES:
         print("FAIL", f)
-    print(f"{total - len(FAILURES)}/{total} passed")
+    print(f"{CHECKS - len(FAILURES)}/{CHECKS} passed")
     return 1 if FAILURES else 0
 
 
