@@ -131,3 +131,37 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 	require.Less(t, retained, float64(caches)*0.12,
 		"closed caches retained %.2f MB across %d caches", retained, caches)
 }
+
+// EXTCODESIZE is answered by the size-only layer, so that layer has to outlive
+// eviction from the content layers. It cannot grow once the content layers have
+// drawn the envelope down, so it has to be born wide enough.
+func TestCodeSizeOutlivesContentEviction(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	// An exhausted envelope: the unconditional birth Take still lands, every
+	// growth step is refused.
+	cachebudget.Global = cachebudget.New(0)
+
+	const budget = 32 * datasize.MB
+	cache := closeOnCleanup(t, NewCodeCache(budget, 1*datasize.MB))
+
+	const contracts = 3000
+	hashes := make([][]byte, contracts)
+	for i := range contracts {
+		code := make([]byte, 64*1024)
+		binary.BigEndian.PutUint64(code, uint64(i))
+		addr := make([]byte, 20)
+		binary.BigEndian.PutUint64(addr, uint64(i))
+		hashes[i] = crypto.Keccak256(code)
+		cache.PutWithCodeHash(addr, code, hashes[i], uint64(i))
+	}
+
+	known := 0
+	for _, h := range hashes {
+		if _, ok := cache.GetCodeSizeByCodeHash(h); ok {
+			known++
+		}
+	}
+	require.Equal(t, contracts, known,
+		"the size layer dropped sizes for code the content layers evicted")
+}

@@ -952,7 +952,7 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	g := newGrowLRUEntries[codeSizeEntry](100_000, 8, nil)
+	g := newGrowLRUEntries[codeSizeEntry](100_000, 0, 8, nil)
 	g.Close()
 	require.Zero(t, cachebudget.Global.Used())
 

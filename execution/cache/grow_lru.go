@@ -67,8 +67,10 @@ type growLRU[V any] struct {
 // newGrowLRUEntries builds a growLRU from an entry ceiling rather than a byte
 // budget, for layers whose contract is the entry count. avgBytes is the payload
 // held outside the freelru element; a layer with an inline value passes 0.
-func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
-	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes),
+// startEntries is the birth capacity, which the envelope always funds; pass 0
+// for the default.
+func newGrowLRUEntries[V any](maxEntries, startEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
+	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), startEntries, int64(avgBytes),
 		uint32(runtime.GOMAXPROCS(0)), onEvict)
 }
 
@@ -83,7 +85,7 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	maxCap := fitCeiling(approx, maxCacheSlots, maxBytes, func(c uint32) int64 {
 		return growLRUBytes(c, procs, int64(avgBytes), elemBytes)
 	})
-	return newGrowLRUWith(maxCap, int64(avgBytes), procs, onEvict)
+	return newGrowLRUWith(maxCap, 0, int64(avgBytes), procs, onEvict)
 }
 
 // growLRUGeneration is the table size and shard count freelru builds a capacity
@@ -115,10 +117,12 @@ func (g *growLRU[V]) generationBytes(capacity uint32) int64 {
 	return growLRUBytes(capacity, g.procs, g.avgBytes, g.elemBytes)
 }
 
-func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, procs uint32, onEvict func(uint64, V)) *growLRU[V] {
+func newGrowLRUWith[V any](maxCap, startCap uint32, payloadBytes int64, procs uint32, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
 	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
-	start := min(uint32(genericCacheStartCapacity), maxCap)
+	// The birth reservation is unconditional, so a layer that cannot rely on
+	// winning a later growth step asks for its working size here.
+	start := min(max(startCap, uint32(genericCacheStartCapacity)), maxCap)
 	g := &growLRU[V]{
 		onEvict:   onEvict,
 		avgBytes:  payloadBytes,

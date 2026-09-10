@@ -263,13 +263,13 @@ func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
+	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, 0, nil)
 	defer sizeLayer.Close()
 	require.Zero(t, sizeLayer.avgBytes, "the size layer must reserve no external payload")
 
 	// Zero payload so the assertion weighs the table and shard charge alone; the
 	// code bytes a real content layer also reserves would mask an undercharge.
-	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
+	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, 0, nil)
 	defer contentLayer.Close()
 
 	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer) })
