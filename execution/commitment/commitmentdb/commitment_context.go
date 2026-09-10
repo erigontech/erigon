@@ -67,11 +67,11 @@ type SharedDomainsCommitmentContext struct {
 	commitmentDomain kv.Domain
 	updates          *commitment.Updates
 	patriciaTrie     commitment.Trie
-	variant          commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
-	justRestored     atomic.Bool            // set to true when commitment trie was just restored from snapshot
+	variant          commitment.TrieVariant
+	justRestored     atomic.Bool
 	traceW           io.Writer
 	stateReader      StateReader
-	paraTrieDB       kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	paraTrieDB       kv.TemporalRoDB
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
 	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
 	// worker count from WarmupNumWorkersOrDefault.

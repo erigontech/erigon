@@ -26,16 +26,12 @@ const (
 )
 
 type ErigonDBSettings struct {
-	StepSize                       uint64 `toml:"step_size"`
-	StepsInFrozenFile              uint64 `toml:"steps_in_frozen_file"`
-	ReferencesInCommitmentBranches *bool  `toml:"references_in_commitment_branches"`
-	// TrieVariant is the commitment trie set the datadir was created with; absent means hex.
-	// Like every erigondb.toml key it wins over the CLI.
-	TrieVariant *string `toml:"trie_variant,omitempty"`
-	// TrieHash is H for a datadir containing a binary trie ("keccak" or "blake3"); absent means
-	// keccak. Meaningless under "hex", which has no choice of hash.
-	TrieHash      *string           `toml:"trie_hash,omitempty"`
-	FrozenAtTxNum map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
+	StepSize                       uint64            `toml:"step_size"`
+	StepsInFrozenFile              uint64            `toml:"steps_in_frozen_file"`
+	ReferencesInCommitmentBranches *bool             `toml:"references_in_commitment_branches"`
+	TrieVariant                    *string           `toml:"trie_variant,omitempty"`
+	TrieHash                       *string           `toml:"trie_hash,omitempty"`
+	FrozenAtTxNum                  map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -79,7 +75,6 @@ func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
 	return txNum, ok
 }
 
-// reconcileTrieVariant applies the datadir's trie variant to the process.
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	switch s.TrieVariantName() {
 	case TrieVariantBin:

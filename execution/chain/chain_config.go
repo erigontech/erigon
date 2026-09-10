@@ -89,9 +89,6 @@ type Config struct {
 	// track head-of-spec set it; no scheduled network does. BinaryTrieTime implies it.
 	EIP8038Revised bool `json:"eip8038Revised,omitempty"`
 
-	// BinaryTrieTime schedules EIP-8297's partitioned binary tree. The key is shared with
-	// the other clients, so one genesis.json serves a mixed network. It must not be earlier
-	// than AmsterdamTime, which is where the tree is first defined.
 	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)

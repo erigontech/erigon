@@ -2006,7 +2006,7 @@ type aggregatorVisible struct {
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64                          // min of domain file EndTxNum across the selected state domains
+	minimaxTxNum uint64
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -2068,9 +2068,6 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
-// stateMinimaxTxNum returns min(EndTxNum) across the selected state domains. Mirrors
-// AggregatorRoTx.TxNumsInFiles but operates directly on the bundle so the
-// writer can compute it without spinning up a throwaway RoTx.
 func (v *aggregatorVisible) stateMinimaxTxNum(commitmentDomain kv.Domain) uint64 {
 	minTxNum := uint64(math.MaxUint64)
 	for _, d := range kv.StateDomains(commitmentDomain) {

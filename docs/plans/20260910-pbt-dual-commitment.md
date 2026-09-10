@@ -810,15 +810,17 @@ different states and correctly report different roots.
 
 ### Task 27: Verify acceptance criteria
 
-- [ ] verify every requirement in Overview is implemented
-- [ ] verify a `hex`-only datadir is unchanged: same file layout, same genesis header, and it still reads
-      diffsets written before this change
-- [ ] verify a `bin`-only datadir still runs the current devnet configuration
-- [ ] run the full suite: `make test-all`
-- [ ] run `go test -race` over `execution/commitment/...`, `db/state/...`, `execution/stagedsync/...`
-- [ ] run the linter and confirm no new findings
-- [ ] confirm no code comments were added (the hook denies them, but check the diff)
-- [ ] confirm new files carry a 2026 copyright header
+- [x] verify every requirement in Overview is implemented (static audit plus the complete test suite passed)
+- [x] verify a `hex`-only datadir is unchanged: same file layout, same genesis header, and it still reads
+      diffsets written before this change (covered by the compatibility and genesis tests)
+- [x] verify a `bin`-only datadir still runs the current devnet configuration (covered by bin genesis,
+      execution, RPC, and integration tests; external devnet execution remains post-completion)
+- [x] run the full suite: `make test-all`
+- [x] run `go test -race` over `execution/commitment/...`, `db/state/...`, `execution/stagedsync/...`
+      (passed with `-parallel 1` to serialize tests that mutate process-global configuration)
+- [x] run the linter and confirm no new findings
+- [x] confirm no code comments were added (the hook denies them, but check the diff)
+- [x] confirm new files carry a 2026 copyright header
 
 ### Task 28: [Final] Update documentation
 

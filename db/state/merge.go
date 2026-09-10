@@ -110,9 +110,6 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // inside an already-selected span are skipped — the outer merge will absorb them.
 //
 // maxEndTxNum is the synchronization frontier set by AggregatorRoTx.findMergeRange:
-// min visible EndTxNum across the selected state domains, optionally tightened to keep
-// Accounts/Storage/Commitment domain frontiers aligned. Files past it aren't yet
-// merge candidates — going further would let one entity drift ahead of the others.
 //
 // When the natural start (endTxNum minus the largest power-of-two step span)
 // falls strictly inside an existing visible file, the window is clipped so its

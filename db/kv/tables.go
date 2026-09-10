@@ -661,12 +661,12 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain      Domain = 0 // Eth Accounts
-	StorageDomain       Domain = 1 // Eth Account's Storage
-	CodeDomain          Domain = 2 // Eth Smart-Contract Code
-	CommitmentDomain    Domain = 3 // Merkle Trie
-	ReceiptDomain       Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
-	RCacheDomain        Domain = 5 // Fat Receipts - with logs. Optional.
+	AccountsDomain      Domain = 0
+	StorageDomain       Domain = 1
+	CodeDomain          Domain = 2
+	CommitmentDomain    Domain = 3
+	ReceiptDomain       Domain = 4
+	RCacheDomain        Domain = 5
 	CommitmentBinDomain Domain = 6
 	DomainLen           Domain = 7
 )

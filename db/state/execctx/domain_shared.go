@@ -430,7 +430,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	} else {
 		sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
 	}
-	// Fetch the aggregator-scope branch cache for the selected canonical domain.
 	var branchCache *commitment.BranchCache
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache && (len(commitmentDomains) > 1 || o.trieCfg.Variant != commitment.VariantBinPatriciaTrie) {
 		branchCache = p.BranchCache(commitmentDomain)
@@ -1099,7 +1098,6 @@ func (sd *SharedDomains) CommitmentDomains() []kv.Domain {
 }
 
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
-// commitment is not yet frozen into files for domain.
 func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, domain kv.Domain, txNum uint64) bool {
 	ss := sd.stepSize
 	if ss == 0 || sd.discardCommitment {
