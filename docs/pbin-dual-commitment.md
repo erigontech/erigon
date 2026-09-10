@@ -95,6 +95,10 @@ state minimax used for file building and merge alignment includes accounts, stor
 that canonical commitment domain through `kv.StateDomains` (`db/kv/tables.go`). A stopped, frozen, or
 not-yet-built shadow domain therefore does not stall canonical file production.
 
+Referenced hex branches retain a read view of their exact account and storage file ranges through
+`aggregatorVisible` (`db/state/aggregator.go`). Those dependencies remain readable when newer merged
+files replace the ranges used by ordinary state reads, including after the hex domain stops or freezes.
+
 The binary domain has no hex branch-cache trunk and no inter-domain dependency. Its files use names
 such as `v1.0-commitment-bin.0-1024.kv`; `ParseFileName` and the snapshot command name tables handle
 the hyphenated type through `db/snaptype/files.go` and `db/snaptype/type.go`.
@@ -125,6 +129,13 @@ The private debug API in `rpc/jsonrpc/debug_api.go` exposes two migration observ
 
 These methods make it possible to compare the shadow window with another client and to distinguish a
 stopped shadow fold from a canonical execution failure.
+
+`debug_executionWitness` seeks only the selected trie's parent state. At the activation block, its
+binary parent root comes from the parent's shadow-root record because the parent header still carries
+the hex root. `buildWitnessResult` (`rpc/jsonrpc/debug_execution_witness.go`) reports an error if that
+shadow-root record is unavailable.
+The explicit commitment-history option enables history and history snapshots for both domains through
+`EnableHistoricalCommitment` (`db/state/statecfg/state_schema.go`).
 
 ## Compatibility
 

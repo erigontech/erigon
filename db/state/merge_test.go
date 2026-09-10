@@ -1301,8 +1301,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		defer sc.Close()
 		defer cc.Close()
 
-		checkFn(ac, 2)
-		checkFn(sc, 2)
+		checkFn(ac, 0)
+		checkFn(sc, 0)
 		checkFn(cc, 2)
 
 		// delete the smaller files

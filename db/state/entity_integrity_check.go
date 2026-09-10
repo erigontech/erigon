@@ -71,6 +71,7 @@ type DependencyIntegrityChecker struct {
 
 type DependentInfo struct {
 	requiredForVisibility func() bool
+	requiredForRetention  func(*FilesItem) bool
 	entity                UniversalEntity
 	filesGetter           DirtyFilesGetter
 	accessors             statecfg.Accessors
@@ -127,7 +128,7 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64) (isPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok || d.disable || (d.disableInterDomain && dependency.category() == domainCategory) {
-		return true
+		return allOrAny.All()
 	}
 
 	if d.trace {
@@ -153,7 +154,7 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 		} else {
 			// Any: used for garbage collection
 			// any dependent (e.g. commiment) file is present => dependency file can't be deleted
-			if found {
+			if found && (dependent.requiredForRetention == nil || dependent.requiredForRetention(file)) {
 				if d.trace {
 					d.logger.Warn("[dbg: Depic]", "dependent", dependent.entity.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true)
 				}

@@ -604,6 +604,9 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 		requiredForVisibility: func() bool {
 			return dependent != kv.CommitmentDomain || a.CanonicalCommitmentDomain() == kv.CommitmentDomain
 		},
+		requiredForRetention: func(file *FilesItem) bool {
+			return dependent != kv.CommitmentDomain || (a.trieVariant != TrieVariantBin && CommitmentBranchReferenced(file.version, a.StepSize(), file.startTxNum, file.endTxNum))
+		},
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
@@ -2043,11 +2046,12 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
-	d            [kv.DomainLen]*domainVisible
-	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
-	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
-	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64
+	d                      [kv.DomainLen]*domainVisible
+	dh                     [kv.DomainLen]visibleFiles      // per-domain History visible files
+	dhii                   [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
+	iis                    [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum           uint64
+	commitmentDependencies map[[2]uint64]commitmentFileDependencies
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -2074,6 +2078,9 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			continue
 		}
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+	}
+	if a.trieVariant != TrieVariantBin && next.d[kv.CommitmentDomain] != nil {
+		next.commitmentDependencies = a.commitmentDependencies(next.d[kv.CommitmentDomain].files)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum(a.CanonicalCommitmentDomain())
 

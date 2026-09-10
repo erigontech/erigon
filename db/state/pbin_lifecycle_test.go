@@ -17,6 +17,9 @@
 package state
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
@@ -122,7 +126,7 @@ func TestPBinLaggingHexShadowDoesNotClampVisibleFiles(t *testing.T) {
 	defer at.Close()
 	require.EqualValues(t, 2*alignStepSize, at.d[kv.AccountsDomain].files.EndTxNum())
 	require.EqualValues(t, alignStepSize, at.d[kv.CommitmentDomain].files.EndTxNum())
-	require.True(t, agg.checker.CheckDependentPresent(FromDomain(kv.AccountsDomain), Any, 0, alignStepSize))
+	require.False(t, agg.checker.CheckDependentPresent(FromDomain(kv.AccountsDomain), Any, 0, alignStepSize))
 }
 
 func pbinDualAggregator(t *testing.T) *Aggregator {
@@ -152,4 +156,136 @@ func TestPBinStoppedShadowDoesNotMerge(t *testing.T) {
 	merges := at.findMergeRange(2*alignStepSize, alignStepSize, 8)
 	require.False(t, merges.domain[kv.CommitmentDomain].any())
 	require.True(t, merges.domain[kv.AccountsDomain].values.needMerge)
+}
+
+func TestPBinFrozenHexReferencesSurviveStateMerge(t *testing.T) {
+	for _, stopped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "frozen", true: "stopped"}[stopped], func(t *testing.T) {
+			agg := pbinDualAggregator(t)
+			agg.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+			dirs := agg.Dirs()
+			generateStateFiles(t, dirs, []testFileRange{{0, 2}})
+			generateCommitmentFile(t, dirs, []testFileRange{{0, 2}})
+			generateDomainFiles(t, "commitment-bin", dirs, []testFileRange{{0, 4}})
+			account := bytes.Repeat([]byte{1}, 20)
+			storage := bytes.Repeat([]byte{2}, 52)
+			for name, key := range map[string][]byte{"accounts": account, "storage": storage} {
+				c, err := seg.NewCompressor(t.Context(), t.Name(), filepath.Join(dirs.SnapDomain, "v1.0-"+name+".0-2.kv"), dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+				require.NoError(t, err)
+				t.Cleanup(c.Close)
+				require.NoError(t, c.AddWord(key))
+				require.NoError(t, c.AddWord([]byte{3}))
+				require.NoError(t, c.Compress())
+				c.Close()
+			}
+			require.NoError(t, agg.OpenFolder())
+			if stopped {
+				agg.StopCommitmentDomain(kv.CommitmentDomain)
+			} else {
+				variant := TrieVariantHexBin
+				require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{TrieVariant: &variant}))
+				require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, 2*alignStepSize-1))
+			}
+			branch := commitment.BranchData{0, 1, 0, 1, 6, 1, 0, 1, 0}
+			expected, err := branch.ReplacePlainKeys(nil, func(_ []byte, isStorage bool) ([]byte, error) {
+				if isStorage {
+					return storage, nil
+				}
+				return account, nil
+			})
+			require.NoError(t, err)
+			before := agg.BeginFilesRo()
+			expanded, err := before.replaceShortenedKeysInBranch([]byte{1}, branch, 0, 2*alignStepSize)
+			require.NoError(t, err)
+			require.Equal(t, expected, expanded)
+			before.Close()
+
+			generateStateFiles(t, dirs, []testFileRange{{0, 4}})
+			require.NoError(t, agg.OpenFolder())
+			after := agg.BeginFilesRo()
+			defer after.Close()
+			require.EqualValues(t, 4*alignStepSize, after.d[kv.AccountsDomain].files.EndTxNum())
+			require.Len(t, after.d[kv.AccountsDomain].files, 1)
+			require.EqualValues(t, 2*alignStepSize, after.d[kv.CommitmentDomain].files.EndTxNum())
+			expanded, err = after.replaceShortenedKeysInBranch([]byte{1}, branch, 0, 2*alignStepSize)
+			require.NoError(t, err)
+			require.Equal(t, expected, expanded)
+
+			agg.cleanAfterMerge(nil)
+			for _, name := range []string{"accounts", "storage"} {
+				require.FileExists(t, filepath.Join(dirs.SnapDomain, "v1.0-"+name+".0-2.kv"))
+			}
+			if stopped {
+				generateCommitmentFile(t, dirs, []testFileRange{{0, 4}})
+				require.NoError(t, agg.OpenFolder())
+				agg.cleanAfterMerge(nil)
+				agg.cleanAfterMerge(nil)
+				expanded, err = after.replaceShortenedKeysInBranch([]byte{1}, branch, 0, 2*alignStepSize)
+				require.NoError(t, err)
+				require.Equal(t, expected, expanded)
+				after.Close()
+				for _, name := range []string{"accounts", "storage"} {
+					_, err := os.Stat(filepath.Join(dirs.SnapDomain, "v1.0-"+name+".0-2.kv"))
+					require.ErrorIs(t, err, os.ErrNotExist)
+				}
+			} else {
+				after.Close()
+				cfg := agg.d[kv.CommitmentBinDomain].DomainCfg
+				db := agg.db
+				agg.Close()
+				reopened := NewTest(dirs).StepSize(alignStepSize).Logger(log.New()).MustOpen(t.Context(), db)
+				t.Cleanup(reopened.Close)
+				require.NoError(t, reopened.RegisterDomain(cfg, reopened.savedSalt, dirs, log.New()))
+				reopened.EnableDomain(kv.CommitmentBinDomain)
+				reopened.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+				require.NoError(t, reopened.OpenFolder())
+				frozenAt, frozen := reopened.IsDomainFrozen(kv.CommitmentDomain)
+				require.True(t, frozen)
+				require.EqualValues(t, 2*alignStepSize-1, frozenAt)
+				restored := reopened.BeginFilesRo()
+				defer restored.Close()
+				expanded, err = restored.replaceShortenedKeysInBranch([]byte{1}, branch, 0, 2*alignStepSize)
+				require.NoError(t, err)
+				require.Equal(t, expected, expanded)
+			}
+		})
+	}
+}
+
+func TestPBinFrozenPlainHexDoesNotRetainStateFiles(t *testing.T) {
+	agg := pbinDualAggregator(t)
+	agg.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+	dirs := agg.Dirs()
+	generateStateFiles(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	generateDomainFiles(t, "commitment-bin", dirs, []testFileRange{{0, 2}})
+	require.NoError(t, agg.OpenFolder())
+	agg.setFrozenAtTxNums(map[string]uint64{kv.CommitmentDomain.String(): alignStepSize - 1})
+	generateStateFiles(t, dirs, []testFileRange{{0, 2}})
+	require.NoError(t, agg.OpenFolder())
+	agg.cleanAfterMerge(nil)
+	for _, name := range []string{"accounts", "storage"} {
+		_, err := os.Stat(filepath.Join(dirs.SnapDomain, "v1.0-"+name+".0-1.kv"))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+}
+
+func TestPBinDisabledDependenciesDoNotRetainFiles(t *testing.T) {
+	for _, mode := range []string{"absent", "disabled", "inter-domain disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			checker := NewDependencyIntegrityChecker(log.New())
+			dependency := FromDomain(kv.AccountsDomain)
+			if mode != "absent" {
+				checker.AddDependency(dependency, &DependentInfo{entity: FromDomain(kv.CommitmentDomain)})
+			}
+			switch mode {
+			case "disabled":
+				checker.Disable()
+			case "inter-domain disabled":
+				checker.DisableInterDomain()
+			}
+			require.True(t, checker.CheckDependentPresent(dependency, All, 0, 1))
+			require.False(t, checker.CheckDependentPresent(dependency, Any, 0, 1))
+		})
+	}
 }

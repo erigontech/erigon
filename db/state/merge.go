@@ -1037,6 +1037,9 @@ func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesIt
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
+		if checker != nil && checker(item.startTxNum, item.endTxNum) {
+			continue
+		}
 		if merged == nil {
 			if hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
@@ -1052,10 +1055,7 @@ func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesIt
 		}
 
 		if item.isProperSubsetOf(merged) {
-			if checker == nil || !checker(item.startTxNum, item.endTxNum) {
-				// no dependent file is present for item, can delete safely...
-				outs = append(outs, item)
-			}
+			outs = append(outs, item)
 		}
 	}
 	return outs

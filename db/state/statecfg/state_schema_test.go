@@ -33,6 +33,23 @@ func TestCommitmentReferencesDefault(t *testing.T) {
 	assert.Equal(t, config3.DefaultReferencesInCommitmentBranches, Schema.CommitmentDomain.ReferencesInCommitmentBranches)
 }
 
+func TestEnableHistoricalCommitmentIncludesBinaryDomain(t *testing.T) {
+	original := Schema
+	t.Cleanup(func() { Schema = original })
+	Schema.CommitmentDomain.Hist.HistoryDisabled = true
+	Schema.CommitmentDomain.Hist.SnapshotsDisabled = true
+	Schema.CommitmentBinDomain.Hist.HistoryDisabled = true
+	Schema.CommitmentBinDomain.Hist.SnapshotsDisabled = true
+
+	EnableHistoricalCommitment()
+
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		cfg := Schema.GetDomainCfg(domain)
+		require.False(t, cfg.Hist.HistoryDisabled, domain.String())
+		require.False(t, cfg.Hist.SnapshotsDisabled, domain.String())
+	}
+}
+
 // TestSchemaEntityEnabled pins which schema entities participate in writes and
 // produce files. A missed literal in Schema silently changes this matrix.
 func TestSchemaEntityEnabled(t *testing.T) {

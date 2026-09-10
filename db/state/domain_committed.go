@@ -36,6 +36,49 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+type commitmentFileDependencies struct {
+	accounts *FilesItem
+	storage  *FilesItem
+}
+
+func (a *Aggregator) commitmentDependencies(files visibleFiles) map[[2]uint64]commitmentFileDependencies {
+	var dependencies map[[2]uint64]commitmentFileDependencies
+	for _, file := range files {
+		if !CommitmentBranchReferenced(file.Version(), a.StepSize(), file.startTxNum, file.endTxNum) {
+			continue
+		}
+		lookup := func(domain kv.Domain) *FilesItem {
+			d := a.d[domain]
+			if d == nil {
+				return nil
+			}
+			item, ok := d.dirtyFiles.Get(&FilesItem{startTxNum: file.startTxNum, endTxNum: file.endTxNum})
+			if !ok || !checkForVisibility(item, d.Accessors, false) {
+				return nil
+			}
+			return item
+		}
+		if dependencies == nil {
+			dependencies = make(map[[2]uint64]commitmentFileDependencies)
+		}
+		dependencies[[2]uint64{file.startTxNum, file.endTxNum}] = commitmentFileDependencies{accounts: lookup(kv.AccountsDomain), storage: lookup(kv.StorageDomain)}
+	}
+	return dependencies
+}
+
+func (at *AggregatorRoTx) commitmentDependency(domain kv.Domain, from, to uint64) (*FilesItem, error) {
+	if at.visible != nil {
+		dependency := at.visible.commitmentDependencies[[2]uint64{from, to}]
+		if domain == kv.AccountsDomain && dependency.accounts != nil {
+			return dependency.accounts, nil
+		}
+		if domain == kv.StorageDomain && dependency.storage != nil {
+			return dependency.storage, nil
+		}
+	}
+	return at.d[domain].lookupVisibleFileByRange(from, to)
+}
+
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
 func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
@@ -120,12 +163,12 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 
 	sto := aggTx.d[kv.StorageDomain]
 	acc := aggTx.d[kv.AccountsDomain]
-	storageItem, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	storageItem, err := at.commitmentDependency(kv.StorageDomain, fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	accountItem, err := acc.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	accountItem, err := at.commitmentDependency(kv.AccountsDomain, fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err

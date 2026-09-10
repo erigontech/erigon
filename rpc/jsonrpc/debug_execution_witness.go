@@ -943,6 +943,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
+	commitmentDomain = sdCtx.CommitmentDomain()
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
@@ -956,6 +957,16 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot = parentHeader.Root
+	if binTrie && !chainConfig.IsBinaryTrie(parentHeader.Time) {
+		shadowRoot, err := rawdb.ReadShadowStateRoot(tx, parentHeader.Hash(), parentNum)
+		if err != nil {
+			return nil, fmt.Errorf("read binary parent shadow root: %w", err)
+		}
+		if len(shadowRoot) != 32 {
+			return nil, fmt.Errorf("binary parent shadow root missing or invalid for block %d (%s)", parentNum, parentHeader.Hash())
+		}
+		expectedParentRoot = common.BytesToHash(shadowRoot)
+	}
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
@@ -1329,16 +1340,13 @@ func detectCollapseSiblings(
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
-	commitmentDomain := kv.CommitmentDomain
-	if binTrie {
-		commitmentDomain = kv.CommitmentBinDomain
-	}
-	splitStateReader := collapseReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock, endTxNum)
+	splitStateReader := collapseReaderFor(hc, tx, sdCtx.CommitmentDomain(), firstTxNumInBlock, endTxNum)
 	sdCtx.SetStateReader(splitStateReader)
-	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	seekTxNum, seekBlockNum, err := sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
+	domains.SetTxNum(seekTxNum)
 	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
 	// parent block's committed state. Any other position means the history has been pruned
 	// for this block range.
@@ -1422,14 +1430,12 @@ func buildWitnessTrie(
 
 	encodedNodes = []hexutil.Bytes{}
 
-	commitmentDomain := kv.CommitmentDomain
-	if binTrie {
-		commitmentDomain = kv.CommitmentBinDomain
-	}
-	sdCtx.SetStateReader(trieReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock))
-	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, sdCtx.CommitmentDomain(), firstTxNumInBlock))
+	seekTxNum, _, err := sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
+	domains.SetTxNum(seekTxNum)
 
 	accessed.touchAll(sdCtx, binTrie)
 

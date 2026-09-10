@@ -436,10 +436,10 @@ var Schema = SchemaGen{
 }
 
 func EnableHistoricalCommitment() {
-	cfg := Schema.CommitmentDomain
-	cfg.Hist.HistoryDisabled = false
-	cfg.Hist.SnapshotsDisabled = false
-	Schema.CommitmentDomain = cfg
+	for _, cfg := range []*DomainCfg{&Schema.CommitmentDomain, &Schema.CommitmentBinDomain} {
+		cfg.Hist.HistoryDisabled = false
+		cfg.Hist.SnapshotsDisabled = false
+	}
 }
 
 /*
