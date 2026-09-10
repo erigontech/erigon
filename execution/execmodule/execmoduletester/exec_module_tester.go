@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -373,6 +374,12 @@ func WithMaxReorgDepth(d uint64) Option {
 	}
 }
 
+func WithSlowBlockThreshold(d time.Duration) Option {
+	return func(opts *options) {
+		opts.slowBlockThreshold = &d
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -406,6 +413,7 @@ type options struct {
 	fcuBackgroundPrune            bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
+	slowBlockThreshold            *time.Duration
 	sentryProtocol                uint
 	stateTransitionObserver       execmodule.StateTransitionObserver
 	skipAmsterdamBuilderContracts bool
@@ -505,6 +513,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
+	if opt.slowBlockThreshold != nil {
+		cfg.Sync.SlowBlockThreshold = opt.slowBlockThreshold
+		if tb != nil {
+			prevReadMetrics := dbg.KVReadLevelledMetrics
+			tb.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+		}
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
