@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -37,6 +38,17 @@ type errDB struct {
 	err             error
 }
 
+type finishOnDoneContext struct {
+	context.Context
+	finish func()
+	once   sync.Once
+}
+
+func (c *finishOnDoneContext) Done() <-chan struct{} {
+	c.once.Do(c.finish)
+	return c.Context.Done()
+}
+
 func (e *errDB) BeginTemporalRo(_ context.Context) (kv.TemporalTx, error) {
 	return nil, e.err
 }
@@ -48,14 +60,13 @@ func TestBuilder_Build_DBError(t *testing.T) {
 
 	want := errors.New("db open failed")
 	b := &Builder{
-		ctx:            context.Background(),
 		db:             &errDB{err: want},
 		builderCfg:     &buildercfg.BuilderConfig{},
 		pendingBlockCh: make(chan *types.Block, 1),
 		logger:         log.New(),
 	}
 
-	_, err := b.Build(&Parameters{}, &atomic.Bool{})
+	_, err := b.Build(t.Context(), &Parameters{}, &atomic.Bool{})
 	require.ErrorIs(t, err, want)
 }
 
@@ -68,4 +79,21 @@ func TestBuilder_PendingBlockCh(t *testing.T) {
 	ch := b.PendingBlockCh()
 	require.NotNil(t, ch)
 	require.Equal(t, ch, b.PendingBlockCh(), "must return the same channel on repeated calls")
+}
+
+func TestWaitForBuilderResultPrefersCompletedPayloadOverCancellation(t *testing.T) {
+	for range 50 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		want := &types.BlockWithReceipts{}
+		results := make(chan *types.BlockWithReceipts, 1)
+		finishCtx := &finishOnDoneContext{
+			Context: ctx,
+			finish:  func() { results <- want },
+		}
+
+		got, err := waitForBuilderResult(finishCtx, results)
+		require.NoError(t, err)
+		require.Same(t, want, got)
+	}
 }

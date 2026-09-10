@@ -17,7 +17,6 @@
 package murmur3
 
 import (
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -80,33 +79,6 @@ func TestMurmur128PairEquivalence(t *testing.T) {
 					len1, len2, seed, gotHi, gotLo, wantHi, wantLo)
 			}
 		}
-	}
-}
-
-// Key lengths match real index keys: 8=txnum, 20=address, 32=hash, 52=addr+slot, 80=commitment path
-var murmurBenchSizes = []int{8, 20, 32, 52, 80, 128}
-
-func BenchmarkMurmur128(b *testing.B) {
-	rnd := rand.New(rand.NewSource(44))
-	for _, size := range murmurBenchSizes {
-		key := make([]byte, size)
-		rnd.Read(key)
-		b.Run(fmt.Sprintf("port/len%d", size), func(b *testing.B) {
-			var sink uint64
-			for b.Loop() {
-				h1, _ := Sum128WithSeed(key, 42)
-				sink = h1
-			}
-			_ = sink
-		})
-		b.Run(fmt.Sprintf("library/len%d", size), func(b *testing.B) {
-			var sink uint64
-			for b.Loop() {
-				h1, _ := libmurmur3.Sum128WithSeed(key, 42)
-				sink = h1
-			}
-			_ = sink
-		})
 	}
 }
 

@@ -134,7 +134,7 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 func Send[I Info](info I) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debug("diagnostic Send panic recovered: %v, stack: %s", r, dbg.Stack())
+			log.Debug("diagnostic Send panic recovered", "panic", r, "stack", dbg.Stack())
 		}
 	}()
 

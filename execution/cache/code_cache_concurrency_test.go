@@ -18,23 +18,22 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/common/math"
 )
 
-// TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
-// accounting drift that the pre-LoadOrStore code had: parallel workers Putting
-// the same cold code all missed the membership check, all passed the cap gate,
-// and all added to the byte counter, leaving a permanent positive surplus that
-// eventually wedged the cap. With the atomic LoadOrStore insert, only the
-// goroutine that actually inserts accounts the size, so the counters must equal
-// exactly one entry regardless of how many concurrent Puts raced.
+// Concurrent puts of the same cold code must account each content layer once.
+// The per-key stripe keeps the membership check, accounting, and insertion atomic.
 func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
@@ -136,5 +135,162 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		v, ok := cc.Get(addr)
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
+}
+
+func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xef
+	code := []byte("dead-fork-code")
+	codeID := maphash.Hash(code)
+	preClearEpoch := cc.coh.Epoch()
+
+	cc.Clear()
+	// Model a writer that sampled the epoch before Clear and published after
+	// the relevant layers were purged.
+	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
+	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.Unwind(150)
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
+func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := []byte{0xef}
+	code := []byte("dead-fork-code")
+	cc.addrBindMu.Lock()
+
+	var wg sync.WaitGroup
+	putStarted := make(chan struct{})
+	wg.Go(func() {
+		close(putStarted)
+		cc.Put(addr, code, 200)
+	})
+	<-putStarted
+	runtime.Gosched()
+
+	clearStarted := make(chan struct{})
+	wg.Go(func() {
+		close(clearStarted)
+		cc.Clear()
+	})
+	<-clearStarted
+	runtime.Gosched()
+
+	cc.addrBindMu.Unlock()
+	wg.Wait()
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
+}
+
+// The grow copy must carry the retiring generation over in Keys() order --
+// oldest first -- because insertion order alone sets the new generation's
+// recency. Reading each entry back with Get re-links it in the generation being
+// retired, so the order the copy observes shifts as the copy walks it.
+func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
+	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+	startCap := g.curCap.Load()
+
+	const warmup = genericCacheStartCapacity / 2
+	for i := range uint64(warmup) {
+		g.Add(key(i), i)
+	}
+	for i := uint64(0); i < warmup; i += 3 { // pull recency away from insertion order
+		g.Get(key(i))
+	}
+
+	var oldKeys, oldVals []uint64
+	var trigger uint64
+	grew := false
+	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+		old := g.cur.Load()
+		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
+			oldKeys = old.Keys() // snapshot the generation this add is about to retire
+			oldVals = make([]uint64, len(oldKeys))
+			for j, k := range oldKeys {
+				oldVals[j], _ = old.Peek(k)
+			}
+		}
+		g.Add(key(i), i)
+		if grew = g.curCap.Load() > startCap; grew {
+			trigger = i // this add landed in the new generation, after the copy
+		}
+	}
+	require.True(t, grew, "the fill must have triggered a real grow")
+
+	// Replay the snapshot into the geometry the grow chose.
+	want := g.newShards(g.curCap.Load())
+	for j, k := range oldKeys {
+		want.Add(k, oldVals[j])
+	}
+	want.Add(key(trigger), trigger)
+
+	got := g.cur.Load()
+	require.Positive(t, want.Len())
+	require.Equal(t, want.Len(), got.Len(), "the grown generation must hold every copied entry")
+	require.Equal(t, want.Keys(), got.Keys(), "the grown generation must keep the pre-grow order")
+	for _, k := range got.Keys() {
+		wantV, ok := want.Peek(k)
+		require.True(t, ok)
+		gotV, ok := got.Peek(k)
+		require.True(t, ok)
+		require.Equal(t, wantV, gotV)
+	}
+}
+
+// A growLRU generation reserves no external payload for a value freelru stores
+// inline, so the slot and per-shard charges alone have to cover it.
+func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
+	defer sizeLayer.Close()
+	require.Zero(t, sizeLayer.avgBytes, "the size layer must reserve no external payload")
+
+	// Zero payload so the assertion weighs the table and shard charge alone; the
+	// code bytes a real content layer also reserves would mask an undercharge.
+	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
+	defer contentLayer.Close()
+
+	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer) })
+	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer) })
+}
+
+func requireGenerationCovered[V any](t *testing.T, g *growLRU[V]) {
+	t.Helper()
+	for _, capacity := range []uint32{1 << 12, 1 << 14, 1 << 16} {
+		// TotalAlloc rather than HeapAlloc: a collection inside the window would
+		// swamp a heap-size delta.
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		gen := g.newShards(capacity)
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		runtime.KeepAlive(gen)
+
+		allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+		charged := g.generationBytes(capacity)
+		require.Positive(t, allocated)
+		require.GreaterOrEqual(t, charged, allocated,
+			"envelope reserves %d B for %d slots but the generation allocates %d B",
+			charged, capacity, allocated)
 	}
 }

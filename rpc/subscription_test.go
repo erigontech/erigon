@@ -188,12 +188,13 @@ type subConfirmation struct {
 func waitForMessages(in *json.Decoder, successes chan subConfirmation, notifications chan subscriptionResult, errors chan error) {
 	for {
 		resp, notification, err := readAndValidateMessage(in)
-		if err != nil {
+		switch {
+		case err != nil:
 			errors <- err
 			return
-		} else if resp != nil {
+		case resp != nil:
 			successes <- *resp
-		} else {
+		default:
 			notifications <- *notification
 		}
 	}

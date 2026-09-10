@@ -34,12 +34,12 @@ func TestGetBufferReturnsEmptyBuffer(t *testing.T) {
 
 func TestPutBufferDropsOversized(t *testing.T) {
 	buf := GetBuffer()
-	buf.Grow(maxBufferCap + 1)
-	require.Greater(t, buf.Cap(), maxBufferCap)
+	buf.Grow(MaxBufferCap + 1)
+	require.Greater(t, buf.Cap(), MaxBufferCap)
 	PutBuffer(buf)
 
 	// Any buffer obtained from the pool now must be within the cap limit.
 	fresh := GetBuffer()
 	defer PutBuffer(fresh)
-	require.LessOrEqual(t, fresh.Cap(), maxBufferCap)
+	require.LessOrEqual(t, fresh.Cap(), MaxBufferCap)
 }

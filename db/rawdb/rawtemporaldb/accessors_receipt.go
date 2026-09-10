@@ -1,10 +1,15 @@
 package rawtemporaldb
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -56,31 +61,98 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
-func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
-	{
-		var buf [binary.MaxVarintLen64]byte
-		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, buf[:i], txNum, nil); err != nil {
-			return err
+// FirstLogIndex returns the block-wide index the first log of the txn at txNum
+// takes. Which record holds it depends on the receipt domain version, so this is
+// the one place that knows: before V1_1 the txn's own record holds it, from V1_1
+// on it is the count the previous txn left, and the first txn of a block has no
+// predecessor record to read.
+func FirstLogIndex(tx kv.TemporalTx, txNum uint64, txIndex int) (uint32, error) {
+	at := txNum
+	if ReceiptStoresFirstLogIdx(tx) {
+		at++
+	} else if txIndex == 0 {
+		return 0, nil
+	}
+	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, LogIndexAfterTxKey, at)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("rawtemporaldb.FirstLogIndex: receipt domain has no record for txNum %d", txNum)
+	}
+	return uint32(uvarint(v)), nil
+}
+
+// ReceiptCacheKey is the single RCacheDomain key; the value is the encoded receipt.
+var ReceiptCacheKey = []byte{0x0}
+
+// ReceiptWriter is a reusable, single-goroutine encoder for the receipt domains.
+// It hands its own scratch to DomainPut, which does not borrow it - see
+// kv.TemporalPutDel.
+type ReceiptWriter struct {
+	buf          [binary.MaxVarintLen64]byte
+	rlpEncodeBuf bytes.Buffer
+}
+
+// Append stores the receipt in RCacheDomain.
+func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
+	var toWrite []byte
+
+	if receipt != nil {
+		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 		}
+
+		storageReceipt := (*types.ReceiptForStorage)(receipt)
+		w.rlpEncodeBuf.Reset()
+		if err := rlp.Encode(&w.rlpEncodeBuf, storageReceipt); err != nil {
+			return fmt.Errorf("ReceiptWriter.Append: encode: %w", err)
+		}
+		toWrite = w.rlpEncodeBuf.Bytes()
+		if dbg.AssertEnabled {
+			storageReceipt2 := &types.ReceiptForStorage{}
+			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
+				panic(fmt.Sprintf("assert: receipt encode/decode round-trip: %v", err))
+			}
+			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
+			}
+			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
+			}
+			if storageReceipt.TransactionIndex != storageReceipt2.TransactionIndex {
+				panic(fmt.Sprintf("assert: TransactionIndex mismatch: %d, %d\n", storageReceipt.TransactionIndex, storageReceipt2.TransactionIndex))
+			}
+		}
+	} else {
+		toWrite = []byte{}
 	}
 
-	{
-		var buf [binary.MaxVarintLen64]byte
-		i := binary.PutUvarint(buf[:], cumBlobGasUsed)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, buf[:i], txNum, nil); err != nil {
-			return err
-		}
-	}
-
-	{
-		var buf [binary.MaxVarintLen64]byte
-		i := binary.PutUvarint(buf[:], uint64(logIndexAfterTx))
-		if err := tx.DomainPut(kv.ReceiptDomain, LogIndexAfterTxKey, buf[:i], txNum, nil); err != nil {
-			return err
-		}
+	if err := tx.DomainPut(kv.RCacheDomain, ReceiptCacheKey, toWrite, txNum, nil); err != nil {
+		return fmt.Errorf("ReceiptWriter.Append: %w", err)
 	}
 	return nil
+}
+
+func (w *ReceiptWriter) AppendMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
+	i := binary.PutUvarint(w.buf[:], cumGasUsedInBlock)
+	if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, w.buf[:i], txNum, nil); err != nil {
+		return err
+	}
+	i = binary.PutUvarint(w.buf[:], cumBlobGasUsed)
+	if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, w.buf[:i], txNum, nil); err != nil {
+		return err
+	}
+	i = binary.PutUvarint(w.buf[:], uint64(logIndexAfterTx))
+	if err := tx.DomainPut(kv.ReceiptDomain, LogIndexAfterTxKey, w.buf[:i], txNum, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func AppendReceiptMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
+	var w ReceiptWriter
+	return w.AppendMetadata(tx, logIndexAfterTx, cumGasUsedInBlock, cumBlobGasUsed, txNum)
 }
 
 func uvarint(in []byte) (res uint64) {

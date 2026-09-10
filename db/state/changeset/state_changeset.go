@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 
@@ -29,10 +30,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
 func (s *StateChangeSet) Copy() *StateChangeSet {
@@ -44,6 +46,8 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
+
 	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
 	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
 	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
@@ -51,29 +55,6 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
-	}
-
-	totalKeyLen := 0
-	totalValueLen := 0
-	for i := range diffSet {
-		totalKeyLen += len(diffSet[i].Key)
-		if diffSet[i].Value != nil {
-			totalValueLen += len(diffSet[i].Value)
-		}
-	}
-
-	// Format: version(2) + uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
-	totalSize := len(out) + 4 + len(diffSet)*(4+1) + totalKeyLen + totalValueLen
-	// Add space for value length prefixes (only for entries with values)
-	for i := range diffSet {
-		if diffSet[i].Value != nil {
-			totalSize += 4
-		}
-	}
-	if cap(out) < totalSize {
-		ret := make([]byte, len(out), totalSize)
-		copy(ret, out)
-		out = ret
 	}
 	ret := out
 
@@ -218,14 +199,15 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
 		cmp := strings.Compare(older[j].Key, newer[i].Key)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			result = append(result, older[j])
 			j++
-		} else if cmp == 0 {
+		case cmp == 0:
 			result = append(result, older[j])
 			i++
 			j++
-		} else {
+		default:
 			result = append(result, newer[i])
 			i++
 		}
@@ -255,14 +237,15 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): acc %x: [different step], step: %d\n", blockNumber, address, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
 					}
 				}
@@ -274,11 +257,12 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [different step], step: %d\n", blockNumber, address, location, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
 					}
 				}
@@ -314,7 +298,10 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+
+// DiffChunkLen keeps 2 chunks inline in one mdbx leaf page - values bigger than half a page go to
+// overflow pages, which cost extra FreeList maintenance. See TestNoOverflowPages.
+const DiffChunkLen = int(ethconfig.DefaultChainDBPageSize)/2 - DiffChunkKeyLen - 32
 
 type threadSafeBuf struct {
 	b []byte
@@ -393,7 +380,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
+	val := make([]byte, 0, DiffChunkLen*int(chunkCount))
 	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])

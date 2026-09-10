@@ -17,7 +17,6 @@ The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/m
 * [`trace`](/interacting-with-erigon/trace): Transaction tracing API.
 * [`txpool`](/interacting-with-erigon/txpool): Transaction pool API.
 * [`admin`](/interacting-with-erigon/admin): Node administration API
-* [`bor`](/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
 * [`ots`](/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 * [`internal`](/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
 * [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
@@ -65,7 +64,7 @@ erigon --http --http.api eth,net,debug,trace
 rpcdaemon --http.api eth,net,debug,trace
 ```
 
-The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, `bor` (Polygon only), and `internal`.
+The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, and `internal`.
 
 You can also restrict who can access the HTTP server by specifying domains for Cross-Origin requests using `--http.corsdomain`:
 
@@ -86,6 +85,22 @@ Erigon supports HTTPS and HTTP/2 out of the box:
 ```bash
 rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
 ```
+
+**New in v3.7:** the same flags work on the `erigon` binary, so the embedded RPC server can serve TLS without a separate
+daemon:
+
+```bash
+erigon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
+The HTTPS listener is independent of the plain HTTP one and binds its own port: `--https.port`, which defaults to
+`--http.port` + 363 (`8908` with a default `--http.port`) — the derivation reads `--http.port` whether or not the plain
+HTTP listener is running. Both `--https.cert` and `--https.key` are required — if either is missing the
+port still binds but TLS serving fails with only a `Failed to serve https endpoint` warning in the log. Setting
+`--https.url` enables the HTTPS server on its own and overrides `--https.addr` and `--https.port`.
+
+Note that `--http=false` switches off the entire RPC stack, HTTPS included. For a TLS-only node, keep `--http` and
+disable just the plain HTTP listener with `--http.enabled=false`.
 
 ### WebSockets
 
@@ -110,10 +125,21 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
-modular architecture where RPC functionality is handled by a standalone daemon.
+**New in v3.7:** the `erigon` binary accepts `--socket.enabled` and `--socket.url` directly, so IPC no longer requires a
+separate process:
+
+```bash
+erigon --datadir=<path-to-datadir> --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+The default `--socket.url` is `unix:///var/run/erigon.sock`, which is usually not writable by the Erigon user — point it
+at your datadir as above. On earlier releases these flags exist only on `rpcdaemon`, and the geth-style `--ipcpath`
+endpoint remains permanently disabled in the `erigon` binary regardless of release.
 
 #### Enabling IPC with RPC Daemon
+
+IPC is also available from the standalone daemon, which is still the right choice when RPC serving runs on its own
+process or host.
 
 First, start Erigon with the private API enabled:
 

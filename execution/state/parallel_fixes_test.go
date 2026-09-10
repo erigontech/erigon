@@ -23,7 +23,6 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -48,7 +47,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	readVal := *balance // Same value
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, // value tiebreaker
+		readVal, liveBalance, eqUint256, absentUint256, recordBalance, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -69,7 +68,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	readVal := *uint256.NewInt(500)
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256,
+		readVal, liveBalance, eqUint256, absentUint256, recordBalance,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -87,14 +86,14 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 
 	// Same nonce from storage → valid
 	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42), liveNonce, eqUint64,
+		uint64(42), liveNonce, eqUint64, absentUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
 	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41), liveNonce, eqUint64,
+		uint64(41), liveNonce, eqUint64, absentUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
@@ -136,7 +135,7 @@ func TestVersionedWriteVersion(t *testing.T) {
 // TX executions on the same worker.
 func TestAccessListResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	// Add an address to the access list
 	testAddr := accounts.InternAddress([20]byte{0x42})
@@ -158,12 +157,12 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 // its own block's access list as phantom entries.
 func TestAddressAccessResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	sender := accounts.InternAddress([20]byte{0x01})
 	coinbase := accounts.InternAddress([20]byte{0x02})
 	leaked := accounts.InternAddress([20]byte{0x42})
 	// Prepare enables access recording at tx start.
-	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil)
 	ibs.MarkAddressAccess(leaked, false)
 	// Tx aborts: AccessedAddresses is never harvested. The worker resets
 	// the shared IBS before the next task.
@@ -175,7 +174,7 @@ func TestAddressAccessResetInIBSReset(t *testing.T) {
 // transient storage (EIP-1153).
 func TestTransientStorageResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
 	testKey := accounts.InternKey([32]byte{0x01})
@@ -449,12 +448,12 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	vm := NewVersionMap(nil)
 
 	ibs := New(&emptyReader{})
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetVersionMap(vm)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 
-	ibs.CreateAccount(addr, true)
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 

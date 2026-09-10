@@ -122,12 +122,13 @@ func (buf *encBuffer) writeBool(b bool) {
 }
 
 func (buf *encBuffer) writeUint64(i uint64) {
-	if i == 0 {
+	switch {
+	case i == 0:
 		buf.str = append(buf.str, EmptyStringCode)
-	} else if i < SingleByteThreshold {
+	case i < SingleByteThreshold:
 		// fits single byte
 		buf.str = append(buf.str, byte(i))
-	} else {
+	default:
 		s := putint(buf.sizebuf[1:], i)
 		buf.sizebuf[0] = EmptyStringCode + byte(s)
 		buf.str = append(buf.str, buf.sizebuf[:s+1]...)

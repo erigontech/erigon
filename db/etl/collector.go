@@ -37,17 +37,36 @@ type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) err
 type simpleLoadFunc func(k, v []byte) error
 
 type Allocator struct {
-	p *sync.Pool
+	p     *sync.Pool
+	mu    sync.Mutex
+	fills map[string]int
 }
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+const maxFillHints = 1024
+
+func NewAllocator(p *sync.Pool) *Allocator {
+	return &Allocator{p: p, fills: map[string]int{}}
+}
+
+func (a *Allocator) lastFill(name string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fills[name]
+}
+
+func (a *Allocator) rememberFill(name string, n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.fills[name]; !ok && len(a.fills) >= maxFillHints {
+		return
+	}
+	a.fills[name] = n
+}
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	//if cast, ok := b.(*sortableBuffer); ok {
-	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	//}
+	b.Reset() // return the buffer's chunks to the pool now — see dataChunks in buffers.go
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
@@ -75,10 +94,15 @@ type Collector struct {
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
 
 	allocator *Allocator
+	fill      int
 }
 
+// NewCollectorWithAllocator builds a collector that draws its buffer from the
+// allocator's pool lazily, on the first Collect — a collector that never
+// receives a write never takes a buffer. Batch writers built upfront for every
+// domain rely on this to make unused writers cost nothing.
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c := &Collector{logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 	c.Allocator(allocator)
 	return c
 }
@@ -92,8 +116,18 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	if len(k) > MaxKeyLen {
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
+	}
+	if len(v) > MaxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
+	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
+		c.bufType = getTypeByBuffer(c.buf)
+		if n := max(c.allocator.lastFill(c.logPrefix), c.fill); n > 0 {
+			c.buf.Prealloc(n, 0)
+		}
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -102,7 +136,8 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
-// Collect does copy `k` and `v`
+// Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
+// over MaxValLen - the spill format cannot spell either.
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
@@ -117,7 +152,7 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
-	if c.buf.Len() == 0 {
+	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
 	}
 
@@ -131,6 +166,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	// go bg - but without server overloading
 	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
+	c.fill = max(c.fill, c.buf.Len())
 	if !doInBackground {
 		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
 		if err != nil {
@@ -143,7 +179,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 	if c.allocator != nil {
-		c.buf = c.allocator.Get()
+		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
 	} else {
 		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
@@ -170,9 +206,6 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.buf == nil && c.allocator != nil {
-		c.buf = c.allocator.Get()
-	}
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
@@ -253,7 +286,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -261,7 +294,16 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) Close() {
+	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
+	// Reset hands to a pool that other collectors draw from.
+	if c.dataProviders != nil { //idempotency
+		for _, p := range c.dataProviders {
+			p.Dispose()
+		}
+		c.dataProviders = nil
+	}
 	if c.buf != nil { //idempotency
+		c.fill = max(c.fill, c.buf.Len())
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
 			c.buf = nil
@@ -269,12 +311,10 @@ func (c *Collector) Close() {
 			c.buf.Reset()
 		}
 	}
-	if c.dataProviders != nil { //idempotency
-		for _, p := range c.dataProviders {
-			p.Dispose()
-		}
-		c.dataProviders = nil
+	if c.allocator != nil && c.fill > 0 {
+		c.allocator.rememberFill(c.logPrefix, c.fill)
 	}
+	c.fill = 0
 	c.allFlushed = false
 }
 
@@ -285,7 +325,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -322,17 +362,18 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
 		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
 		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
+				if err := loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
 				prevK = element.Key
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
+					if err := loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
@@ -341,12 +382,13 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else {
-			if err = loadFunc(element.Key, element.Value); err != nil {
+		default:
+			if err := loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
 		}
 
+		var err error
 		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
@@ -356,7 +398,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	if args.BufferType == SortableAppendBuffer {
 		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
+			if err := loadFunc(prevK, prevV); err != nil {
 				return err
 			}
 		}
@@ -367,13 +409,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
-	if k == nil {
+	switch {
+	case k == nil:
 		currentKeyStr = "final"
-	} else if len(k) < 4 {
+	case len(k) < 4:
 		currentKeyStr = hex.EncodeToString(k)
-	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+	case k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8: // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
-	} else {
+	default:
 		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr

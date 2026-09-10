@@ -79,17 +79,12 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
-* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Error Description:** The node cannot connect to a component it dials out to, such as a
+  separately run sentry or downloader, or the core instance an external RPC daemon talks to.
+* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag naming its address points to the wrong one.
+* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
-
-### Bad block / Invalid Merkle on Polygon network
-
-* **Error Description:** The node stops importing new blocks, and the logs show errors related to bad blocks.
-* **Cause:** This is a Polygon-specific issue that occurs when the Heimdall and Bor layers are out of sync.
-* **Solution:** Verify that your Heimdall and REST servers are running. Restarting the Bor and Heimdall services on both the sentry and validator nodes should resolve the issue by bringing the layers back into sync. See the [Polygon Node](/get-started/easy-nodes/how-to-run-a-polygon-node) guide.
 
 ## Build and Installation
 

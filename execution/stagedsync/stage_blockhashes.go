@@ -50,7 +50,7 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	if err := cfg.headerWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, cfg.tmpDir, s.BlockNumber, headNumber+1, ctx, logger); err != nil {
 		return err
 	}
-	if err = s.Update(tx, headNumber); err != nil {
+	if err := s.Update(tx, headNumber); err != nil {
 		return err
 	}
 	return nil

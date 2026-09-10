@@ -101,7 +101,7 @@ func memoryMap(path string, lock bool) (*os.File, mmap.MMap, []uint32, error) {
 	}
 	for i, magic := range dumpMagic {
 		if buffer[i] != magic {
-			mem.Unmap()
+			mem.Unmap() //nolint:errcheck
 			file.Close()
 			return nil, nil, nil, ErrInvalidDumpMagic
 		}
@@ -147,7 +147,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	}
 	suffix, err := math.RandInt64()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get random integer: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to get random integer: %w", err)
 	}
 	// Create a huge temporary empty file to fill with data
 	temp := path + "." + strconv.Itoa(int(suffix))
@@ -170,7 +170,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 		}
 		_ = dir2.RemoveFile(temp)
 	}()
-	if err = dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
+	if err := dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
 		return nil, nil, nil, err
 	}
 	// Memory map the file for writing and fill it with the generator
@@ -318,7 +318,7 @@ func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(c.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("cache-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			dir2.RemoveFile(path)
+			_ = dir2.RemoveFile(path)
 		}
 	})
 }
@@ -326,7 +326,7 @@ func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 // finalizer unmaps the memory and closes the file.
 func (c *cache) finalizer() {
 	if c.mmap != nil {
-		c.mmap.Unmap()
+		c.mmap.Unmap() //nolint:errcheck
 		c.dump.Close()
 		c.mmap, c.dump = nil, nil
 	}
@@ -407,7 +407,7 @@ func (d *dataset) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(d.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("full-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			dir2.RemoveFile(path)
+			_ = dir2.RemoveFile(path)
 		}
 	})
 }
@@ -422,7 +422,7 @@ func (d *dataset) generated() bool {
 // finalizer closes any file handlers and memory maps open.
 func (d *dataset) finalizer() {
 	if d.mmap != nil {
-		d.mmap.Unmap()
+		d.mmap.Unmap() //nolint:errcheck
 		d.dump.Close()
 		d.mmap, d.dump = nil, nil
 	}

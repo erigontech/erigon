@@ -92,7 +92,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	_, headSlot, statusCode, err := a.getHead()
+	_, headSlot, statusCode, err := a.getSelectedHead()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
@@ -313,20 +313,22 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 		// Note: for altair, we don't have the inclusion delay, always 0.
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
-				if flagIdx == int(a.beaconChainCfg.TimelyHeadFlagIndex) {
+				switch flagIdx {
+				case int(a.beaconChainCfg.TimelyHeadFlagIndex):
 					totalReward.Head = idealReward.Head
-				} else if flagIdx == int(a.beaconChainCfg.TimelyTargetFlagIndex) {
+				case int(a.beaconChainCfg.TimelyTargetFlagIndex):
 					totalReward.Target = idealReward.Target
-				} else if flagIdx == int(a.beaconChainCfg.TimelySourceFlagIndex) {
+				case int(a.beaconChainCfg.TimelySourceFlagIndex):
 					totalReward.Source = idealReward.Source
 				}
 			} else if flagIdx != int(a.beaconChainCfg.TimelyHeadFlagIndex) {
 				down := -int64(baseReward * weights[flagIdx] / a.beaconChainCfg.WeightDenominator)
-				if flagIdx == int(a.beaconChainCfg.TimelyHeadFlagIndex) {
+				switch flagIdx {
+				case int(a.beaconChainCfg.TimelyHeadFlagIndex):
 					totalReward.Head = down
-				} else if flagIdx == int(a.beaconChainCfg.TimelyTargetFlagIndex) {
+				case int(a.beaconChainCfg.TimelyTargetFlagIndex):
 					totalReward.Target = down
-				} else if flagIdx == int(a.beaconChainCfg.TimelySourceFlagIndex) {
+				case int(a.beaconChainCfg.TimelySourceFlagIndex):
 					totalReward.Source = down
 				}
 			}

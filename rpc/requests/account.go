@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -69,6 +70,18 @@ func (reqGen *requestGenerator) GetBalance(address common.Address, blockRef rpc.
 	return result.ToInt(), nil
 }
 
+func (reqGen *requestGenerator) GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockRef rpc.BlockReference) (*accounts.AccProofResult, error) {
+	keys := make([]hexutil.Bytes, len(storageKeys))
+	for i := range storageKeys {
+		keys[i] = storageKeys[i][:]
+	}
+	var result accounts.AccProofResult
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetProof, address, keys, blockRef); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (reqGen *requestGenerator) GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
@@ -84,7 +97,7 @@ func (reqGen *requestGenerator) DebugAccountAt(blockHash common.Hash, txIndex ui
 
 	method, body := reqGen.debugAccountAt(blockHash, txIndex, account)
 	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("failed to get account: %v", res.Err)
+		return nil, fmt.Errorf("failed to get account: %w", res.Err)
 	}
 
 	if b.Error != nil {

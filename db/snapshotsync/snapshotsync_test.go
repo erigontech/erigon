@@ -23,11 +23,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -38,7 +40,7 @@ import (
 
 func beginTestRoTx(t *testing.T) kv.Tx {
 	t.Helper()
-	tx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
+	tx, err := mdbxtest.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,8 +498,8 @@ func TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies(t *testing.T) {
 }
 
 // TestReceiptsSegmentRetentionCutoff: when blocks are kept but state history is
-// pruned, rcache history must follow state history (so download agrees with
-// retirement) while log indexes follow block data; the windows coincide otherwise.
+// pruned, both rcache history and the log indexes must follow state history, so
+// download agrees with retirement instead of fetching files it then deletes.
 func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
 	const head = 1_000_000
 	rcacheSeg := "history/v1.0-" + kv.RCacheDomain.String() + ".0-64.v"
@@ -507,7 +509,8 @@ func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
 	assert.NotZero(t, blocksHistory, "blocks-mode history window must be finite")
 	assert.Equal(t, uint64(0), blocksRetentionCutoff(prune.BlocksMode, nil, head), "blocks-mode blocks window is keep-all")
 	assert.Equal(t, blocksHistory, receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, rcacheSeg))
-	assert.Equal(t, uint64(0), receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, logIdxSeg))
+	assert.Equal(t, blocksHistory, receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, logIdxSeg),
+		"a blocks-mode node must not download log indexes that execution retirement then deletes")
 
 	assert.Equal(t, blocksRetentionCutoff(prune.MinimalMode, nil, head), receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, rcacheSeg))
 }
@@ -520,7 +523,7 @@ func TestIsReceiptsSegmentPruned(t *testing.T) {
 	const stepSize = 100
 	const pruneHeight = 50 // minTxNum(50)=5000 → cutoff step 50
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -584,4 +587,32 @@ func TestGetMaxStepRangeInSnapshots(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid domain snapshot filename")
 	})
+}
+
+// KeepAllBlocksPruneMode means follow-history for receipts, not keep-all.
+func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
+	t.Parallel()
+	const head = 23_000_000
+	const rcacheName = "history/v1.0-rcache.100-200.v"
+
+	for _, tc := range []struct {
+		name string
+		mode prune.Mode
+		want uint64
+	}{
+		{"minimal keeps only its history window", prune.MinimalMode, head - config3.MinimalPruneDistance},
+		{"full keeps only its history window", prune.FullMode, head - config3.DefaultPruneDistance},
+		{"blocks keeps only its history window", prune.BlocksMode, head - config3.DefaultPruneDistance},
+		{"archive keeps everything", prune.ArchiveMode, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, tc.mode.ReceiptsFollowHistory(),
+				"presets leave Receipts unset, which for receipts means follow-history")
+			require.Equal(t, tc.want, receiptsSegmentRetentionCutoff(tc.mode, nil, head, rcacheName))
+		})
+	}
+
+	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
+		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 }

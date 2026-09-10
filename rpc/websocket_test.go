@@ -239,7 +239,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 	})
 
 	// Start the server.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatal("can't listen:", err)
 	}
@@ -359,8 +359,8 @@ func TestWebsocketNonBlockingAcquire(t *testing.T) {
 	if callErr == nil {
 		t.Fatal("expected -32005 error but Call succeeded")
 	}
-	rpcErr, ok := callErr.(Error)
-	if !ok {
+	var rpcErr Error
+	if !errors.As(callErr, &rpcErr) {
 		t.Fatalf("expected rpc.Error, got %T: %v", callErr, callErr)
 	}
 	if rpcErr.ErrorCode() != ErrCodeServerOverloaded {

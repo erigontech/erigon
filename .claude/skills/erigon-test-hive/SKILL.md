@@ -5,10 +5,10 @@ description: Run Erigon Hive simulator tests locally or via GitHub Actions. Test
 
 # Erigon Hive Tests
 
-Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
+Runs Hive simulator tests for EL/CL protocol interoperability. Three modes:
 1. **`make test-hive`** — uses `act` (nektos) to simulate the GitHub Actions workflow locally
 2. **`make hive-local`** — builds hive and runs suites directly (no `act` needed)
-3. **`make eest-devnet`** — runs the BAL/Amsterdam-specific EEST fixtures
+3. **`make eest-devnet`** — runs the CI-equivalent Glamsterdam `consume-enginex` shard
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
 
 Hive spawns per test:
 - One container per EL client instance (erigon)
-- One container per simulator (e.g., `ethereum/engine`, `eels/consume-engine`)
+- One container per simulator (e.g., `ethereum/engine`, `eels/consume-enginex`)
 - Intermediate build images for each client Dockerfile
 
 The CI workflow always runs `docker system prune -af --volumes` on exit (even on failure). Replicate this locally.
@@ -48,12 +48,20 @@ SUITE=eest make test-hive
 make hive-local
 ```
 
-### BAL/Amsterdam-specific (EIP-7928 fixtures)
+### Direct EEST EngineX runs
 
 ```bash
-# Runs eels/consume-engine with amsterdam fixtures
+# Runs the unsharded stable EngineX fixtures
+make eest-hive
+
+# Matches the CI glamsterdam-devnet shard
 make eest-devnet
 ```
+
+`make eest-devnet` selects Amsterdam and `BPO2ToAmsterdam`, enables parallel
+execution and BAL validation, and uses the CI simulator parallelism and timeout
+flags. Use `SUITE=eest make test-hive` to exercise the complete stable/devnet
+matrix.
 
 ## Cleanup (ALWAYS run after hive tests)
 
@@ -117,8 +125,8 @@ cd temp/<hive-dir>/hive
 # Run with a specific test pattern
 ./hive --sim ethereum/engine --sim.limit=".*cancun.*" --sim.parallelism=4 --client erigon
 
-# Run EEST engine simulator (URL pinned in test-fixtures.json)
-./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
+# Run stable EEST EngineX simulator (URL pinned in test-fixtures.json)
+./hive --sim ethereum/eels/consume-enginex --sim.limit="" --sim.parallelism=4 --client erigon \
   --sim.buildarg fixtures=$(jq -r '."eest_stable".url' test-fixtures.json)
 ```
 
@@ -132,8 +140,7 @@ cd temp/<hive-dir>/hive
 | `engine/api` | Engine API conformance |
 | `engine/auth` | JWT authentication |
 | `rpc-compat` | RPC compatibility with reference |
-| `eels/consume-engine` | EEST execution spec tests |
-| `eels/consume-engine` (amsterdam) | EIP-7928 BAL Amsterdam fixtures |
+| `eels/consume-enginex` | Stable and fork-partitioned devnet EEST EngineX tests |
 
 ## Related Skill
 
@@ -152,6 +159,8 @@ This skill (`erigon-test-hive`) documents the Makefile targets for reference —
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `make test-hive` | Test Hive | `test-hive.yml` |
+| `SUITE=eest make test-hive` | Hive EEST tests | `test-hive-eest.yml` |
+| `make eest-devnet` | Hive EEST `glamsterdam-devnet` shard | `test-hive-eest.yml` |
 
 To dispatch remotely on a branch:
 ```bash

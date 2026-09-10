@@ -60,7 +60,7 @@ func (sf *visibleFilesForMerge) Close() {
 func (at *AggregatorRoTx) filesInRange(r *Ranges) (*visibleFilesForMerge, error) {
 	sf := &visibleFilesForMerge{}
 	for id := range at.d {
-		if at.d[id].d.Disable {
+		if !at.d[id].d.Enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -69,7 +69,7 @@ func (at *AggregatorRoTx) filesInRange(r *Ranges) (*visibleFilesForMerge, error)
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || at.iis[id].ii.Disable {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled {
 			continue
 		}
 		if !rng.needMerge {

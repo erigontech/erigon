@@ -95,12 +95,11 @@ quit
 	}
 }
 
-// formatArgsForLLDB
 func formatArgsForLLDB(args []string) string {
 	var formattedArgs []string
 	for _, arg := range args {
 		if strings.Contains(arg, " ") {
-			formattedArgs = append(formattedArgs, fmt.Sprintf(`"%s"`, arg)) // Экранируем пробелы
+			formattedArgs = append(formattedArgs, fmt.Sprintf("%q", arg))
 		} else {
 			formattedArgs = append(formattedArgs, arg)
 		}

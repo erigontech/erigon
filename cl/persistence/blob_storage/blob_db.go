@@ -20,11 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
-	"math"
-	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -34,15 +30,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv"
-)
-
-const (
-	subdivisionSlot = 10_000
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_storage_mock.go -package=mock_services . BlobStorage
@@ -53,26 +43,20 @@ type BlobStorage interface {
 	BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
-	Prune() error
+	PruneBelow(slot uint64) error
 }
 
 type BlobStore struct {
-	db                kv.RwDB
-	fs                afero.Fs
-	beaconChainConfig *clparams.BeaconChainConfig
-	ethClock          eth_clock.EthereumClock
-	slotsKept         uint64
+	bucketStore
+	slotLocks
+	db kv.RwDB
 }
 
-func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) BlobStorage {
-	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
-}
-
-func blobSidecarFilePath(slot, index uint64, blockRoot common.Hash) (folderpath, filepath string) {
-	subdir := slot / subdivisionSlot
-	folderpath = strconv.FormatUint(subdir, 10)
-	filepath = fmt.Sprintf("%s/%s_%d", folderpath, blockRoot.String(), index)
-	return
+func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
+	bs := &BlobStore{db: db}
+	bs.bucketStore.init(fs)
+	bs.slotLocks.initLocks()
+	return bs
 }
 
 /*
@@ -83,24 +67,39 @@ indicies:
 
 // WriteBlobSidecars writes the sidecars on the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
 func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error {
-	for _, blobSidecar := range blobSidecars {
-		folderPath, filePath := blobSidecarFilePath(
-			blobSidecar.SignedBlockHeader.Header.Slot,
-			blobSidecar.Index, blockRoot,
-		)
-		// mkdir the whole folder and subfolders
-		bs.fs.MkdirAll(folderPath, 0o755)
-		// create the file
-		file, err := bs.fs.Create(filePath)
+	// An empty batch writes no file, so it has no slot to lock on; it still records a
+	// zero count row, which is what tells "this block has no blobs" from "unknown".
+	if len(blobSidecars) > 0 {
+		var slot uint64
+		for index, sidecar := range blobSidecars {
+			if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+				return errors.New("blob sidecar is missing its signed block header")
+			}
+			if index == 0 {
+				slot = sidecar.SignedBlockHeader.Header.Slot
+				continue
+			}
+			if sidecar.SignedBlockHeader.Header.Slot != slot {
+				return errors.New("blob sidecars span multiple slots")
+			}
+		}
+		lock := bs.forSlot(slot)
+		lock.Lock()
+		if !bs.startWrite(slot) {
+			lock.Unlock()
+			return nil
+		}
+		defer bs.finishWrite()
+		err := func() error {
+			defer lock.Unlock()
+			for _, blobSidecar := range blobSidecars {
+				if _, err := bs.writeAdmitted(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
 		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
 			return err
 		}
 	}
@@ -135,70 +134,39 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 
+	lock := bs.forSlot(slot)
+	lock.RLock()
+	defer lock.RUnlock()
+
 	var blobSidecars []*cltypes.BlobSidecar
 	for i := range kzgCommitmentsLength {
-		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
-		file, err := bs.fs.Open(filePath)
+		blobSidecar := &cltypes.BlobSidecar{}
+		found, err := bs.read(slot, blockRoot, uint64(i), blobSidecar, clparams.DenebVersion)
 		if err != nil {
-			if errors.Is(err, afero.ErrFileNotFound) {
-				return nil, false, nil
-			}
 			return nil, false, err
 		}
-		defer file.Close()
-
-		blobSidecar := &cltypes.BlobSidecar{}
-		if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
-			return nil, false, err
+		if !found {
+			return nil, false, nil
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
 	}
 	return blobSidecars, true, nil
 }
 
-// Do a bit of pruning
-func (bs *BlobStore) Prune() error {
-	if bs.slotsKept == math.MaxUint64 {
-		return nil
-	}
-
-	currentSlot := bs.ethClock.GetCurrentSlot()
-	if currentSlot <= bs.slotsKept {
-		return nil
-	}
-	currentSlot -= bs.slotsKept
-	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
-	// delete all the folders that are older than slotsKept
-	for i := uint64(0); i < currentSlot; i += subdivisionSlot {
-		bs.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
-	}
-	return nil
+func (bs *BlobStore) PruneBelow(slot uint64) error {
+	return bs.pruneBelow(slot)
 }
 
 func (bs *BlobStore) BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error) {
-	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
-	_, err := bs.fs.Stat(filePath)
-	if os.IsNotExist(err) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
+	return bs.exists(slot, blockRoot, idx)
 }
 
 func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
-	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
-	file, err := bs.fs.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = io.Copy(w, file)
-	return err
+	return bs.stream(w, slot, blockRoot, idx)
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
-	tx, err := bs.db.BeginRo(context.Background())
+	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -214,6 +182,10 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.H
 }
 
 func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
+	lock := bs.forSlot(slot)
+	lock.Lock()
+	defer lock.Unlock()
+
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -227,14 +199,24 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		return nil
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+	var firstErr error
 	for i := range kzgCommitmentsLength {
-		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
-		if err := bs.fs.Remove(filePath); err != nil {
-			return err
+		if err := bs.remove(slot, blockRoot, uint64(i)); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
-	return tx.Commit()
+	// Drop the row even after a partial failure: a file missing under a surviving row reads as
+	// unavailable forever, but a dropped row reads as unknown and lets the block be re-fetched.
+	if err := tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:]); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		return firstErr
+	}
+	if err := tx.Commit(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
 
 type sidecarsPayload struct {
@@ -243,6 +225,36 @@ type sidecarsPayload struct {
 }
 
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
+
+// VerifyBlobSidecars validates sidecar proofs and optionally their signed headers.
+func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	blobs := make([]*goethkzg.Blob, len(sidecars))
+	commitments := make([]goethkzg.KZGCommitment, len(sidecars))
+	proofs := make([]goethkzg.KZGProof, len(sidecars))
+	for i, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return errors.New("could not verify blob's inclusion proof")
+		}
+		if verifySignatureFn != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return err
+			}
+		}
+		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+		commitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+	}
+	if err := kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
+		return errors.New("sidecar is wrong")
+	}
+	return nil
+}
 
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
 func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {

@@ -76,6 +76,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                       map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads             map[common.Hash]bool
+	OnBlockErr                   error
 	OnExecutionPayloadErr        error
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
@@ -165,7 +166,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Return(true, nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
-		Prune(gomock.Any()).
+		PruneBelow(gomock.Any()).
 		Return(nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
@@ -348,7 +349,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 	fullValidation bool,
 	checkDataAvaiability bool,
 ) error {
-	return nil
+	return f.OnBlockErr
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
@@ -363,7 +364,7 @@ func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signe
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
 	return nil
 }
 

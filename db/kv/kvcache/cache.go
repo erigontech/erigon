@@ -28,7 +28,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -56,7 +55,6 @@ type Cache interface {
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
-	HasStorage(address common.Address) (bool, error)
 }
 
 // Coherent works on top of Database Transaction and pair Coherent+ReadTransaction must
@@ -143,17 +141,6 @@ func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err er
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
-func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
-	// note: theoretically we could try to use the cache and look for populated storage
-	// slots for the given account, however that will be only useful in case of a
-	// collision (ie creating an account which already has storage as per eip-7610) which
-	// in reality is very rare; for all the other most likely situations in which we query
-	// if an account has storage (and that account is newly created and doesn't have storage)
-	// the cache will say that there is no known storage in which case we will still need to
-	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
 
 var _ Cache = (*Coherent)(nil)         // compile-time interface check
 var _ CacheView = (*CoherentView)(nil) // compile-time interface check
@@ -194,15 +181,15 @@ func New(cfg CoherentConfig) *Coherent {
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
 		cfg:          cfg,
-		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
-		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name=%q}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name=%q}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name=%q}`, cfg.MetricsLabel)),
+		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name=%q}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name=%q}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -396,9 +383,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	c.miss.Inc()
 
 	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err = tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		v, _, err = tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	}
 	if err != nil {
 		return nil, err
@@ -428,7 +415,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	v, _, err = tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +535,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K)
+			inDb, _, err := tx.GetLatest(domain, val.K, kv.GetLatestOptions{})
 			if err != nil {
 				return false, keys, err
 			}

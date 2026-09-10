@@ -21,16 +21,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// BranchWrite stores the previous and new data for a single PutBranch call.
 type BranchWrite struct {
 	PrevData []byte
 	NewData  []byte
 }
 
-// RecordingContext wraps a PatriciaContext and records all data read during
-// trie processing (branches, accounts, storages) and all branch writes.
-// The recorded data can be used to build a TrieTrace for replay in tests.
-// Not safe for concurrent use — Process runs single-threaded.
+// Not safe for concurrent use: assumes Process runs single-threaded.
 type RecordingContext struct {
 	inner PatriciaContext
 
@@ -40,7 +36,6 @@ type RecordingContext struct {
 	putBranches map[string]BranchWrite
 }
 
-// NewRecordingContext creates a RecordingContext wrapping the given PatriciaContext.
 func NewRecordingContext(inner PatriciaContext) *RecordingContext {
 	return &RecordingContext{
 		inner:       inner,

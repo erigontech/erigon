@@ -5,7 +5,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 )
@@ -29,14 +33,13 @@ func BenchmarkSLOADCold(b *testing.B) {
 		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
 			// Gas: 2100 per cold SLOAD + overhead
-			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
-			deployContract(statedb, addrContract, code)
-			setStorage(statedb, addrContract, slots)
+			vmenv := benchConfig(b, uint64(n)*2200+100_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			setStorage(b, statedb, addrContract, slots)
+			callComplete(b, vmenv, addrContract, nil)
 			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
+				callComplete(b, vmenv, addrContract, nil)
 			}
 		})
 	}
@@ -58,12 +61,13 @@ func BenchmarkSLOADWarm(b *testing.B) {
 
 		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
-			deployContract(statedb, addrContract, code)
-			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			setStorage(b, statedb, addrContract, slots)
+			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}
@@ -84,13 +88,12 @@ func BenchmarkSSTORE(b *testing.B) {
 		code := p.Op(vm.STOP).Bytes()
 
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, uint64(n)*22_100+100_000)
-		deployContract(statedb, addrContract, code)
+		vmenv := benchConfig(b, uint64(n)*22_100+100_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		callComplete(b, vmenv, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, vmenv, addrContract, nil)
 		}
 	})
 
@@ -107,14 +110,13 @@ func BenchmarkSSTORE(b *testing.B) {
 		code := p.Op(vm.STOP).Bytes()
 
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
-		deployContract(statedb, addrContract, code)
-		setStorage(statedb, addrContract, slots)
+		vmenv := benchConfig(b, uint64(n)*5200+100_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+		callComplete(b, vmenv, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, vmenv, addrContract, nil)
 		}
 	})
 
@@ -131,14 +133,13 @@ func BenchmarkSSTORE(b *testing.B) {
 		code := p.Op(vm.STOP).Bytes()
 
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
-		deployContract(statedb, addrContract, code)
-		setStorage(statedb, addrContract, slots)
+		vmenv := benchConfig(b, uint64(n)*5200+100_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+		callComplete(b, vmenv, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, vmenv, addrContract, nil)
 		}
 	})
 }
@@ -158,11 +159,12 @@ func BenchmarkTransientStorage(b *testing.B) {
 
 		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
-			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}
@@ -184,14 +186,54 @@ func BenchmarkStorageDiversity(b *testing.B) {
 
 		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
-			deployContract(statedb, addrContract, code)
-			setStorage(statedb, addrContract, slots)
+			vmenv := benchConfig(b, uint64(n)*2200+100_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			setStorage(b, statedb, addrContract, slots)
+			callComplete(b, vmenv, addrContract, nil)
 			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
+				callComplete(b, vmenv, addrContract, nil)
+			}
+		})
+	}
+}
+
+// BenchmarkAddressDiversity measures repeated BALANCE over n distinct warm
+// accounts, the way an airdrop or batch contract walks a holder list. The sweep
+// assumes the EVM interns addresses through a 256-entry direct-mapped table and
+// covers the miss side the call benchmarks never reach — they touch a handful of
+// addresses and hit every time.
+//
+// The addresses are keccak output, so they land in buckets at random rather than
+// one per bucket: 16 of them get 16 buckets and always hit, 256 cover 163 of the
+// 256 and miss 64% of the time, 1024 miss 98%. The sweep is therefore one hitting
+// tier and two thrashing ones, not a fits/fills/overflows progression.
+func BenchmarkAddressDiversity(b *testing.B) {
+	require.Equal(b, 256, vm.AddressCacheSize,
+		"the tiers below are one hitting and two thrashing only against this bucket count")
+
+	for _, n := range []int{16, 256, 1024} {
+		p, lbl := program.New().Jumpdest()
+		addrs := make([]common.Address, n)
+		for i := range addrs {
+			addrs[i] = common.BytesToAddress(crypto.Keccak256([]byte{byte(i), byte(i >> 8)}))
+			p.Push(addrs[i]).Op(vm.BALANCE, vm.POP)
+		}
+		code := p.Jump(lbl).Bytes()
+
+		b.Run(fmt.Sprintf("%daccounts", n), func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			for i, a := range addrs {
+				addr := accounts.InternAddress(a)
+				require.NoError(b, statedb.CreateAccount(addr, false))
+				require.NoError(b, statedb.SetBalance(addr, *uint256.NewInt(uint64(i) + 1), 0))
+			}
+			callOOG(b, vmenv, addrContract)
+			for b.Loop() {
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}

@@ -95,7 +95,7 @@ func detectOutboundIP(unspecified net.IP) net.IP {
 	if unspecified.To4() == nil {
 		network, target = "udp6", "[2001:4860:4860::8888]:80"
 	}
-	conn, err := net.Dial(network, target)
+	conn, err := net.Dial(network, target) //nolint:noctx
 	if err != nil {
 		return nil
 	}

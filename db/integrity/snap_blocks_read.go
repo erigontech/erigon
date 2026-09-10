@@ -64,7 +64,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservi
 		case <-ctx.Done():
 			return nil
 		case <-logEvery.C:
-			log.Info("[integrity] Blocks", "blockNum", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(maxBlockNum)))
+			log.Info("[integrity] Blocks", "blockNum", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(maxBlockNum)))
 		default:
 		}
 	}

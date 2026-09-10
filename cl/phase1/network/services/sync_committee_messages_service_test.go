@@ -72,7 +72,7 @@ func TestSyncCommitteesBadTiming(t *testing.T) {
 	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
 
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
-	synced.OnHeadState(state)
+	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(false).AnyTimes()
 	require.Error(t, s.ProcessMessage(context.Background(), nil, msg))
 }
@@ -85,7 +85,7 @@ func TestSyncCommitteesBadSubnet(t *testing.T) {
 	sn := uint64(1000)
 
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
-	synced.OnHeadState(state)
+	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.Error(t, s.ProcessMessage(context.Background(), &sn, msg))
 }
@@ -101,7 +101,7 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
-	synced.OnHeadState(state)
+	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Silent ignore: returns nil if done twice

@@ -4,12 +4,12 @@ package logger
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/holiman/uint256"
 )
 
 var _ = (*structLogMarshaling)(nil)
@@ -23,7 +23,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		GasCost       math.HexOrDecimal64         `json:"gasCost"`
 		Memory        hexutil.Bytes               `json:"memory"`
 		MemorySize    int                         `json:"memSize"`
-		Stack         []*math.HexOrDecimal256     `json:"stack"`
+		Stack         []hexutil.U256              `json:"stack"`
 		ReturnData    hexutil.Bytes               `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
@@ -40,9 +40,9 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Memory = s.Memory
 	enc.MemorySize = s.MemorySize
 	if s.Stack != nil {
-		enc.Stack = make([]*math.HexOrDecimal256, len(s.Stack))
+		enc.Stack = make([]hexutil.U256, len(s.Stack))
 		for k, v := range s.Stack {
-			enc.Stack[k] = (*math.HexOrDecimal256)(v)
+			enc.Stack[k] = hexutil.U256(v)
 		}
 	}
 	enc.ReturnData = s.ReturnData
@@ -64,7 +64,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		GasCost       *math.HexOrDecimal64        `json:"gasCost"`
 		Memory        *hexutil.Bytes              `json:"memory"`
 		MemorySize    *int                        `json:"memSize"`
-		Stack         []*math.HexOrDecimal256     `json:"stack"`
+		Stack         []hexutil.U256              `json:"stack"`
 		ReturnData    *hexutil.Bytes              `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         *int                        `json:"depth"`
@@ -94,9 +94,9 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		s.MemorySize = *dec.MemorySize
 	}
 	if dec.Stack != nil {
-		s.Stack = make([]*big.Int, len(dec.Stack))
+		s.Stack = make([]uint256.Int, len(dec.Stack))
 		for k, v := range dec.Stack {
-			s.Stack[k] = (*big.Int)(v)
+			s.Stack[k] = uint256.Int(v)
 		}
 	}
 	if dec.ReturnData != nil {

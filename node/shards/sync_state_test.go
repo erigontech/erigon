@@ -21,21 +21,26 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+func newSyncStateFixture(t *testing.T, executionProgress uint64) (*Notifications, kv.RwTx) {
 	t.Helper()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, executionProgress))
+	return NewNotifications(nil), tx
+}
 
-	n := NewNotifications(nil)
+func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	n, tx := newSyncStateFixture(t, executionProgress)
 	n.NewLastBlockSeen(lastNewBlockSeen)
 	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
 	require.NoError(t, err)
@@ -77,6 +82,109 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 	require.Equal(t, uint64(500), reply.FrozenBlocks)
 }
 
+func buildReplyWithDownloadForTest(t *testing.T, done, total, targetBlock, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	n, tx := newSyncStateFixture(t, executionProgress)
+	n.SetSnapshotDownloading(done, total, targetBlock)
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	return reply
+}
+
+// During snapshot download the byte-completion ratio is mapped onto the
+// block-based currentBlock/highestBlock so dashboards show smooth 0→100%
+// progress: currentBlock = ratio * blocks_to_be_downloaded.
+func TestBuildSyncingReplySnapshotDownloadMapsRatioToBlocks(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 0)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
+// After the download completes progress is pinned at the commitment block to
+// bridge the handoff to execution: currentBlock must report that block, not drop
+// to 0 while the Execution stage counter has not yet been updated.
+func TestBuildSyncingReplySnapshotDownloadHandoffPinsCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.SetSnapshotDownloadHandoff(20_000_000)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(20_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
+// The snapshots being downloaded only cover targetBlock, so an FCU arriving
+// mid-download must raise the reported highest block without scaling the byte
+// ratio onto it: doing so claims blocks no snapshot holds and makes
+// currentBlock step backwards once execution starts.
+func TestBuildSyncingReplySnapshotDownloadDoesNotScaleToLiveHead(t *testing.T) {
+	const targetBlock, liveHead = 20_000_000, 21_000_000
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(liveHead)
+	n.SetSnapshotDownloading(500, 1000, targetBlock)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(targetBlock/2), reply.CurrentBlock)
+	require.Equal(t, uint64(liveHead), reply.LastNewBlockSeen)
+}
+
+// The downloader recomputes its byte total every cycle and it grows as torrent
+// metadata arrives, so consecutive samples differ in both fields. A reader must
+// never combine the total of one sample with the completed bytes of the next:
+// that overshoots the target, i.e. currentBlock > highestBlock.
+func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	const target = 20_000_000
+
+	stop, writerDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			n.SetSnapshotDownloading(99, 100, target)
+			n.SetSnapshotDownloading(150, 200, target)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-writerDone
+	}()
+
+	for range 20_000 {
+		reply, err := n.BuildSyncingReply(tx, 0)
+		require.NoError(t, err)
+		require.LessOrEqual(t, reply.CurrentBlock, reply.LastNewBlockSeen)
+	}
+}
+
+// Only the handoff pin is dropped: an in-flight sample is the last honest
+// progress after a failed download and must survive. The report tells the caller
+// whether the reply changed, so the transition can be published to subscribers.
+func TestClearSnapshotDownloadPin(t *testing.T) {
+	n := NewNotifications(nil)
+
+	require.False(t, n.ClearSnapshotDownloadPin(), "no sample to drop")
+
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
+	require.False(t, n.ClearSnapshotDownloadPin())
+	require.NotNil(t, n.snapDownload.Load())
+
+	n.SetSnapshotDownloadHandoff(20_000_000)
+	require.True(t, n.ClearSnapshotDownloadPin())
+	require.Nil(t, n.snapDownload.Load())
+	require.False(t, n.ClearSnapshotDownloadPin(), "already dropped")
+}
+
 func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
 	for {
@@ -93,7 +201,7 @@ func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.Sync
 // point for every sync-state producer, so two producers observing the same
 // state must yield one notification.
 func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -124,7 +232,7 @@ func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
 // published before the subscription is the seed, one published after arrives
 // on the channel — never both, never neither.
 func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -157,7 +265,7 @@ func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
 // subscription: any publish is then ordered entirely before (impossible, none
 // happened) or entirely after it, and lands on the channel.
 func TestSubscribeSyncStateBeforeFirstPublishBuildsSeed(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -177,4 +285,101 @@ func TestSubscribeSyncStateBeforeFirstPublishBuildsSeed(t *testing.T) {
 
 	require.NoError(t, n.PublishSyncState(tx, 0))
 	require.Len(t, drainSyncStateEvents(ch), 1, "a publish after subscribing must arrive as an event even when it equals the built seed")
+}
+
+// A node that already has committed execution progress and downloads more
+// snapshots (an upgrade, caplin enabled later) must never report a position
+// below what it committed; below that floor the byte ratio is the progress.
+func TestBuildSyncingReplySnapshotDownloadKeepsCommittedProgress(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 6_000_000)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(6_000_000), reply.CurrentBlock)
+
+	reply = buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 100)
+	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
+}
+
+// When committed progress already exceeds the download target, the floor lands
+// on CurrentBlock but the highest block must follow it: reporting a highest
+// block below the current one breaks the sync-reply invariant.
+func TestBuildSyncingReplySnapshotDownloadCommittedProgressAboveTarget(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 25_000_000)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(25_000_000), reply.CurrentBlock)
+	require.GreaterOrEqual(t, reply.LastNewBlockSeen, reply.CurrentBlock)
+}
+
+// Execution progress reaching the commitment block means the handoff is over for
+// this reader, so the reply switches back to the stage shape. The state itself
+// stays until its owner drops it: this tx may be ahead of the committed view.
+func TestBuildSyncingReplyHandoffEndsOnceExecutionReachesCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 19_000_000)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock)
+	require.Len(t, reply.Stages, len(stages.AllStages))
+	require.NotNil(t, n.snapDownload.Load(), "only the owner drops the handoff")
+}
+
+// Committed progress below the commitment block is the pre-download position of
+// an upgraded node: the stage bumps Execution to the commitment block in its own
+// tx, so the publish that sets the pin still reads the old value. Dropping the
+// pin there reports that old position, i.e. the backwards jump the pin prevents.
+func TestBuildSyncingReplyHandoffSurvivesProgressBelowCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 6_000_000)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+	require.Empty(t, reply.Stages)
+	require.NotNil(t, n.snapDownload.Load(), "handoff still pinned")
+}
+
+// The pipeline publishes with its rw tx (Hook.BeforeRun), which carries the
+// snapshots stage's uncommitted Execution bump. That observation must not end
+// the handoff for readers of the committed view: until the pipeline's first
+// commit, a poller still reads the pre-download position.
+func TestBuildSyncingReplyHandoffSurvivesUncommittedBumpObservation(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+
+	setup, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer setup.Rollback()
+	require.NoError(t, stages.SaveStageProgress(setup, stages.Execution, 6_000_000))
+	require.NoError(t, setup.Commit())
+
+	n := NewNotifications(nil)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	pipelineTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer pipelineTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(pipelineTx, stages.Execution, 19_000_000))
+	fromPipeline, err := n.BuildSyncingReply(pipelineTx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), fromPipeline.CurrentBlock)
+
+	poll, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer poll.Rollback()
+	reply, err := n.BuildSyncingReply(poll, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock,
+		"a poll on the committed view must keep the pin until the bump commits")
+}
+
+// At the handoff the pinned reply raises LastNewBlockSeen to the commitment
+// block; the next reply rebuilds it from LastNewBlockSeen alone and would step
+// it back below CurrentBlock.
+func TestBuildSyncingReplyLastNewBlockSeenNeverBelowCurrentBlock(t *testing.T) {
+	reply := buildReplyForTest(t, 25_722_999, 0, 25_723_236)
+	require.Equal(t, uint64(25_723_236), reply.CurrentBlock)
+	require.GreaterOrEqual(t, reply.LastNewBlockSeen, reply.CurrentBlock)
 }

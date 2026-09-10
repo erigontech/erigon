@@ -19,8 +19,12 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -31,13 +35,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -51,6 +53,28 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 	ws.SetNonce(addr, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nonce})
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bal})
 	return ws
+}
+
+func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	return &blockResult{
+		Block:     types.NewBlockFromStorage(blockHash, header, nil, nil, nil, nil),
+		lastTxNum: lastTxNum,
+		isPartial: partial,
+	}
+}
+
+type latestMetricsCaptureTx struct {
+	kv.TemporalTx
+	nonNilMetrics bool
+}
+
+func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, _ := opts.Metrics()
+	if dm, ok := metrics.(*kvmetrics.DomainMetrics); ok {
+		tx.nonNilMetrics = dm != nil
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
 }
 
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
@@ -108,12 +132,12 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
 		writeAccount(txNum)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
 
 	for txNum := block1End + 1; txNum <= block2End; txNum++ {
 		writeAccount(txNum)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2End})
+	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
 
 	cc.Stop()
 
@@ -173,7 +197,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
 		writeAccount(txNum, 1)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
 
 	// Block 2 runs only up to the step edge — no block-2 boundary is sent.
 	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
@@ -232,7 +256,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	// deterministically (the per-key ctx check in the trie fold, with >=1 update).
 	failCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	cc.handleMessage(failCtx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+	cc.handleMessage(failCtx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 
 	require.False(t, cc.hasComputed,
 		"a failed partial-block commitment must not be marked computed — the error must halt exec, not be swallowed")
@@ -316,7 +340,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	// The block-end system task is always published at the block-end txNum, with
 	// empty writes when the block has no finalize writes.
 	writeAccount(edgeTxNum, edgeTxHasWrites)
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: edgeTxNum})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, edgeTxNum, false))
 	cc.Stop()
 
 	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
@@ -475,6 +499,54 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		"the checkpoint must NOT record commitment writes into the different live accumulator")
 }
 
+// TestHandleMessage_StepBoundaryFallsThroughToLiveWhenNotYetSaved pins the
+// cs==nil path TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow's
+// comment calls out as untested: block N's changeset is live but not yet
+// saved (SavePastChangesetAccumulator only runs at block end), so the
+// mid-block checkpoint must fall through to it — not drop the writes.
+func TestHandleMessage_StepBoundaryFallsThroughToLiveWhenNotYetSaved(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	blockHash := common.Hash{0xAB}
+
+	db, tx, doms := setupStepTest(t)
+
+	// Block 1's own changeset is live, but not yet saved under its hash —
+	// GetChangesetByHash(1, blockHash) is nil here, exactly as it is for
+	// every mid-block step edge in the real exec loop.
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			rules:     &chain.Rules{},
+			blockNum:  1,
+			blockHash: blockHash,
+			txNum:     txNum,
+			writes:    nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	require.Positive(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"the checkpoint must fall through to the live changeset when block N's own hasn't been saved yet — dropping it loses these writes from the changeset entirely")
+}
+
 // TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset guards
 // the block-boundary variant: forcePerBlockCompute makes even a pre-window block
 // compute per-block, so that compute must isolate or it leaks into a later
@@ -514,7 +586,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	}
 	// First partial block => computeWithoutCheck, a per-block compute with no
 	// root check; pre-window, so it must isolate its commitment writes.
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 
 	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
 		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
@@ -544,24 +616,31 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(rawDb.Close)
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	db, err := temporal.New(rawDb, agg, nil)
-	require.NoError(t, err)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(func() { tx.Rollback() })
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
+	doms.SetDisableInlineTouchKey(true) // as parallel exec does: the calculator owns Updates
 	return db, tx, doms
+}
+
+func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	_, tx, doms := setupStepTest(t)
+	require.NotNil(t, doms.Collector())
+	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
+	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx}).CloneForWorker(context.Background(), captureTx)
+	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
+	require.NoError(t, err)
+	require.True(t, captureTx.nonNilMetrics)
 }
 
 // TestComputeAhead_StepBoundaryCheckpointMidBlock pins the batch-end-in-BAL
@@ -608,7 +687,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 			accountValues[string(addrBytes)] = buf
 		}
 		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
-		bList = append(bList, &types.AccountChanges{
+		bList = append(bList, types.AccountChanges{
 			Address:        accounts.InternAddress([20]byte(addrBytes)),
 			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
 			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
@@ -644,6 +723,271 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
+// TestLoop_BlockRequestBeatsSameNumberedResult pins that loop() handles a block's
+// request before its own result, which select alone does not guarantee. The two
+// delivery orders hit different windows: pre-buffered makes both cases ready at
+// once, after-start races the send against select's readiness poll.
+func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	// Per-block mode would publish a second, incremental result per block and
+	// break the single-result assertion below.
+	dbg.BatchCommitments = true
+
+	// Each iteration logs its own expected wrong-root failure.
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	// Each iteration is an independent chance at select's two-ready pick, but the
+	// two orders are not equally likely to hit it: with the drain removed, the
+	// pre-buffered order catches within a handful of iterations while after-start
+	// averages ~40 and tails past 100, so it needs the larger count to keep a
+	// regression from slipping through.
+	for _, tc := range []struct {
+		name       string
+		afterStart bool
+		iterations uint64
+	}{
+		{name: "buffered before start", iterations: 200},
+		{name: "delivered after start", afterStart: true, iterations: 2_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Own domains per subtest: block and txNum restart at 1.
+			db, _, doms := setupStepTest(t)
+			rnd := rand.New(rand.NewSource(7))
+			for i := uint64(1); i <= tc.iterations; i++ {
+				in := make(chan applyResult, 4)
+				reqs := make(chan *blockRequest, 4)
+				out := make(chan commitmentResult, 4)
+				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out)
+				require.NoError(t, err)
+				cc.hasFirstBlock = true
+				cc.firstBlockNum = i
+
+				addrBytes := make([]byte, length.Addr)
+				rnd.Read(addrBytes)
+				bal := types.BlockAccessList{{
+					Address:      accounts.InternAddress([20]byte(addrBytes)),
+					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
+				}}
+
+				// stateRoot is deliberately wrong, so a processed request publishes
+				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
+				send := func() {
+					reqs <- &blockRequest{
+						blockNum:   i,
+						firstTxNum: i,
+						lastTxNum:  i,
+						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
+						bal:        bal,
+					}
+					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
+					close(reqs)
+					close(in)
+				}
+				if tc.afterStart {
+					cc.Start(ctx)
+					go send()
+				} else {
+					send()
+					cc.Start(ctx)
+				}
+
+				// Range rather than Stop() first: out closes only after loop() returns,
+				// and Stop()'s close(cc.done) would race an in-flight publish().
+				var results []commitmentResult
+				for res := range out {
+					results = append(results, res)
+				}
+				cc.Stop()
+
+				require.Len(t, results, 1,
+					"iteration %d: block %d's request was dropped by its own same-numbered result before compute-ahead could run", i, i)
+				require.ErrorIs(t, results[0].err, ErrWrongTrieRoot,
+					"iteration %d: block %d's request must be processed before its own result", i, i)
+			}
+		})
+	}
+}
+
+// TestComputeWithBlockAccumulator_ConcurrentRotation runs the calculator and a
+// changeset-rotating producer concurrently, with the calculator free to lag
+// behind the producer. It pins that every block's commitment diffs land in
+// that block's own saved changeset regardless of that lag — the genuinely
+// concurrent counterpart to TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow,
+// meant to be run with `go test -race`.
+//
+// Runs with deferred commitment updates both off and on, since each takes a
+// different code path to record this call's own branch writes.
+func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
+	for _, deferUpdates := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferUpdates=%v", deferUpdates), func(t *testing.T) {
+			// The lock-step run is the oracle: identical inputs, but every block
+			// is computed before the producer rotates away from it, so routing
+			// there cannot be raced. Diffs from the lagging run must match it
+			// entry for entry — a per-block "is it non-empty" check would miss a
+			// misroute between two blocks that both wrote something.
+			want := runRotationWorkload(t, deferUpdates, false)
+			got := runRotationWorkload(t, deferUpdates, true)
+			for b := uint64(1); b <= rotationBlocks; b++ {
+				require.Equal(t, want[b], got[b],
+					"block %d: commitment diffs differ from the lock-step run — a concurrent accumulator rotation misrouted them", b)
+				require.NotEmpty(t, want[b], "block %d: lock-step run recorded no commitment diffs, so the comparison proves nothing", b)
+			}
+		})
+	}
+}
+
+const (
+	rotationBlocks     = uint64(24)
+	rotationTxsPerBlok = uint64(5)
+)
+
+// runRotationWorkload drives the calculator over rotationBlocks blocks, each
+// with its own changeset, and returns the commitment diffs that landed in each.
+// With lag, the producer never waits for the calculator, so accumulator
+// rotations land mid-compute; without it, each block is awaited before the next
+// rotation.
+func runRotationWorkload(t *testing.T, deferUpdates, lag bool) map[uint64][]kv.DomainEntryDiff {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(deferUpdates)
+
+	in := make(chan applyResult, 8)
+	out := make(chan commitmentResult, int(rotationBlocks)+8)
+	// perBlockFrom=1: every block owns its own changeset, matching the
+	// changeset-window exec loop's per-block accumulator install/save/clear.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
+	require.NoError(t, err)
+	cc.Start(ctx)
+
+	var (
+		drainWG   sync.WaitGroup
+		drainMu   sync.Mutex
+		drainErrs []error
+		closeOnce sync.Once
+	)
+	// loop() exits only once in is closed — done is deliberately not an exit
+	// condition — so Stop deadlocks unless in is closed first. A require failure
+	// anywhere below would otherwise hang here instead of reporting.
+	closeIn := func() { closeOnce.Do(func() { close(in) }) }
+	t.Cleanup(func() {
+		closeIn()
+		cc.Stop()
+		drainWG.Wait()
+	})
+
+	// Adds extra contention on changesetMu from a third goroutine, unrelated
+	// to routing correctness but raising the odds of exposing any accumulator
+	// access that isn't actually serialized by the lock. Cleanup (not a
+	// manual stop at the end) so a require failure mid-test still stops it
+	// rather than leaving it spinning.
+	stopDistractor := make(chan struct{})
+	var distractorWG sync.WaitGroup
+	t.Cleanup(func() {
+		close(stopDistractor)
+		distractorWG.Wait()
+	})
+	distractorWG.Go(func() {
+		for {
+			select {
+			case <-stopDistractor:
+				return
+			default:
+				doms.GetChangesetAccumulator()
+				time.Sleep(time.Microsecond)
+			}
+		}
+	})
+
+	// Drain out concurrently: the producer below blocks on in if the calculator
+	// stops consuming, and the calculator stops consuming as soon as it blocks
+	// on a full out. Sizing the buffer to the worst-case publish count would
+	// make the test hang on any later change to rotationBlocks or the step size.
+	// out closes after loop() returns, which ends the range.
+	computed := make(chan uint64, 4*rotationBlocks)
+	drainWG.Go(func() {
+		defer close(computed)
+		for r := range out {
+			// Root mismatches are expected here (no real state root is
+			// computed) and irrelevant — this test is about changeset routing.
+			if r.err != nil && !errors.Is(r.err, ErrWrongTrieRoot) {
+				drainMu.Lock()
+				drainErrs = append(drainErrs, fmt.Errorf("block %d: %w", r.blockNum, r.err))
+				drainMu.Unlock()
+			}
+			if !lag {
+				computed <- r.blockNum
+			}
+		}
+	})
+
+	changesets := make(map[uint64]*changeset.StateChangeSet, rotationBlocks)
+	rnd := rand.New(rand.NewSource(42))
+	var txNum uint64
+	for b := uint64(1); b <= rotationBlocks; b++ {
+		blockHash := common.Hash{byte(b)}
+		cs := &changeset.StateChangeSet{}
+		changesets[b] = cs
+		doms.SetChangesetAccumulator(cs)
+
+		var lastTx uint64
+		for range rotationTxsPerBlok {
+			txNum++
+			lastTx = txNum
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+			in <- &txResult{blockNum: b, blockHash: blockHash, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)}
+		}
+
+		doms.SavePastChangesetAccumulator(blockHash, b, cs)
+		in <- newTestBlockResult(b, blockHash, lastTx, false)
+		if !lag {
+			awaitBlockComputed(t, computed, b)
+		}
+		doms.SetChangesetAccumulator(nil)
+	}
+	closeIn()
+	drainWG.Wait()
+	require.Empty(t, drainErrs, "unexpected compute errors")
+
+	diffs := make(map[uint64][]kv.DomainEntryDiff, rotationBlocks)
+	for b := uint64(1); b <= rotationBlocks; b++ {
+		diffs[b] = changesets[b].Diffs[kv.CommitmentDomain].GetDiffSet()
+	}
+	return diffs
+}
+
+func awaitBlockComputed(t *testing.T, computed <-chan uint64, block uint64) {
+	t.Helper()
+	for {
+		select {
+		case bn, ok := <-computed:
+			if !ok {
+				t.Fatalf("calculator stopped before block %d was computed", block)
+			}
+			if bn == block {
+				return
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("block %d was not computed", block)
+		}
+	}
+}
+
 // feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into
 // cc.state, marks the block computed-ahead with balRoots[1]=balRoot, then delivers
 // blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
@@ -672,7 +1016,7 @@ func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
 	cc.computedAhead[1] = true
 	cc.balRoots[1] = balRoot
 
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: n})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, n, false))
 	cc.Stop()
 	select {
 	case res := <-out:

@@ -352,7 +352,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 
 	for idx, c := range cases {
 		w := httptest.NewRecorder()
-		r, err := http.NewRequest(http.MethodGet, "http://localhost:9090/health", nil)
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:9090/health", nil)
 		if err != nil {
 			t.Errorf("%v: creating request: %v", idx, err)
 		}
@@ -516,7 +516,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 
 	for idx, c := range cases {
 		w := httptest.NewRecorder()
-		r, err := http.NewRequest(http.MethodGet, "http://localhost:9090/health", nil)
+		r, err := http.NewRequest(http.MethodGet, "http://localhost:9090/health", nil) //nolint:noctx
 		if err != nil {
 			t.Errorf("%v: creating request: %v", idx, err)
 		}

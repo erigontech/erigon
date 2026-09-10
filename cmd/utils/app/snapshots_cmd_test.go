@@ -25,13 +25,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/stretchr/testify/require"
 )
 
 type bundle struct {
@@ -624,9 +625,16 @@ func TestDUClassifyFile(t *testing.T) {
 		{"caplin", "v1.0-beaconblocks.0-100.seg", duCatCaplin},
 
 		// block segments (top-level snapshots dir)
-		{"snapshots", "v1.0-0-500-headers.seg", duCatBlocks},
-		{"snapshots", "v1.0-0-500-bodies.seg", duCatBlocks},
-		{"snapshots", "v1.0-0-500-transactions.idx", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-headers.seg", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-bodies.seg", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-transactions.idx", duCatBlocks},
+
+		// consensus-layer segments also live in the top-level snapshots dir,
+		// but their retention follows the caplin flags, not --prune.mode
+		{"snapshots", "v1.1-000000-000100-beaconblocks.seg", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-beaconblocks.idx", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-blobsidecars.seg", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-blocksidecars.seg", duCatCaplin},
 
 		// case insensitivity
 		{"Domain", "v1.0-accounts.0-16.kv", duCatDomains},
@@ -637,7 +645,7 @@ func TestDUClassifyFile(t *testing.T) {
 
 		// non-segment files → other
 		{"snapshots", "salt.txt", duCatOther},
-		{"snapshots", "v1.0-0-500-headers.torrent", duCatOther},
+		{"snapshots", "v1.0-000000-000500-headers.torrent", duCatOther},
 	}
 
 	for _, tt := range tests {
@@ -677,7 +685,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 	writeFile(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg", 600)
 
 	// block segment files (top-level snapshots dir)
-	writeFile(dirs.Snap, "v1.0-0-500-headers.seg", 800)
+	writeFile(dirs.Snap, "v1.0-000000-000500-headers.seg", 800)
 
 	files, err := duWalkSnapshots(dirs)
 	require.NoError(t, err)
@@ -714,7 +722,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 
 	// Check block segment is not a state file.
 	for _, f := range files {
-		if f.Name == "v1.0-0-500-headers.seg" {
+		if f.Name == "v1.0-000000-000500-headers.seg" {
 			require.False(t, f.IsState)
 			// Block file ranges are multiplied by 1000 by ParseFileName
 			require.Equal(t, uint64(0), f.From)
@@ -816,7 +824,8 @@ func TestDUComputeEstimates(t *testing.T) {
 		// New block segment (To=20M above both block cutoffs) — kept in all
 		{Name: "15000-20000-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 15_000_000, To: 20_000_000},
 
-		// Caplin — always kept
+		// Caplin — excluded from every mode: its retention follows the caplin
+		// flags, not --prune.mode, so it would distort each estimate equally.
 		{Name: "beaconblocks.0-100.seg", Size: 700, Category: duCatCaplin, IsState: false, From: 0, To: 100},
 	}
 
@@ -826,8 +835,8 @@ func TestDUComputeEstimates(t *testing.T) {
 	estimates := duComputeEstimates(files, maxBlock, maxStep)
 	require.Len(t, estimates, 4)
 
-	// Archive: sum everything
-	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000 + 700)
+	// Archive: sum every execution-layer file (caplin's 700 is not included)
+	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000)
 	require.Equal(t, "archive", estimates[0].Mode)
 	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
 	require.Equal(t, int64(0), estimates[0].Delta)
@@ -893,6 +902,24 @@ func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
 	}
 }
 
+func TestDUComputeEstimates_ExcludesCaplin(t *testing.T) {
+	// A blob-archive node carries far more consensus-layer data than execution-layer
+	// data. --prune.mode does not govern it, so leaving it in would inflate every
+	// mode by the same amount and make the per-mode numbers useless.
+	files := []duFileInfo{
+		{Name: "v1.0-accounts.0-10.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
+		{Name: "v1.1-000000-000100-blobsidecars.seg", Size: 9000, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+		{Name: "v1.1-000000-000100-BalancesDump.seg", Size: 500, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	estimates := duComputeEstimates(files, 50000, 10)
+	require.Len(t, estimates, 4)
+	for _, e := range estimates {
+		require.Equal(t, int64(100), e.TotalBytes, "mode %q must exclude caplin data", e.Mode)
+	}
+	require.Equal(t, int64(9500), duCaplinBytes(files))
+}
+
 func TestDUDetectNodeType(t *testing.T) {
 	t.Run("archive - has old state history from step 0", func(t *testing.T) {
 		// Archive mode keeps all history — old history files from step 0 are present.
@@ -925,8 +952,8 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
 			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 50},
-			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
-			{Name: "300-2000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
+			{Name: "000000-000300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
+			{Name: "000300-002000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
 		}
 		require.Equal(t, "blocks", duDetectNodeType(files))
 	})

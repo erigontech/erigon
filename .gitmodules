@@ -1,3 +1,0 @@
-[submodule "tests"]
-	path = execution/tests/legacy-tests
-	url = https://github.com/ethereum/tests

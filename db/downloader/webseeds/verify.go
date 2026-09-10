@@ -63,12 +63,13 @@ func Verify(
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
 	defer func() {
-		items.Wait()
+		// The early-return err takes priority; the normal path already returns items.Wait().
+		_ = items.Wait()
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
-			"total bytes read", checker.totalBytesRead.Load(),
-			"total request count", checker.totalRequestCount.Load())
+			"totalBytesRead", checker.totalBytesRead.Load(),
+			"totalRequestCount", checker.totalRequestCount.Load())
 	}()
 	for _, chain := range chains {
 		// Shift left?
@@ -196,7 +197,7 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	info, err := mi.UnmarshalInfo()
 	panicif.Err(err)
-	me.logger.Debug("got metainfo", "piece length", info.PieceLength, "length", info.Length)
+	me.logger.Debug("got metainfo", "pieceLength", info.PieceLength, "length", info.Length)
 	dataUrl := baseUrl + "/" + item.Name
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dataUrl, nil)
 	panicif.Err(err)
@@ -212,14 +213,14 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	etag := resp.Header.Get("ETag")
 	stateItem.Etag = etag
-	me.logger.Debug("item response", "etag", etag, "content length", resp.ContentLength)
+	me.logger.Debug("item response", "etag", etag, "contentLength", resp.ContentLength)
 	done, err = me.matchHashes(&info, resp, stateItem)
 	if err == nil {
 		stateItem.DataMatchesTorrent = true
 		me.logger.Info("snapshot matches",
 			"url", dataUrl,
 			//"name", item.Name,
-			"content length", resp.ContentLength,
+			"contentLength", resp.ContentLength,
 			//"etag", resp.Header.Get("etag"),
 		)
 	}
@@ -280,7 +281,7 @@ func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64, onReadN fu
 			n, err := io.CopyN(h, r, pieceLength)
 			onReadN(n)
 			if err != nil {
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					yield(result.Err[metainfo.Hash](err))
 					return
 				}

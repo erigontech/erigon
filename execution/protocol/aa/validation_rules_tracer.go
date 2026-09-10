@@ -212,7 +212,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot accounts.StorageKey, ad
 		buf[51] = byte(x)
 
 		hash.Reset()
-		hash.Write(buf)
+		_, _ = hash.Write(buf)
 		result = hash.Sum(result[:0])
 
 		for n := 0; n <= 128; n++ {

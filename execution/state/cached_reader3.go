@@ -51,7 +51,7 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 		return nil, nil
 	}
 	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, err
 	}
 	return &a, nil
@@ -79,10 +79,6 @@ func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key account
 	var v uint256.Int
 	(&v).SetBytes(enc)
 	return v, true, nil
-}
-
-func (r *CachedReader3) HasStorage(address accounts.Address) (bool, error) {
-	return r.cache.HasStorage(address.Value())
 }
 
 func (r *CachedReader3) ReadAccountCode(address accounts.Address) ([]byte, error) {

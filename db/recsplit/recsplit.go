@@ -52,6 +52,12 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
+// maxFanout bounds splitParams' fanout for every leafSize <= MaxLeafSize (the real
+// maximum is 9, see TestSplitParamsFanoutBound). findSplit counts into fixed-size
+// arrays of this length, so masking a partition index with maxFanout-1 is a no-op
+// that lets the compiler drop the bounds check.
+const maxFanout = 16
+
 // ExistenceFilterVersion selects the existence-filter format written for new index files.
 //
 //	0 = byte-array of first-bytes (legacy, no FuseFilter)
@@ -84,7 +90,7 @@ func remix(z uint64) uint64 {
 
 // recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
 type recsplitScratch struct {
-	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
+	count              []uint16 // Partition offsets used to redistribute a bucket after findSplit
 	buffer             []uint64
 	offsetBuffer       []uint64
 	unaryBuf           []uint64 // reused across buckets to avoid allocation
@@ -356,13 +362,24 @@ func (sc *recsplitScratch) preAlloc(n int) {
 // the Golomb parameter for m. Each scratch owns its own slice, so this is safe
 // to call concurrently from different workers without any locking.
 func (sc *recsplitScratch) golombParam(m uint16) int {
+	if i, table := int(m), sc.golombRice; i < len(table) {
+		return int(table[i] >> 27)
+	}
+	return sc.golombParamSlow(m)
+}
+
+// golombParamSlow extends the table up to m, then returns the parameter for m.
+// Kept out of golombParam so the common already-computed case stays inlinable.
+func (sc *recsplitScratch) golombParamSlow(m uint16) int {
 	for s := uint16(len(sc.golombRice)); m >= s; s++ {
-		sc.golombRice = append(sc.golombRice, 0)
-		if s == 0 {
-			sc.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-		} else if s <= sc.leafSize {
-			sc.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-		} else {
+		switch {
+		case s == 0:
+			sc.golombRice = append(sc.golombRice, (bijMemo[0]<<27)|bijMemo[0])
+		case s <= sc.leafSize:
+			bij := bijMemo[s]
+			sc.golombRice = append(sc.golombRice, (bij<<27)|(uint32(1)<<16)|bij)
+		default:
+			sc.golombRice = append(sc.golombRice, 0)
 			computeGolombRice(s, sc.golombRice, sc.leafSize, sc.primaryAggrBound, sc.secondaryAggrBound)
 		}
 	}
@@ -431,8 +448,9 @@ func remap16(x uint64, n uint16) uint16 {
 }
 
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
-// when mapping keys to 64-bit values
-func (rs *RecSplit) ResetNextSalt() {
+// when mapping keys to 64-bit values. Everything the failed attempt accumulated has to go:
+// the encoders append into their existing buffers, so leftovers land in the rebuilt index.
+func (rs *RecSplit) ResetNextSalt() error {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
@@ -451,21 +469,50 @@ func (rs *RecSplit) ResetNextSalt() {
 		_, _ = rs.offsetFile.Seek(0, 0)
 		rs.offsetWriter.Reset(rs.offsetFile)
 	}
+	rs.gr.Reset()
+	rs.ef = eliasfano16.DoubleEliasFano{}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
+
+	if rs.existenceFV0 != nil {
+		// a completed Build closes this file, so start a fresh one rather than rewind
+		_ = rs.existenceFV0.Close()
+		_ = dir.RemoveFile(rs.existenceFV0.Name())
+		f, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return err
+		}
+		rs.existenceFV0 = f
+		rs.existenceWV0.Reset(f)
+	}
+	if rs.existenceFV1 != nil || rs.existenceFV2 != nil {
+		if rs.existenceFV1 != nil {
+			rs.existenceFV1.Close()
+		}
+		if rs.existenceFV2 != nil {
+			rs.existenceFV2.Close()
+		}
+		var err error
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
-	if m > secondaryAggrBound { // High-level aggregation (fanout 2)
+	switch {
+	case m > secondaryAggrBound: // High-level aggregation (fanout 2)
 		unit = secondaryAggrBound * (((m+1)/2 + secondaryAggrBound - 1) / secondaryAggrBound)
 		fanout = 2
-	} else if m > primaryAggrBound { // Second-level aggregation
+	case m > primaryAggrBound: // Second-level aggregation
 		unit = primaryAggrBound
 		fanout = (m + primaryAggrBound - 1) / primaryAggrBound
-	} else { // First-level aggregation
+	default: // First-level aggregation
 		unit = leafSize
 		fanout = (m + leafSize - 1) / leafSize
 	}
@@ -652,43 +699,37 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 
 // findSplit finds a salt value such that keys in bucket are evenly distributed
 // into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
-// Uses 8-way salt parallelism with 8 independent count arrays carved from the
-// count slice (which must have len >= 8*fanout).
-func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
+// Uses 8-way salt parallelism with 8 independent count arrays.
+func findSplit(bucket []uint64, salt uint64, fanout, unit uint16) uint64 {
+	if fanout > maxFanout {
+		panic(fmt.Sprintf("fanout %d exceeds maxFanout %d", fanout, maxFanout))
+	}
 	m := uint16(len(bucket))
-	c0 := count[0*fanout : 1*fanout : 1*fanout]
-	c1 := count[1*fanout : 2*fanout : 2*fanout]
-	c2 := count[2*fanout : 3*fanout : 3*fanout]
-	c3 := count[3*fanout : 4*fanout : 4*fanout]
-	c4 := count[4*fanout : 5*fanout : 5*fanout]
-	c5 := count[5*fanout : 6*fanout : 6*fanout]
-	c6 := count[6*fanout : 7*fanout : 7*fanout]
-	c7 := count[7*fanout : 8*fanout : 8*fanout]
 	for {
-		clear(count[:8*fanout])
-		for i := range m {
-			key := bucket[i]
-			c0[remap16(remix(key+salt), m)/unit]++
-			c1[remap16(remix(key+salt+1), m)/unit]++
-			c2[remap16(remix(key+salt+2), m)/unit]++
-			c3[remap16(remix(key+salt+3), m)/unit]++
-			c4[remap16(remix(key+salt+4), m)/unit]++
-			c5[remap16(remix(key+salt+5), m)/unit]++
-			c6[remap16(remix(key+salt+6), m)/unit]++
-			c7[remap16(remix(key+salt+7), m)/unit]++
+		var c [8][maxFanout]uint16
+		for _, key := range bucket {
+			c[0][(remap16(remix(key+salt), m)/unit)&(maxFanout-1)]++
+			c[1][(remap16(remix(key+salt+1), m)/unit)&(maxFanout-1)]++
+			c[2][(remap16(remix(key+salt+2), m)/unit)&(maxFanout-1)]++
+			c[3][(remap16(remix(key+salt+3), m)/unit)&(maxFanout-1)]++
+			c[4][(remap16(remix(key+salt+4), m)/unit)&(maxFanout-1)]++
+			c[5][(remap16(remix(key+salt+5), m)/unit)&(maxFanout-1)]++
+			c[6][(remap16(remix(key+salt+6), m)/unit)&(maxFanout-1)]++
+			c[7][(remap16(remix(key+salt+7), m)/unit)&(maxFanout-1)]++
 		}
 		// Branchless validation: XOR each count with expected value,
 		// OR-accumulate to detect any mismatch.
 		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
-		for i := uint16(0); i < fanout-1; i++ {
-			bad0 |= c0[i] ^ unit
-			bad1 |= c1[i] ^ unit
-			bad2 |= c2[i] ^ unit
-			bad3 |= c3[i] ^ unit
-			bad4 |= c4[i] ^ unit
-			bad5 |= c5[i] ^ unit
-			bad6 |= c6[i] ^ unit
-			bad7 |= c7[i] ^ unit
+		for i := range fanout - 1 {
+			j := i & (maxFanout - 1)
+			bad0 |= c[0][j] ^ unit
+			bad1 |= c[1][j] ^ unit
+			bad2 |= c[2][j] ^ unit
+			bad3 |= c[3][j] ^ unit
+			bad4 |= c[4][j] ^ unit
+			bad5 |= c[5][j] ^ unit
+			bad6 |= c[6][j] ^ unit
+			bad7 |= c[7][j] ^ unit
 		}
 		if bad0 == 0 {
 			return salt
@@ -727,8 +768,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	fullMask := uint32((1 << m) - 1)
 	for {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
-		for i := range m {
-			key := bucket[i]
+		for _, key := range bucket {
 			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
 			// and compiler generating less assembly checks: ~10% perf.
 			// it's safe because: len(bucket) <= leafSize <= 24
@@ -798,7 +838,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		salt = findSplit(bucket, salt, fanout, unit, count)
+		salt = findSplit(bucket, salt, fanout, unit)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
@@ -878,11 +918,13 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	}
 
 	mmapSize := int(rs.keysAdded * 8)
-	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	mmapHandle1, err := mmap.OpenRo(rs.offsetFile, mmapSize)
 	if err != nil {
 		return fmt.Errorf("mmap offset file: %w", err)
 	}
-	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+	// Discarded, not folded into retErr: an Unmap failure here would trigger the
+	// retErr-triggered cleanup above and discard an offsetEf that finished building correctly.
+	defer func() { _ = mmapHandle1.Unmap() }()
 
 	data := mmapHandle1[:mmapSize]
 	for i := uint64(0); i < rs.keysAdded; i++ {
@@ -932,24 +974,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
 	}
 
-	var err error
-	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
+	indexF, createErr := dir.CreateTemp(rs.filePath)
+	if createErr != nil {
+		return fmt.Errorf("create index file %s: %w", rs.filePath, createErr)
 	}
-
+	rs.indexF = indexF
 	defer rs.indexF.Close()
 	rs.indexW = bufiopool.Writer(rs.indexF)
 	defer bufiopool.PutWriter(rs.indexW)
+
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
@@ -958,7 +1001,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	} else {
 		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
-	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
+	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
@@ -1067,17 +1110,17 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	if err = rs.indexW.Flush(); err != nil {
+	if err := rs.indexW.Flush(); err != nil {
 		return err
 	}
-	if err = rs.fsync(); err != nil {
+	if err := rs.fsync(); err != nil {
 		return err
 	}
-	if err = rs.indexF.Close(); err != nil {
+	if err := rs.indexF.Close(); err != nil {
 		return err
 	}
 
-	if err = os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
+	if err := os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}

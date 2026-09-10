@@ -29,17 +29,17 @@ func ProcessEth1DataReset(s abstract.BeaconState) {
 	}
 }
 
-func ProcessSlashingsReset(s abstract.BeaconState) {
-	s.SetSlashingSegmentAt(int(state.Epoch(s)+1)%int(s.BeaconConfig().EpochsPerSlashingsVector), 0)
+func ProcessSlashingsReset(s abstract.BeaconState) error {
+	return s.SetSlashingSegmentAt(int(state.Epoch(s)+1)%int(s.BeaconConfig().EpochsPerSlashingsVector), 0)
 }
 
-func ProcessRandaoMixesReset(s abstract.BeaconState) {
+func ProcessRandaoMixesReset(s abstract.BeaconState) error {
 	currentEpoch := state.Epoch(s)
 	nextEpoch := state.Epoch(s) + 1
-	s.SetRandaoMixAt(int(nextEpoch%s.BeaconConfig().EpochsPerHistoricalVector), s.GetRandaoMixes(currentEpoch))
+	return s.SetRandaoMixAt(int(nextEpoch%s.BeaconConfig().EpochsPerHistoricalVector), s.GetRandaoMixes(currentEpoch))
 }
 
-func ProcessParticipationFlagUpdates(state abstract.BeaconState) {
+func ProcessParticipationFlagUpdates(state abstract.BeaconState) error {
 	defer monitor.ObserveElaspedTime(monitor.ProcessParticipationFlagUpdatesTime).End()
-	state.ResetEpochParticipation()
+	return state.ResetEpochParticipation()
 }

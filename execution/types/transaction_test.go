@@ -33,6 +33,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -786,7 +787,9 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
@@ -811,7 +814,9 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTrailingBytes(t *testing.T) {
@@ -875,4 +880,50 @@ func TestTypedTxEmptyToErrorMessage(t *testing.T) {
 			assert.EqualError(t, err, "wrong size for To: 0")
 		})
 	}
+}
+
+// Typed-transaction JSON that omits a field the decoder dereferences must be
+// rejected, not panic.
+func TestUnmarshalTransactionFromJSONMissingFields(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		json string
+	}{
+		{"dynamicFee without maxFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"dynamicFee without maxPriorityFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxPriorityFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"setCode without authorizationList", `{"type":"0x4","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := UnmarshalTransactionFromJSON([]byte(tc.json))
+			assert.Error(t, err)
+		})
+	}
+}
+
+// A type-2 transaction carries no 'gasPrice' field, so its absence must not be
+// an error.
+func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
+	t.Parallel()
+	const txJSON = `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x3b9aca00","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`
+	txn, err := UnmarshalTransactionFromJSON([]byte(txJSON))
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
+}
+
+func TestAATotalGasLimitOverflow(t *testing.T) {
+	t.Parallel()
+
+	tx := &AccountAbstractionTransaction{ValidationGasLimit: 1, PaymasterValidationGasLimit: 2, PostOpGasLimit: 4}
+	tx.GasLimit = 8
+	total, ok := tx.TotalGasLimit(16)
+	assert.True(t, ok)
+	assert.Equal(t, uint64(31), total)
+
+	overflowing := &AccountAbstractionTransaction{ValidationGasLimit: ^uint64(0), PaymasterValidationGasLimit: 1}
+	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
+	assert.False(t, ok)
+	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
 }

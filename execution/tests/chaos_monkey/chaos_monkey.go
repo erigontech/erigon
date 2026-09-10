@@ -28,9 +28,9 @@ const (
 	consensusFailureRate = 300
 )
 
-func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bool, txTaskErr error) error {
-	if !IsInitialCycle && rand.Int()%consensusFailureRate == 0 && txIndex == 0 && !badBlockHalt {
-		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr)
+func ThrowRandomConsensusError(isInitialCycle bool, txIndex int, badBlockHalt bool, txTaskErr error) error {
+	if !isInitialCycle && rand.Int()%consensusFailureRate == 0 && txIndex == 0 && !badBlockHalt {
+		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr) //nolint:errorlint // txTaskErr is nil on the path the monkey fires on; %w would render %!w(<nil>)
 	}
 	return nil
 }

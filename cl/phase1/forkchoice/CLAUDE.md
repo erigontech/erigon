@@ -40,7 +40,7 @@ verified against the Go code in this repository.
 | `on_block.go`: `verifyKzgCommitmentsAgainstTransactions` | Deneb execution payload blob versioned-hash checks; Electra/Fulu maximum blob count plumbing |
 | `on_block.go`: `isDataAvailable` | Deneb `is_data_available` for blob sidecars; pre-Gloas local blob storage path |
 | `on_block.go`: PeerDAS `IsDataAvailable` and `SyncColumnDataLater` branch inside `OnBlock` | Fulu modified `is_data_available`: data availability is checked by block root through data column sidecars, without passing `blob_kzg_commitments`; modified Fulu `on_block` calls it as `is_data_available(hash_tree_root(block))` |
-| `on_execution_payload.go`: `OnExecutionPayload`, `applyEnvelope`, `applyEnvelopeLocked`, `ApplyLocalSelfBuildEnvelope`, `StoreAnchorEnvelope` | Gloas `on_execution_payload_envelope`, `Store.payloads`, `Store.payload_timeliness_vote`, `Store.payload_data_availability_vote` |
+| `on_execution_payload.go`: `OnExecutionPayload`, `applyEnvelope`, `applyEnvelopeCoordinated`, `ApplyLocalSelfBuildEnvelope`, `StoreAnchorEnvelope` | Gloas `on_execution_payload_envelope`, `Store.payloads`, `Store.payload_timeliness_vote`, `Store.payload_data_availability_vote` |
 | `on_execution_payload.go`: `validateEnvelopeAgainstBlock`, `verifyEnvelopeBuilderSignature`, `checkDataAvailability`, `validatePayloadWithEL` | Gloas `on_execution_payload_envelope`; Gloas/Fulu data availability for committed bid blob data; Bellatrix `ExecutionEngine.notify_forkchoice_updated`/payload validation context |
 | `on_payload_attestation_message.go`: `OnPayloadAttestationMessage` | Gloas `on_payload_attestation_message`, PTC membership/signature/current-slot checks |
 | `on_attestation.go`: `OnAttestation`, `ProcessAttestingIndicies`, `ValidateOnAttestation`, `validateTargetEpochAgainstCurrentTime` | Phase0 `on_attestation`, `validate_on_attestation`, `validate_target_epoch_against_current_time`; Gloas modified `validate_on_attestation` |
@@ -54,6 +54,16 @@ verified against the Go code in this repository.
 | `fork_graph/interface.go`, `fork_graph/fork_graph_disk.go`, `fork_graph/fork_graph_disk_fs.go`, `fork_graph/participation_indicies_store.go` | Implementation storage for Phase0/Gloas `Store.blocks`, `Store.block_states`, `Store.checkpoint_states`, payload envelope persistence, and participation data |
 | `optimistic/optimistic.go`, `optimistic/optimistic_impl.go` | Optimistic sync support for execution payload validity tracking; review with Bellatrix execution payload validity and fork-choice update semantics |
 | `public_keys_registry/interface.go`, `public_keys_registry/in_memory_public_keys_registry.go`, `public_keys_registry/db_public_keys_registry.go` | Signature verification support for `is_valid_indexed_attestation` and payload attestation validation |
+
+## Anchor State Invariant
+
+`NewForkChoiceStore` stores the anchor state's latest block root/epoch as *both* the
+justified and finalized checkpoint (`forkchoice.go:392-393`). The anchor is therefore
+assumed to be a finalized (FFG-final, reorg-immune) state, exactly as spec
+`get_forkchoice_store(anchor_state)` requires. Any code that produces the bootstrap
+anchor must honor this: a head state is reorg-eligible and must never be handed in. The
+local-restart resume path (`cl/phase1/core/checkpoint_sync`) depends on this — it resumes
+only from the persisted finalized state (`finalized.ssz_snappy`), never a head state.
 
 ## Fulu Review Notes
 

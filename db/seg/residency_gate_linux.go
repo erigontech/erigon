@@ -1,0 +1,207 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package seg
+
+import (
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
+)
+
+var pageSize = os.Getpagesize()
+
+// residencyWindow is how many bytes from the reset offset the gate ensures are
+// resident. State reads are scattered, so reading beyond the page holding the
+// value is pure read amplification. Capping it at MaxReadSize prevents
+// the bitmap from marking a range that BlockingRead truncated.
+var residencyWindow = min(dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 1)*pageSize, iouring.MaxReadSize)
+
+// residencyRefresh is how often the cached residency bitmap is rebuilt from a
+// fresh mincore scan, correcting bits the OS changed under us (evictions clear,
+// readahead sets). Between refreshes the gate never calls mincore on the hot path.
+var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) * time.Second
+
+// EnableResidencyGate routes cold .kv page access through blocking async I/O so
+// the read does not hold the goroutine's P.
+func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
+
+// residencyRegion returns the page-aligned file extent covering the word at offset,
+// zero length when out of range. Works in file offsets, so a SequentialView reading
+// through its own mmap needs no special case.
+func (g *Getter) residencyRegion(offset uint64) (length int, fileOffset int64) {
+	if g.d == nil || len(g.data) == 0 {
+		return 0, 0
+	}
+	absStart := int64(g.dataOffset + offset)
+	if absStart < 0 || absStart >= g.d.Size() {
+		return 0, 0
+	}
+	aligned := absStart &^ int64(pageSize-1)
+	end := min(aligned+int64(residencyWindow), g.d.Size())
+	return int(end - aligned), aligned
+}
+
+func (g *Getter) ensureResident(offset uint64) {
+	if residencyWindow <= 0 { // RESIDENCY_WINDOW_PAGES=0 disables the gate
+		return
+	}
+	length, fileOffset := g.residencyRegion(offset)
+	if length == 0 {
+		return
+	}
+	rb := g.d.residencyBitmap()
+	if rb == nil {
+		return
+	}
+	first := int(fileOffset) / pageSize
+	last := first + (length-1)/pageSize
+	if rb.residentRange(first, last) {
+		return // believed resident — go straight to the mapping (a stale bit just faults)
+	}
+	g.d.blockingAsyncRead(fileOffset, length)
+	rb.markRange(first, last)
+}
+
+// residencyBitmap is per file: residency is a page-cache property every mapping of
+// the file shares, and mincore needs a mapping only as an access handle.
+func (d *Decompressor) residencyBitmap() *residencyBitmap {
+	if rb := d.residency.Load(); rb != nil {
+		return rb
+	}
+	if len(d._mmapHandle) == 0 { // closed: nothing left to probe
+		return nil
+	}
+	// Seed happens on the refresh goroutine's first pass, not here: a synchronous
+	// mincore of a multi-GB file would stall the exec worker that triggered init.
+	// Until the seed lands the bitmap reads all-cold, so early reads use blocking
+	// async I/O rather than faulting through the mapping.
+	rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
+	if !d.residency.CompareAndSwap(nil, rb) {
+		return d.residency.Load() // lost the race; the winner owns the scan goroutine
+	}
+	go d.refreshResidencyLoop(rb)
+	return rb
+}
+
+func (d *Decompressor) blockingAsyncRead(fileOffset int64, n int) {
+	iouring.BlockingRead(int(d.f.Fd()), fileOffset, n)
+}
+
+// residencyBitmap caches page-cache residency, one bit per mapped page, so the
+// hot path is a single atomic load instead of a per-read mincore syscall. The bit
+// is a hint, kept honest by a periodic mincore rescan: a stale set bit costs one
+// mmap fault, a stale clear bit one cheap cache-hit io_uring read — both harmless.
+type residencyBitmap struct {
+	nPages int
+	words  []uint64
+	done   chan struct{}
+
+	mu      sync.Mutex // serializes refresh scans against stop() so no mincore runs after munmap
+	stopped bool
+}
+
+func newResidencyBitmap(nPages int) *residencyBitmap {
+	return &residencyBitmap{
+		nPages: nPages,
+		words:  make([]uint64, (nPages+63)/64),
+		done:   make(chan struct{}),
+	}
+}
+
+func (rb *residencyBitmap) residentRange(first, last int) bool {
+	for p := first; p <= last; p++ {
+		w := atomic.LoadUint64(&rb.words[p>>6])
+		if w&(1<<uint(p&63)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (rb *residencyBitmap) markRange(first, last int) {
+	for p := first; p <= last; p++ {
+		atomic.OrUint64(&rb.words[p>>6], 1<<uint(p&63))
+	}
+}
+
+func (d *Decompressor) refreshResidencyLoop(rb *residencyBitmap) {
+	d.refreshResidency(rb) // seed
+	t := time.NewTicker(residencyRefresh)
+	defer t.Stop()
+	for {
+		select {
+		case <-rb.done:
+			return
+		case <-t.C:
+			d.refreshResidency(rb)
+		}
+	}
+}
+
+// refresh rebuilds the whole bitmap from a chunked mincore scan of the mapping.
+// It replaces words wholesale; a concurrent markRange that gets clobbered is a
+// harmless false-negative (one extra io_uring next time).
+// Reads the mapping under rb.mu, after the stopped check, so no scan can begin
+// once Close has started unmapping.
+func (d *Decompressor) refreshResidency(rb *residencyBitmap) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if rb.stopped {
+		return
+	}
+	m := d._mmapHandle
+	if len(m) == 0 {
+		return
+	}
+	const chunkPages = 1 << 18 // 1GB per mincore call (256KB scratch), word-aligned
+	vec := make([]byte, chunkPages)
+	for p := 0; p < rb.nPages; p += chunkPages {
+		n := min(chunkPages, rb.nPages-p)
+		lenBytes := min(n*pageSize, len(m)-p*pageSize)
+		_, _, errno := unix.Syscall(unix.SYS_MINCORE,
+			uintptr(unsafe.Pointer(&m[p*pageSize])),
+			uintptr(lenBytes),
+			uintptr(unsafe.Pointer(&vec[0])))
+		if errno != 0 {
+			return
+		}
+		for wp := 0; wp < n; wp += 64 {
+			var word uint64
+			bits := min(64, n-wp)
+			for b := range bits {
+				if vec[wp+b]&1 != 0 {
+					word |= 1 << uint(b)
+				}
+			}
+			atomic.StoreUint64(&rb.words[(p+wp)>>6], word)
+		}
+	}
+}
+
+func (rb *residencyBitmap) stop() {
+	rb.mu.Lock()
+	rb.stopped = true
+	rb.mu.Unlock()
+	close(rb.done)
+}

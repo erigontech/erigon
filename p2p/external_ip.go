@@ -82,6 +82,10 @@ func (t *externalIPTracker) logFailure(msg string, ctx ...any) {
 // network-change event until stop closes.
 func (t *externalIPTracker) run(stop <-chan struct{}, interval time.Duration) {
 	notifier := newNetChangeNotifier(t.logger)
-	defer notifier.Close()
+	defer func() {
+		if err := notifier.Close(); err != nil {
+			t.logger.Debug("network-change notifier close failed", "err", err)
+		}
+	}()
 	t.runWithNotifier(stop, notifier, interval, defaultEventDebounce)
 }

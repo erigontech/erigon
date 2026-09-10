@@ -33,7 +33,6 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)
 
-	// generate updates
 	b.Logf("keys count: %d", keysCount)
 	builder := NewUpdateBuilder()
 	for range keysCount {

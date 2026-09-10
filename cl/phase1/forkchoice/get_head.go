@@ -110,6 +110,7 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
 		headHash, headSlot := f.headHash, f.headSlot
+		f.publishSelectedHead(headHash, headSlot)
 		f.mu.RUnlock()
 		return headHash, headSlot, nil
 	}
@@ -124,7 +125,15 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
 			"justifiedRoot", justifiedCheckpoint.Root)
-		return f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot(), nil
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.headHash != (common.Hash{}) {
+			f.publishSelectedHead(f.headHash, f.headSlot)
+			return f.headHash, f.headSlot, nil
+		}
+		headRoot, headSlot := f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot()
+		f.publishSelectedHead(headRoot, headSlot)
+		return headRoot, headSlot, nil
 	}
 
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
@@ -151,21 +160,29 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 		// a nil state degrades to zero attestation weight, as before.
 		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-		f.mu.Lock()
-		if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
-			f.mu.Unlock()
-			continue
-		}
-		defer f.mu.Unlock()
+		headHash, headSlot, ok, err := func() (common.Hash, uint64, bool, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
 
-		head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
+				return common.Hash{}, 0, false, nil
+			}
+			head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+			if err != nil {
+				return common.Hash{}, 0, false, err
+			}
+			f.headHash = head.Root
+			f.headSlot = slot
+			f.headPayloadStatus = head.PayloadStatus
+			f.publishSelectedHead(f.headHash, f.headSlot)
+			return f.headHash, f.headSlot, true, nil
+		}()
 		if err != nil {
 			return common.Hash{}, 0, err
 		}
-		f.headHash = head.Root
-		f.headSlot = slot
-		f.headPayloadStatus = head.PayloadStatus
-		return f.headHash, f.headSlot, nil
+		if ok {
+			return headHash, headSlot, nil
+		}
 	}
 }
 
@@ -285,6 +302,7 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 				return common.Hash{}, 0, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
+			f.publishSelectedHead(f.headHash, f.headSlot)
 			return f.headHash, f.headSlot, nil
 		}
 
@@ -308,6 +326,12 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 				maxWeight = weight
 			}
 		}
+	}
+}
+
+func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
+	if f.syncedDataManager != nil {
+		f.syncedDataManager.OnSelectedHead(root, slot)
 	}
 }
 

@@ -94,7 +94,7 @@ func TestHexCompactRoundtrip(t *testing.T) {
 
 		// half with terminator, half without
 		if i%2 == 0 {
-			hex = append(hex, Terminator)
+			hex = append(hex, Terminator) //nolint:makezero
 		}
 
 		compact := HexToCompact(hex)
@@ -182,30 +182,25 @@ func FuzzHexCompactRoundtrip(f *testing.F) {
 	})
 }
 
-func BenchmarkHexToCompact(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		HexToCompact(testBytes)
-	}
-}
+func TestHexToCompactInto(t *testing.T) {
+	hex := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	want := HexToCompact(hex)
 
-func BenchmarkCompactToHex(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		CompactToHex(testBytes)
-	}
-}
+	t.Run("dst large enough is reused", func(t *testing.T) {
+		dst := make([]byte, 64)
+		got := HexToCompactInto(dst, hex)
+		require.Equal(t, want, got)
+		require.Same(t, &dst[0], &got[0], "result must alias dst when capacity allows")
+	})
 
-func BenchmarkKeybytesToHex(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		KeybytesToHex(testBytes)
-	}
-}
+	t.Run("dst too small allocates independently", func(t *testing.T) {
+		dst := make([]byte, 2)
+		got := HexToCompactInto(dst, hex)
+		require.Equal(t, want, got)
+		require.NotSame(t, &dst[0], &got[0], "result must not alias an undersized dst")
+	})
 
-func BenchmarkHexToKeybytes(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		HexToKeybytes(testBytes)
-	}
+	t.Run("nil dst matches HexToCompact", func(t *testing.T) {
+		require.Equal(t, want, HexToCompactInto(nil, hex))
+	})
 }

@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -113,81 +112,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON validates required fields and parses the Timestamp field.
-func (l *ErigonLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address     *common.Address `json:"address"`
-		Topics      *[]common.Hash  `json:"topics"`
-		Data        *hexutil.Bytes  `json:"data"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-		Timestamp   *hexutil.Uint64 `json:"timestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
-	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
-	}
-	if dec.Timestamp != nil {
-		l.Timestamp = *dec.Timestamp
-	}
-	return nil
-}
-
 type Logs []*Log
-
-type ErigonLog struct {
-	Log
-	Timestamp hexutil.Uint64 `json:"timestamp" codec:"-"`
-}
-
-type ErigonLogs []*ErigonLog
-
-// ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
-func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
-	result := make(ErigonLogs, len(logs))
-	for i, l := range logs {
-		result[i] = &ErigonLog{
-			Log:       *l,
-			Timestamp: hexutil.Uint64(timestamp),
-		}
-	}
-	return result
-}
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
@@ -195,54 +120,28 @@ type RPCLog struct {
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
+// ToRPCLogs converts Logs to RPCLogs, adding a timestamp to each entry.
+func (logs Logs) ToRPCLogs(timestamp uint64) RPCLogs {
+	result := make(RPCLogs, len(logs))
+	for i, l := range logs {
+		result[i] = &RPCLog{
+			Log:            *l,
+			BlockTimestamp: hexutil.Uint64(timestamp),
+		}
+	}
+	return result
+}
+
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
 func (l *RPCLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address        *common.Address `json:"address"`
-		Topics         *[]common.Hash  `json:"topics"`
-		Data           *hexutil.Bytes  `json:"data"`
-		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
-		TxHash         *common.Hash    `json:"transactionHash"`
-		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash      *common.Hash    `json:"blockHash"`
-		Index          *hexutil.Uint   `json:"logIndex"`
-		Removed        *bool           `json:"removed"`
-		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := l.Log.UnmarshalJSON(input); err != nil {
 		return err
 	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
+	var dec struct {
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
 	}
 	if dec.BlockTimestamp != nil {
 		l.BlockTimestamp = *dec.BlockTimestamp
@@ -252,19 +151,41 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
+// Copy deep-copies the logs into freshly allocated shared backing arrays.
+// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, len(logs))
-	for i, log := range logs {
-		logsCopy[i] = log.Copy()
+	var totalTopics, totalData int
+	for _, l := range logs {
+		if l == nil {
+			continue
+		}
+		totalTopics += len(l.Topics)
+		totalData += len(l.Data)
 	}
-	return logsCopy
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	backing := make([]Log, len(logs))
+	out := make(Logs, len(logs))
+	for i, l := range logs {
+		if l == nil {
+			continue
+		}
+		dst := &backing[i]
+		nt, nd := len(l.Topics), len(l.Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		l.copyTo(dst)
+		out[i] = dst
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
-func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
+func ToRPCTransactionLog(log *Log, header *Header) *RPCLog {
 	return &RPCLog{
 		Log:            *log,
 		BlockTimestamp: hexutil.Uint64(header.Time),
@@ -418,46 +339,47 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
-// without flattening them into a single slice first.
-func RlpHashLogs(groups []Logs) common.Hash {
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, logs := range groups {
-			for _, l := range logs {
-				payloadSize += l.encodingSize()
-			}
+		for _, l := range logs {
+			payloadSize += l.encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, logs := range groups {
-			for _, l := range logs {
-				if err := l.encodeRLP(w, b); err != nil {
-					return err
-				}
+		for _, l := range logs {
+			if err := l.encodeRLP(w, b); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
 }
 
-// Copy creates a deep copy of the Log.
+// Copy creates a deep copy of the Log. Nil Topics and Data become empty, which
+// is what keeps a LOG0 entry marshalling as `"topics":[]`.
 func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	return &Log{
-		Address:     l.Address,
-		Topics:      slices.Clone(l.Topics),
-		Data:        slices.Clone(l.Data),
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
-		Removed:     l.Removed,
+	dst := &Log{
+		Topics: make([]common.Hash, len(l.Topics)),
+		Data:   make(hexutil.Bytes, len(l.Data)),
 	}
+	l.copyTo(dst)
+	return dst
+}
+
+// copyTo overwrites dst, reusing its Topics/Data buffers. They must already be
+// long enough — anything beyond their length is dropped.
+func (l *Log) copyTo(dst *Log) {
+	t, d := dst.Topics, dst.Data
+	*dst = *l
+	dst.Topics = t[:copy(t, l.Topics)]
+	dst.Data = d[:copy(d, l.Data)]
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of

@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -88,11 +89,12 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, 
 
 	// Empty TransactionHashes slice (not nil) means subscribe to all
 	txHashes := filterReq.GetTransactionHashes()
-	if txHashes != nil && len(txHashes) == 0 {
+	switch {
+	case txHashes != nil && len(txHashes) == 0:
 		filter.allTxHashes = 1
-	} else if filterReq.GetAllTransactions() {
+	case filterReq.GetAllTransactions():
 		filter.allTxHashes = 1
-	} else {
+	default:
 		filter.allTxHashes = 0
 	}
 
@@ -130,7 +132,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF {
+	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
 	}
 	return nil
@@ -176,13 +178,18 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
 	receipt := rn.Receipt
 	blockNum := receipt.BlockNumber.Uint64()
+	var blockTimestamp uint64
+	if rn.Header != nil {
+		blockTimestamp = rn.Header.Time
+	}
 
 	// Convert logs
 	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
 	for _, l := range receipt.Logs {
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
-			Log:     l,
-			Removed: rn.Removed,
+			Log:            l,
+			BlockTimestamp: blockTimestamp,
+			Removed:        rn.Removed,
 		}))
 	}
 

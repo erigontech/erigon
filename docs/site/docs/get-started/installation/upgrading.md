@@ -27,10 +27,10 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 ### Snapshots Upgrade Options
 
 * `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
-* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and the Heimdall / Polygon-bridge DBs) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
 
 :::warning
-`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and the Heimdall / Polygon-bridge DBs) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
 :::
 
 Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.

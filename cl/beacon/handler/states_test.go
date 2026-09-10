@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,7 +75,9 @@ func TestGetStateFork(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/fork")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/fork", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -137,7 +141,9 @@ func TestGetStateRoot(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/root")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/root", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -195,7 +201,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -288,7 +294,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -361,7 +367,9 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -418,7 +426,9 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -475,7 +485,9 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/finality_checkpoints")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/finality_checkpoints", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -531,7 +543,9 @@ func TestGetRandao(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/randao")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/randao", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -571,7 +585,9 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 
 	versions := map[string]string{}
 	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
-		resp, err := http.Get(server.URL + "/eth/v1/beacon/states/head/" + endpoint)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
 		require.NoError(t, err)
 		resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)
@@ -581,4 +597,23 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	}
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+}
+
+// The response can be hundreds of MB on mainnet, so it must not stay in the pool.
+func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
+	seed := new(strings.Builder)
+	saved := stringsBuilderPool
+	stringsBuilderPool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { stringsBuilderPool = saved })
+
+	const count = 16
+	validators := solid.NewValidatorSetWithLength(count, count)
+	balances := solid.NewUint64ListSSZ(count)
+	for i := range count {
+		balances.Append(uint64(i))
+	}
+
+	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
+
+	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
 }

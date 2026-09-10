@@ -23,7 +23,7 @@ These methods must be explicitly enabled using the `--http.api` flag when starti
 ### Enhanced Features
 
 * `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
-* `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps
+* `erigon_getLogs` returns enhanced RPCLog objects with additional metadata like timestamps
 * `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
 See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
@@ -228,7 +228,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock
 
 | Type  | Description                                       |
 | ----- | ------------------------------------------------- |
-| Array | Array of ErigonLog objects with enhanced metadata |
+| Array | Array of RPCLog objects with enhanced metadata |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit. The block range of the query is independently capped by `--rpc.blockrange.limit` (default `1000`).
@@ -258,7 +258,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"add
 
 | Type  | Description                                                  |
 | ----- | ------------------------------------------------------------ |
-| Array | Array of ErigonLog objects in descending chronological order |
+| Array | Array of RPCLog objects in descending chronological order |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit.

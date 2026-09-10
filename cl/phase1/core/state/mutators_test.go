@@ -36,7 +36,7 @@ func getTestStateBalances(t *testing.T) *state2.CachingBeaconState {
 	for i := range numVals {
 		v := solid.NewValidator()
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
-		b.AddValidator(v, i)
+		require.NoError(t, b.AddValidator(v, i))
 	}
 	return b
 }
@@ -46,7 +46,7 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance, _ := s.ValidatorBalance(int(testInd))
-	state2.IncreaseBalance(s, testInd, amount)
+	require.NoError(t, state2.IncreaseBalance(s, testInd, amount))
 	afterBalance, _ := s.ValidatorBalance(int(testInd))
 	require.Equal(t, afterBalance, beforeBalance+amount)
 }
@@ -107,7 +107,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			description:                "success",
 			numValidators:              3,
 			expectedExitEpoch:          5,
-			expectedWithdrawlableEpoch: 0,
+			expectedWithdrawlableEpoch: 5 + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay,
 			validator:                  v1,
 		},
 		{
@@ -121,9 +121,9 @@ func TestInitiatieValidatorExit(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			state := getTestStateBalances(t)
-			state.AppendValidator(tc.validator)
+			require.NoError(t, state.AddValidator(tc.validator, 32_000_000_000))
 			testInd := uint64(state.ValidatorLength() - 1)
-			state.InitiateValidatorExit(testInd)
+			require.NoError(t, state.InitiateValidatorExit(testInd))
 			val, err := state.ValidatorForValidatorIndex(int(testInd))
 			require.NoError(t, err)
 			if val.ExitEpoch() != tc.expectedExitEpoch {

@@ -229,7 +229,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			s.logsBufMu.Unlock()
 		}
 		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, fmt.Errorf("error: could not parse requests logs: %w", err)
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
@@ -293,7 +293,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if config.IsPrague(header.Time) {
 		header.RequestsHash = outRequests.Hash()
 	}
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), outRequests, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), outRequests, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
@@ -393,8 +393,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	amsterdam := chain.Config().IsAmsterdam(header.Time)
 	if amsterdam {
 		if header.SlotNumber == nil {
-			// TODO: No Slot Error Yet - Treat it as optional for hive testing
-			//return rules.ErrMissingSlotNumber
+			return rules.ErrMissingSlotNumber
 		}
 		if chain.Config().IsEIPEnabled(7928, header.Time) {
 			if header.BlockAccessListHash == nil {
@@ -452,7 +451,9 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 		if parent.Time < *config.BalancerTime { // first Balancer HF block
 			for address, rewrittenCode := range config.BalancerRewriteBytecode {
-				state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified)
+				if err := state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -463,6 +464,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		var vmContext *tracing.VMContext
 		if tracer != nil {
 			random := header.MixDigest
+			execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
 			// GasPrice is intentionally zero — system calls have no gas price.
 			vmContext = &tracing.VMContext{
 				Coinbase:        accounts.InternAddress(header.Coinbase),
@@ -471,6 +473,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 				Random:          &random,
 				ChainConfig:     config,
 				IntraBlockState: state,
+				Rules:           execCtx.Rules(config),
 			}
 		}
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {

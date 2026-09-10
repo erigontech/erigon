@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
@@ -60,6 +60,8 @@ type BackwardBeaconDownloader struct {
 	onNewBlock     OnNewBlock
 	finished       atomic.Bool
 	reqInterval    *time.Ticker
+	baseInterval   time.Duration
+	emptyResponses atomic.Uint32
 	db             kv.RwDB
 	sn             *freezeblocks.CaplinSnapshots
 	neverSkip      bool
@@ -91,22 +93,52 @@ type SkippedFullBlock struct {
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB, beaconCfg *clparams.BeaconChainConfig) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
-		ctx:         ctx,
-		rpc:         rpc,
-		db:          db,
-		reqInterval: time.NewTicker(200 * time.Millisecond),
-		neverSkip:   true,
-		engine:      engine,
-		sn:          sn,
-		beaconCfg:   beaconCfg,
+		ctx:          ctx,
+		rpc:          rpc,
+		db:           db,
+		reqInterval:  time.NewTicker(defaultReqInterval),
+		baseInterval: defaultReqInterval,
+		neverSkip:    true,
+		engine:       engine,
+		sn:           sn,
+		beaconCfg:    beaconCfg,
 	}
 }
+
+const (
+	defaultReqInterval      = 200 * time.Millisecond
+	maxEmptyResponseBackoff = 5 * time.Second
+)
 
 // SetThrottle sets the throttle.
 func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.baseInterval = throttle
 	b.reqInterval.Reset(throttle)
+}
+
+func emptyResponseBackoff(base time.Duration, consecutive uint32) time.Duration {
+	return min(base<<min(consecutive, 4), maxEmptyResponseBackoff)
+}
+
+// backOffEmpty slows the request rate while no peer answers with the range.
+// Without it the node re-asks at the stage throttle forever, since an empty
+// response is legal and carries no signal that the range is unobtainable.
+func (b *BackwardBeaconDownloader) backOffEmpty() {
+	consecutive := b.emptyResponses.Add(1)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reqInterval.Reset(emptyResponseBackoff(b.baseInterval, consecutive))
+}
+
+func (b *BackwardBeaconDownloader) resetEmptyBackoff() {
+	if b.emptyResponses.Swap(0) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reqInterval.Reset(b.baseInterval)
 }
 
 // SetSlotToDownload sets slot to download.
@@ -199,8 +231,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 // Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
-	start := b.slotToDownload.Load() - count + 1
-	if start > b.slotToDownload.Load() { // overflow check
+	start, underflow := math.SafeSub(b.slotToDownload.Load(), count-1)
+	if underflow {
 		start = 0
 	}
 
@@ -273,11 +305,14 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 		requestSent.Store(false)
 		return
 	}
-	if blocks == nil || len(blocks) == 0 {
-		b.rpc.BanPeer(peerId)
+	if len(blocks) == 0 {
+		// An empty response is protocol-legal: the peer may have pruned the range.
+		log.Debug("[Caplin] empty backward beacon block response", "peer", peerId, "start", start, "count", count)
+		b.backOffEmpty()
 		requestSent.Store(false)
 		return
 	}
+	b.resetEmptyBackoff()
 
 	select {
 	case received <- blocks:
@@ -610,7 +645,9 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			continue
 		}
 		for i := *newSlot + 1; i < *slot; i++ {
-			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i)); err != nil {
+				return err
+			}
 		}
 	}
 

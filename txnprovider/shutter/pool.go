@@ -314,7 +314,6 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			IsEIP7623:          isEIP7623,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
-			IsEIP8037:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
@@ -328,31 +327,31 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		intrinsicRegularGas := intrinsicGasResult.RegularGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicRegularGas {
-			intrinsicRegularGas = intrinsicGasResult.FloorGasCost
+		intrinsicGas := intrinsicGasResult.ExecutionGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
 		blobGas := txn.GetBlobGas()
-		if intrinsicRegularGas > availableGas.Regular {
+		if intrinsicGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
-				"skipping decrypted txn: insufficient regular gas",
+				"skipping decrypted txn: insufficient execution gas",
 				"hash", txn.Hash(),
 				"type", txn.Type(),
 				"sender", sender,
-				"intrinsicRegularGas", intrinsicRegularGas,
-				"availableRegular", availableGas.Regular,
+				"intrinsicGas", intrinsicGas,
+				"availableExecution", availableGas.Execution,
 			)
 			continue
 		}
-		if intrinsicGasResult.StateGas > availableGas.State {
+		if isAmsterdam && txn.GetGasLimit() > availableGas.State {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
 				"skipping decrypted txn: insufficient state gas",
 				"hash", txn.Hash(),
 				"type", txn.Type(),
 				"sender", sender,
-				"intrinsicStateGas", intrinsicGasResult.StateGas,
+				"gasLimit", txn.GetGasLimit(),
 				"availableState", availableGas.State,
 			)
 			continue
@@ -369,8 +368,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		availableGas.Regular -= intrinsicRegularGas
-		availableGas.State -= intrinsicGasResult.StateGas
+		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobGas
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)

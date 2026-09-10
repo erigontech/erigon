@@ -37,7 +37,7 @@ import (
 
 // Do 1 step to start txPool
 func oneBlockStep(m *execmoduletester.ExecModuleTester, require *require.Assertions) {
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)

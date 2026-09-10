@@ -54,12 +54,7 @@ const (
 )
 
 type result struct {
-	resultChannel chan any
-	result        any
-	status        ResultStatus
-	reason        ResultStatusReason
-	statusInfo    string
-	failureCause  error
+	status ResultStatus
 }
 
 func NewResult() Result {

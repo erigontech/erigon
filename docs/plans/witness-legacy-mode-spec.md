@@ -18,8 +18,10 @@ debug_executionWitness(block, mode?) -> ExecutionWitnessResult
 
 - `block` — block number, tag, or hash (`rpc.BlockNumberOrHash`).
 - `mode` — optional string, `"legacy"` or `"canonical"`. When omitted the mode is `legacy`.
-- The call requires the historical-commitment schema (`rawdb.ReadDBCommitmentHistoryEnabled`); without it the
-  call returns an error.
+- The call requires the historical-commitment schema (`rawdb.ReadDBCommitmentHistoryEnabled`) to recompute a
+  witness on demand; without it the call returns an error — unless the node runs in **head-capture** serving
+  mode (see *Head-capture serving*), which serves recent blocks from an in-memory cache built without any
+  commitment history.
 
 `resolveWitnessMode` derives the mode from the `mode` parameter alone — there is no environment-variable
 override. Absent ⇒ `legacy`; `"legacy"`/`"canonical"` ⇒ that mode; any other value ⇒ error.
@@ -41,9 +43,10 @@ when empty.
 ### `state` — pre-state proof nodes
 
 The set of RLP-encoded trie nodes proving every account and storage slot the block reads or writes, drawn from
-the account trie and from the storage tries of touched accounts. It is produced by folding the commitment trie
-over the accessed hashed keys (`GenerateWitness` → `toWitnessTrie`): each key contributes the nodes on its
-root→leaf path together with the branch sibling hashes required to recompute every node hash up to the root.
+the account trie and from the storage tries of touched accounts. It is produced by an on-the-fly fold over the
+accessed hashed keys (`HexPatriciaHashed.Witnesses` captures the superset node set, `WitnessNodes` prunes it to
+the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
+required to recompute every node hash up to the root.
 The accessed-key set is first augmented by a collapse-detection pass (`detectCollapseSiblings`, run against a
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
 transaction transiently collapsed; the witness is then assembled against the parent-state reader.
@@ -116,11 +119,45 @@ A witness is a **sufficient** proof, not a canonical-minimal one: re-execution t
 correctness condition, so two conforming producers may legitimately differ in which redundant nodes or codes
 they include.
 
+## Head-capture serving (minimal nodes)
+
+A node pruned without commitment-domain history (`--prune.mode=minimal`) cannot recompute a witness on demand,
+because the parent commitment plane is only reachable through commitment history it no longer keeps. **Head-capture**
+serving fills that gap for the last N blocks: with `--witness.cache.head-capture` set (plus a non-zero
+`--witness.cache.blocks`), the node eagerly builds each new head block's witness as it commits and stores it in
+the same block-hash-keyed LRU the durable path uses. The commitment parent state is read from a *pinned parent
+RO snapshot* (a temporal tx lagging the tip by one committed block, whose commitment-latest equals the parent's
+commitment); the account/storage/code parent and block-end state come from the history a minimal node still
+retains. Each built witness passes the same self-verification gates before it is cached, so a stale or
+incomplete view fails closed and simply leaves that block uncached — never a wrong witness.
+
+Flags (embedded RPC only):
+
+- `--witness.cache.head-capture` — enable head-capture serving on a node without commitment history. Ignored
+  (no-op) when commitment history is present: such a node keeps the durable recompute-on-miss path.
+- `--witness.cache.blocks` — window size N; the number of recent blocks retained, capped at 96.
+- `--witness.cache.maxmb` — resident-memory cap in MB. Eviction triggers on whichever of the block count
+  (`--witness.cache.blocks`) or this byte budget binds first. `0` = count-only (no byte cap).
+
+Serving semantics in head-capture mode:
+
+- **Cache-only.** A hit is served from cache verbatim; a miss returns a typed out-of-window error and **never**
+  falls through to a history recompute (there is no commitment history to recompute from).
+- **Tip-only.** Only blocks within the trailing window are servable. A request ahead of the tip, or for a block
+  older than the window, is out-of-window.
+- **By-hash canonical check.** A by-hash request whose block number is no longer canonical (reorged out) returns
+  the distinct `reorged-away` error rather than serving a stale orphan as canonical.
+- **Cold after restart.** The cache is in-memory only and cannot be back-filled from history. After a restart it
+  is empty and re-warms forward, so the last ~N blocks are out-of-window until N new blocks have been committed.
+- **`eth_getWitness`.** In head-capture mode this RLP/uncached endpoint also returns the out-of-window error
+  instead of attempting a recompute; on a commitment-history node its behavior is unchanged.
+
 ## Errors
 
 - block not found or not canonical;
 - `mode` outside `{legacy, canonical}`;
-- historical-commitment schema disabled;
+- historical-commitment schema disabled and head-capture serving off;
+- head-capture cache miss — requested block is out of the trailing window, or its hash was reorged away;
 - stateless re-execution root mismatch (no witness is returned).
 
 ## Code map
@@ -128,6 +165,10 @@ they include.
 - **Producer** — `rpc/jsonrpc/debug_execution_witness.go`: `ExecutionWitness` (entry), `resolveWitnessMode`,
   `collectAccessedState` (codes/keys), `collectAccessedHeaders`, `detectCollapseSiblings`, `buildWitnessTrie`,
   `verifyWitnessStateless`, the `{0x80}` append.
-- **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` →
-  `execution/commitment/hex_patricia_hashed.go` `GenerateWitness` / `toWitnessTrie`, `witnessCreateAccountNode`
-  (untouched storage root = `HashNode`).
+- **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
+  `execution/commitment/hex_patricia_hashed.go` `Witnesses` (untouched storage root emitted as a bare
+  `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysFromNodes`.
+- **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
+  `rpc/jsonrpc/witness_cache_builder.go` (`WitnessCacheMode`, rolling-pin lifecycle, `buildAndCacheHeadCapture`),
+  `rpc/jsonrpc/debug_execution_witness.go` (`headCaptureSource`, `buildWitnessResultHeadCapture`,
+  `errWitnessOutOfWindow` / `errWitnessReorgedAway`), enabled in `node/eth/backend.go`.

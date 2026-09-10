@@ -19,17 +19,18 @@
 
 package vm
 
-import "encoding/binary"
+import (
+	"encoding/binary"
 
-// SWAR (SIMD-within-a-register) constants for scanning a uint64 of code 8 bytes
-// at a time. A byte b is a PUSH opcode (PUSH1..PUSH32, 0x60..0x7f) iff
-// b&0xe0 == 0x60, so (b&swarPushHi)^swarPushPat is zero exactly for PUSH bytes;
-// the classic has-zero-byte trick then locates them.
+	"github.com/erigontech/erigon/common/bitutil"
+)
+
+// A byte b is a PUSH opcode (PUSH1..PUSH32, 0x60..0x7f) iff b&0xe0 == 0x60, so
+// (b&swarPushHi)^swarPushPat is zero exactly for PUSH bytes and bitutil.HasZero
+// spots eight of them at once.
 const (
 	swarPushHi  = 0xe0e0e0e0e0e0e0e0
 	swarPushPat = 0x6060606060606060
-	swarLow     = 0x0101010101010101
-	swarHigh    = 0x8080808080808080
 )
 
 // codeBitmap collects data locations in code.
@@ -47,7 +48,7 @@ func codeBitmap(code []byte) bitvec {
 		if pc+8 <= codeLen {
 			w := binary.LittleEndian.Uint64(code[pc : pc+8])
 			t := (w & swarPushHi) ^ swarPushPat
-			if (t-swarLow)&^t&swarHigh == 0 { // no PUSH byte in this word
+			if bitutil.HasZero(t) == 0 { // no PUSH byte in this word
 				pc += 8
 				continue
 			}

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -24,13 +25,9 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// CommitmentReader does GetLatest on the CommitmentDomain. Decoupled from
-// tx/aggregator types to keep this package free of db/state imports.
 type CommitmentReader func(prefix []byte) (v []byte, step uint64, found bool, err error)
 
-// estimatedEntryOverheadBytes is the per-entry RAM cost beyond the encoded
-// value itself: branchCacheEntry (~80 B), maphash slot + hash (~40 B),
-// prefix slice (~24 B header + content), value slice header (~24 B).
+// 168 = branchCacheEntry (~80B) + maphash slot/hash (~40B) + prefix/value slice headers (~24B each).
 const estimatedEntryOverheadBytes = 168
 
 type pathDepth struct {
@@ -38,8 +35,7 @@ type pathDepth struct {
 	depth int
 }
 
-// ContractTrunkPreload holds the resumable state of a BFS preload for one
-// contract's storage subtree. Not goroutine-safe.
+// Not goroutine-safe.
 type ContractTrunkPreload struct {
 	contractHash    []byte
 	queue           []pathDepth
@@ -47,34 +43,20 @@ type ContractTrunkPreload struct {
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
-	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
-	// later unwind below that point evicts them via the BranchCache floor (a
-	// txN=0 pin would escape it and be served stale after a deep unwind).
-	pinTxNum uint64
+	pinTxNum        uint64
 }
 
-// NewContractTrunkPreload seeds a preload state at depth 64 (storage
-// subtree root: keccak256(address), 32 bytes / 64 nibbles).
 func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error) {
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreload: contractHash must be 32 bytes, got %d", len(contractHash))
 	}
-	contractNibbles := make([]byte, 64)
-	for i, b := range contractHash {
-		contractNibbles[2*i] = b >> 4
-		contractNibbles[2*i+1] = b & 0x0f
-	}
 	return &ContractTrunkPreload{
-		contractHash:    contractHash,
-		queue:           []pathDepth{{path: contractNibbles, depth: 64}},
+		contractHash:    bytes.Clone(contractHash),
+		queue:           []pathDepth{{path: ContractNibbles(contractHash), depth: 64}},
 		maxDepthReached: 64,
 	}, nil
 }
 
-// Run advances the BFS one chunk, pinning branches until additionalBudgetBytes
-// is exhausted or the queue is empty. Returns entries pinned THIS call, whether
-// the preload is now complete, and any reader error. On error the partial pin
-// set and queue position are preserved for a retry on the next Run.
 func (p *ContractTrunkPreload) Run(
 	additionalBudgetBytes int,
 	reader CommitmentReader,
@@ -93,28 +75,27 @@ func (p *ContractTrunkPreload) Run(
 
 	for len(p.queue) > 0 {
 		head := p.queue[0]
-		p.queue = p.queue[1:]
 
 		prefix := nibbles.HexToCompact(head.path)
 		v, step, found, rerr := reader(prefix)
 		if rerr != nil {
+			p.pinned += chunkPinned
+			p.usedBytes += chunkUsedBytes
 			return chunkPinned, false, fmt.Errorf("preload at depth %d: %w", head.depth, rerr)
 		}
 		if !found {
+			p.queue = p.queue[1:]
 			continue
 		}
 
 		entryCost := estimatedEntryOverheadBytes + len(prefix) + len(v)
 		if chunkUsedBytes+entryCost > additionalBudgetBytes {
-			p.queue = append([]pathDepth{head}, p.queue...)
 			break
 		}
+		p.queue = p.queue[1:]
 
 		cache.PinEntry(prefix, v, step, p.pinTxNum)
-		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
-		prefixCopy := make([]byte, len(prefix))
-		copy(prefixCopy, prefix)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)
+		p.pinnedPrefixes = append(p.pinnedPrefixes, prefix)
 		chunkUsedBytes += entryCost
 		chunkPinned++
 		if head.depth > p.maxDepthReached {
@@ -126,13 +107,15 @@ func (p *ContractTrunkPreload) Run(
 				"used_mb", (p.usedBytes+chunkUsedBytes)/(1<<20))
 		}
 
-		// Branch encoding: 2-byte touchMap || 2-byte bitmap || per-child data.
 		if len(v) < 4 {
 			continue
 		}
 		bitmap := binary.BigEndian.Uint16(v[2:4])
 		for n := range 16 {
 			if bitmap&(1<<uint(n)) == 0 {
+				continue
+			}
+			if head.depth+1 > maxStorageTrunkDepth {
 				continue
 			}
 			childPath := make([]byte, len(head.path)+1)
@@ -156,7 +139,6 @@ func (p *ContractTrunkPreload) MaxDepthReached() int { return p.maxDepthReached 
 func (p *ContractTrunkPreload) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 func (p *ContractTrunkPreload) ContractHash() []byte     { return p.contractHash }
 
-// PreloadContractTrunk is the one-shot wrapper around NewContractTrunkPreload + Run.
 func PreloadContractTrunk(
 	contractHash []byte,
 	ramBudgetBytes int,
@@ -172,6 +154,9 @@ func PreloadContractTrunk(
 		return 0, err
 	}
 	pinned, queueEmpty, err := p.Run(ramBudgetBytes, reader, cache, logger)
+	if err != nil {
+		return pinned, err
+	}
 	if logger != nil {
 		logger.Info("[trunk-preload] complete",
 			"contract_hash", fmt.Sprintf("%x", contractHash),
@@ -183,5 +168,5 @@ func PreloadContractTrunk(
 			"queue_remaining", p.QueueRemaining(),
 			"cache_pinned_total", cache.PinnedCount())
 	}
-	return pinned, err
+	return pinned, nil
 }

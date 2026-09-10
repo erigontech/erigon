@@ -19,7 +19,6 @@ package sentinel
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -72,20 +71,11 @@ func (g *GossipManager) Close() {
 
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
 type GossipSubscription struct {
-	gossip_topic GossipTopic
-	host         peer.ID
-	ch           chan *GossipMessage
-	ctx          context.Context
-	expiration   atomic.Value // Unix nano for how much we should listen to this topic
-	subscribed   atomic.Bool
-
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
 
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
-
-	s *Sentinel
 
 	stopCh    chan struct{}
 	closeOnce sync.Once

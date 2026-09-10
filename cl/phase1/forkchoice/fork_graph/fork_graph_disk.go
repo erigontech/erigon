@@ -19,11 +19,12 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -90,10 +91,14 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
 	// Alternate beacon states
-	fs        afero.Fs
-	blocks    sync.Map // set of blocks (block root -> block)
-	headers   sync.Map // set of headers
-	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
+	fs      afero.Fs
+	blocks  sync.Map // set of blocks (block root -> block)
+	headers sync.Map // set of headers
+	// badBlocks maps an invalid block root to the slot it was seen at, so Prune
+	// can drop it: an invalid block is deleted from blocks before its root is
+	// recorded here, so the block-keyed pruning below never reaches it. Roots
+	// marked with no header to take a slot from are stored as slotUnknown.
+	badBlocks sync.Map // common.Hash -> uint64 slot
 
 	// current state data — dual-protected. AddChainSegment is the sole writer
 	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
@@ -131,9 +136,7 @@ type forkGraphDisk struct {
 	envelopeExists sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyWriter *snappy.Writer
-	sszSnappyReader *snappy.Reader
+	sszBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData
@@ -142,41 +145,32 @@ type forkGraphDisk struct {
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) (ForkGraph, error) {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
-		// GLOAS checkpoint/anchor sync fix: the first transitionSlot for this
-		// anchor needs to record the correct state root (computed with
-		// LatestBlockHeader.Root == zero) into stateRoots. Two cases arise:
-		//
-		// Fresh checkpoint sync: Root is zero per spec (process_block_header
-		// zeroes it). We compute HashSSZ with Root=0 (the correct value),
-		// fill in Root, and cache it as PreviousStateRoot.
-		//
-		// Restart from disk: a previous run already filled in Root and
-		// serialized the state. Root is now that same correct hash (the one
-		// originally computed with Root=0). HashSSZ would return a different
-		// (wrong) value because Root is non-zero, so we must NOT recompute;
-		// instead we use the stored Root directly as PreviousStateRoot.
-		if anchorHeader.Root == [32]byte{} {
-			stateHash, err := anchorState.HashSSZ()
-			if err != nil {
-				panic(err)
+		stateHash := anchorState.PeekPreviousStateRoot()
+		if stateHash == (common.Hash{}) {
+			if anchorHeader.Slot == anchorState.Slot() && anchorHeader.Root != (common.Hash{}) {
+				stateHash = anchorHeader.Root
+			} else {
+				stateHash, err = anchorState.HashSSZ()
+				if err != nil {
+					return nil, err
+				}
 			}
-			anchorHeader.Root = stateHash
-			anchorState.SetLatestBlockHeader(&anchorHeader)
-			anchorState.SetPreviousStateRoot(stateHash)
-		} else {
-			anchorState.SetPreviousStateRoot(anchorHeader.Root)
 		}
+		if anchorHeader.Root == (common.Hash{}) {
+			anchorHeader.Root = stateHash
+		}
+		anchorState.SetPreviousStateRoot(stateHash)
 	} else {
 		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
-			panic(err)
+			return nil, err
 		}
 		anchorState.SetPreviousStateRoot(anchorHeader.Root)
 	}
@@ -200,9 +194,11 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
-	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
+	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
+		return nil, err
+	}
 	// preallocate buffer
-	return f
+	return f, nil
 }
 
 func (f *forkGraphDisk) AnchorSlot() uint64 {
@@ -234,7 +230,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
 		log.Debug("block below anchor slot", "slot", block.Slot, "hash", common.Hash(blockRoot))
-		f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 		return nil, BelowAnchor, nil
 	}
 
@@ -312,7 +308,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+			f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 			f.currentStateMu.Lock()
 			f.currentState = nil
 			f.currentStateBlockRoot = common.Hash{}
@@ -565,7 +561,11 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
-	f.badBlocks.Store(blockRoot, struct{}{})
+	slot := uint64(slotUnknown)
+	if header, ok := f.GetHeader(blockRoot); ok {
+		slot = header.Slot
+	}
+	f.badBlocks.Store(blockRoot, slot)
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
@@ -573,7 +573,17 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
+// slotUnknown marks a bad block with no header to take a slot from, so no prune
+// drops it; MarkHeaderAsInvalid records the header's slot when there is one.
+const slotUnknown = math.MaxUint64
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
+	f.badBlocks.Range(func(key, value any) bool {
+		if value.(uint64) < pruneSlot {
+			f.badBlocks.Delete(key)
+		}
+		return true
+	})
 	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value any) bool {
@@ -613,10 +623,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
-		f.fs.Remove(getBeaconStateFilename(root))
+		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+		}
 		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
-		f.fs.Remove(getEnvelopeFilename(root))
+		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
@@ -703,7 +717,8 @@ func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.P
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
@@ -721,7 +736,8 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {

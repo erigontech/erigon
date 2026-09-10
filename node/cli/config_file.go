@@ -35,7 +35,8 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 
 	fileConfig := make(map[string]any)
 
-	if fileExtension == ".yml" || fileExtension == ".yaml" {
+	switch {
+	case fileExtension == ".yml" || fileExtension == ".yaml":
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
@@ -44,7 +45,7 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 		if err != nil {
 			return err
 		}
-	} else if fileExtension == ".toml" {
+	case fileExtension == ".toml":
 		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
@@ -53,7 +54,7 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 		if err != nil {
 			return err
 		}
-	} else {
+	default:
 		return errors.New("config files only accepted are .yaml and .toml")
 	}
 
@@ -73,12 +74,12 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 				}
 				err := cmd.Set(key, strings.Join(s, ","))
 				if err != nil {
-					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
+					return fmt.Errorf("failed setting %s flag with values=%s error=%w", key, s, err)
 				}
 			} else {
 				err := cmd.Set(key, fmt.Sprintf("%v", value))
 				if err != nil {
-					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
+					return fmt.Errorf("failed setting %s flag with value=%v error=%w", key, value, err)
 
 				}
 			}

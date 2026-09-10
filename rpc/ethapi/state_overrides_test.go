@@ -37,7 +37,7 @@ func TestStateOverrides_MovePrecompileDeterministicError(t *testing.T) {
 	for i := range 500 {
 		func(i int) {
 			ibs := state.New(state.NewNoopReader())
-			defer ibs.Release(false)
+			defer ibs.Close()
 			err := so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{})
 			require.EqualError(t, err, want, "iteration %d: error must be deterministic", i)
 		}(i)
@@ -58,7 +58,7 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 
 	precompiles := vm.PrecompiledContracts{src: stub}
 	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
+	defer ibs.Close()
 	err := so.Override(ibs, precompiles, &chain.Rules{})
 	require.NoError(t, err)
 
@@ -67,4 +67,42 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 	require.False(t, atSrc, "precompile must be removed from source")
 	require.True(t, atDst, "precompile must be present at destination")
 	require.Equal(t, stub.Name(), got.Name())
+}
+
+func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
+	key := common.HexToHash("0x01")
+
+	for _, tc := range []struct {
+		name      string
+		stateDiff bool
+	}{
+		{name: "state"},
+		{name: "stateDiff", stateDiff: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := map[common.Hash]common.Hash{key: common.HexToHash("0x2a")}
+			account := Account{State: &storage}
+			if tc.stateDiff {
+				account = Account{StateDiff: &storage}
+			}
+
+			overrides := StateOverrides{addr: account}
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+
+			rules := &chain.Rules{IsSpuriousDragon: true}
+			require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
+
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+
+			value, err := ibs.GetState(addr, accounts.InternKey(key))
+			require.NoError(t, err)
+			require.Equal(t, uint64(0x2a), value.Uint64())
+		})
+	}
 }

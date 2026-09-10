@@ -23,7 +23,7 @@ func TestInterpEquivBinary(t *testing.T) {
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 	buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -42,7 +42,7 @@ func TestInterpEquivBinary(t *testing.T) {
 	g := seg.NewReader(kv.MakeGetter(), compress)
 	get := func(interp bool, budget uint64, k []byte) ([]byte, bool, uint64) {
 		BtInterp, BtInterpBudget = interp, budget
-		v, ok, off, err := bt.bplus.Get(g, k)
+		v, ok, off, err := bt.bplus.Get(g, k, nil)
 		require.NoError(t, err)
 		return v, ok, off
 	}

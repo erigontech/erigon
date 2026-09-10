@@ -173,8 +173,7 @@ func WrapStreamError(err error, typ reflect.Type) error {
 }
 
 func addErrorContext(err error, ctx string) error {
-	var decErr *decodeError
-	if errors.As(err, &decErr) {
+	if decErr, ok := errors.AsType[*decodeError](err); ok {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
@@ -354,7 +353,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 			val.SetLen(i + 1)
 		}
 		// decode into element
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); err == EOL { //nolint:errorlint // intentional bare sentinel check
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -373,7 +372,7 @@ func decodeListArray(s *Stream, val reflect.Value, elemdec decoder) error {
 	vlen := val.Len()
 	i := 0
 	for ; i < vlen; i++ {
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); err == EOL { //nolint:errorlint // intentional bare sentinel check
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -445,7 +444,7 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		}
 		for i, f := range fields {
 			err := f.info.decoder(s, val.Field(f.index))
-			if err == EOL {
+			if err == EOL { //nolint:errorlint // intentional bare sentinel check
 				if f.optional {
 					// The field is optional, so reaching the end of the list before
 					// reaching the last field is acceptable. All remaining undecoded
@@ -698,7 +697,7 @@ func (s *Stream) Bytes() ([]byte, error) {
 		return []byte{s.byteval}, nil
 	case String:
 		b := make([]byte, size)
-		if err = s.readFull(b); err != nil {
+		if err := s.readFull(b); err != nil {
 			return nil, err
 		}
 		if size == 1 && b[0] < 128 {
@@ -728,7 +727,7 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 		s.kind = -1 // rearm Kind
 		return []byte{s.byteval}, nil
 	case String:
-		if err = s.willRead(size); err != nil {
+		if err := s.willRead(size); err != nil {
 			return nil, err
 		}
 		if uint64(len(*sr)) < size {
@@ -745,8 +744,7 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 	}
 }
 
-// ReadBytes decodes the next RLP value and stores the result in b.
-// The value size must match len(b) exactly.
+// ReadBytes reads an RLP string into b, which must match the exact decoded value size.
 func (s *Stream) ReadBytes(b []byte) error {
 	kind, size, err := s.Kind()
 	if err != nil {
@@ -764,7 +762,7 @@ func (s *Stream) ReadBytes(b []byte) error {
 		if uint64(len(b)) != size {
 			return fmt.Errorf("input value has wrong size %d, want %d", size, len(b))
 		}
-		if err = s.readFull(b); err != nil {
+		if err := s.readFull(b); err != nil {
 			return err
 		}
 		if size == 1 && b[0] < 128 {
@@ -790,15 +788,8 @@ func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
 		return append(dst, s.byteval), nil
 	case String:
 		cur := len(dst)
-		need := cur + int(size)
-		if cap(dst) < need {
-			grown := make([]byte, need)
-			copy(grown, dst)
-			dst = grown
-		} else {
-			dst = dst[:need]
-		}
-		if err = s.readFull(dst[cur:]); err != nil {
+		dst = slices.Grow(dst, int(size))[:cur+int(size)]
+		if err := s.readFull(dst[cur:]); err != nil {
 			return dst, err
 		}
 		if size == 1 && dst[cur] < 128 {
@@ -966,7 +957,7 @@ func (s *Stream) Addr() (a common.Address, err error) {
 	case size != uint64(len(a)):
 		return a, fmt.Errorf("input value has wrong size %d, want %d", size, len(a))
 	}
-	if err = s.readFull(s.uintbuf[:len(a)]); err != nil {
+	if err := s.readFull(s.uintbuf[:len(a)]); err != nil {
 		return a, err
 	}
 	copy(a[:], s.uintbuf[:len(a)])
@@ -988,7 +979,7 @@ func (s *Stream) ReadHash() (h common.Hash, err error) {
 	case size != uint64(len(h)):
 		return h, fmt.Errorf("input value has wrong size %d, want %d", size, len(h))
 	}
-	if err = s.readFull(s.uintbuf[:len(h)]); err != nil {
+	if err := s.readFull(s.uintbuf[:len(h)]); err != nil {
 		return h, err
 	}
 	copy(h[:], s.uintbuf[:len(h)])

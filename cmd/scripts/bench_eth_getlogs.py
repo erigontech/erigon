@@ -33,6 +33,7 @@ import csv
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
 from collections import defaultdict
 from datetime import datetime
@@ -84,8 +85,20 @@ FILTER_CONFIGS = [
 
 MAX_LOGS_WARN = 20_000
 
+ALLOWED_URL_SCHEMES = ("http", "https")
+
+
+def validate_rpc_url(url: str) -> str:
+    """Reject non-HTTP(S) endpoints so a malformed --url can't be turned into an
+    SSRF or local-file read — urllib otherwise honours file://, gopher://, etc."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES or not parsed.netloc:
+        raise ValueError(f"unsupported --url {url!r}: expected http(s)://host[:port]")
+    return url
+
 
 def rpc(url: str, method: str, params: list, timeout: int = 120) -> dict:
+    validate_rpc_url(url)
     payload = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -98,6 +111,7 @@ def get_block_number(url: str) -> int:
 
 def call_getlogs(url, from_block, to_block, addresses=None, topics=None):
     """Returns (latency_ms, status, log_count)."""
+    validate_rpc_url(url)
     filter_obj = {"fromBlock": hex(from_block), "toBlock": hex(to_block)}
     if addresses:
         filter_obj["address"] = addresses if len(addresses) > 1 else addresses[0]
@@ -140,7 +154,11 @@ def build_scenarios(tip, ranges):
 
 
 def run_bench(args):
-    url     = args.url
+    try:
+        url = validate_rpc_url(args.url)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
     label   = args.label
     repeats = args.repeats
     ranges  = [int(x) for x in args.ranges.split(",")]

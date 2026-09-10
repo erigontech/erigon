@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -141,6 +142,10 @@ var (
 		Value: ".*",
 		Usage: "Run only those tests matching the regular expression.",
 	}
+	ExcludeFlag = cli.StringSliceFlag{
+		Name:  "exclude",
+		Usage: "Exclude tests whose fixture path or path::test identifier matches a regular expression.",
+	}
 	WorkersFlag = cli.Uint64Flag{
 		Name:  "workers",
 		Value: 1,
@@ -209,6 +214,9 @@ func init() {
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,
+		&rlpTestCommand,
+		&transactionTestCommand,
+		&difficultyTestCommand,
 		&stateTransitionCommand,
 	}
 }
@@ -216,7 +224,7 @@ func init() {
 func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		code := 1
-		if ec, ok := err.(*t8ntool.NumberedError); ok {
+		if ec, ok := errors.AsType[*t8ntool.NumberedError](err); ok {
 			code = ec.ExitCode()
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, err)

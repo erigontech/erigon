@@ -41,8 +41,8 @@ type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
 
-	headRoot atomic.Value
-	headSlot atomic.Uint64
+	selectedHead atomic.Pointer[headIdentity]
+	stateHead    atomic.Pointer[headIdentity]
 
 	headState         *state.CachingBeaconState
 	previousHeadState *state.CachingBeaconState
@@ -51,11 +51,34 @@ type SyncedDataManager struct {
 	mu         sync.RWMutex
 }
 
+type headIdentity struct {
+	root common.Hash
+	slot uint64
+}
+
 func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool) *SyncedDataManager {
 	return &SyncedDataManager{
 		enabled: enabled,
 		cfg:     cfg,
 	}
+}
+
+func (s *SyncedDataManager) OnSelectedHead(blockRoot common.Hash, blockSlot uint64) {
+	if !s.enabled {
+		return
+	}
+	s.selectedHead.Store(&headIdentity{root: blockRoot, slot: blockSlot})
+}
+
+func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
+	if !s.enabled {
+		return common.Hash{}, 0, false
+	}
+	head := s.selectedHead.Load()
+	if head == nil {
+		return common.Hash{}, 0, false
+	}
+	return head.root, head.slot, true
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
@@ -96,8 +119,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if err != nil {
 		return err
 	}
-	s.headSlot.Store(newState.Slot())
-	s.headRoot.Store(blkRoot)
+	s.stateHead.Store(&headIdentity{root: blkRoot, slot: newState.Slot()})
 	return nil
 }
 
@@ -136,18 +158,20 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	if err != nil {
 		return err
 	}
-	s.headSlot.Store(newState.Slot())
-	s.headRoot.Store(blockRoot)
+	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
 }
 
 // ViewHeadState allows safe, read-only access to the current head state.
 func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
-	_, synced := s.headRoot.Load().(common.Hash)
-	if !s.enabled || !synced {
+	if !s.enabled || s.stateHead.Load() == nil {
 		return ErrNotSynced
 	}
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stateHead.Load() == nil || s.headState == nil {
+		return ErrNotSynced
+	}
 	if dbg.CaplinSyncedDataMangerDeadlockDetection {
 		trace := dbg.Stack()
 		ch := make(chan struct{})
@@ -161,11 +185,20 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		}()
 		defer close(ch)
 	}
-	defer s.mu.RUnlock()
 	if err := fn(s.headState); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *SyncedDataManager) ViewHeadStateWithIdentity(fn ViewHeadStateWithIdentityFn) error {
+	return s.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		head := s.stateHead.Load()
+		if head == nil {
+			return ErrNotSynced
+		}
+		return fn(headState, head.root, head.slot)
+	})
 }
 
 // ViewPreviousHeadState allows safe, read-only access to the previous head state.
@@ -179,26 +212,34 @@ func (s *SyncedDataManager) ViewPreviousHeadState(fn ViewHeadStateFn) error {
 }
 
 func (s *SyncedDataManager) Syncing() bool {
-	_, synced := s.headRoot.Load().(common.Hash)
-	return !synced
+	return s.stateHead.Load() == nil
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {
-	if !s.enabled {
+	head := s.stateHead.Load()
+	if !s.enabled || head == nil {
 		return 0
 	}
-	return s.headSlot.Load()
+	return head.slot
 }
 
 func (s *SyncedDataManager) HeadRoot() common.Hash {
+	head := s.stateHead.Load()
+	if !s.enabled || head == nil {
+		return common.Hash{}
+	}
+	return head.root
+}
+
+func (s *SyncedDataManager) StateHead() (common.Hash, uint64, bool) {
 	if !s.enabled {
-		return common.Hash{}
+		return common.Hash{}, 0, false
 	}
-	root, ok := s.headRoot.Load().(common.Hash)
-	if !ok {
-		return common.Hash{}
+	head := s.stateHead.Load()
+	if head == nil {
+		return common.Hash{}, 0, false
 	}
-	return root
+	return head.root, head.slot, true
 }
 
 func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
@@ -215,8 +256,8 @@ func (s *SyncedDataManager) UnsetHeadState() {
 	defer s.mu.Unlock()
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
-	s.headRoot = atomic.Value{}
-	s.headSlot.Store(uint64(0))
+	s.stateHead.Store(nil)
+	s.selectedHead.Store(nil)
 	s.headState = nil
 	s.previousHeadState = nil
 }

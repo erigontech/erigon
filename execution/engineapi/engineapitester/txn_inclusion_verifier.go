@@ -56,12 +56,12 @@ func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 		// fcu persistance is now asynchronous so this can get called
 		// in the test loop before the tx data is coommited in which
 		// case it will fail and needs to retry
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
-		defer cancel()
+		txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), txCtx)
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
-			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+			return v.rpcApiClient.GetTransactionReceipt(txCtx, txn.Hash())
 		}, backOff)
+		cancel()
 
 		if err != nil {
 			return err
@@ -91,49 +91,46 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 	payload *enginetypes.ExecutionPayload,
 	inclusions ...OrderedInclusion,
 ) error {
-	orderedInclusions := make(map[uint64]common.Hash, len(inclusions))
-	for _, inclusion := range inclusions {
-		orderedInclusions[inclusion.TxnIndex] = inclusion.TxnHash
-	}
-
 	var accErr error
-	for i, txnBytes := range payload.Transactions {
-		txn, err := types.DecodeTransaction(txnBytes)
-		if err != nil {
-			return err
+	markMissing := func(inclusion OrderedInclusion) {
+		if accErr == nil {
+			accErr = errors.New("txns missing")
 		}
 
-		inclusionHash, ok := orderedInclusions[uint64(i)]
-		if !ok {
+		accErr = fmt.Errorf("%w: (%d,%s)", accErr, inclusion.TxnIndex, inclusion.TxnHash)
+	}
+
+	for _, inclusion := range inclusions {
+		if inclusion.TxnIndex >= uint64(len(payload.Transactions)) {
+			markMissing(inclusion)
 			continue
+		}
+
+		txn, err := types.DecodeTransaction(payload.Transactions[inclusion.TxnIndex])
+		if err != nil {
+			return err
 		}
 
 		// fcu persistance is now asynchronous so this can get called
 		// in the test loop before the tx data is coommited in which
 		// case it will fail and needs to retry
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
-		defer cancel()
+		txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), txCtx)
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
-			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+			return v.rpcApiClient.GetTransactionReceipt(txCtx, txn.Hash())
 		}, backOff)
+		cancel()
 		if err != nil {
 			return err
 		}
 
 		if r.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("txn %d in block %d not successful", i, r.BlockNumber)
+			return fmt.Errorf("txn %d in block %d not successful", inclusion.TxnIndex, r.BlockNumber)
 		}
 
-		if txn.Hash() == inclusionHash {
-			continue
+		if txn.Hash() != inclusion.TxnHash {
+			markMissing(inclusion)
 		}
-
-		if accErr == nil {
-			accErr = errors.New("txns missing")
-		}
-
-		accErr = fmt.Errorf("%w: (%d,%s)", accErr, i, inclusionHash)
 	}
 
 	return accErr

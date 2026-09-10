@@ -144,7 +144,7 @@ func init() {
 	Forks["ArrowGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = uint256.NewInt(0xC00000)
+	c.TerminalTotalDifficulty = uint256.NewInt(0xC0000)
 	Forks["ArrowGlacierToParisAtDiffC0000"] = c
 
 	c = configCopy(c)

@@ -19,9 +19,10 @@ package hexutil
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math/big"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 // Decode decodes a hex string with 0x prefix.
@@ -112,6 +113,50 @@ func DecodeBig(input string) (*big.Int, error) {
 	return dec, nil
 }
 
+// DecodeU256 decodes a hex string with 0x prefix as a quantity.
+// It accepts exactly what DecodeBig does, minus the big.Int round-trip:
+// numbers larger than 256 bits are not accepted.
+//
+// The result is returned by value so a caller that only reads it pays no
+// allocation; take its address to build a hexutil.U256.
+func DecodeU256(input string) (uint256.Int, error) {
+	var dec uint256.Int
+	raw, err := checkNumber(input)
+	if err != nil {
+		return dec, err
+	}
+	if len(raw) > 64 {
+		return dec, ErrBig256Range
+	}
+	// Fill one 64-bit word per 16 nibbles, least-significant word first, rather
+	// than shifting the whole 256-bit value once per nibble.
+	end := len(raw)
+	for i := 0; i < len(dec) && end > 0; i++ {
+		start := max(end-16, 0)
+		var word uint64
+		for ri := start; ri < end; ri++ {
+			nib := decodeNibble(raw[ri])
+			if nib == badNibble {
+				return uint256.Int{}, ErrSyntax
+			}
+			word = word<<4 | nib
+		}
+		dec[i] = word
+		end = start
+	}
+	return dec, nil
+}
+
+// MustDecodeU256 decodes a hex string with 0x prefix as a quantity.
+// It panics for invalid input.
+func MustDecodeU256(input string) uint256.Int {
+	dec, err := DecodeU256(input)
+	if err != nil {
+		panic(err)
+	}
+	return dec
+}
+
 // MustDecodeBig decodes a hex string with 0x prefix as a quantity.
 // It panics for invalid input.
 func MustDecodeBig(input string) *big.Int {
@@ -123,13 +168,14 @@ func MustDecodeBig(input string) *big.Int {
 }
 
 // EncodeBig encodes bigint as a hex string with 0x prefix.
-// The sign of the integer is ignored.
 func EncodeBig(bigint *big.Int) string {
-	nbits := bigint.BitLen()
-	if nbits == 0 {
+	if sign := bigint.Sign(); sign == 0 {
 		return "0x0"
+	} else if sign > 0 {
+		return "0x" + bigint.Text(16)
+	} else {
+		return "-0x" + bigint.Text(16)[1:]
 	}
-	return fmt.Sprintf("%#x", bigint)
 }
 
 func has0xPrefix(input string) bool {

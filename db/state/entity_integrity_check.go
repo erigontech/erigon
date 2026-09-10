@@ -123,7 +123,7 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 // is (dependent) commitment.0-2 present?
 // - if no (or !checkVisibility), don't use it for visibleFiles.
 // - Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
-func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
+func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64) (isPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok || d.disable || (d.disableInterDomain && dependency.category() == domainCategory) {
 		return true

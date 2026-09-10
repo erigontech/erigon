@@ -68,25 +68,24 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     accounts.Address // Provides information for ORIGIN
 	GasPrice   uint256.Int      // Provides information for GASPRICE
-	BlobFee    uint256.Int      // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash    // Provides versioned blob hashes for BLOBHASH
 }
 
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-	BlockRegularGasUsed  uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
-	BlockStateGasUsed    uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
-	MaxGasUsed           uint64 // Gas used by the transaction before refunds
-	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted             bool   // Whether the execution was aborted by `REVERT`
-	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance    uint256.Int
-	CoinbaseInitBalance  uint256.Int
-	FeeTipped            uint256.Int
-	FeeBurnt             uint256.Int
-	BurntContractAddress accounts.Address
+	ReceiptGasUsed        uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
+	BlockExecutionGasUsed uint64 // Per-tx execution gas for block-level accounting (pre-Amsterdam: same as block gas)
+	BlockStateGasUsed     uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	MaxGasUsed            uint64 // Gas used by the transaction before refunds
+	Err                   error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted              bool   // Whether the execution was aborted by `REVERT`
+	ReturnData            []byte // Returned data from evm(function result or data supplied with revert opcode)
+	SenderInitBalance     uint256.Int
+	CoinbaseInitBalance   uint256.Int
+	FeeTipped             uint256.Int
+	FeeBurnt              uint256.Int
+	BurntContractAddress  accounts.Address
 
 	// L2 is an opaque value the lifecycle hooks may populate (e.g. an L1-fee
 	// split or retryable ticket info); nil unless a hook sets it.
@@ -132,7 +131,7 @@ type (
 	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
-	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
+	// Used to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 
 	// StartTxFunc runs at the very top of TxnExecutor.Execute, before
@@ -148,17 +147,17 @@ type (
 
 	// ComputeRefundFunc, when non-nil, replaces TxnExecutor's built-in
 	// refund ladder for this tx.
-	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, imdGas mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
+	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, intrinsicGas uint64, intrinsicGasResult mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
 )
 
 // RefundResult is what ComputeRefundFunc produces in place of the refund
 // ladder: the final per-tx gas-used values TxnExecutor.Execute needs to
 // charge the block gas pool and pay tips/burn the base fee.
 type RefundResult struct {
-	BlockRegularGasUsed uint64
-	BlockStateGasUsed   uint64
-	TxnGasUsedB4Refunds uint64
-	TxnGasUsed          uint64
+	BlockExecutionGasUsed uint64
+	BlockStateGasUsed     uint64
+	TxnGasUsedB4Refunds   uint64
+	TxnGasUsed            uint64
 }
 
 // Message is the subset of protocol.Message the lifecycle hooks read; its
