@@ -678,13 +678,13 @@ different states and correctly report different roots.
 - Modify: `rpc/jsonrpc/debug_api.go`
 - Create: `rpc/jsonrpc/debug_shadow_root_test.go`
 
-- [ ] add `debug_shadowStateRoot(blockHash)` returning the recorded root or null, matching geth's shape
-- [ ] add `debug_migrationProgress` reporting the datadir mode, the activation time, whether the flip has
+- [x] add `debug_shadowStateRoot(blockHash)` returning the recorded root or null, matching geth's shape
+- [x] add `debug_migrationProgress` reporting the datadir mode, the activation time, whether the flip has
       happened, and whether the shadow is stopped — keep it to fields with a consumer
-- [ ] write tests: a known block hash returns its recorded root; an unknown hash returns null
-- [ ] write tests: progress reports the right mode for `hex`, `bin` and `hex+bin`, and reports a stopped
+- [x] write tests: a known block hash returns its recorded root; an unknown hash returns null
+- [x] write tests: progress reports the right mode for `hex`, `bin` and `hex+bin`, and reports a stopped
       shadow after a shadow fold error
-- [ ] run `make test-short` — must pass before task 21
+- [x] run `make test-short` — must pass before task 21
 
 ### Task 21: Select the trie by block on the RPC paths that need it
 

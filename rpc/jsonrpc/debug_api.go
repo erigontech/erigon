@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"runtime"
 	"runtime/debug"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -69,6 +71,8 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	ShadowStateRoot(ctx context.Context, blockHash common.Hash) (*common.Hash, error)
+	MigrationProgress(ctx context.Context) (*MigrationProgress, error)
 	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
 	ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
@@ -77,6 +81,13 @@ type PrivateDebugAPI interface {
 	SetMemoryLimit(limit int64) int64
 	GcStats() *debug.GCStats
 	MemStats() *runtime.MemStats
+}
+
+type MigrationProgress struct {
+	Mode           string          `json:"mode"`
+	ActivationTime *hexutil.Uint64 `json:"activationTime,omitempty"`
+	Flipped        bool            `json:"flipped"`
+	ShadowStopped  bool            `json:"shadowStopped"`
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -89,6 +100,86 @@ type DebugAPIImpl struct {
 	// witnessCache serves recent legacy-mode debug_executionWitness results from
 	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
 	witnessCache *witnessResultCache
+}
+
+func (api *DebugAPIImpl) ShadowStateRoot(ctx context.Context, blockHash common.Hash) (*common.Hash, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if blockNumber == nil {
+		return nil, nil
+	}
+	root, err := rawdb.ReadShadowStateRoot(tx, blockHash, *blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if len(root) == 0 {
+		return nil, nil
+	}
+	result := common.BytesToHash(root)
+	return &result, nil
+}
+
+func (api *DebugAPIImpl) MigrationProgress(ctx context.Context) (*MigrationProgress, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	config, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	mode, err := api.trieVariant()
+	if err != nil {
+		return nil, err
+	}
+	progress := &MigrationProgress{Mode: mode}
+	if config.BinaryTrieTime != nil {
+		activationTime := hexutil.Uint64(*config.BinaryTrieTime)
+		progress.ActivationTime = &activationTime
+	}
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	head, err := api._blockReader.HeaderByNumber(ctx, tx, latest)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil {
+		progress.Flipped = config.IsBinaryTrie(head.Time)
+	}
+	if mode == dbstate.TrieVariantHexBin && latest > 0 && head != nil {
+		root, err := rawdb.ReadShadowStateRoot(tx, head.Hash(), latest)
+		if err != nil {
+			return nil, err
+		}
+		progress.ShadowStopped = len(root) == 0
+	}
+	return progress, nil
+}
+
+func (api *DebugAPIImpl) trieVariant() (string, error) {
+	if api.dirs.Snap == "" {
+		return dbstate.TrieVariantHex, nil
+	}
+	settings, err := dbstate.ReadErigonDBSettings(api.dirs)
+	if errors.Is(err, fs.ErrNotExist) {
+		return dbstate.TrieVariantHex, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return settings.TrieVariantName(), nil
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
