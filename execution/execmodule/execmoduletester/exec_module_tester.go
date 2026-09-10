@@ -507,6 +507,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
 	cfg.BatchSize = 5 * datasize.MB
+	// One module per test, many at once: the production budget would let each
+	// claim the whole shared envelope.
+	cfg.StateCacheBudget = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.Sync.ParallelStateFlushing = false
 	cfg.TxPool.Disable = !withTxPool
@@ -807,7 +810,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		0, // stateCacheBudget: production default; the caches jump-grow on demand
+		cfg.StateCacheBudget,
 		logger,
 		engine,
 		cfg.Sync,
