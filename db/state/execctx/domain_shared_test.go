@@ -1211,7 +1211,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer rwTx.Rollback()
 
 		ac := state.AggTx(rwTx)
-		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...)))
 
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)

@@ -80,7 +80,8 @@ type Aggregator struct {
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
-	commitmentRefsMu sync.RWMutex
+	commitmentRefsMu    sync.RWMutex
+	canonicalCommitment atomic.Uint32
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -160,6 +161,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger lo
 
 		produce: true,
 	}
+	a.canonicalCommitment.Store(uint32(kv.CommitmentDomain))
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
 	a.oldestVisible = empty
@@ -274,6 +276,17 @@ func (a *Aggregator) StepSize() uint64          { return a.stepSize.Load() }
 func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
 func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile.Load() }
 func (a *Aggregator) Logger() log.Logger        { return a.logger }
+func (a *Aggregator) CanonicalCommitmentDomain() kv.Domain {
+	commitmentDomain := kv.Domain(a.canonicalCommitment.Load())
+	if commitmentDomain == kv.AccountsDomain {
+		return kv.CommitmentDomain
+	}
+	return commitmentDomain
+}
+
+func (a *Aggregator) SetCanonicalCommitmentDomain(domain kv.Domain) {
+	a.canonicalCommitment.Store(uint32(domain))
+}
 
 // SetErigondbDomainStepsInFrozenFile applies a domain-only merge cap override at runtime.
 // Intended for one-shot tools (e.g. `erigon seg retire`) that construct the aggregator
@@ -1856,7 +1869,7 @@ type aggregatorVisible struct {
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	minimaxTxNum uint64                          // min of domain file EndTxNum across the selected state domains
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1884,7 +1897,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		}
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
-	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.minimaxTxNum = next.stateMinimaxTxNum(a.CanonicalCommitmentDomain())
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -1918,12 +1931,12 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
-// stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
+// stateMinimaxTxNum returns min(EndTxNum) across the selected state domains. Mirrors
 // AggregatorRoTx.TxNumsInFiles but operates directly on the bundle so the
 // writer can compute it without spinning up a throwaway RoTx.
-func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
+func (v *aggregatorVisible) stateMinimaxTxNum(commitmentDomain kv.Domain) uint64 {
 	minTxNum := uint64(math.MaxUint64)
-	for _, d := range kv.StateDomains {
+	for _, d := range kv.StateDomains(commitmentDomain) {
 		dv := v.d[d]
 		if dv == nil {
 			continue
@@ -1954,11 +1967,18 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 
 	r := &Ranges{}
 	// Account/storage must stay range-aligned with commitment whenever referencing is active.
+	commitmentDomain := at.a.CanonicalCommitmentDomain()
 	commitmentMergeReferencing := at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced()
+	var lmrAcc, lmrSto MergeRange
 	if commitmentMergeReferencing {
-		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
-		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
-		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange(stepSize)
+		lmrAcc = at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
+		lmrSto = at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
+		if at.d[commitmentDomain] == nil {
+			commitmentMergeReferencing = false
+		}
+	}
+	if commitmentMergeReferencing {
+		lmrCom := at.d[commitmentDomain].files.LatestMergedRange(stepSize)
 
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal

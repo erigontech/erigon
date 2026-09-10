@@ -654,7 +654,9 @@ const (
 	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
 )
 
-var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
+func StateDomains(commitmentDomain Domain) []Domain {
+	return []Domain{AccountsDomain, StorageDomain, CodeDomain, commitmentDomain}
+}
 
 const (
 	AccountsHistoryIdx   InvertedIdx = 0

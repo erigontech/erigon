@@ -324,18 +324,18 @@ different states and correctly report different roots.
 - Modify: `db/state/aggregator_align_test.go`
 - Modify: `db/state/execctx/domain_shared_test.go`
 
-- [ ] turn `kv.StateDomains` from a package var into a function taking the canonical commitment domain
+- [x] turn `kv.StateDomains` from a package var into a function taking the canonical commitment domain
       and returning `{Accounts, Storage, Code, canonical}`
-- [ ] add a canonical-commitment accessor to `Aggregator`, **derived** at open from the head header's
+- [x] add a canonical-commitment accessor to `Aggregator`, **derived** at open from the head header's
       time via `Config.IsBinaryTrie`, defaulting to `kv.CommitmentDomain`
-- [ ] thread it through `stateMinimaxTxNum`, `replaceShortenedKeysInBranch`, the agg log stats, and the
+- [x] thread it through `stateMinimaxTxNum`, `replaceShortenedKeysInBranch`, the agg log stats, and the
       `LatestMergedRange` alignment; update the `findMergeRangeInFiles` doc comment
-- [ ] update the callers `kv.StateDomains` had as a var, test files included
-- [ ] write tests: with the selector on `kv.CommitmentDomain` the minimax equals today's value
-- [ ] write tests: a registered-but-empty **non-canonical** commitment domain does not enter the minimax
-- [ ] write tests: an empty **canonical** commitment domain still collapses the minimax to 0 — that
+- [x] update the callers `kv.StateDomains` had as a var, test files included
+- [x] write tests: with the selector on `kv.CommitmentDomain` the minimax equals today's value
+- [x] write tests: a registered-but-empty **non-canonical** commitment domain does not enter the minimax
+- [x] write tests: an empty **canonical** commitment domain still collapses the minimax to 0 — that
       guard must survive this change
-- [ ] run `make test-short` — must pass before task 5
+- [x] run `make test-short` — must pass before task 5
 
 ### Task 5: Add kv.CommitmentBinDomain (enum, tables, schema, versions, metrics)
 

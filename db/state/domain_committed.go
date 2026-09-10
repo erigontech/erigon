@@ -51,7 +51,11 @@ func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
 	stepSize := at.StepSize()
-	for _, f := range at.d[kv.CommitmentDomain].files {
+	commitmentDomain := at.a.CanonicalCommitmentDomain()
+	if at.d[commitmentDomain] == nil {
+		return false
+	}
+	for _, f := range at.d[commitmentDomain].files {
 		if CommitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
@@ -83,8 +87,8 @@ func commitmentMergeNeedsTransform(inputs []*FilesItem, refsEnabled bool, stepSi
 
 // commitmentFileVersionByRange returns the version of the commitment file covering from..to
 // (zero if missing, treated as referenced) and its metric bucket index.
-func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version.Version, int) {
-	for i, f := range at.d[kv.CommitmentDomain].files {
+func (at *AggregatorRoTx) commitmentFileVersionByRange(commitmentDomain kv.Domain, from, to uint64) (version.Version, int) {
+	for i, f := range at.d[commitmentDomain].files {
 		if f.startTxNum == from && f.endTxNum == to {
 			if i > 5 {
 				return f.Version(), 5
@@ -104,12 +108,12 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	aggTx := at
 
 	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
+		aggTx.TxNumsInFiles(kv.StateDomains(at.a.CanonicalCommitmentDomain())...) == 0 {
 
 		return branch, nil // do not transform, return as is
 	}
 
-	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
+	fileVersion, metricI := aggTx.commitmentFileVersionByRange(at.a.CanonicalCommitmentDomain(), fStartTxNum, fEndTxNum)
 	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
 		return branch, nil // input file was written plain (v2.2) or below the referencing threshold
 	}
