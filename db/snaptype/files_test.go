@@ -152,3 +152,28 @@ func TestLoadSaltRewritesMalformedFile(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadSaltReadOnlyKeepsMalformedFile(t *testing.T) {
+	baseDir := t.TempDir()
+	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+	content := []byte("bad")
+	if err := os.WriteFile(fpath, content, os.ModePerm); err != nil {
+		t.Fatal(err)
+	}
+
+	salt, err := LoadSalt(baseDir, false, log.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if salt != nil {
+		t.Errorf("autoCreate=false invented salt %d", *salt)
+	}
+
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saltBytes, content) {
+		t.Errorf("autoCreate=false rewrote the salt file: got %x, want %x", saltBytes, content)
+	}
+}

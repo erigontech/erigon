@@ -860,3 +860,18 @@ func TestGetStateIndicesSaltRewritesMalformedFile(t *testing.T) {
 		})
 	}
 }
+
+func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+	content := []byte("bad")
+	require.NoError(t, os.WriteFile(fpath, content, os.ModePerm))
+
+	salt, err := GetStateIndicesSalt(dirs, false, log.New())
+	require.NoError(t, err)
+	require.Nil(t, salt, "genNew=false must not invent a salt")
+
+	saltBytes, err := os.ReadFile(fpath)
+	require.NoError(t, err)
+	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
+}

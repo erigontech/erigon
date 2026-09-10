@@ -208,7 +208,9 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 		}
 		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
 		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
-		fexists = len(saltBytes) == 4
+		if fexists = len(saltBytes) == 4; !fexists {
+			logger.Warn("discarding malformed state-salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
 	}
 
 	// Initialize salt if it doesn't exist
@@ -222,9 +224,9 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 
 		saltV := rand.Uint32()
 		salt = &saltV
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, *salt)
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+		newSalt := make([]byte, 4)
+		binary.BigEndian.PutUint32(newSalt, *salt)
+		if err := dir.WriteFileWithFsync(fpath, newSalt, os.ModePerm); err != nil {
 			return nil, err
 		}
 		return salt, nil // Return the newly created salt directly
