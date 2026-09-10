@@ -442,3 +442,16 @@ func TestToRPCLogsEmpty(t *testing.T) {
 		require.Len(t, rpcLogs, 0)
 	}
 }
+
+// decodeLogsForStorage hands out pointers into one shared block, which is only
+// safe because nothing retains a single *Log past its receipt. ToRPCLogs is the
+// path that outlives it, so it must copy the value out rather than alias.
+func TestToRPCLogsCopiesTheLog(t *testing.T) {
+	t.Parallel()
+	src := Logs{{Address: common.Address{1}, Index: 7}}
+	out := src.ToRPCLogs(99)
+	src[0].Address = common.Address{2}
+	src[0].Index = 8
+	require.Equal(t, common.Address{1}, out[0].Address)
+	require.Equal(t, hexutil.Uint(7), out[0].Index)
+}

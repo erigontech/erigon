@@ -101,11 +101,11 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 	return
 }
 
-// countItems returns the number of top-level items in a list payload, stopping
+// CountItems returns the number of top-level items in a list payload, stopping
 // at the first that does not fit. It bounds the count, not bytes: anything
 // sizing an allocation from it needs its own byte cap. Only item spans are read,
 // not the canonicality Prefix checks, since the decoder checks that anyway.
-func countItems(payload []byte) int {
+func CountItems(payload []byte) int {
 	n := 0
 	for pos := 0; pos < len(payload); n++ {
 		var span int
