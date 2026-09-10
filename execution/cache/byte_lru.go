@@ -27,19 +27,14 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
-// byteLRU is a uint64-keyed cache bounded by the bytes it holds — weighed by
-// the caller's weigher — instead of by an entry count over an assumed average
-// size. It grows on demand like growLRU: the weight ceiling rises one chunk at
-// a time out of the shared cachebudget envelope, and stops rising for good once
-// the envelope refuses a chunk, so a full envelope costs nothing per Add.
+// byteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
+// caller's weigher, instead of by an entry count over an assumed average size.
+// The ceiling rises one chunk at a time out of the shared cachebudget envelope
+// and stops for good once the envelope refuses a chunk.
 //
-// The synchronous executor orders InvalidateAll only, so no deferred onEvict
-// fires after Purge/Close have zeroed the counters. It does not order eviction
-// against Add: supplying an executor disables otter's drain rescheduling, so a
-// layer can sit over its ceiling until the next write. CleanUp forces a drain.
-//
-// Eviction is W-TinyLFU: a newcomer no hotter than the coldest resident entry
-// is rejected rather than admitted.
+// The synchronous executor orders InvalidateAll but not eviction against Add,
+// so a layer can sit over its ceiling until the next write; CleanUp forces a
+// drain. Eviction is W-TinyLFU, so a newcomer can be rejected outright.
 type byteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64
@@ -58,11 +53,9 @@ type byteLRU[V any] struct {
 }
 
 const (
-	// byteLRUFloorBytes is taken unconditionally, so it must stay small: every
-	// short-lived cache pays it whatever the envelope has left.
+	// Taken unconditionally, so it must stay small: every short-lived cache pays
+	// it whatever the envelope has left.
 	byteLRUFloorBytes = int64(1 * datasize.MB)
-	// byteLRUChunkBytes is the granularity of envelope reservations: coarse
-	// enough that growth touches cachebudget.Global a handful of times per cache.
 	byteLRUChunkBytes = int64(32 * datasize.MB)
 )
 
@@ -108,8 +101,7 @@ func (b *byteLRU[V]) Add(key uint64, value V) bool {
 }
 
 // grow re-tests the caller's condition under the lock: without it every writer
-// that piled up at a full limit reserves its own chunk, draining the shared
-// envelope in one burst instead of one chunk at a time.
+// piled up at a full limit reserves its own chunk, draining the envelope at once.
 func (b *byteLRU[V]) grow(w int64) {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
@@ -129,8 +121,8 @@ func (b *byteLRU[V]) grow(w int64) {
 func (b *byteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
 func (b *byteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
-// Purge empties the cache and returns the grown reservation to the envelope,
-// keeping the floor so the cache is never left disabled.
+// Purge empties the cache and returns the grown reservation, keeping the floor
+// so the cache is never left disabled.
 func (b *byteLRU[V]) Purge() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()

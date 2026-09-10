@@ -38,8 +38,10 @@ func hash32(b []byte) [32]byte {
 }
 
 const (
-	// DefaultCodeCacheBytes is the byte limit for the code cache.
-	DefaultCodeCacheBytes = 512 * datasize.MB
+	// DefaultCodeCacheBytes is the byte limit for the code cache. Drawn from the
+	// shared cachebudget envelope, so it buys residency against the account and
+	// storage caches rather than on top of them.
+	DefaultCodeCacheBytes = 256 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
 	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
@@ -77,10 +79,9 @@ const (
 // the codeEntry struct. Omitting it undercounts a layer of small entries ~1.6x.
 const otterEntryOverheadBytes = 64
 
-// codeEntryBytes is the resident cost of one code-layer slot excluding the code
-// bytes themselves: the uint64 key, the entry struct (slice header, keyHash,
-// txNum, epoch) and the cache's own per-entry overhead. It is both the weigher's
-// fixed term and the key cost the byte counters use, so counter and bound agree.
+// codeEntryBytes is one slot's resident cost excluding the code bytes. It is
+// both the weigher's fixed term and the key cost the counters use, so counter
+// and bound agree.
 const codeEntryBytes = 8 + int64(unsafe.Sizeof(codeEntry{})) + otterEntryOverheadBytes
 
 type codeEntry struct {
@@ -109,9 +110,8 @@ type codeSizeEntry struct {
 //   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
 //     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
 //
-// The content layers are bounded by the bytes they hold. A full layer makes
-// room for the newcomer or rejects it: eviction is W-TinyLFU, which protects
-// the incumbent, so admission is not guaranteed.
+// The content layers are bounded by the bytes they hold. W-TinyLFU protects the
+// incumbent, so admission is not guaranteed.
 //
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
 // same way as the account/storage/branch caches: a contract's code
@@ -191,9 +191,8 @@ type CodeCache struct {
 	closed atomic.Bool
 }
 
-// contentLRU is the slice of the byteLRU/growLRU surface the content-addressed
-// insert path uses. Taken as a type parameter, not an interface value, so the
-// call stays a direct dispatch.
+// contentLRU is the byteLRU/growLRU surface the content-addressed insert path
+// uses. A type parameter, not an interface, so the call stays direct.
 type contentLRU[T any] interface {
 	Get(uint64) (T, bool)
 	Add(uint64, T) bool
@@ -261,9 +260,6 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
 	}
-	// The content-addressed layers grow from a small start into the shared
-	// envelope, so a cache over few contracts (a test fixture) never pre-commits
-	// the full budget. onEvict keeps the byte/entry counters following residency.
 	// Both layers store the same slice, so the counters double-charge it. But
 	// nothing keeps their resident sets equal, and disjoint sets really do cost
 	// twice — the split bounds that worst case.
