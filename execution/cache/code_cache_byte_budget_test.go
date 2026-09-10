@@ -29,9 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-// A budget must hold whatever the contract-size distribution turns out to be.
-// An entry-count bound derived from an assumed average retained 5.3x the
-// configured bytes when every contract was 64 KiB, which OOMed devnet nodes.
+// The bound must hold whatever the contract-size distribution turns out to be.
 func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 	for _, codeLen := range []int{64 * 1024, 24 * 1024, 1024} {
 		t.Run(datasize.ByteSize(codeLen).HR(), func(t *testing.T) {
@@ -48,9 +46,7 @@ func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 			cache.hashToCode.c.CleanUp()
 			cache.codeHashToCode.c.CleanUp()
 
-			// Each layer is bounded at half the configured figure, and the pair
-			// must stay inside the whole of it. An addr is required or
-			// putCodeLocked never runs and codeSize stays 0 whatever the bound.
+			// An addr is required or putCodeLocked never runs and codeSize is 0.
 			perLayer := int64(budget / 2)
 			require.NotZero(t, cache.CodeSizeBytes(), "hashToCode must be populated")
 			require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer,
@@ -63,8 +59,7 @@ func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 	}
 }
 
-// Same bound when the writers are concurrent: charge-then-insert must not let
-// in-flight puts accumulate past the budget.
+// Same bound with concurrent writers.
 func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 	const budget = 4 * datasize.MB
 	cache := closeOnCleanup(t, NewCodeCache(budget, 1*datasize.MB))
@@ -82,9 +77,7 @@ func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	// Eviction is not synchronous with Add under concurrent writers: otter
-	// schedules its drain behind a TryLock and does not reschedule a missed one
-	// with a custom executor. Force it before reading the bound.
+	// Eviction is not synchronous with Add; force the drain before reading.
 	cache.hashToCode.c.CleanUp()
 	cache.codeHashToCode.c.CleanUp()
 
@@ -93,9 +86,8 @@ func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 	require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer)
 }
 
-// A harness builds one cache per fixture and closes it. A closed cache must
-// release its bytes: the underlying cache stays reachable until its runtime
-// cleanup runs, so anything the eviction callback captures outlives Close.
+// A closed cache must release its bytes: it stays reachable until its runtime
+// cleanup runs, so whatever the eviction callback captures outlives Close.
 func TestCodeCacheClosedIsCollectable(t *testing.T) {
 	prev := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prev })
@@ -110,8 +102,7 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 		return float64(m.HeapAlloc) / 1048576
 	}
 
-	// Direct check first: a closed layer must hold nothing. The heap check below
-	// can only see the aggregate, so on its own it cannot say why.
+	// Direct check first; the heap check below sees only the aggregate.
 	one := NewCodeCache(1*datasize.MB, 1*datasize.MB)
 	for i := range 4000 {
 		code := make([]byte, 256)
@@ -136,8 +127,7 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 	}
 	retained := heap() - base
 
-	// Each cache held ~1.2MB while live; keeping even a tenth of that per closed
-	// cache is what turned a fixture harness into tens of GB.
+	// Each held ~1.2MB while live.
 	require.Less(t, retained, float64(caches)*0.12,
 		"closed caches retained %.2f MB across %d caches", retained, caches)
 }

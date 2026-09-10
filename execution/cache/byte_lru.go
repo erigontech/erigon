@@ -33,26 +33,20 @@ import (
 // a time out of the shared cachebudget envelope, and stops rising for good once
 // the envelope refuses a chunk, so a full envelope costs nothing per Add.
 //
-// The synchronous executor buys ordering for InvalidateAll only: it drains
-// under the eviction mutex and runs every deletion notification before
-// returning, so no deferred onEvict fires after Purge/Close have zeroed the
-// counters and drives them negative. It does NOT make eviction synchronous with
-// Add: supplying an executor clears otter's hasDefaultExecutor, its drain is
-// scheduled behind a TryLock, and the reschedule that would retry a missed
-// drain is gated on that same flag. So under concurrent writers a layer can sit
-// over its ceiling until the next write; CleanUp forces the drain.
+// The synchronous executor orders InvalidateAll only, so no deferred onEvict
+// fires after Purge/Close have zeroed the counters. It does not order eviction
+// against Add: supplying an executor disables otter's drain rescheduling, so a
+// layer can sit over its ceiling until the next write. CleanUp forces a drain.
 //
-// Eviction is W-TinyLFU, not LRU: a newcomer no hotter than the coldest
-// resident entry is rejected rather than admitted.
+// Eviction is W-TinyLFU: a newcomer no hotter than the coldest resident entry
+// is rejected rather than admitted.
 type byteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
-	// onEvict is held indirectly so Close can drop it. The underlying cache
-	// stays reachable until its runtime cleanup runs, and a callback that
-	// captured the owning CodeCache would keep that owner — and every byte it
-	// holds — alive for just as long. Harnesses build one cache per fixture.
+	// Indirect so Close can clear it: the cache outlives Close via its runtime
+	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
 	resident atomic.Int64
@@ -64,10 +58,8 @@ type byteLRU[V any] struct {
 }
 
 const (
-	// byteLRUFloorBytes is the residency a cache is born with. Taken
-	// unconditionally, so the envelope cannot refuse it — which is why it must
-	// stay small: a harness that builds many short-lived caches pays this floor
-	// for every one of them, with no shared budget left to say no.
+	// byteLRUFloorBytes is taken unconditionally, so it must stay small: every
+	// short-lived cache pays it whatever the envelope has left.
 	byteLRUFloorBytes = int64(1 * datasize.MB)
 	// byteLRUChunkBytes is the granularity of envelope reservations: coarse
 	// enough that growth touches cachebudget.Global a handful of times per cache.
@@ -99,11 +91,9 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 
 func (b *byteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
-// Add reports whether the value could be offered to the cache, not whether it
-// is resident afterwards: W-TinyLFU may still reject a newcomer in favour of
-// the incumbent, and that path returns true. Only a value larger than the whole
-// budget returns false — onEvict never fires for it, so a caller that accounts
-// the entry up-front must refund it rather than leak the cost.
+// Add reports that the value could be offered, not that it is resident: a
+// W-TinyLFU rejection also returns true. False means it exceeds the whole
+// budget, and onEvict never fires for it, so the caller must refund its charge.
 func (b *byteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
@@ -164,9 +154,7 @@ func (b *byteLRU[V]) Close() {
 		return
 	}
 	b.closed = true
-	// Drop the entries, not just the reservation. The underlying cache stays
-	// reachable after Close, so a layer that keeps its bytes here keeps them for
-	// the life of the process — and harnesses build one cache per fixture.
+	// Entries, not just the reservation: the cache stays reachable after Close.
 	b.c.InvalidateAll()
 	b.onEvict.Store(nil)
 	b.resident.Store(0)

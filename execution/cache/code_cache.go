@@ -73,11 +73,8 @@ const (
 	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
 )
 
-// otterEntryOverheadBytes is what the cache holds per entry beyond the key and
-// the codeEntry struct: node, table slot and policy bookkeeping. Measured flat
-// at 56-66 B across entry counts and value sizes. Leaving it out undercounts a
-// layer of small contracts by ~1.6x, which is the direction an assumed average
-// used to hide.
+// otterEntryOverheadBytes is the cache's own per-entry cost beyond the key and
+// the codeEntry struct. Omitting it undercounts a layer of small entries ~1.6x.
 const otterEntryOverheadBytes = 64
 
 // codeEntryBytes is the resident cost of one code-layer slot excluding the code
@@ -186,8 +183,7 @@ type CodeCache struct {
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
-	// codeLayerCapB is what one content layer is bounded at, which is what the
-	// usage percentages must be read against.
+	// codeLayerCapB bounds one content layer; usage percentages are against it.
 	codeLayerCapB datasize.ByteSize
 
 	// closed guards the single paired Close of the content layers so a double
@@ -268,12 +264,9 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The content-addressed layers grow from a small start into the shared
 	// envelope, so a cache over few contracts (a test fixture) never pre-commits
 	// the full budget. onEvict keeps the byte/entry counters following residency.
-	// The two content layers hold the same code under different keys and store
-	// the same slice, so most of the apparent double charge is phantom: only the
-	// entry structs duplicate. Their resident sets still diverge under
-	// independent eviction, and unsplit that reached 1.53x the configured figure
-	// in real heap. Splitting is the conservative bound: it costs distinct-code
-	// capacity to keep real bytes inside the budget.
+	// Both layers store the same slice, so the counters double-charge it; only
+	// the entry structs truly duplicate. Their resident sets still diverge, so
+	// splitting is the conservative bound on real bytes.
 	perLayer := max(codeCapacityBytes/2, 1)
 	cc.codeLayerCapB = perLayer
 	cc.hashToCode = newByteLRU(perLayer, codeEntryResident,
