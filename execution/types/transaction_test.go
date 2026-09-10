@@ -944,8 +944,8 @@ func TestDecodeAccessListKeysDoNotAlias(t *testing.T) {
 	if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
 		t.Fatal(err)
 	}
-	var got AccessList
-	if err := decodeAccessList(&got, rlp.NewBytesStream(buf.Bytes())); err != nil {
+	got, err := decodeALFrom(buf.Bytes())
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 {
@@ -955,6 +955,16 @@ func TestDecodeAccessListKeysDoNotAlias(t *testing.T) {
 	if got[1].StorageKeys[0] != (common.Hash{0xbb}) {
 		t.Fatalf("append to tuple 0 overwrote tuple 1: %x", got[1].StorageKeys[0])
 	}
+}
+
+// decodeALFrom decodes b into a fresh AccessList, returning the pooled stream as
+// NewBytesStream requires.
+func decodeALFrom(b []byte) (AccessList, error) {
+	s := rlp.NewBytesStream(b)
+	defer rlp.PutStream(s)
+	var al AccessList
+	err := decodeAccessList(&al, s)
+	return al, err
 }
 
 func encodeAL(t *testing.T, al AccessList) []byte {
@@ -986,22 +996,24 @@ func sampleAL(tuples, keysPer int) AccessList {
 func TestCountAccessList(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ tuples, keysPer int }{{0, 0}, {1, 0}, {1, 1}, {3, 2}, {2, 60}, {40, 1}} {
-		al := sampleAL(c.tuples, c.keysPer)
-		enc := encodeAL(t, al)
-		s := rlp.NewBytesStream(enc)
-		l, err := s.List()
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw := s.Peek()
-		if uint64(len(raw)) < l {
-			t.Fatalf("Peek gave %d bytes, want at least %d", len(raw), l)
-		}
-		gotT, gotK := countAccessList(raw[:l])
-		if gotT != c.tuples || gotK != c.tuples*c.keysPer {
-			t.Errorf("%dx%d: counted %d tuples %d keys, want %d and %d",
-				c.tuples, c.keysPer, gotT, gotK, c.tuples, c.tuples*c.keysPer)
-		}
+		t.Run(fmt.Sprintf("%dx%d", c.tuples, c.keysPer), func(t *testing.T) {
+			enc := encodeAL(t, sampleAL(c.tuples, c.keysPer))
+			s := rlp.NewBytesStream(enc)
+			defer rlp.PutStream(s)
+			l, err := s.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := s.Peek()
+			if uint64(len(raw)) < l {
+				t.Fatalf("Peek gave %d bytes, want at least %d", len(raw), l)
+			}
+			gotT, gotK := countAccessList(raw[:l])
+			if gotT != c.tuples || gotK != c.tuples*c.keysPer {
+				t.Errorf("counted %d tuples %d keys, want %d and %d",
+					gotT, gotK, c.tuples, c.tuples*c.keysPer)
+			}
+		})
 	}
 }
 
@@ -1011,13 +1023,17 @@ func TestDecodeAccessListMalformed(t *testing.T) {
 	t.Parallel()
 	enc := encodeAL(t, sampleAL(3, 2))
 	for i := range enc {
-		var al AccessList
-		_ = decodeAccessList(&al, rlp.NewBytesStream(enc[:i])) // truncated
+		// A proper prefix is never a complete access list, so the pre-walk must
+		// not let one decode.
+		if _, err := decodeALFrom(enc[:i]); err == nil {
+			t.Errorf("truncation to %d bytes decoded without error", i)
+		}
 		for _, b := range []byte{0x00, 0x7f, 0x80, 0xb7, 0xbf, 0xf7, 0xff} {
 			corrupt := bytes.Clone(enc)
 			corrupt[i] = b
-			var al2 AccessList
-			_ = decodeAccessList(&al2, rlp.NewBytesStream(corrupt))
+			// A flipped byte can still spell a valid, different list, so only
+			// the absence of a panic is pinned here.
+			_, _ = decodeALFrom(corrupt)
 		}
 	}
 }
@@ -1061,7 +1077,9 @@ func TestDecodeAccessListReplacesExisting(t *testing.T) {
 	enc := encodeAL(t, sampleAL(1, 1))
 	stale := AccessList{{Address: common.Address{0xff}, StorageKeys: []common.Hash{{0xff}}}}
 	viaSlice := slices.Clone(stale)
-	require.NoError(t, decodeAccessList(&viaSlice, rlp.NewBytesStream(enc)))
+	viaSliceStream := rlp.NewBytesStream(enc)
+	require.NoError(t, decodeAccessList(&viaSlice, viaSliceStream))
+	rlp.PutStream(viaSliceStream)
 	viaReader := slices.Clone(stale)
 	require.NoError(t, decodeAccessList(&viaReader, rlp.NewStream(bytes.NewReader(enc), 0)))
 	require.Equal(t, viaSlice, viaReader)
