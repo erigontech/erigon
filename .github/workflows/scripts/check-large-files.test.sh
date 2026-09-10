@@ -13,7 +13,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # make_repo <dir> <bytes-on-branch> — a repo with a small file committed on the
-# default branch and one file of the given size added on branch "feat".
+# default branch and one file of the given size added on branch "feat",
+# left checked out so the script sees it as HEAD.
 make_repo() {
   local dir="$1" bytes="$2"
   mkdir -p "$dir"
@@ -34,7 +35,7 @@ run_case() {
   local name="$1" want="$2" dir="$3"
   shift 3
   local out rc
-  out=$(cd "$dir" && LARGE_FILE_LIMIT_BYTES="${LARGE_FILE_LIMIT_BYTES:-1048576}" bash "$script" "$@" 2>&1)
+  out=$(cd "$dir" && bash "$script" "$@" 2>&1)
   rc=$?
   if [ "$rc" -eq "$want" ]; then
     printf 'ok   - %s (exit %d)\n' "$name" "$rc"
@@ -49,15 +50,15 @@ run_case() {
 make_repo "$work/big" 2097152
 make_repo "$work/small" 1024
 
-run_case "a file over the limit fails" 1 "$work/big" base feat
-run_case "a file under the limit passes" 0 "$work/small" base feat
-run_case "an empty base is an error, not a pass" 2 "$work/big" "" feat
-run_case "an unknown base is an error, not a pass" 2 "$work/big" no-such-ref feat
-LARGE_FILE_LIMIT_BYTES=4194304 run_case "the limit is configurable" 0 "$work/big" base feat
+run_case "a file over the limit fails" 1 "$work/big" base
+run_case "a file under the limit passes" 0 "$work/small" base
+run_case "an empty base is an error, not a pass" 2 "$work/big" ""
+run_case "an unknown base is an error, not a pass" 2 "$work/big" no-such-ref
+LARGE_FILE_LIMIT_BYTES=4194304 run_case "the limit is configurable" 0 "$work/big" base
 
 # The failure message must name the file, else CI says nothing actionable.
 # Captured first: pipefail would otherwise report the script's own exit code.
-report=$(cd "$work/big" && bash "$script" base feat 2>&1)
+report=$(cd "$work/big" && bash "$script" base 2>&1)
 if printf '%s\n' "$report" | grep -q 'added.bin'; then
   printf 'ok   - the failure names the file\n'
   pass=$((pass + 1))

@@ -125,9 +125,6 @@ mdbx.lck
 */**/*.local.json
 .claude/skills/
 
-# Prevent accidental commit of locally-built binaries
-/erigon
-
 # place to store task-specific agent .md files that we do not want to commit to main repo
 agentspecs/
 .claude/worktrees/
@@ -141,8 +138,9 @@ gocache
 .claude/scheduled_tasks.lock
 test-fixtures-cache
 
-# `go build ./cmd/<name>` from the repo root drops the binary here; the real
-# build writes to build/bin. `scripts` is omitted: it is a tracked directory.
+# Prevent accidental commit of locally-built binaries: `go build ./cmd/<name>`
+# from the repo root drops them here, the real build writes to build/bin.
+# `cmd/scripts` is left out: `scripts` is a tracked directory.
 /abigen
 /bootnode
 /bumper
