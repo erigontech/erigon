@@ -30,22 +30,20 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-//go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
-
 // Withdrawal represents a validator withdrawal from the consensus layer.
 // See EIP-4895: Beacon chain push withdrawals as operations.
 type Withdrawal struct {
-	Index     uint64         `json:"index"`          // monotonically increasing identifier issued by consensus layer
-	Validator uint64         `json:"validatorIndex"` // index of validator associated with withdrawal
+	Index     hexutil.Uint64 `json:"index"`          // monotonically increasing identifier issued by consensus layer
+	Validator hexutil.Uint64 `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   common.Address `json:"address"`        // target address for withdrawn ether
-	Amount    uint64         `json:"amount"`         // value of withdrawal in GWei
+	Amount    hexutil.Uint64 `json:"amount"`         // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
-	encodingSize += rlp.U64Len(obj.Index)
-	encodingSize += rlp.U64Len(obj.Validator)
-	encodingSize += rlp.U64Len(obj.Amount)
+	encodingSize += rlp.U64Len(uint64(obj.Index))
+	encodingSize += rlp.U64Len(uint64(obj.Validator))
+	encodingSize += rlp.U64Len(uint64(obj.Amount))
 	return encodingSize
 }
 
@@ -60,10 +58,10 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := rlp.EncodeU64(obj.Index, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(obj.Index), w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeU64(obj.Validator, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(obj.Validator), w, b[:]); err != nil {
 		return err
 	}
 
@@ -75,7 +73,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return rlp.EncodeU64(obj.Amount, w, b[:])
+	return rlp.EncodeU64(uint64(obj.Amount), w, b[:])
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
@@ -84,31 +82,28 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if obj.Index, err = s.Uint64(); err != nil {
+	var v uint64
+	if v, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
-	if obj.Validator, err = s.Uint64(); err != nil {
+	obj.Index = hexutil.Uint64(v)
+	if v, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Validator: %w", err)
 	}
+	obj.Validator = hexutil.Uint64(v)
 	if err = s.ReadBytes(obj.Address[:]); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	if obj.Amount, err = s.Uint64(); err != nil {
+	if v, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
+	obj.Amount = hexutil.Uint64(v)
 
 	return s.ListEnd()
 }
 
 func (*Withdrawal) Clone() clonable.Clonable {
 	return &Withdrawal{}
-}
-
-// field type overrides for gencodec
-type withdrawalMarshaling struct {
-	Index     hexutil.Uint64
-	Validator hexutil.Uint64
-	Amount    hexutil.Uint64
 }
 
 // Withdrawals implements DerivableList for withdrawals.

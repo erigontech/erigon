@@ -109,7 +109,7 @@ func TestPartialDataColumnPartsMetadata_Fulu(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(clparams.FuluVersion)
 	testSSZRoundTrip(t, testDir, clparams.FuluVersion, obj)
 }
 
@@ -118,6 +118,13 @@ func TestPartialDataColumnPartsMetadata_Gloas(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(clparams.GloasVersion)
 	testSSZRoundTrip(t, testDir, clparams.GloasVersion, obj)
+}
+
+func TestPartialDataColumnPartsMetadataCloneNil(t *testing.T) {
+	var metadata *cltypes.PartialDataColumnPartsMetadata
+	clone := metadata.Clone()
+	require.NotNil(t, clone)
+	require.IsType(t, &cltypes.PartialDataColumnPartsMetadata{}, clone)
 }
