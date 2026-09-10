@@ -16,14 +16,16 @@ func TestValidateEmbeddedBuilderMode(t *testing.T) {
 		name       string
 		enabled    bool
 		internalCL bool
+		networkID  uint64
 		wantError  bool
 	}{
 		{name: "disabled without embedded Caplin"},
-		{name: "enabled with embedded Caplin", enabled: true, internalCL: true},
+		{name: "enabled with embedded Caplin", enabled: true, internalCL: true, networkID: 1},
 		{name: "enabled without embedded Caplin", enabled: true, wantError: true},
+		{name: "enabled on unsupported network", enabled: true, internalCL: true, networkID: 999, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			cfg := ethconfig.Config{InternalCL: test.internalCL}
+			cfg := ethconfig.Config{InternalCL: test.internalCL, NetworkID: test.networkID}
 			cfg.CaplinConfig.EpbsBuilder.Enabled = test.enabled
 			err := validateEmbeddedBuilderMode(&cfg)
 			if test.wantError {
