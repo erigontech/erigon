@@ -633,20 +633,20 @@ different states and correctly report different roots.
 - Modify: `execution/state/genesiswrite/genesis_test.go`
 - Modify: `execution/state/genesiswrite/pbin_genesis_test.go`
 
-- [ ] lift the post-genesis refusal in `checkBinaryTrieSchedule` for `hex+bin`; keep the
+- [x] lift the post-genesis refusal in `checkBinaryTrieSchedule` for `hex+bin`; keep the
       `amsterdamTime <= binaryTrieTime` check
-- [ ] rewrite `checkBinaryTrieCommitment` to require that the datadir carries a bin domain, replacing the
+- [x] rewrite `checkBinaryTrieCommitment` to require that the datadir carries a bin domain, replacing the
       `COMMITMENT_BIN=true` wording
-- [ ] make `ComputeGenesisCommitment` compute both roots at block 0 and write both domains; the header
+- [x] make `ComputeGenesisCommitment` compute both roots at block 0 and write both domains; the header
       takes whichever `Config.IsBinaryTrie` names for the genesis timestamp
-- [ ] write tests: a genesis with `binaryTrieTime > timestamp` is accepted under `hex+bin` and refused
+- [x] write tests: a genesis with `binaryTrieTime > timestamp` is accepted under `hex+bin` and refused
       under `hex` and under `bin`
-- [ ] write tests: a genesis with `binaryTrieTime < amsterdamTime` is still refused
-- [ ] write tests: block 0 writes a hex root to the header and a bin root to the bin domain, and the two
+- [x] write tests: a genesis with `binaryTrieTime < amsterdamTime` is still refused
+- [x] write tests: block 0 writes a hex root to the header and a bin root to the bin domain, and the two
       differ
-- [ ] write tests: a `hex` datadir with no `binaryTrieTime` produces a byte-identical genesis header to
+- [x] write tests: a `hex` datadir with no `binaryTrieTime` produces a byte-identical genesis header to
       today
-- [ ] run `make test-short` — must pass before task 19
+- [x] run `make test-short` — must pass before task 19
 
 ### Task 19: Record and prune shadow roots
 
