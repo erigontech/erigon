@@ -22,8 +22,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 )
+
+func TestValidateEmbeddedBuilderConfigRejectsMissingKey(t *testing.T) {
+	config := clparams.CaplinConfig{NetworkId: clparams.NetworkType(1)}
+	config.EpbsBuilder = epbscfg.DefaultConfig()
+	config.EpbsBuilder.Enabled = true
+	require.ErrorContains(t, ValidateEmbeddedBuilderConfig(config), "key path")
+}
 
 func TestWithBuilderSupportsDynamicValidatorAPIWithoutRelay(t *testing.T) {
 	var got option

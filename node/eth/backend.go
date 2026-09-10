@@ -278,6 +278,11 @@ func New(
 	if err := validateEmbeddedBuilderMode(config); err != nil {
 		return nil, err
 	}
+	caplinConfig := config.CaplinConfig
+	caplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
+	if err := caplin1.ValidateEmbeddedBuilderConfig(caplinConfig); err != nil {
+		return nil, fmt.Errorf("validate embedded ePBS builder: %w", err)
+	}
 	options := newOptions{}
 	for _, opt := range opts {
 		opt(&options)
@@ -1034,7 +1039,8 @@ func New(
 }
 
 func validateEmbeddedBuilderMode(config *ethconfig.Config) error {
-	if config.CaplinConfig.EpbsBuilder.Enabled && !config.InternalCL {
+	if config.CaplinConfig.EpbsBuilder.Enabled && (!config.InternalCL ||
+		(!clparams.EmbeddedSupported(config.NetworkID) && !config.CaplinConfig.IsDevnet())) {
 		return errors.New("embedded ePBS builder requires embedded Caplin")
 	}
 	return nil

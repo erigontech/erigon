@@ -22,7 +22,6 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		BidMargin:     0.85,
-		MaxPending:    32,
 		MaxRetained:   16,
 		RetryInterval: 250 * time.Millisecond,
 	}

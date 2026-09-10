@@ -194,6 +194,26 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 	return nil
 }
 
+func ValidateEmbeddedBuilderConfig(config clparams.CaplinConfig) error {
+	if !config.EpbsBuilder.Enabled {
+		return nil
+	}
+	var beaconConfig *clparams.BeaconChainConfig
+	if config.IsDevnet() {
+		if config.HaveInvalidDevnetParams() {
+			return errors.New("devnet config and genesis state paths must be set together")
+		}
+		customBeaconConfig, _, err := clparams.CustomConfig(config.CustomConfigPath)
+		if err != nil {
+			return err
+		}
+		beaconConfig = &customBeaconConfig
+	} else {
+		_, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)
+	}
+	return epbs.ValidateRuntimeConfig(config.EpbsBuilder, beaconConfig)
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,

@@ -347,7 +347,7 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	require.True(t, cfg.CaplinConfig.EpbsBuilder.Enabled)
 	require.Equal(t, "/secure/builder.key", cfg.CaplinConfig.EpbsBuilder.KeyPath)
 	require.Equal(t, 0.9, cfg.CaplinConfig.EpbsBuilder.BidMargin)
-	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxPending)
+	require.Zero(t, cfg.CaplinConfig.EpbsBuilder.MaxPending)
 	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxRetained)
 	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.RetryInterval)
 }

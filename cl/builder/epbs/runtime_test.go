@@ -21,7 +21,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -144,7 +143,7 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 			copy.SlotsPerEpoch = 0
 			deps.BeaconConfig = &copy
 		}},
-		{name: "zero pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = 0 }},
+		{name: "negative pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = -1 }},
 		{name: "pending capacity shorter than one epoch", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.MaxPending = int(deps.BeaconConfig.SlotsPerEpoch) - 1
 		}},
@@ -164,6 +163,24 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimeCapacityCoversOneMainnetEpoch(t *testing.T) {
-	require.GreaterOrEqual(t, epbscfg.DefaultConfig().MaxPending, int(clparams.MainnetBeaconConfig.SlotsPerEpoch))
+func TestRuntimeDefaultPendingCapacityTracksChain(t *testing.T) {
+	cfg := gloasCoordinatorConfig()
+	cfg.SlotsPerEpoch = 64
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
+	runtimeCfg := epbscfg.DefaultConfig()
+	runtimeCfg.Enabled = true
+	runtimeCfg.KeyPath = keyPath
+	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+		BeaconConfig: &cfg,
+		Clock:        eth_clock.NewMockEthereumClock(gomock.NewController(t)),
+		Head:         new(resolverHeadSource),
+		Forkchoice:   new(resolverForkchoice),
+		Assembler:    new(coordinatorAssembler),
+		Publisher:    &runtimePublisher{published: make(chan string, 1)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 }
