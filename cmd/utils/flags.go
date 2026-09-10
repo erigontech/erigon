@@ -41,6 +41,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/time/rate"
 
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
@@ -268,6 +269,19 @@ var (
 	BuilderMaxBlobsFlag = cli.Uint64Flag{
 		Name:  "builder.maxblobs",
 		Usage: "Cap the number of blob transactions included in a built block",
+	}
+	EpbsBuilderFlag = cli.BoolFlag{
+		Name:  "builder",
+		Usage: "Enable the embedded ePBS builder",
+	}
+	EpbsBuilderKeyFlag = cli.StringFlag{
+		Name:  "builder.key",
+		Usage: "Path to the embedded builder BLS private key",
+	}
+	EpbsBuilderBidMarginFlag = cli.Float64Flag{
+		Name:  "builder.bid-margin",
+		Usage: "Fraction of block value offered by the embedded builder",
+		Value: epbscfg.DefaultConfig().BidMargin,
 	}
 
 	VMEnableDebugFlag = cli.BoolFlag{
@@ -1863,6 +1877,10 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
+	cfg.CaplinConfig.EpbsBuilder = epbscfg.DefaultConfig()
+	cfg.CaplinConfig.EpbsBuilder.Enabled = ctx.Bool(EpbsBuilderFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
