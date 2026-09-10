@@ -3,10 +3,9 @@ participants:
     cl_image: test/erigon:current
     cl_log_level: "debug"
     cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics", "--beacon.api=beacon,validator,node,config,debug"]
-    el_type: erigon
-    el_image: test/erigon:current
+    el_type: geth
+    el_image: ethpandaops/geth:glamsterdam-devnet-8
     el_log_level: "debug"
-    el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
     vc_image: ethpandaops/lighthouse:glamsterdam-devnet-8
@@ -14,7 +13,7 @@ participants:
 global_log_level: "debug"
 network_params:
   preset: mainnet
-  seconds_per_slot: 6
+  seconds_per_slot: 12
   genesis_delay: 20
   altair_fork_epoch: 0
   bellatrix_fork_epoch: 0
