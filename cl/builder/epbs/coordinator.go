@@ -295,6 +295,10 @@ func (c *Coordinator) runSlotGuarded(
 	}
 	keepAuction = true
 	publishErr := c.publisher.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encoded)
+	if errors.Is(publishErr, errLocalBidNotAccepted) {
+		c.rollbackPublish(auction)
+		return nil, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
+	}
 	c.finishPublish(auction)
 	if publishErr != nil {
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
@@ -750,4 +754,16 @@ func (c *Coordinator) finishPublish(entry *auctionEntry) {
 		return
 	}
 	entry.phase = auctionPhaseRetained
+}
+
+func (c *Coordinator) rollbackPublish(entry *auctionEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.auctions[entry.key] != entry || entry.phase != auctionPhasePublishing {
+		return
+	}
+	if retained := c.retained[entry.identity]; retained != nil && retained.owner == entry {
+		delete(c.retained, entry.identity)
+	}
+	delete(c.auctions, entry.key)
 }
