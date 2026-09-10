@@ -52,7 +52,7 @@ func TestDetectKeyEncoding_AllV1(t *testing.T) {
 		{k: hexCompact(5, 6, 7, 8, 9, 0xa), v: nil}, // ends with 0x9a
 		{k: hexCompact(0xb, 0xc, 0xd, 0xe), v: nil}, // ends with 0xde
 	}
-	encoding, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV1, encoding, "expected V1 encoding")
 }
@@ -64,7 +64,7 @@ func TestDetectKeyEncoding_AllV2(t *testing.T) {
 		{k: v2Key(0, 0, 0, 0), v: nil},
 		{k: v2Key(0xf, 0xe, 0xd, 0xc, 0xb), v: nil}, // odd-length triggers parity=1 path
 	}
-	encoding, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV2, encoding, "expected V2 encoding")
 }
@@ -78,7 +78,7 @@ func TestDetectKeyEncoding_OneV1AmongV2(t *testing.T) {
 		{k: v2Key(5, 6, 7, 8), v: nil},
 		{k: bad, v: nil},
 	}
-	encoding, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV1, encoding, "any non-canonical sample must classify the file as V1")
 }
@@ -88,13 +88,13 @@ func TestDetectKeyEncoding_StateKeysOnly(t *testing.T) {
 		{k: commitmentdb.KeyCommitmentState, v: []byte{0x01, 0x02}},
 		{k: commitmentdb.KeyCommitmentState, v: nil},
 	}
-	_, err := detectKeyEncoding(samples)
+	_, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.ErrorIs(t, err, errNoNonStateSamples)
 }
 
 func TestDetectKeyEncoding_V3RecordIsNotV1(t *testing.T) {
 	key := nibbles.ChildKeyV3(nibbles.EncodeKeyV3([]byte{0x1, 0x2}), 0x8)
-	detected, err := detectKeyEncoding([]sampledPair{{k: key}})
+	detected, err := detectKeyEncodingForStateKey([]sampledPair{{k: key}}, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV3, detected, "v3 record key %x was classified as %v", key, detected)
 }
@@ -108,7 +108,7 @@ func TestDetectKeyEncoding_MixedSamplesPreferV3(t *testing.T) {
 		{k: v3Key, v: nil},
 	}
 
-	encoding, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV3, encoding, "mixed sample containing v3 key %x must classify as V3", v3Key)
 }
@@ -142,7 +142,7 @@ func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
 		{k: v1AmbiguousKey, v: nil},
 		{k: hexCompact(0xa, 0xb, 0xc, 0xd, 0xe, 0xf, 0, 0), v: nil},
 	}
-	encoding, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.Equal(t, keyEncodingV2, encoding,
 		"detector classifies ambiguous V1 file as V2 — V1 and V2 legacy keys remain ambiguous")

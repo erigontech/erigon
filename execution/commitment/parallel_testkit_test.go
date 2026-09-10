@@ -306,26 +306,8 @@ func branchDiff(t *testing.T, seq, par *MockState) {
 	t.Logf("total divergent branches: %d", n)
 }
 
-func snapshotBranches(ms *MockState) map[string][]byte {
-	snap := make(map[string][]byte, len(ms.cm))
-	for k, v := range ms.cm {
-		snap[k] = append([]byte(nil), v...)
-	}
-	return snap
-}
-
-func requireBranchesUnchanged(t *testing.T, snap map[string][]byte, ms *MockState) {
-	t.Helper()
-	require.Equalf(t, len(snap), len(ms.cm), "a mid-block re-fold changed the stored branch count")
-	for k, v := range ms.cm {
-		require.Truef(t, bytes.Equal(snap[k], v), "a mid-block re-fold wrote branch %x", []byte(k))
-	}
-}
-
 func nibs(vals ...byte) []byte {
-	out := make([]byte, len(vals))
-	copy(out, vals)
-	return out
+	return vals
 }
 
 func nibbleAddr(targetNibble, seed int) []byte {

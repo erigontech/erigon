@@ -30,16 +30,6 @@ var (
 // EncodeKeyV3 packs a nibble path into a V3 node key. The final byte is 0x00
 // for an even path and 0xf0|lastNibble for an odd path.
 func EncodeKeyV3(nibbles []byte) []byte {
-	n := len(nibbles)
-	if n > MaxPathNibbles {
-		panic(fmt.Sprintf("nibbles v3: path length %d exceeds MaxPathNibbles=%d", n, MaxPathNibbles))
-	}
-	for i, nibble := range nibbles {
-		if nibble > 0x0f {
-			panic(fmt.Sprintf("nibbles v3: nibble at index %d is 0x%02x, must be in [0x00, 0x0F]", i, nibble))
-		}
-	}
-
 	return EncodeKeyV3Into(nil, nibbles)
 }
 

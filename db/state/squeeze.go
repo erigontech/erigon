@@ -342,25 +342,12 @@ func ExpandShortenedKeysInBranch(
 	accountFile, storageFile *FilesItem,
 	startTxNum, endTxNum uint64,
 ) (commitment.BranchData, error) {
-	return ExpandShortenedKeysInBranchForFormat(branch, accounts, storage, accountFile, storageFile, startTxNum, endTxNum, false)
-}
-
-func ExpandShortenedKeysInBranchForFormat(
-	branch commitment.BranchData,
-	accounts, storage *DomainRoTx,
-	accountFile, storageFile *FilesItem,
-	startTxNum, endTxNum uint64,
-	edgeRecords bool,
-) (commitment.BranchData, error) {
-	if edgeRecords {
-		return nil, fmt.Errorf("expand shortened keys: %w", commitment.ErrEdgeRecord)
-	}
 	storageGetter := storage.dataReader(storageFile.decompressor)
 	accountGetter := accounts.dataReader(accountFile.decompressor)
 	logger := log.Root()
 	stepSize := accounts.d.stepSize
 
-	return branch.ReplacePlainKeysForFormat(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // not a referenced key, keep as is
@@ -385,7 +372,7 @@ func ExpandShortenedKeysInBranchForFormat(
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
 		return apkBuf, nil
-	}, false)
+	})
 }
 
 func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {

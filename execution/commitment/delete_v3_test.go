@@ -58,7 +58,7 @@ func TestCollectUpdateV3WritesLiveAndDeletedChildren(t *testing.T) {
 	require.NoError(t, be.CollectUpdate(ctx, prefix, 1<<2, 1<<2|1<<9, 1<<2, &cells, false))
 	require.Len(t, ctx.puts, 2)
 	require.Equal(t, nibbles.ChildKeyV3(nibbles.EncodeKeyV3(path), 2), ctx.puts[0].prefix)
-	require.Equal(t, EncodeBranchChild(cells[2].branchMask, &cells[2]), ctx.puts[0].data)
+	require.Equal(t, AppendBranchChild(nil, cells[2].branchMask, &cells[2]), ctx.puts[0].data)
 	require.Equal(t, nibbles.ChildKeyV3(nibbles.EncodeKeyV3(path), 9), ctx.puts[1].prefix)
 	require.NotNil(t, ctx.puts[1].data)
 	require.Empty(t, ctx.puts[1].data)

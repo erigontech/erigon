@@ -149,7 +149,7 @@ func TestWarmupRecordDescentCarriesChildMask(t *testing.T) {
 		branchCell.hash[i] = byte(i + 1)
 	}
 	var records [16][]byte
-	records[nibble] = EncodeBranchChild(childMask, &branchCell)
+	records[nibble] = AppendBranchChild(nil, childMask, &branchCell)
 
 	rootPrefix := string(nibbles.HexToCompact(nil))
 	ctx := &recordWarmupCtx{

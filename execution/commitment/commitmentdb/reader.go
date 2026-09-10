@@ -126,10 +126,7 @@ func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
 	// Before flush drained sd.mem this was masked because the in-memory batch
 	// still held the source values; rebinding the getter to the foreign compute
 	// tx reads the wrong database and yields empty state (wrong root).
-	if r.metrics != nil {
-		return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(r.metrics))
-	}
-	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{})
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(r.metrics))
 }
 
 // CloneForWorker clones into a worker reader that meters into workerCtx's

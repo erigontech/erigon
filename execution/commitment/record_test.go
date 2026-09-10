@@ -89,7 +89,7 @@ func packedRecordExtension(extension []byte) []byte {
 
 func TestEncodeBranchChild(t *testing.T) {
 	d := recordTestData("branch", []byte{0xa, 0xb, 0xc})
-	got := EncodeBranchChild(0x1234, &d)
+	got := AppendBranchChild(nil, 0x1234, &d)
 
 	want := []byte{recordFlagHash | recordFlagExtensionOdd, 0x12, 0x34}
 	want = append(want, d.hash[:]...)
@@ -105,7 +105,7 @@ func TestEncodeLeafChildShapes(t *testing.T) {
 				extension = []byte{1, 2, 3, 4}
 			}
 			d := recordTestData(shape, extension)
-			got := EncodeLeafChild(&d)
+			got := AppendLeafChild(nil, &d)
 			flags := got[0]
 			require.Equal(t, uint8(recordFlagLeaf), flags&recordFlagLeaf)
 			require.Equal(t, uint8(0), flags&recordFlagExtensionOdd)
@@ -139,7 +139,7 @@ func TestEncodeLeafChildShapes(t *testing.T) {
 func TestEncodeLeafChildOmitsEmbeddedHash(t *testing.T) {
 	d := recordTestData("account", nil)
 	d.stateHashLen = 31
-	rec := EncodeLeafChild(&d)
+	rec := AppendLeafChild(nil, &d)
 
 	require.Zero(t, rec[0]&recordFlagHash)
 	require.Len(t, rec, 1+length.Addr)
@@ -154,7 +154,7 @@ func TestEncodeLeafChildOmitsEmbeddedHash(t *testing.T) {
 func TestSynthesizeBranchRowCarriesLeafChildMask(t *testing.T) {
 	d := recordTestData("account-storage", nil)
 	var records [16][]byte
-	records[0] = EncodeLeafChild(&d)
+	records[0] = AppendLeafChild(nil, &d)
 
 	read, err := SynthesizeBranchRow(1, true, records, 1, nil)
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestSynthesizeBranchRowDoesNotMarkSingletonStorageAsBranch(t *testing.T) {
 	d := recordTestData("account-storage", nil)
 	d.storageMask = 0
 	var records [16][]byte
-	records[0] = EncodeLeafChild(&d)
+	records[0] = AppendLeafChild(nil, &d)
 
 	read, err := SynthesizeBranchRow(1, true, records, 1, nil)
 	require.NoError(t, err)
@@ -186,9 +186,9 @@ func TestDecodeRecordIntoRoundTrip(t *testing.T) {
 				wantMask := uint16(0)
 				if shape == "branch" {
 					wantMask = 0x1234
-					rec = EncodeBranchChild(wantMask, &d)
+					rec = AppendBranchChild(nil, wantMask, &d)
 				} else {
-					rec = EncodeLeafChild(&d)
+					rec = AppendLeafChild(nil, &d)
 					if shape == "account-storage" {
 						wantMask = d.storageMask
 					}
@@ -261,9 +261,9 @@ func TestRecordRowReconstruction(t *testing.T) {
 			}
 			var rec []byte
 			if shape == "branch" {
-				rec = EncodeBranchChild(bitmap, &source[nibble])
+				rec = AppendBranchChild(nil, bitmap, &source[nibble])
 			} else {
-				rec = EncodeLeafChild(&source[nibble])
+				rec = AppendLeafChild(nil, &source[nibble])
 			}
 			var decoded cell
 			_, err = DecodeRecordInto(rec, &decoded)
@@ -281,10 +281,10 @@ func TestRecordRowReconstruction(t *testing.T) {
 
 func TestDecodeRecordIntoRejectsMalformedRecords(t *testing.T) {
 	branchData := recordTestData("branch", []byte{1, 2, 3})
-	oddBranch := EncodeBranchChild(1, &branchData)
+	oddBranch := AppendBranchChild(nil, 1, &branchData)
 	truncatedTail := oddBranch[:len(oddBranch)-1]
 	storageData := recordTestData("account-storage", nil)
-	storageWithoutRoom := EncodeLeafChild(&storageData)
+	storageWithoutRoom := AppendLeafChild(nil, &storageData)
 	storageWithoutRoom = storageWithoutRoom[:len(storageWithoutRoom)-1]
 	badParity := bytes.Clone(oddBranch)
 	badParity[len(badParity)-1] |= 1
@@ -311,7 +311,7 @@ func TestDecodeRecordIntoRejectsMalformedRecords(t *testing.T) {
 
 func TestDecodeRecordIntoRejectsLengthMismatches(t *testing.T) {
 	d := recordTestData("storage", nil)
-	rec := EncodeLeafChild(&d)
+	rec := AppendLeafChild(nil, &d)
 	var c cell
 	_, err := DecodeRecordInto(append(rec, 1, 2, 3), &c)
 	require.Error(t, err)
@@ -372,7 +372,7 @@ func TestEncodeLeafChildReservesExactCapacity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var d cellEncodeData
 			tc.build(&d)
-			rec := EncodeLeafChild(&d)
+			rec := AppendLeafChild(nil, &d)
 			require.Equal(t, len(rec), cap(rec), "record outgrew its reserved capacity")
 		})
 	}
@@ -390,7 +390,7 @@ func TestDecodeRecordRejectsStorageAddrFlagOnWrongShapes(t *testing.T) {
 	for i := range b.hash {
 		b.hash[i] = byte(i + 1)
 	}
-	branch := EncodeBranchChild(0x1234, &b)
+	branch := AppendBranchChild(nil, 0x1234, &b)
 	branch[0] |= recordFlagStorageAddr
 	_, err := DecodeRecordInto(branch, &c)
 	require.Error(t, err, "branch record must reject the storage-address flag")
@@ -400,7 +400,7 @@ func TestDecodeRecordRejectsStorageAddrFlagOnWrongShapes(t *testing.T) {
 	for i := range s.storageAddr {
 		s.storageAddr[i] = byte(0xa0 + i)
 	}
-	leaf := EncodeLeafChild(&s)
+	leaf := AppendLeafChild(nil, &s)
 	leaf[0] |= recordFlagStorageAddr
 	_, err = DecodeRecordInto(leaf, &c)
 	require.Error(t, err, "storage leaf must reject the storage-address flag")

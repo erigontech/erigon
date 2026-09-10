@@ -814,21 +814,7 @@ func (branchData BranchData) IsEdgeRecord() bool {
 	return err == nil
 }
 
-func (branchData BranchData) ensureLegacyRow(parser string, edgeRecords bool) error {
-	if edgeRecords {
-		return fmt.Errorf("%w: %s received %d-byte value", ErrEdgeRecord, parser, len(branchData))
-	}
-	return nil
-}
-
 func (branchData BranchData) ChildCount() (int, error) {
-	return branchData.ChildCountForFormat(false)
-}
-
-func (branchData BranchData) ChildCountForFormat(edgeRecords bool) (int, error) {
-	if err := branchData.ensureLegacyRow("ChildCount", edgeRecords); err != nil {
-		return 0, err
-	}
 	if len(branchData) < 4 {
 		return 0, nil
 	}
@@ -897,11 +883,7 @@ func (branchData BranchData) HasShortenedKeys() bool {
 // first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
 // parse failure, and leaves the tally partial.
 func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
-	return branchData.CountPlainKeysForFormat(false)
-}
-
-func (branchData BranchData) CountPlainKeysForFormat(edgeRecords bool) (plainAccounts, plainStorages, shortened uint64, err error) {
-	_, err = branchData.ReplacePlainKeysForFormat(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		switch {
 		case isStorage && len(key) == length.Addr+length.Hash:
 			plainStorages++
@@ -911,19 +893,12 @@ func (branchData BranchData) CountPlainKeysForFormat(edgeRecords bool) (plainAcc
 			shortened++
 		}
 		return nil, nil
-	}, edgeRecords)
+	})
 	return plainAccounts, plainStorages, shortened, err
 }
 
 // If fn returns nil, the original key is kept.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
-	return branchData.ReplacePlainKeysForFormat(newData, fn, false)
-}
-
-func (branchData BranchData) ReplacePlainKeysForFormat(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error), edgeRecords bool) (BranchData, error) {
-	if err := branchData.ensureLegacyRow("ReplacePlainKeys", edgeRecords); err != nil {
-		return nil, err
-	}
 	if len(branchData) < 4 {
 		return branchData, nil
 	}
@@ -1072,13 +1047,6 @@ func (branchData BranchData) ReplacePlainKeysForFormat(newData []byte, fn func(k
 }
 
 func (branchData BranchData) IsComplete() (bool, error) {
-	return branchData.IsCompleteForFormat(false)
-}
-
-func (branchData BranchData) IsCompleteForFormat(edgeRecords bool) (bool, error) {
-	if err := branchData.ensureLegacyRow("IsComplete", edgeRecords); err != nil {
-		return false, err
-	}
 	if len(branchData) < 4 {
 		return false, nil
 	}
@@ -1170,13 +1138,6 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 }
 
 func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
-	return branchData.decodeCellsForFormat(false)
-}
-
-func (branchData BranchData) decodeCellsForFormat(edgeRecords bool) (touchMap, afterMap uint16, row [16]*cell, err error) {
-	if parseErr := branchData.ensureLegacyRow("decodeCells", edgeRecords); parseErr != nil {
-		return 0, 0, row, parseErr
-	}
 	if len(branchData) < 4 {
 		return 0, 0, row, errors.New("decodeCells: branch data too short for maps")
 	}
@@ -1204,14 +1165,10 @@ func (branchData BranchData) decodeCellsForFormat(edgeRecords bool) (touchMap, a
 }
 
 func (branchData BranchData) Validate(branchKey []byte) error {
-	return branchData.ValidateForFormat(branchKey, false)
-}
-
-func (branchData BranchData) ValidateForFormat(branchKey []byte, edgeRecords bool) error {
 	if branchData.IsTombstone() {
 		return nil
 	}
-	_, afterMap, row, err := branchData.decodeCellsForFormat(edgeRecords)
+	_, afterMap, row, err := branchData.decodeCells()
 	if err != nil {
 		return err
 	}
@@ -1466,10 +1423,6 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 }
 
 func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) (*BranchStat, error) {
-	return DecodeBranchAndCollectStatForFormat(key, branch, tv, false)
-}
-
-func DecodeBranchAndCollectStatForFormat(key, branch []byte, tv TrieVariant, edgeRecords bool) (*BranchStat, error) {
 	stat := &BranchStat{}
 	if len(key) == 0 {
 		return nil, nil
@@ -1480,13 +1433,10 @@ func DecodeBranchAndCollectStatForFormat(key, branch []byte, tv TrieVariant, edg
 	stat.IsRoot = true
 
 	isState := bytes.Equal(key, LegacyKeyCommitmentState)
-	if edgeRecords {
-		isState = bytes.Equal(key, KeyCommitmentState)
-	}
 	if !isState {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).decodeCellsForFormat(edgeRecords)
+		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
 			return nil, err
 		}

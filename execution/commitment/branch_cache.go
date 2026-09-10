@@ -468,7 +468,7 @@ func (c *BranchCache) ContractHash(prefix []byte) (hash [32]byte, ok bool) {
 
 func contractHashFromPrefix(prefix []byte, edgeRecords bool) (hash [32]byte, ok bool) {
 	if !edgeRecords {
-		return ContractHashFromPrefix(prefix)
+		return legacyContractHashFromPrefix(prefix)
 	}
 	depth, ok := v3EdgeDepth(prefix)
 	if !ok || depth <= 64 {
@@ -478,8 +478,8 @@ func contractHashFromPrefix(prefix []byte, edgeRecords bool) (hash [32]byte, ok 
 	return hash, true
 }
 
-// ContractHashFromPrefix: ok=false for non-storage prefixes.
-func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
+// legacyContractHashFromPrefix: ok=false for non-storage prefixes.
+func legacyContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
 	}

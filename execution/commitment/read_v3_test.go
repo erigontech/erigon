@@ -83,9 +83,9 @@ func TestSynthesizeBranchRowMatchesBundledRow(t *testing.T) {
 	for bitset := mask; bitset != 0; bitset &= bitset - 1 {
 		nibble := bitsTrailingZeros16(bitset)
 		if source[nibble].accountAddrLen > 0 || source[nibble].storageAddrLen > 0 {
-			records[nibble] = EncodeLeafChild(&source[nibble])
+			records[nibble] = AppendLeafChild(nil, &source[nibble])
 		} else {
-			records[nibble] = EncodeBranchChild(0x4567, &source[nibble])
+			records[nibble] = AppendBranchChild(nil, 0x4567, &source[nibble])
 		}
 	}
 
@@ -114,7 +114,7 @@ func TestSynthesizeBranchRowIgnoresClearedMaskRecords(t *testing.T) {
 
 	stale := recordTestData("account", nil)
 	var records [16][]byte
-	records[7] = EncodeLeafChild(&stale)
+	records[7] = AppendLeafChild(nil, &stale)
 	read, err := SynthesizeBranchRow(1<<2, true, records, 1<<7, legacy)
 	require.NoError(t, err)
 
@@ -135,9 +135,9 @@ func TestSynthesizeBranchRowResultSurvivesALaterCall(t *testing.T) {
 		src[2] = recordTestData(shape, ext)
 		var records [16][]byte
 		if src[2].accountAddrLen > 0 || src[2].storageAddrLen > 0 {
-			records[2] = EncodeLeafChild(&src[2])
+			records[2] = AppendLeafChild(nil, &src[2])
 		} else {
-			records[2] = EncodeBranchChild(0x1234, &src[2])
+			records[2] = AppendBranchChild(nil, 0x1234, &src[2])
 		}
 		return uint16(1 << 2), records
 	}
@@ -175,7 +175,7 @@ func TestUnfoldBranchNodeRecordsErrorsOnMaskedButMissingChild(t *testing.T) {
 	var cells [16]cellEncodeData
 	cells[2] = recordTestData("branch", nil)
 	ctx := &maskGapRecordContext{present: 1 << 2}
-	ctx.records[2] = EncodeBranchChild(0, &cells[2])
+	ctx.records[2] = AppendBranchChild(nil, 0, &cells[2])
 
 	newTrie := func() *HexPatriciaHashed {
 		hph := newHexPatriciaHashed()

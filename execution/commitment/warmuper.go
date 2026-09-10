@@ -327,13 +327,6 @@ func (w *Warmuper) Close() {
 	w.cancel()
 }
 
-// warmupKeyRecords is the v3 descent: one record decoded per level, no legacy row built and taken
-// apart, and the child's own bitmap carried into the next read.
-func (w *Warmuper) warmupKeyRecords(reader BranchRecordReader, hashedKey []byte, startDepth int) {
-	var compactBuf [maxCompactKeyLen]byte
-	w.warmupKeyRecordsInto(reader, hashedKey, startDepth, &compactBuf)
-}
-
 func (w *Warmuper) warmupKeyRecordsInto(reader BranchRecordReader, hashedKey []byte, startDepth int, compactBuf *[maxCompactKeyLen]byte) {
 	depth := startDepth
 	var mask uint16

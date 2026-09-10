@@ -39,7 +39,7 @@ func storageLeafBranch(t *testing.T, nibble byte, account, slot []byte) BranchDa
 		data.stateHash[i] = byte(i + 1)
 	}
 
-	record := EncodeLeafChild(&data)
+	record := AppendLeafChild(nil, &data)
 	var records [16][]byte
 	records[nibble] = record
 	read, err := SynthesizeBranchRow(1<<nibble, true, records, 1<<nibble, nil)
@@ -105,7 +105,7 @@ func TestAccountLeafDoesNotUseStorageAddressHoist(t *testing.T) {
 	t.Parallel()
 
 	data := recordTestData("account", nil)
-	record := EncodeLeafChild(&data)
+	record := AppendLeafChild(nil, &data)
 	var records [16][]byte
 	records[3] = record
 	read, err := SynthesizeBranchRow(1<<3, true, records, 1<<3, nil)
@@ -242,7 +242,7 @@ func TestStorageLeafRecordContainsSlotOnly(t *testing.T) {
 	t.Parallel()
 
 	data := recordTestData("storage", nil)
-	record := EncodeLeafChild(&data)
+	record := AppendLeafChild(nil, &data)
 	require.Len(t, record, 1+length.Hash+length.Hash)
 	require.Equal(t, data.storageAddr[length.Addr:], record[1+length.Hash:])
 }

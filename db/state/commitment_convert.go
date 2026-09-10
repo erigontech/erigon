@@ -89,13 +89,6 @@ type sampledPair struct {
 	k, v []byte
 }
 
-// detectKeyEncoding identifies V1, V2, or V3 from sampled non-state keys.
-// V3 child records have a canonical V3 node key before their 0x80..0x8f
-// child suffix. Legacy keys retain the V1/V2 canonicality check.
-func detectKeyEncoding(samples []sampledPair) (keyEncoding, error) {
-	return detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
-}
-
 func detectKeyEncodingForStateKey(samples []sampledPair, stateKey []byte) (keyEncoding, error) {
 	legacy, err := detectLegacyKeyEncodingForStateKey(samples, stateKey)
 	if err != nil {

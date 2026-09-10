@@ -49,7 +49,7 @@ func TestCollectUpdateV3WritesOnlyChangedChildRecords(t *testing.T) {
 
 	wantKey := nibbles.ChildKeyV3(nibbles.EncodeKeyV3(path), 3)
 	require.Equal(t, wantKey, ctx.puts[0].prefix)
-	require.Equal(t, EncodeLeafChild(&cells[3]), ctx.puts[0].data)
+	require.Equal(t, AppendLeafChild(nil, &cells[3]), ctx.puts[0].data)
 	require.Nil(t, ctx.puts[0].prev)
 
 	require.NotEqual(t, nibbles.EncodeKeyV3(path), ctx.puts[0].prefix, "the node key must not be written as a separate record")
@@ -374,7 +374,7 @@ func TestEncodeLeafChildFusedShapesRoundTrip(t *testing.T) {
 		copy(c.stateHash[:], bytes.Repeat([]byte{0xab}, length.Hash))
 
 		var decoded cell
-		mask, err := DecodeRecordInto(EncodeLeafChild(&c), &decoded)
+		mask, err := DecodeRecordInto(AppendLeafChild(nil, &c), &decoded)
 		require.NoError(t, err)
 		require.Zero(t, mask)
 		require.Equal(t, int16(length.Addr+length.Hash), decoded.storageAddrLen)
@@ -394,7 +394,7 @@ func TestEncodeLeafChildFusedShapesRoundTrip(t *testing.T) {
 		copy(c.stateHash[:], bytes.Repeat([]byte{0xef}, length.Hash))
 
 		var decoded cell
-		mask, err := DecodeRecordInto(EncodeLeafChild(&c), &decoded)
+		mask, err := DecodeRecordInto(AppendLeafChild(nil, &c), &decoded)
 		require.NoError(t, err)
 		require.Equal(t, uint16(0x4208), mask)
 		require.Equal(t, int16(length.Hash), decoded.hashLen)
@@ -441,7 +441,7 @@ func TestCollectUpdateV3RecordScratchDoesNotLeakBetweenChildren(t *testing.T) {
 
 	require.NoError(t, be.CollectUpdate(ctx, prefix, mask, mask, mask, &cells, false))
 	require.Len(t, ctx.puts, 2)
-	require.Equal(t, EncodeLeafChild(&cells[2]), ctx.puts[0].data)
-	require.Equal(t, EncodeBranchChild(cells[5].branchMask, &cells[5]), ctx.puts[1].data)
+	require.Equal(t, AppendLeafChild(nil, &cells[2]), ctx.puts[0].data)
+	require.Equal(t, AppendBranchChild(nil, cells[5].branchMask, &cells[5]), ctx.puts[1].data)
 	require.Greater(t, len(ctx.puts[0].data), len(ctx.puts[1].data))
 }

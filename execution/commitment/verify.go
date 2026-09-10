@@ -34,17 +34,7 @@ func VerifyBranchHashes(
 	accountValues map[string][]byte,
 	storageValues map[string][]byte,
 ) error {
-	return VerifyBranchHashesForFormat(branchKey, branchData, accountValues, storageValues, false)
-}
-
-func VerifyBranchHashesForFormat(
-	branchKey []byte,
-	branchData BranchData,
-	accountValues map[string][]byte,
-	storageValues map[string][]byte,
-	edgeRecords bool,
-) error {
-	_, _, row, err := branchData.decodeCellsForFormat(edgeRecords)
+	_, _, row, err := branchData.decodeCells()
 	if err != nil {
 		return fmt.Errorf("decodeCells: %w", err)
 	}

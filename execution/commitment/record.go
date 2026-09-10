@@ -40,7 +40,6 @@ const (
 
 var (
 	ErrMalformedRecord = errors.New("commitment: malformed edge record")
-	ErrEdgeRecord      = errors.New("commitment: edge record is not a legacy branch row")
 )
 
 type BranchRecordRead struct {
@@ -158,14 +157,6 @@ func growRecord(dst []byte, n int) []byte {
 		return make([]byte, 0, n)
 	}
 	return dst[:0]
-}
-
-func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
-	return AppendBranchChild(nil, mask, cell)
-}
-
-func EncodeLeafChild(cell *cellEncodeData) []byte {
-	return AppendLeafChild(nil, cell)
 }
 
 func AppendBranchChild(dst []byte, mask uint16, cell *cellEncodeData) []byte {
