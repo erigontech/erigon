@@ -153,9 +153,7 @@ type TxPool struct {
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
 	amsterdamTime           *uint64
-	binaryTrieTime          *uint64
 	isPostAmsterdam         atomic.Bool
-	isPostBinaryTrie        atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -268,7 +266,6 @@ func New(
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
 	res.amsterdamTime = chainConfig.AmsterdamTime
-	res.binaryTrieTime = chainConfig.BinaryTrieTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
@@ -1310,7 +1307,7 @@ func (p *TxPool) isAmsterdam() bool {
 // isEIP8038Revised must agree with evmtypes.BlockContext.Rules: a pool charging the
 // other EIP-8038 schedule rejects transactions its own executor would accept.
 func (p *TxPool) isEIP8038Revised() bool {
-	return p.chainConfig.EIP8038Revised || isTimeBasedForkActivated(&p.isPostBinaryTrie, p.binaryTrieTime)
+	return p.chainConfig.EIP8038Revised || p.chainConfig.IsBinaryTrieScheduled()
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

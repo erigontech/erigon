@@ -261,19 +261,19 @@ different states and correctly report different roots.
 - Modify: `execution/chain/binary_trie_test.go`
 - Modify: `txnprovider/txpool/pool_test.go`
 
-- [ ] change `NewRules` to `EIP8038Revised: c.EIP8038Revised || c.BinaryTrieTime != nil`
-- [ ] add a `Config` predicate for "this chain schedules the PBT at all" and use it at the three call
+- [x] change `NewRules` to `EIP8038Revised: c.EIP8038Revised || c.BinaryTrieTime != nil`
+- [x] add a `Config` predicate for "this chain schedules the PBT at all" and use it at the three call
       sites rather than repeating the nil check
-- [ ] change `TxPool.isEIP8038Revised` and the shutter pool's equivalent to the same config-level
+- [x] change `TxPool.isEIP8038Revised` and the shutter pool's equivalent to the same config-level
       predicate, dropping the `isPostBinaryTrie` time latch
-- [ ] leave `Config.IsBinaryTrie` one-argument — do **not** add geth's London gate (see Technical
+- [x] leave `Config.IsBinaryTrie` one-argument — do **not** add geth's London gate (see Technical
       Details); update the `BinaryTrieTime` doc comment, which no longer implies "genesis only"
-- [ ] write tests: a config with `binaryTrieTime` after `amsterdamTime` charges the revised schedule at
+- [x] write tests: a config with `binaryTrieTime` after `amsterdamTime` charges the revised schedule at
       a block *before* `binaryTrieTime`, and at one after; a config with no `binaryTrieTime` charges the
       corpus-pinned schedule at both
-- [ ] write tests: the txpool and the executor agree on `IsEIP8038Revised` at a pre-flip and a post-flip
+- [x] write tests: the txpool and the executor agree on `IsEIP8038Revised` at a pre-flip and a post-flip
       block time (the invariant `TxPool.isEIP8038Revised` documents)
-- [ ] run `make test-short` — must pass before task 2
+- [x] run `make test-short` — must pass before task 2
 
 ### Task 2: Version the diffset domain framing
 

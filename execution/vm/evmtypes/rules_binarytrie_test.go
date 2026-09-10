@@ -24,20 +24,20 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// The devnet genesis carries binaryTrieTime and no eip8038Revised, and geth charges the
-// revised schedule from Amsterdam unconditionally, so the tree has to imply it.
-func TestBinaryTrieImpliesEIP8038Revised(t *testing.T) {
+func TestEIP8038RevisedFollowsBinaryTrieSchedule(t *testing.T) {
 	t.Parallel()
 
-	zero := uint64(0)
-	bc := &BlockContext{Time: 1}
+	amsterdam := uint64(100)
+	binaryTrie := uint64(200)
+	withBinaryTrie := &chain.Config{AmsterdamTime: &amsterdam, BinaryTrieTime: &binaryTrie}
+	withoutBinaryTrie := &chain.Config{AmsterdamTime: &amsterdam}
 
-	c := &chain.Config{AmsterdamTime: &zero, BinaryTrieTime: &zero}
-	require.True(t, bc.Rules(c).EIP8038Revised)
+	for _, time := range []uint64{150, 250} {
+		bc := &BlockContext{Time: time}
+		require.True(t, bc.Rules(withBinaryTrie).EIP8038Revised)
+		require.False(t, bc.Rules(withoutBinaryTrie).EIP8038Revised)
+	}
 
-	c = &chain.Config{AmsterdamTime: &zero}
-	require.False(t, bc.Rules(c).EIP8038Revised, "Amsterdam alone keeps the pinned-corpus schedule")
-
-	c = &chain.Config{AmsterdamTime: &zero, EIP8038Revised: true}
-	require.True(t, bc.Rules(c).EIP8038Revised, "the explicit key still works on its own")
+	withExplicitSchedule := &chain.Config{AmsterdamTime: &amsterdam, EIP8038Revised: true}
+	require.True(t, (&BlockContext{Time: 150}).Rules(withExplicitSchedule).EIP8038Revised)
 }

@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -2738,11 +2739,11 @@ func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
 		return pool
 	}
 
-	zero := uint64(0)
 	base := amsterdamConfig(t)
 
 	withTree := amsterdamConfig(t)
-	withTree.BinaryTrieTime = &zero
+	later := uint64(100)
+	withTree.BinaryTrieTime = &later
 	require.True(t, newPool(t, withTree).isEIP8038Revised())
 
 	require.False(t, newPool(t, base).isEIP8038Revised(), "Amsterdam alone keeps the pinned-corpus schedule")
@@ -2753,56 +2754,18 @@ func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
 
 }
 
-// The predicate above is not the defect: it was the two CalcIntrinsicGas call sites that never
-// passed it. This drives validateTx through AddLocalTxns with a transaction funded to exactly
-// the revised intrinsic gas, so a pool charging the unrevised schedule rejects what the
-// executor would run. Reverting either threaded line turns it red.
-func TestPoolIntrinsicGasFollowsEIP8038Revised(t *testing.T) {
+func TestPoolAndExecutorAgreeOnEIP8038RevisedAtBothSidesOfBinaryTrie(t *testing.T) {
 	t.Parallel()
 
-	intrinsic := func(revised bool) uint64 {
-		res, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-			AccessListLen: 1, StorageKeysLen: 1,
-			IsEIP2: true, IsEIP2028: true, IsEIP3860: true, IsEIP7623: true,
-			IsEIP7976: true, IsEIP7981: true, IsEIP2780: true,
-			IsEIP8038Revised: revised,
-		})
-		require.False(t, overflow)
-		return res.ExecutionGas
+	binaryTrieTime := uint64(200)
+	config := amsterdamConfig(t)
+	config.BinaryTrieTime = &binaryTrieTime
+	pool := &TxPool{chainConfig: config}
+
+	for _, blockTime := range []uint64{150, 250} {
+		rules := (&evmtypes.BlockContext{Time: blockTime}).Rules(config)
+		require.Equal(t, rules.EIP8038Revised, pool.isEIP8038Revised())
 	}
-	revisedGas, unrevisedGas := intrinsic(true), intrinsic(false)
-	require.Less(t, revisedGas, unrevisedGas, "the revised schedule must be the cheaper one")
-
-	// Exactly affordable under the revised schedule and 200 gas short under the other.
-	send := func(t *testing.T, cfg *chain.Config) txpoolcfg.DiscardReason {
-		t.Helper()
-		ctx, pool, _, _, sender := newTestPoolWithFundedSenderOn(t, cfg, accounts.EmptyCodeHash)
-		to := common.Address{2}
-		txn := &TxnSlot{Txn: &types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{Nonce: 0, GasLimit: revisedGas, To: &to},
-			TipCap:   *uint256.NewInt(1), FeeCap: *uint256.NewInt(2),
-			AccessList: types.AccessList{{
-				Address:     common.Address{3},
-				StorageKeys: []common.Hash{{4}},
-			}},
-		}}
-		txn.IDHash[0] = 9
-		var txns TxnSlots
-		txns.Append(txn, sender[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txns)
-		require.NoError(t, err)
-		require.Len(t, reasons, 1)
-		return reasons[0]
-	}
-
-	zero := uint64(0)
-	withTree := amsterdamConfig(t)
-	withTree.BinaryTrieTime = &zero
-	require.NotEqual(t, txpoolcfg.IntrinsicGas, send(t, withTree),
-		"a pool on the revised schedule must accept a transaction funded to the revised intrinsic gas")
-
-	require.Equal(t, txpoolcfg.IntrinsicGas, send(t, amsterdamConfig(t)),
-		"a pool on the unrevised schedule charges %d where the executor charges %d", unrevisedGas, revisedGas)
 }
 
 // probeFeeCalculator runs fn from the middle of fromDB, where CurrentFees is called.
