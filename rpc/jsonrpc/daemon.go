@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/sszql"
 )
 
 func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.BaseApiConfig {
@@ -108,6 +109,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, NewGraphQLApiConfig(cfg))
+	sszqlImpl := sszql.NewSSZQLAPI(db, base._blockReader)
 	overlayImpl := NewOverlayAPI(base, db, NewOverlayApiConfig(cfg), otsImpl)
 
 	if cfg.GraphQLEnabled {
@@ -115,6 +117,15 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 			Namespace: "graphql",
 			Public:    true,
 			Service:   GraphQLAPI(gqlImpl),
+			Version:   "1.0",
+		})
+	}
+
+	if cfg.SSZQLEnabled {
+		list = append(list, rpc.API{
+			Namespace: "sszql",
+			Public:    true,
+			Service:   sszql.SSZQLAPI(sszqlImpl),
 			Version:   "1.0",
 		})
 	}
