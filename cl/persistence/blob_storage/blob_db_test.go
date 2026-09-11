@@ -118,6 +118,31 @@ func TestVerifyAgainstIdentifiersRejectsAShortProofWithoutLosingStoredData(t *te
 	require.Equal(t, stored.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
 }
 
+// A remote response can decode with the nested header absent, and the insert path reads through it
+// before validating anything, so the structural check has to come first.
+func TestVerifyAgainstIdentifiersRejectsAnIncompleteHeader(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
+
+	for _, tc := range []struct {
+		name    string
+		sidecar *cltypes.BlobSidecar
+	}{
+		{"nil signed block header", &cltypes.BlobSidecar{}},
+		{"nil header", &cltypes.BlobSidecar{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{tc.sidecar}, clparams.DenebVersion, nil)
+			require.Error(t, err)
+			require.Zero(t, inserted)
+		})
+	}
+}
+
 func setupTestDB(t *testing.T) kv.RwDB {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	return db
