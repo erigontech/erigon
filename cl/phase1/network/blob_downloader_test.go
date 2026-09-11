@@ -19,9 +19,11 @@ package network
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -39,8 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/spf13/afero"
-	"math"
 )
 
 type staticPeerDasGetter struct{ pd das.PeerDas }
