@@ -82,6 +82,8 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 		}).
 		AnyTimes()
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 
 	b := &BlobHistoryDownloader{
@@ -117,6 +119,8 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(context.Canceled).AnyTimes()
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, _ common.Hash) (uint32, error) {
 		<-ctx.Done()
 		return 0, ctx.Err()
@@ -148,6 +152,8 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 func TestBlobHistoryDownloaderMixedBatchAttemptsFuluAfterDenebFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
@@ -187,6 +193,8 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
@@ -232,6 +240,8 @@ func TestBlobHistoryDownloaderCompletedFuluRecoveryMeetsDurablePostcondition(t *
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
@@ -312,6 +322,8 @@ func TestBlobHistoryDownloaderFuluRecoveryWaitsForAsyncPersistence(t *testing.T)
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	var reads atomic.Int32
@@ -343,6 +355,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).Times(2)
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).Times(2)
 
@@ -364,6 +378,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing
 func TestBlobHistoryDownloaderFuluTransientReadErrorDoesNotRemoveStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, errors.New("temporary read failure"))
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
@@ -384,6 +400,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRetainsPartialCommitmentCount(t *testi
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
@@ -407,6 +425,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRetainsExcessCommitmentCount(t *testin
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(3), nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
@@ -428,6 +448,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRetainsExcessCommitmentCount(t *testin
 func TestBlobHistoryDownloaderCountEqualFuluSkipsDeepScanValidation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
@@ -476,6 +498,8 @@ func TestBlobHistoryDownloaderDoesNotRetryIntentionallyPrunedFiles(t *testing.T)
 func TestBlobHistoryDownloaderDoesNotDeepVerifyCountEqualStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 100
@@ -496,6 +520,8 @@ func TestBlobHistoryDownloaderDoesNotDeepVerifyCountEqualStorage(t *testing.T) {
 func TestBlobHistoryDownloaderRetriesRecoveryAfterDurablePostcheckFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	countCalls := 0
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash) (uint32, error) {
 		countCalls++
@@ -579,6 +605,8 @@ func TestBlobHistoryDownloaderConservesEveryIncompleteFuluBlockAcrossPasses(t *t
 				},
 			).AnyTimes()
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+			// Files are present unless a test says otherwise; the archive path stats index 0.
+			blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, root common.Hash) (uint32, error) {
 					slot := roots[root]
@@ -616,6 +644,8 @@ func TestBlobHistoryDownloaderRetryDropsAlreadyCompleteDenebBlock(t *testing.T) 
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).Return(uint32(1), nil).AnyTimes()
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, blockRoot).Return([]*cltypes.BlobSidecar{sidecar}, true, nil).AnyTimes()
 	peer := &countingBlobPeerClient{responses: []*cltypes.BlobSidecar{sidecar}}
@@ -636,6 +666,8 @@ func TestBlobHistoryDownloaderRetryRetainsDenebBlockOnStorageReadError(t *testin
 	require.NoError(t, err)
 	wantErr := errors.New("temporary storage failure")
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	countCalls := 0
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).DoAndReturn(func(context.Context, common.Hash) (uint32, error) {
 		countCalls++
@@ -675,6 +707,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testin
 			peerDas := mock_services.NewMockPeerDas(ctrl)
 			peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+			// Files are present unless a test says otherwise; the archive path stats index 0.
+			blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 			block.Block.Slot = 100
 			block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
@@ -705,6 +739,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
@@ -729,6 +765,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
@@ -745,6 +783,8 @@ func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
 func TestBlobHistoryDownloaderFuluBlockWithoutBlobsIgnoresStaleMetadata(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
@@ -913,6 +953,8 @@ func denebRecoveryFixture(t *testing.T, count int) (*cltypes.SignedBeaconBlock, 
 func TestBlobHistoryDownloaderFailedDenebRequestWithholdsCompletionNotification(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	client := cancelingBlobPeerClient{cancel: cancel}
@@ -934,6 +976,8 @@ func TestBlobHistoryDownloaderFailedDenebRequestWithholdsCompletionNotification(
 func TestBlobHistoryDownloaderDenebWithoutBlobsIgnoresStaleStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 100
@@ -956,6 +1000,10 @@ func TestBlobHistoryDownloaderPostchecksPersistedDenebGroupAfterRequestCancellat
 	require.NoError(t, err)
 
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), rootA, []*cltypes.BlobSidecar{sidecarA}).DoAndReturn(
 		func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
 			cancel()
@@ -996,6 +1044,10 @@ func TestBlobHistoryDownloaderMixedDenebBatchIgnoresZeroCommitmentStorage(t *tes
 			require.NoError(t, err)
 
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+
+			// Files are present unless a test says otherwise; the archive path stats index 0.
+
+			blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 			blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), nonzeroRoot, []*cltypes.BlobSidecar{sidecar}).Return(nil)
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), nonzeroRoot).Return(uint32(1), nil)
 			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), nonzero.Block.Slot, nonzeroRoot).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
@@ -1084,6 +1136,10 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
 
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+
+	// Files are present unless a test says otherwise; the archive path stats index 0.
+
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	// Complete under the canonical root, absent under anything else.
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), canonical).
 		Return(uint32(block.GetBlobKzgCommitments().Len()), nil).AnyTimes()
@@ -1100,4 +1156,38 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	batch, _, err := downloader.collectIncompleteBlocks(slot, slot)
 	require.NoError(t, err)
 	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
+}
+
+// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a datadir
+// pruned as non-archive and later reopened with --caplin.blobs-archive carries counts that no file
+// backs. A matching count is then not evidence the store can serve the slot, and skipping it lets
+// the pass report completion and move its target past work an archive node still owes.
+//
+// The wrong-root lookup used to mask this by missing every count; reading the canonical root
+// correctly removes that accident, so the archive path has to check availability itself.
+func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testing.T) {
+	block, sidecar := validDenebRecoverySidecar(t, 100)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fs := afero.NewMemMapFs()
+	storage := blob_storage.NewBlobStore(db, fs)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
+	require.NoError(t, storage.PruneBelow(10_000))
+
+	// The state the finding describes: the count row survives, the file does not.
+	count, err := storage.KzgCommitmentsCount(t.Context(), blockRoot)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), count)
+	exists, err := storage.BlobSidecarExists(t.Context(), block.Block.Slot, blockRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = true
+
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "an archive slot whose sidecar files are gone must stay queued")
 }
