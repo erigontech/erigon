@@ -58,6 +58,45 @@ func TestVerifyBlobSidecarsGloasDoesNotRequireInclusionProof(t *testing.T) {
 	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.FuluVersion, nil))
 }
 
+// Skipping the inclusion-proof check for Gloas must not also skip checking that the sidecar can be
+// encoded in the shape the reader expects: a short proof vector round-trips through the writer but
+// not the reader, so accepting one replaces readable data with a file nothing can decode.
+func TestVerifyAgainstIdentifiersRejectsAShortProofWithoutLosingStoredData(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}
+	blockRoot, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+
+	stored := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{stored}))
+	_, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "the fixture must start from readable data")
+
+	// What an explicit "kzg_commitment_inclusion_proof": [] decodes to.
+	short := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(0))
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: blockRoot, Index: 0})
+
+	_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a sidecar the reader cannot decode must be rejected before it is written")
+	require.Zero(t, inserted)
+
+	sidecars, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "a rejected write must leave the existing sidecar readable")
+	require.Len(t, sidecars, 1)
+	require.Equal(t, stored.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
+}
+
 func setupTestDB(t *testing.T) kv.RwDB {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	return db

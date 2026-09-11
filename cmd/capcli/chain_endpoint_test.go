@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -96,11 +97,34 @@ func headSlotInDB(t *testing.T, datadirPath string, root common.Hash) *uint64 {
 	return slot
 }
 
+// Run fetches a checkpoint state before it reaches anything under test here, so the checkpoint URLs
+// are pointed at a local server to keep the test off the public providers.
+func serveCheckpointStateLocally(t *testing.T) {
+	t.Helper()
+	_, checkpointState, _ := tests.GetPhase0Random()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		encoded, err := checkpointState.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(encoded)
+	}))
+	t.Cleanup(server.Close)
+
+	previous := clparams.ConfigurableCheckpointsURLs
+	clparams.ConfigurableCheckpointsURLs = []string{server.URL}
+	t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = previous })
+}
+
 // The bootstrap head takes a different path from every other block: ChainEndpoint.Run fetches it,
 // writes it and commits before the loop starts. With blobs requested, a blob-bearing head must not
 // be committed unless its sidecars are stored, or the download reports success over a block whose
 // blobs nothing will look for again.
 func TestChainEndpointRunDoesNotCommitABlobBearingHeadWithoutItsSidecars(t *testing.T) {
+	serveCheckpointStateLocally(t)
+
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Mainnet)
 	require.NoError(t, err)
 
@@ -123,6 +147,8 @@ func TestChainEndpointRunDoesNotCommitABlobBearingHeadWithoutItsSidecars(t *test
 // The head still has to be committed when it carries no commitments, otherwise routing it through
 // the blob path would stall every download that has no blobs to fetch.
 func TestChainEndpointRunCommitsAHeadWithNoCommitments(t *testing.T) {
+	serveCheckpointStateLocally(t)
+
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Mainnet)
 	require.NoError(t, err)
 
