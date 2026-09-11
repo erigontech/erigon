@@ -84,6 +84,7 @@ type Task interface {
 	GasPool() *protocol.GasPool
 
 	IsBlockEnd() bool
+	IsSystemTx() bool
 	IsHistoric() bool
 
 	TracingHooks() *tracing.Hooks
@@ -225,6 +226,7 @@ type TxTask struct {
 	Trace                 bool
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	isSystemTx            bool   // consensus system transaction (Parlia): runs outside the block gas pool
 
 	gasPool      *protocol.GasPool
 	sender       accounts.Address
@@ -455,6 +457,10 @@ func (t *TxTask) IsBlockEnd() bool {
 	return t.TxIndex == len(t.Txs)
 }
 
+func (t *TxTask) IsSystemTx() bool { return t.isSystemTx }
+
+func (t *TxTask) SetSystemTx(v bool) { t.isSystemTx = v }
+
 func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
@@ -550,16 +556,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		if sysEngine, ok := asSystemTxEngine(engine); ok {
-			isSys, sysErr := sysEngine.IsSystemTransaction(txTask.Tx(), header)
-			if sysErr != nil {
-				result.Err = sysErr
-				return &result
-			}
-			if isSys {
-				result = *txTask.executeSystemTx(sysEngine, evm, ibs)
-				break
-			}
+		if txTask.isSystemTx {
+			sysEngine, _ := asSystemTxEngine(engine)
+			result = *txTask.executeSystemTx(sysEngine, evm, ibs)
+			break
 		}
 
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
