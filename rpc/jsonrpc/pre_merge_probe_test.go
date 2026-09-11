@@ -576,3 +576,46 @@ func TestPreMergeVerdictHoldsAcrossChainShapes(t *testing.T) {
 		}
 	}
 }
+
+// TestPreMergeSearchKeepsTheBoundsItRead measures the walk on the shape that costs the
+// most: a count inflated block after block, each one excluded in a pass of its own. The
+// blocks a pass reads bound the next one, so the chain is descended once, not per pass.
+func TestPreMergeSearchKeepsTheBoundsItRead(t *testing.T) {
+	t.Parallel()
+
+	const length = 4096
+	inflation := make([]int, length)
+	for block := 1; block <= 10; block++ {
+		inflation[block] = 1
+	}
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: inflation}
+	api := newProbeAPI(reader)
+
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.True(t, decided)
+	require.True(t, data.holds, "no block records a user transaction, so none is missing")
+	require.Less(t, reader.bodyReads.Load(), int64(60),
+		"the chain is descended once, not once per block the count makes the search exclude")
+}
+
+// TestPreMergeSamplingBracketsTheSearch measures a chain whose count is inflated just
+// above genesis: every sampled block already says where the transaction the count
+// records can be, so the search starts from what the sampling read instead of the whole
+// chain.
+func TestPreMergeSamplingBracketsTheSearch(t *testing.T) {
+	t.Parallel()
+
+	const length = 4096
+	inflation := make([]int, length)
+	inflation[0] = 1
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: inflation}
+	api := newProbeAPI(reader)
+
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.True(t, decided)
+	require.True(t, data.holds, "the count is inflation alone, so no transaction is missing")
+	require.Less(t, reader.bodyReads.Load(), int64(20),
+		"the sampled counts bracket the search instead of being read and dropped")
+}

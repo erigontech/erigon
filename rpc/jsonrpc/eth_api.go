@@ -575,18 +575,32 @@ func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uin
 	if err != nil {
 		return false, false, err
 	}
-	if last != nil && earlyUserTxns(last, limit-1) <= 0 {
-		return true, true, nil
+	var bounds []earlyTxnBound
+	if last != nil {
+		txns := earlyUserTxns(last, limit-1)
+		if txns <= 0 {
+			return true, true, nil
+		}
+		bounds = append(bounds, earlyTxnBound{num: limit - 1, body: last, txns: txns})
 	}
+	low := uint64(0)
 	for candidate := limit / 2; candidate >= 1; candidate /= 2 {
 		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, candidate)
 		if err != nil {
 			return false, false, err
 		}
-		if body == nil || body.TxCount <= systemTxsPerBlock {
+		if body == nil {
 			continue
 		}
-		return api.readsUserTransaction(ctx, tx, candidate)
+		if body.TxCount > systemTxsPerBlock {
+			return api.readsUserTransaction(ctx, tx, candidate)
+		}
+		txns := earlyUserTxns(body, candidate)
+		if txns <= 0 {
+			low = candidate + 1
+			break
+		}
+		bounds = append(bounds, earlyTxnBound{num: candidate, body: body, txns: txns})
 	}
 	if last == nil {
 		// Nothing sampled could show a transaction, and no count proved there are none,
@@ -596,7 +610,7 @@ func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uin
 	}
 	// The count proves a transaction is there and no sampled block held one: a chain
 	// sparse enough to pay for a search.
-	candidate, outcome, err := api.searchUserTxnBlock(ctx, tx, limit-1, last)
+	candidate, outcome, err := api.searchUserTxnBlock(ctx, tx, low, bounds)
 	if err != nil {
 		return false, false, err
 	}
@@ -635,21 +649,33 @@ const (
 // open rather than settled on what the search has not seen.
 const earlyTxnSearchBudget = 256
 
-// searchUserTxnBlock locates a block up to last whose body records a user transaction,
-// which the count the caller read says is there. That count is an upper bound, so the
-// block it lands on can record none: what it carried was inflation, and excluding it
-// moves the bound past that block so the search resumes above it.
-func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, last uint64, lastBody *types.BodyForStorage) (uint64, earlyTxnSearch, error) {
-	budget, low, excludedTxns := earlyTxnSearchBudget, uint64(0), int64(0)
-	totalTxns := earlyUserTxns(lastBody, last)
+// earlyTxnBound is a block whose cumulative count ran ahead of what the search had
+// excluded when it was read. Counts only grow with the block number, so it stays an
+// upper bound until the search excludes as many transactions as it records.
+type earlyTxnBound struct {
+	num  uint64
+	body *types.BodyForStorage
+	txns int64
+}
+
+// searchUserTxnBlock locates a block at or above low whose body records a user
+// transaction, which the count in the outermost of bounds says is there. That count is an
+// upper bound, so the block it lands on can record none: what it carried was inflation,
+// and excluding it moves the bound past that block so the search resumes above it.
+func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, low uint64, bounds []earlyTxnBound) (uint64, earlyTxnSearch, error) {
+	budget, excludedTxns := earlyTxnSearchBudget, int64(0)
+	totalTxns := bounds[0].txns
 	for excludedTxns < totalTxns {
-		high, highBody := last, lastBody
-		for low < high {
+		for len(bounds) > 1 && bounds[len(bounds)-1].txns <= excludedTxns {
+			bounds = bounds[:len(bounds)-1]
+		}
+		high := bounds[len(bounds)-1]
+		for low < high.num {
 			if budget <= 0 {
 				return 0, earlyTxnUnread, nil
 			}
 			budget--
-			middle := low + (high-low)/2
+			middle := low + (high.num-low)/2
 			body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, middle)
 			if err != nil {
 				return 0, earlyTxnUnread, err
@@ -657,16 +683,17 @@ func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, last uint6
 			if body == nil {
 				return 0, earlyTxnUnread, nil
 			}
-			if earlyUserTxns(body, middle) > excludedTxns {
-				high, highBody = middle, body
+			if txns := earlyUserTxns(body, middle); txns > excludedTxns {
+				high = earlyTxnBound{num: middle, body: body, txns: txns}
+				bounds = append(bounds, high)
 			} else {
 				low = middle + 1
 			}
 		}
-		if highBody.TxCount > systemTxsPerBlock {
+		if high.body.TxCount > systemTxsPerBlock {
 			return low, earlyTxnFound, nil
 		}
-		excludedTxns = earlyUserTxns(highBody, low)
+		excludedTxns = high.txns
 		low++
 	}
 	return 0, earlyTxnNone, nil
