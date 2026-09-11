@@ -225,3 +225,65 @@ func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "withdrawal 7")
 }
+
+type blockDerivedL2 struct{}
+
+func (blockDerivedL2) Name() string { return "blockderived" }
+
+func (blockDerivedL2) ResolveRules(_, blockNum, _ uint64, r *chain.Rules) {
+	if blockNum >= 20_000_000 {
+		r.L2Version = 50
+	} else {
+		r.L2Version = 30
+	}
+}
+
+func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		l2          chain.L2Config
+		blockNum    uint64
+		wantVersion uint64
+	}{
+		{"version from block number, below the ladder step", blockDerivedL2{}, 15_000_000, 30},
+		{"version from block number, above the ladder step", blockDerivedL2{}, 21_000_000, 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cancunTime := uint64(0)
+			chainConfig := chain.Config{
+				ChainID:    uint256.NewInt(1337),
+				CancunTime: &cancunTime,
+				L2:         tc.l2,
+			}
+			beaconRoot := common.HexToHash("0xbeac07")
+			header := &types.Header{
+				Difficulty:            *ProofOfStakeDifficulty,
+				Number:                *uint256.NewInt(tc.blockNum),
+				Time:                  1,
+				ParentBeaconBlockRoot: &beaconRoot,
+			}
+
+			var seen *tracing.VMContext
+			tracer := tracing.Hooks{
+				OnSystemCallStartV2: func(env *tracing.VMContext) { seen = env },
+			}
+
+			logger := log.New()
+			chainReader := consensuschain.NewReader(&chainConfig, nil, nil, logger)
+			systemCallCustom := func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+				return nil, nil
+			}
+			var intraBlockState state.IntraBlockState
+			var eth1Engine rules.Engine
+
+			require.NoError(t, New(eth1Engine).Initialize(&chainConfig, chainReader, header,
+				&intraBlockState, systemCallCustom, logger, &tracer))
+
+			require.NotNil(t, seen, "the Cancun system call must reach OnSystemCallStartV2")
+			require.NotNil(t, seen.Rules, "the traced context must carry the rules, not the ingredients to rebuild them")
+
+			require.Equal(t, tc.wantVersion, seen.Rules.L2Version,
+				"the traced rules must carry the version the system call's own EVM resolves")
+		})
+	}
+}

@@ -51,8 +51,9 @@ type DomainIOMetrics struct {
 	// from CacheReadCount which counts sd.mem and sd.parent.mem hits.
 	// Hit means stateCache.Get returned ok (we skipped MDBX+files).
 	// Miss means stateCache.Get returned !ok and we fell through to aggTx.
-	StateCacheHitCount  int64
-	StateCacheMissCount int64
+	StateCacheHitCount    int64
+	StateCacheMissCount   int64
+	StateCacheHitDuration time.Duration
 }
 
 // DomainMetrics is used in two roles. As the shared aggregate, it is read for a
@@ -144,12 +145,16 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	de.DbReadDuration += d
 }
 
-func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain) {
+func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain, start time.Time) {
 	if dm == nil {
 		return
 	}
+	d := time.Since(start)
 	dm.StateCacheHitCount++
-	dm.domainEntry(domain).StateCacheHitCount++
+	dm.StateCacheHitDuration += d
+	de := dm.domainEntry(domain)
+	de.StateCacheHitCount++
+	de.StateCacheHitDuration += d
 }
 
 func (dm *DomainMetrics) UpdateStateCacheMiss(domain kv.Domain) {
@@ -245,6 +250,18 @@ func (dm *DomainMetrics) Merge(src *DomainMetrics) {
 	dm.mergeLocked(src)
 }
 
+func (dm *DomainMetrics) SnapshotDomain(domain kv.Domain) DomainIOMetrics {
+	if dm == nil {
+		return DomainIOMetrics{}
+	}
+	dm.RLock()
+	defer dm.RUnlock()
+	if de := dm.Domains[domain]; de != nil {
+		return *de
+	}
+	return DomainIOMetrics{}
+}
+
 // mergeLocked folds src into dm without taking dm's lock. Used by Merge (which
 // holds the lock) and by the Collector goroutine (single-owner, no lock needed).
 func (dm *DomainMetrics) mergeLocked(src *DomainMetrics) {
@@ -274,6 +291,7 @@ func addIOMetrics(dst, src *DomainIOMetrics) {
 		dst.UniqueLenBuckets[i] += src.UniqueLenBuckets[i]
 	}
 	dst.StateCacheHitCount += src.StateCacheHitCount
+	dst.StateCacheHitDuration += src.StateCacheHitDuration
 	dst.StateCacheMissCount += src.StateCacheMissCount
 }
 

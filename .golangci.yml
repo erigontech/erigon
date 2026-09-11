@@ -104,10 +104,10 @@ linters:
       enable:
         - nilness
         - unusedwrite
+        - shadow
       disable:
         - deepequalerrors
         - fieldalignment
-        - shadow
         - unsafeptr
   exclusions:
     generated: lax
@@ -120,32 +120,102 @@ linters:
       - linters:
           - modernize
         path: _grpc\.pb\.go
+      # shadow runs under db/ only for now; the rest of the tree is not swept yet.
+      - linters:
+          - govet
+        text: "^shadow:"
+        path-except: "^db/"
+      # Bootstrap exclusion: files with baseline shadow findings, migrated one
+      # file per PR. Remove a file from the list once it is clean; a file that is
+      # not listed is gated, so a fixed file cannot silently regress.
+      - linters:
+          - govet
+        text: "^shadow:"
+        path: "^(\
+          db/datastruct/btindex/bpstree_bench_test\\.go\
+          |db/datastruct/btindex/btree_index_test\\.go\
+          |db/datastruct/btindex/interp_varlen_test\\.go\
+          |db/datastruct/btindex/testhelpers_test\\.go\
+          |db/datastruct/fusefilter/fusefilter_fuzz_test\\.go\
+          |db/datastruct/fusefilter/fusefilter_realfile_test\\.go\
+          |db/datastruct/fusefilter/fusefilter_writer\\.go\
+          |db/datastruct/fusefilter/fusefilter_writer_test\\.go\
+          |db/downloader/chaintoml\\.go\
+          |db/downloader/downloader\\.go\
+          |db/downloader/downloader_test\\.go\
+          |db/downloader/webseed\\.go\
+          |db/integrity/commitment_integrity\\.go\
+          |db/integrity/no_gaps_in_canonical_headers\\.go\
+          |db/integrity/receipts_no_duplicates\\.go\
+          |db/kv/backup/backup\\.go\
+          |db/kv/backup/datadir\\.go\
+          |db/kv/kvcache/cache\\.go\
+          |db/kv/mdbx/kv_abstract_test\\.go\
+          |db/kv/mdbx/kv_mdbx\\.go\
+          |db/kv/mdbx/kv_mdbx_test\\.go\
+          |db/kv/membatchwithdb/memory_mutation\\.go\
+          |db/kv/membatchwithdb/memory_mutation_test\\.go\
+          |db/kv/membatchwithdb/memory_store_test\\.go\
+          |db/kv/prune/prune\\.go\
+          |db/kv/prune/prune_test\\.go\
+          |db/kv/rawdbv3/txnum\\.go\
+          |db/kv/rawdbv3/txnum_bench_test\\.go\
+          |db/kv/remotedbserver/remotedbserver_test\\.go\
+          |db/kv/temporal/kv_temporal_resources_test\\.go\
+          |db/kv/temporal/kv_temporal_test\\.go\
+          |db/rawdb/accessors_chain\\.go\
+          |db/rawdb/accessors_chain_test\\.go\
+          |db/rawdb/accessors_indexes_test\\.go\
+          |db/recsplit/eliasfano32/elias_fano\\.go\
+          |db/recsplit/eliasfano32/elias_fano_test\\.go\
+          |db/recsplit/index\\.go\
+          |db/recsplit/index_test\\.go\
+          |db/recsplit/recsplit\\.go\
+          |db/recsplit/recsplit_fuzz_test\\.go\
+          |db/snapshotsync/freezeblocks/beacon_block_reader\\.go\
+          |db/snapshotsync/freezeblocks/block_reader\\.go\
+          |db/snapshotsync/freezeblocks/block_reader_bench_test\\.go\
+          |db/snapshotsync/freezeblocks/block_snapshots\\.go\
+          |db/snapshotsync/freezeblocks/caplin_snapshots\\.go\
+          |db/snapshotsync/merger\\.go\
+          |db/snapshotsync/snapshots\\.go\
+          |db/snapshotsync/snapshotsync\\.go\
+          |db/snaptype/type\\.go\
+          |db/state/aggregator\\.go\
+          |db/state/aggregator_bench_test\\.go\
+          |db/state/aggregator_fuzz_test\\.go\
+          |db/state/aggregator_test\\.go\
+          |db/state/commitment_convert\\.go\
+          |db/state/commitment_version_testutil_test\\.go\
+          |db/state/domain\\.go\
+          |db/state/domain_committed\\.go\
+          |db/state/domain_test\\.go\
+          |db/state/erigondb_settings\\.go\
+          |db/state/execctx/domain_shared\\.go\
+          |db/state/execctx/domain_shared_test\\.go\
+          |db/state/execctx/statecache_readfill_test\\.go\
+          |db/state/history\\.go\
+          |db/state/history_test\\.go\
+          |db/state/inverted_index\\.go\
+          |db/state/inverted_index_test\\.go\
+          |db/state/merge\\.go\
+          |db/state/merge_test\\.go\
+          |db/state/snap_creation_fragility_test\\.go\
+          |db/state/squeeze\\.go\
+          |db/state/squeeze_test\\.go\
+          |db/state/stats/agg_log_stats\\.go\
+          |db/state/temporal_mem_batch\\.go\
+          |db/test/aggregator_ext_test\\.go\
+          |db/test/domain_shared_bench_test\\.go\
+          |db/test/domains_restart_test\\.go\
+          |db/test/lifecycle_bench_test\\.go\
+          )$"
       # Bootstrap exclusion for #22538: baseline errcheck findings, migrated
       # one package per PR. Remove a package's alternative once it's clean.
       - linters:
           - errcheck
         path: "^(\
-          diagnostics/diaglib\
-          |diagnostics/diskutils\
-          |execution/commitment\
-          |execution/commitment/trie\
-          |execution/exec\
-          |execution/execmodule\
-          |execution/execmodule/execmoduletester\
-          |execution/protocol\
-          |execution/protocol/aa\
-          |execution/protocol/misc\
-          |execution/protocol/rules/aura\
-          |execution/protocol/rules/ethash\
-          |execution/protocol/rules/merge\
-          |execution/rlp\
-          |execution/stagedsync\
-          |execution/tests\
-          |execution/tests/testutil\
-          |execution/tracing/tracers/js\
-          |execution/types\
-          |execution/types/accounts\
-          |node\
+          node\
           |node/app/component\
           |node/debug\
           |node/nodecfg\

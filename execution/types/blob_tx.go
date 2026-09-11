@@ -398,7 +398,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode BlobVersionedHashes
-	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
+	if stx.BlobVersionedHashes, err = decodeHashListTo(s, nil); err != nil {
 		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
 	if len(stx.BlobVersionedHashes) == 0 {

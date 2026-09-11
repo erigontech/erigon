@@ -145,7 +145,7 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := store.forkGraph.GetHeader(blockRoot)
 	require.True(t, ok, "block should have been added once the EL validated it")
-	require.True(t, store.IsPayloadVerified(blockRoot))
+	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
 }
 
 // A GetHead that runs while f.mu is released caches a head computed without the
@@ -335,7 +335,7 @@ func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusInvalidated, nil)
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
 
-		require.ErrorContains(t, run(), "block is invalid")
+		require.ErrorIs(t, run(), ErrBlockInvalid)
 		status, ok := store.executionPayloadStatus.Get(block.Block.Body.ExecutionPayload.BlockHash)
 		require.True(t, ok, "the EL verdict must still be recorded")
 		require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -418,7 +418,7 @@ func TestOnBlockCancelledNewPayloadLeavesStoreConsistent(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := store.forkGraph.GetHeader(blockRoot)
 	require.False(t, ok, "a block whose EL validation was cancelled must not be committed")
-	require.False(t, store.IsPayloadVerified(blockRoot))
+	require.False(t, store.verifiedExecutionPayload.Contains(blockRoot))
 }
 
 // Two OnBlock calls racing on the same block must both succeed and leave the payload
@@ -448,7 +448,7 @@ func TestConcurrentOnBlockForSameBlockStaysConsistent(t *testing.T) {
 
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	require.True(t, store.IsPayloadVerified(blockRoot))
+	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
 	_, ok := store.forkGraph.GetHeader(blockRoot)
 	require.True(t, ok)
 	status, ok := store.executionPayloadStatus.Get(block.Block.Body.ExecutionPayload.BlockHash)

@@ -554,6 +554,9 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
 	cell.loaded = upCell.loaded
+	if cell.accountAddrLen == 0 {
+		cell.loaded &^= cellLoadAccount
+	}
 }
 
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
@@ -602,8 +605,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	if lowDepth > 64 {
-		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	if lowDepth > 64 && lowCell.accountAddrLen == 0 {
+		cell.loaded = cell.loaded&cellLoadAccount | lowCell.loaded&cellLoadStorage
 	} else {
 		cell.loaded = lowCell.loaded
 	}
@@ -2353,8 +2356,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
-
-	mxTrieProcessedKeys.Inc()
 	return nil
 }
 
