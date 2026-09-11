@@ -153,7 +153,7 @@ type BaseAPI struct {
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
 	// availability, which widens as segments arrive.
-	_preMergeData concurrent.CachedValue[bool]
+	_preMergeData concurrent.CachedValue[preMergeBlockData]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -474,22 +474,23 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
 // that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
-	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	expiry, oldest, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
 	if err != nil {
 		return err
 	}
 	if expiry {
-		if mergeHeight == nil || block >= *mergeHeight {
+		if oldest == nil || block >= *oldest {
 			return nil
 		}
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *oldest)
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
 // history-expiry policy rather than a window, which Distance.Enabled reads as "not
-// pruning" although pre-merge transactions are never downloaded.
+// pruning" although pre-merge transactions are never downloaded, and the block the
+// datadir then serves from.
 func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
 	p, err := api.pruneMode(tx)
 	if err != nil || p == nil {
@@ -503,12 +504,20 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 		return false, nil, err
 	}
 	if chainConfig.MergeHeight != nil {
-		holds, err := api.holdsPreMergeBlockData(ctx, tx, *chainConfig.MergeHeight)
-		if err != nil || holds {
+		data, err := api.holdsPreMergeBlockData(ctx, tx, *chainConfig.MergeHeight)
+		if err != nil || data.holds {
 			return false, nil, err
 		}
+		return true, &data.oldest, nil
 	}
 	return true, chainConfig.MergeHeight, nil
+}
+
+// preMergeBlockData is what the datadir answers about pre-merge blocks: whether it holds
+// any, and the lowest block it serves in full when it does not.
+type preMergeBlockData struct {
+	holds  bool
+	oldest uint64
 }
 
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
@@ -516,19 +525,19 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // mode carries the same sentinel for both. Only a readable transaction of an early block
 // settles it: expiry keeps pre-merge headers and bodies, and the transaction segment
 // spanning the merge point reaches below it.
-func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
+func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (preMergeBlockData, error) {
 	for {
-		if holds, observed, fresh := api._preMergeData.Load(); observed && fresh {
-			return holds, nil
+		if data, observed, fresh := api._preMergeData.Load(); observed && fresh {
+			return data, nil
 		}
-		holds, ran, err := api._preMergeData.Produce(ctx, func() (bool, bool, error) {
+		data, ran, err := api._preMergeData.Produce(ctx, func() (preMergeBlockData, bool, error) {
 			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
 		})
 		switch {
 		case err == nil:
-			return holds, nil
+			return data, nil
 		case ran || ctx.Err() != nil:
-			return false, err
+			return preMergeBlockData{}, err
 		}
 		// The probe reads through the transaction of the caller that ran it, so a failure
 		// is about that caller rather than about the datadir: one that only waited asks
@@ -539,20 +548,21 @@ func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 // probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
 // decided=false where the block data it reads is itself missing: a verdict inferred from
 // absent data is not one to remember.
-func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (holds, decided bool, err error) {
+func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (data preMergeBlockData, decided bool, err error) {
 	if mergeHeight == 0 {
-		return false, true, nil
+		return preMergeBlockData{}, true, nil
 	}
 	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
 	if err != nil {
-		return false, false, err
+		return preMergeBlockData{}, false, err
 	}
 	// Zero is a snapshot set starting at genesis, one a database holding every block
 	// after it; anything higher starts mid-chain, however far below the merge point.
 	if oldest > 1 {
-		return false, true, nil
+		return preMergeBlockData{oldest: oldest}, true, nil
 	}
-	return api.hasEarlyTransaction(ctx, tx, mergeHeight)
+	holds, decided, err := api.hasEarlyTransaction(ctx, tx, mergeHeight)
+	return preMergeBlockData{holds: holds, oldest: mergeHeight}, decided, err
 }
 
 // hasEarlyTransaction reports whether the datadir is read as holding user transactions
