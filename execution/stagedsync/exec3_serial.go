@@ -155,6 +155,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Logger:           se.logger,
 			}
 
+			sysTx, sysErr := systemTxFlag(se.cfg.engine, txs, txIndex, header)
+			if sysErr != nil {
+				return nil, rwTx, sysErr
+			}
+			txTask.SetSystemTx(sysTx)
+
 			if txTask.TxNum > 0 && txTask.TxNum <= initialTxNum {
 				havePartialBlock = true
 				inputTxNum++

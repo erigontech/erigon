@@ -1309,11 +1309,16 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
 	}
 
+	// Parlia routes the tip to the (contended) SystemAddress, which its in-block
+	// system transactions then read; deferring the credit would make those reads
+	// see a stale balance, so apply fees inline during execution instead.
+	delayFeeCalc := pe.cfg.chainConfig.Parlia == nil
+
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
-			shouldDelayFeeCalc: true,
+			shouldDelayFeeCalc: delayFeeCalc,
 		}
 
 		executor.tasks = append(executor.tasks, t)
@@ -2884,7 +2889,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// worker coinbase write, and downstream BALANCE(coinbase) reads
 		// across this window are rare. Value-aware validation would close
 		// the gap if it surfaces.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil && !txTask.Rules().IsParlia {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
@@ -2979,7 +2984,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				if txn := txTask.Tx(); txn != nil {
+				if txn := txTask.Tx(); txn != nil && !txTask.IsSystemTx() {
 					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
 					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
 						return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
