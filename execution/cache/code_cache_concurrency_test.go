@@ -52,9 +52,9 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int64(8+len(code)), cc.codeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeSize.Load(),
 		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
-	require.Equal(t, int64(len(codeHash)+len(code)), cc.codeHashCodeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
 		"codeSizeByCodeHash must hold exactly one entry after concurrent same-code Puts")
@@ -83,7 +83,7 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Put(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
+	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)
@@ -91,9 +91,9 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 }
 
 // TestCodeCache_ConcurrentDistinctPuts_RespectCap drives many workers putting
-// distinct codes whose combined size far exceeds a tiny cap. The freelru layer
-// evicts the coldest entries to stay within its entry cap (no freeze), and the
-// OnEvict-maintained byte counter must never drift negative under concurrency.
+// distinct codes whose combined size far exceeds a tiny budget. The layer
+// evicts to stay within its byte bound (no freeze), and the onEvict-maintained
+// byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
 	cc := closeOnCleanup(t, NewCodeCache(codeCap, 16*datasize.MB))
@@ -110,10 +110,12 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The entry cap (codeCap/avgCodeEntryBytes) is the hard bound; residency
-	// settled far below the 128 distinct puts rather than freezing at the first.
+	// Residency settled far below the 128 distinct puts rather than freezing at
+	// the first. No byte assertion at this size: the layer holds single-digit
+	// entries here, where the admission granularity is the same order as the
+	// budget. TestCodeCacheStaysWithinByteBudget pins the bound at a realistic size.
 	require.Less(t, cc.codeHashToCode.Len(), workers,
-		"freelru must evict to its entry cap, not hold all 128 distinct codes")
+		"the layer must evict to its byte budget, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
 		"byte counter must stay non-negative (OnEvict accounting must not double-subtract)")
 }
@@ -153,7 +155,7 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	// Model a writer that sampled the epoch before Clear and published after
 	// the relevant layers were purged.
 	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
-	cc.hashToCode.Put(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
 	cc.Unwind(150)
 
 	_, ok := cc.Get(addr)
@@ -212,7 +214,7 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
 	for i := range uint64(500) {
-		g.Put(key(i), i)
+		g.Add(key(i), i)
 	}
 	check("adds")
 	require.Equal(t, 500, g.Len(), "500 distinct keys must fit below the 1024-slot start capacity")
@@ -225,7 +227,7 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 
 	before := g.cur.Load()
 	for i := uint64(500); i < 4000; i++ {
-		g.Put(key(i), i)
+		g.Add(key(i), i)
 	}
 	require.NotEqual(t, before, g.cur.Load(), "grow did not happen")
 	check("grow")
@@ -244,7 +246,7 @@ func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
 	defer g.Close()
 
 	h := uint64(7)
-	g.Put(h, 1)
+	g.Add(h, 1)
 	gen1 := g.cur.Load()
 
 	// Build the next generation exactly like maybeGrow's copy loop, and
@@ -259,7 +261,7 @@ func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
 	g.cur.Store(gen2)
 	g.curCap.Store(newCap)
 
-	g.Put(h, 2)
+	g.Add(h, 2)
 
 	require.Equal(t, gen2.lru.Len(), g.Len(),
 		"counter must not double-count a grow-copied key replaced in place")
@@ -323,16 +325,8 @@ func TestCodeCache_GrowLRULenCounterUnderConcurrency(t *testing.T) {
 	close(done)
 	unwinder.Wait()
 
-	for _, layer := range []struct {
-		name string
-		lru  *growLRU[codeEntry]
-	}{
-		{"hashToCode", cc.hashToCode},
-		{"codeHashToCode", cc.codeHashToCode},
-	} {
-		require.Equal(t, layer.lru.cur.Load().lru.Len(), layer.lru.Len(), "%s counter drifted", layer.name)
-		require.Greater(t, layer.lru.curCap.Load(), layer.lru.startCap, "%s never grew", layer.name)
-	}
+	// Only the size layer is still a growLRU; the content layers are byteLRU,
+	// which bounds by bytes and keeps no generation counter.
 	require.Equal(t, cc.codeSizeByCodeHash.cur.Load().lru.Len(), cc.codeSizeByCodeHash.Len(),
 		"codeSizeByCodeHash counter drifted")
 	require.Greater(t, cc.codeSizeByCodeHash.curCap.Load(), cc.codeSizeByCodeHash.startCap,
@@ -349,7 +343,7 @@ func BenchmarkGrowLRUParallelPutGrow(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			n := seq.Add(1) * 0x9E3779B97F4A7C15
-			g.Put(n, n)
+			g.Add(n, n)
 		}
 	})
 }
@@ -373,7 +367,7 @@ func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
 				h := key(uint64(w)*20000 + i)
 				stripe := &stripes[uint8(h)]
 				stripe.Lock()
-				g.Put(h, i)
+				g.Add(h, i)
 				stripe.Unlock()
 			}
 		})
@@ -403,7 +397,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 
 	const warmup = genericCacheStartCapacity / 2
 	for i := range uint64(warmup) {
-		g.Put(key(i), i)
+		g.Add(key(i), i)
 	}
 	for i := uint64(0); i < warmup; i += 3 { // pull recency away from insertion order
 		g.Get(key(i))
@@ -421,7 +415,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 				oldVals[j], _ = old.lru.Peek(k)
 			}
 		}
-		g.Put(key(i), i)
+		g.Add(key(i), i)
 		if grew = g.curCap.Load() > startCap; grew {
 			trigger = i // this add landed in the new generation, after the copy
 		}

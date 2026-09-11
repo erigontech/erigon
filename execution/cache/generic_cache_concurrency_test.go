@@ -33,6 +33,10 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
+// largeCodePayloadBytes is a big-content payload size for the growLRU sizing
+// sweeps; the code layers themselves are byte-bounded and no longer use it.
+const largeCodePayloadBytes = 12 * 1024
+
 // The envelope must cover what a cache actually allocates: freelru wraps every
 // value in an element and over-allocates the table by 25%, neither of which the
 // payload estimate accounts for.
@@ -802,7 +806,7 @@ func TestGenericCache_CeilingFitsItsBudget(t *testing.T) {
 
 	for _, procs := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 		runtime.GOMAXPROCS(procs)
-		for _, payload := range []uint32{8, avgStoragePayloadBytes, avgAccountPayloadBytes, avgBytesPerEntry, avgCodeEntryBytes} {
+		for _, payload := range []uint32{8, avgStoragePayloadBytes, avgAccountPayloadBytes, avgBytesPerEntry, largeCodePayloadBytes} {
 			for _, budget := range cacheBudgets {
 				// The value type sets the element size, which every term scales with.
 				requireCeilingFitsBudget[[]byte](t, procs, payload, budget)
@@ -891,7 +895,7 @@ func TestGrowLRU_ByteBudgetHoldsAcrossShardCountChanges(t *testing.T) {
 	// fill shard 0 alone and never reach the capacity a grow is triggered on.
 	fill := func(g *growLRU[codeEntry], upTo uint32) {
 		for i := range upTo {
-			g.Put(spreadKey(uint64(i)), codeEntry{})
+			g.Add(spreadKey(uint64(i)), codeEntry{})
 		}
 	}
 
@@ -901,7 +905,7 @@ func TestGrowLRU_ByteBudgetHoldsAcrossShardCountChanges(t *testing.T) {
 	ceilingCost := func(t *testing.T, at, to int) int64 {
 		cachebudget.Global = cachebudget.New(math.MaxInt64)
 		runtime.GOMAXPROCS(at)
-		g := newGrowLRU[codeEntry](budget, avgCodeEntryBytes, nil)
+		g := newGrowLRU[codeEntry](budget, largeCodePayloadBytes, nil)
 		defer g.Close()
 		settled := func(step string) {
 			t.Helper()
@@ -953,7 +957,7 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 	require.Zero(t, cachebudget.Global.Used())
 
 	for i := range 4 * genericCacheStartCapacity {
-		g.Put(spreadKey(uint64(i)), codeSizeEntry{})
+		g.Add(spreadKey(uint64(i)), codeSizeEntry{})
 	}
 	require.Zero(t, cachebudget.Global.Used(), "a grow after Close charged the envelope")
 

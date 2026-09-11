@@ -50,7 +50,8 @@ func (g *lruGen[V]) add(h uint64, v V) {
 // toward a byte-budget ceiling as it fills, funding each step from the shared
 // cachebudget envelope. It exists so a cache with a small working set never
 // pre-commits its full configured capacity — the same demand-growth the state
-// caches use — reused across the CodeCache's content and size layers.
+// caches use. The CodeCache's content layers moved to byteLRU; its size layer
+// still uses this.
 //
 // Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a
@@ -169,11 +170,12 @@ func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
-// Put stores a key, growing first when the generation is full. The Remove is not
-// redundant after a caller's miss: an unfenced grow can leave the key present in
-// the generation this Put lands on, and freelru's Add would replace it in place
-// without firing OnEvict, stranding the count and the caller's byte counter.
-func (g *growLRU[V]) Put(key uint64, value V) {
+// Add stores a key, growing first when the generation is full. It never refuses,
+// so the admitted result is always true. The Remove is not redundant after a
+// caller's miss: an unfenced grow can leave the key present in the generation
+// this Add lands on, and freelru's Add would replace it in place without firing
+// OnEvict, stranding the count and the caller's byte counter.
+func (g *growLRU[V]) Add(key uint64, value V) bool {
 	gen := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
 		g.maybeGrow()
@@ -181,6 +183,7 @@ func (g *growLRU[V]) Put(key uint64, value V) {
 	}
 	gen.lru.Remove(key)
 	gen.add(key, value)
+	return true
 }
 
 func (g *growLRU[V]) maybeGrow() {
