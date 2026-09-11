@@ -422,13 +422,6 @@ func New(
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
 
-	// BSC/Parlia has no execution engine yet: run the pipeline blocks-only so the
-	// download driver can persist and advance the head without executing. Reuses
-	// the StagesOnlyBlocks mode; remove once Parlia execution is plugged in.
-	if chainConfig.Parlia != nil {
-		dbg.StagesOnlyBlocks = true
-	}
-
 	setDefaultMinerGasLimit(config, chainConfig)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
