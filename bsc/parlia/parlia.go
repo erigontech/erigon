@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -84,6 +85,21 @@ func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header)
 		return false, errors.New("parlia: unauthorized system transaction")
 	}
 	return sender.Value() == header.Coinbase, nil
+}
+
+// ApplySystemTx performs the consensus state effect for a system transaction and
+// runs it. distributeToSystem/distributeToValidator move the reward from
+// SystemAddress to the validator before it is forwarded on-chain as the tx value.
+func (p *Parlia) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header, run rules.SystemTxRun) (uint64, error) {
+	if value := tx.GetValue(); !value.IsZero() {
+		if err := ibs.SubBalance(params.SystemAddress, *value, tracing.BalanceChangeUnspecified); err != nil {
+			return 0, err
+		}
+		if err := ibs.AddBalance(accounts.InternAddress(header.Coinbase), *value, tracing.BalanceChangeUnspecified); err != nil {
+			return 0, err
+		}
+	}
+	return run(ibs)
 }
 
 // --- EngineReader ---
