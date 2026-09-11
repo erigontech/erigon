@@ -427,6 +427,8 @@ jobs:
             .data.slot == "0" and
             $block[0].version == "gloas" and
             $block[0].data.message.slot == "0" and
+            .data.latest_execution_payload_bid != null and
+            $block[0].data.message.body.signed_execution_payload_bid.message != null and
             .data.latest_execution_payload_bid ==
               $block[0].data.message.body.signed_execution_payload_bid.message
           ' "$api_tmp_dir/state.json"

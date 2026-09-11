@@ -68,14 +68,15 @@ func TestDevGenesisBeaconBodyToleratesMissingGloasBid(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestDevGenesisBeaconBodyPreservesMatchingDefaultGloasBody(t *testing.T) {
+func TestDevGenesisBeaconBodyUsesGloasStateBidWhenDefaultBodyMatchesHeader(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	genesisState := state.New(&cfg)
 	genesisState.SetVersion(clparams.GloasVersion)
-	genesisState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+	bid := &cltypes.ExecutionPayloadBid{
 		BlockHash:          common.HexToHash("0x01"),
 		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
-	})
+	}
+	genesisState.SetLatestExecutionPayloadBid(bid)
 
 	expected := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
 	expected.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
@@ -86,6 +87,6 @@ func TestDevGenesisBeaconBodyPreservesMatchingDefaultGloasBody(t *testing.T) {
 	body := devGenesisBeaconBody(genesisState, &cfg)
 	bodyRoot, err := body.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, expectedRoot, bodyRoot)
-	require.Equal(t, common.Hash{}, body.SignedExecutionPayloadBid.Message.BlockHash)
+	require.Equal(t, bid, body.SignedExecutionPayloadBid.Message)
+	require.NotEqual(t, expectedRoot, bodyRoot)
 }

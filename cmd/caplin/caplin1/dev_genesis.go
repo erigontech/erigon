@@ -99,10 +99,6 @@ func devGenesisBeaconBody(genesisState *state.CachingBeaconState, cfg *clparams.
 	}
 	if version >= clparams.GloasVersion {
 		if bid := genesisState.GetLatestExecutionPayloadBid(); bid != nil {
-			header := genesisState.LatestBlockHeader()
-			if root, err := body.HashSSZ(); err == nil && root == header.BodyRoot {
-				return body
-			}
 			body.SignedExecutionPayloadBid.Message = bid
 		}
 	}
