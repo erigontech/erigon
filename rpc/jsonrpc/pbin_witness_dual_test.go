@@ -93,18 +93,22 @@ func TestPBinHeadCaptureWithoutCommitmentHistory(t *testing.T) {
 	require.NotEmpty(t, result.State)
 }
 
-func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
 	withBinCommitmentDatadir(t)
 	withCommitmentHistory(t)
-	previousDual := statecfg.ExperimentalHexBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
-	statecfg.ExperimentalHexBinCommitment = true
+	var options []execmoduletester.Option
+	if activation > 0 {
+		previousDual := statecfg.ExperimentalHexBinCommitment
+		t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
+		statecfg.ExperimentalHexBinCommitment = true
+		options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
+	}
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
-	amsterdam, activation := uint64(0), uint64(30)
+	amsterdam := uint64(0)
 	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime, config.BinaryTrieTime = &amsterdam, &activation
 	balance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
@@ -112,7 +116,7 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 	for i := range 256 {
 		genesis.Alloc[common.BytesToAddress([]byte{0x02, byte(i)})] = types.GenesisAccount{Balance: big.NewInt(1)}
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key), execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
+	m := execmoduletester.New(t, append(options, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))...)
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, true) }))
 	tx, err := m.DB.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -169,7 +173,7 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 }
 
 func TestPBinDualExecutionWitness(t *testing.T) {
-	api, m := pbinDualWitnessFixture(t)
+	api, m := pbinWitnessFixture(t, 30)
 	for _, n := range []rpc.BlockNumber{2, 3, 4} {
 		t.Run(n.String(), func(t *testing.T) {
 			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
@@ -191,7 +195,7 @@ func TestPBinDualExecutionWitness(t *testing.T) {
 }
 
 func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
-	api, m := pbinDualWitnessFixture(t)
+	api, m := pbinWitnessFixture(t, 30)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	selector := rpc.BlockNumberOrHashWithNumber(2)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
@@ -236,7 +240,7 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 }
 
 func TestPBinDualPostFlipProofAndWitnessRefuse(t *testing.T) {
-	_, m := pbinDualWitnessFixture(t)
+	_, m := pbinWitnessFixture(t, 30)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	for _, n := range []rpc.BlockNumber{3, 4} {

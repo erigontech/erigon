@@ -33,18 +33,38 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-func TestPBinDualSimulation(t *testing.T) {
-	_, m := pbinDualWitnessFixture(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+func pbinSimulationCall(n uint64) SimulatedBlock {
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
-	call := func(n uint64) SimulatedBlock {
-		gas := hexutil.Uint64(2_000_000)
-		time := hexutil.Uint64(n * 10)
-		value := common.BigToHash(uint256.NewInt(n).ToBig())
-		data := hexutil.Bytes(value[:])
-		return SimulatedBlock{BlockOverrides: &ethapi.BlockOverrides{Time: &time}, Calls: []ethapi.CallArgs{{From: &from, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)), Input: &data}}}
+	gas := hexutil.Uint64(2_000_000)
+	time := hexutil.Uint64(n * 10)
+	value := common.BigToHash(uint256.NewInt(n).ToBig())
+	data := hexutil.Bytes(value[:])
+	return SimulatedBlock{BlockOverrides: &ethapi.BlockOverrides{Time: &time}, Calls: []ethapi.CallArgs{{From: &from, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)), Input: &data}}}
+}
+
+func TestPBinBinOnlySimulation(t *testing.T) {
+	_, m := pbinWitnessFixture(t, 0)
+	blocks := []SimulatedBlock{pbinSimulationCall(2), pbinSimulationCall(3), pbinSimulationCall(4)}
+	for _, history := range []bool{true, false} {
+		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, history) }))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: blocks}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(1)))
+		require.NoError(t, err)
+		require.Len(t, result, len(blocks))
+		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+			for i, block := range result {
+				require.Equal(t, rawdb.ReadHeaderByNumber(tx, uint64(i)+2).Root, block["stateRoot"], "commitment history %v, block %d", history, i+2)
+			}
+			return nil
+		}))
 	}
+}
+
+func TestPBinDualSimulation(t *testing.T) {
+	_, m := pbinWitnessFixture(t, 30)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	call := pbinSimulationCall
 	for _, tc := range []struct {
 		name   string
 		base   uint64
