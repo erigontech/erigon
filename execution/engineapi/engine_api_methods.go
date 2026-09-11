@@ -281,6 +281,14 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
+// headPredatesOsaka reports that the canonical head is known and sits before Osaka.
+// An unknown head is not pre-Osaka: GetBlobsV2/V3 must keep serving while OsakaTime
+// is still in the future, which is the opposite of what GetBlobsV1 needs.
+func (e *EngineServer) headPredatesOsaka(ctx context.Context) bool {
+	currentHeader := e.chainRW.CurrentHeader(ctx)
+	return currentHeader != nil && !e.config.IsOsaka(currentHeader.Time)
+}
+
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	currentHeader := e.chainRW.CurrentHeader(ctx)
@@ -300,6 +308,9 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
+	if e.headPredatesOsaka(ctx) {
+		return nil, nil
+	}
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
@@ -312,6 +323,9 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
+	if e.headPredatesOsaka(ctx) {
+		return nil, nil
+	}
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err

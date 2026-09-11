@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Do 1 step to start txPool
@@ -437,4 +438,61 @@ type headUnavailableExecutionModule struct {
 
 func (headUnavailableExecutionModule) CurrentHeader(context.Context) (*types.Header, error) {
 	return nil, errors.New("execution module unavailable")
+}
+
+type fixedHeadExecutionModule struct {
+	execmodule.ExecutionModule
+	time uint64
+}
+
+func (m fixedHeadExecutionModule) CurrentHeader(context.Context) (*types.Header, error) {
+	return &types.Header{Time: m.time}, nil
+}
+
+// A nil blobGetter makes any txpool access surface as ErrPoolDisabled, so these
+// assert the short-circuit by the absence of that error.
+func TestGetBlobsV2V3ShortCircuitBeforeOsaka(t *testing.T) {
+	osakaTime := uint64(1000)
+	cfg := &chain.Config{OsakaTime: &osakaTime}
+
+	newServer := func(execModule execmodule.ExecutionModule) *EngineServer {
+		return NewEngineServer(log.New(), cfg, execModule, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, ethconfig.Defaults.MaxReorgDepth)
+	}
+
+	t.Run("pre-osaka head returns null without touching the pool", func(t *testing.T) {
+		require := require.New(t)
+		engineServer := newServer(fixedHeadExecutionModule{time: osakaTime - 1})
+
+		v2, err := engineServer.GetBlobsV2(context.Background(), []common.Hash{{}})
+		require.NoError(err)
+		require.Nil(v2)
+
+		v3, err := engineServer.GetBlobsV3(context.Background(), []common.Hash{{}})
+		require.NoError(err)
+		require.Nil(v3)
+	})
+
+	t.Run("post-osaka head serves normally", func(t *testing.T) {
+		require := require.New(t)
+		engineServer := newServer(fixedHeadExecutionModule{time: osakaTime})
+
+		_, err := engineServer.GetBlobsV2(context.Background(), []common.Hash{{}})
+		require.ErrorIs(err, txpool.ErrPoolDisabled)
+
+		_, err = engineServer.GetBlobsV3(context.Background(), []common.Hash{{}})
+		require.ErrorIs(err, txpool.ErrPoolDisabled)
+	})
+
+	// Mirror image of GetBlobsV1: an unknown head must not be read as "pre-Osaka",
+	// or V2/V3 would stop serving on a network whose OsakaTime is still in the future.
+	t.Run("unknown head serves rather than short-circuiting", func(t *testing.T) {
+		require := require.New(t)
+		engineServer := newServer(headUnavailableExecutionModule{})
+
+		_, err := engineServer.GetBlobsV2(context.Background(), []common.Hash{{}})
+		require.ErrorIs(err, txpool.ErrPoolDisabled)
+
+		_, err = engineServer.GetBlobsV3(context.Background(), []common.Hash{{}})
+		require.ErrorIs(err, txpool.ErrPoolDisabled)
+	})
 }
