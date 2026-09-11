@@ -730,9 +730,9 @@ func asSystemTxEngine(e rules.Engine) (rules.SystemTxEngine, bool) {
 	return s, ok
 }
 
-// executeSystemTx runs a Parlia system transaction as a free consensus call
-// (no gas pool, no intrinsic gas). The engine owns the surrounding state effect;
-// the run closure bumps the sender nonce and performs the EVM call.
+// executeSystemTx runs a consensus system transaction as a free call (no gas
+// pool, no intrinsic gas): the engine owns the surrounding state effect, the run
+// closure bumps the sender nonce and performs the EVM call.
 func (txTask *TxTask) executeSystemTx(engine rules.SystemTxEngine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
 	var result TxResult
 
