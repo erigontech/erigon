@@ -430,7 +430,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 		})
 	}
 	defer func() {
-		mapGroup.Wait()
+		_ = mapGroup.Wait()
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
@@ -568,10 +568,12 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		if tx != nil && WorkerCount == 1 {
 			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 		} else {
-			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
+			if viewErr := cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
 				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 				return nil
-			})
+			}); viewErr != nil {
+				return nil, viewErr
+			}
 
 			if err != nil {
 				return nil, err
@@ -585,7 +587,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 
 	ctx, cancleCtx := context.WithCancel(ctx)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
-	defer workers.Wait()
+	defer func() { _ = workers.Wait() }()
 
 	workersExited := &atomic.Bool{}
 	go func() {

@@ -468,6 +468,32 @@ func (p *TxPool) publishDepthMetrics() {
 	queuedSubCounter.SetInt(p.queued.Len())
 }
 
+// forgetUnusedSenders drops the id of every sender in the batch that has no
+// txn left in p.all. Validation rejects a txn before it becomes a metaTxn, so
+// it never enters p.deletedTxns and the flush-time eviction never sees it.
+// Callers must hold p.lock.
+func (p *TxPool) forgetUnusedSenders(ids []uint64) {
+	for _, id := range ids {
+		if p.all.hasTxns(id) {
+			continue
+		}
+		if addr, ok := p.senders.senderID2Addr[id]; ok {
+			delete(p.senders.senderID2Addr, id)
+			delete(p.senders.senderIDs, addr)
+		}
+	}
+}
+
+// senderIDsOf snapshots the batch's sender ids, which forgetUnusedSenders needs
+// after the batch itself has been reset.
+func senderIDsOf(txns *TxnSlots) []uint64 {
+	ids := make([]uint64, len(txns.Txns))
+	for i, txn := range txns.Txns {
+		ids[i] = txn.SenderID
+	}
+	return ids
+}
+
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	if !p.Started() {
 		return errors.New("txpool not started yet")
@@ -506,6 +532,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	defer p.forgetUnusedSenders(senderIDsOf(p.unprocessedRemoteTxns))
 
 	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
 	if err != nil {
@@ -1446,6 +1473,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
 		return nil, err
 	}
+	defer p.forgetUnusedSenders(senderIDsOf(&newTxns))
 
 	originalTxns := newTxns
 

@@ -20,7 +20,7 @@ func (noopBlockOperationProcessor) ProcessProposerSlashing(abstract.BeaconState,
 func (noopBlockOperationProcessor) ProcessAttesterSlashing(abstract.BeaconState, *cltypes.AttesterSlashing) error {
 	return nil
 }
-func (noopBlockOperationProcessor) ProcessAttestations(abstract.BeaconState, *solid.ListSSZ[*solid.Attestation]) error {
+func (noopBlockOperationProcessor) ProcessAttestations(abstract.BeaconState, *solid.ListSSZ[*solid.Attestation], uint64) error {
 	return nil
 }
 func (noopBlockOperationProcessor) ProcessDeposit(abstract.BeaconState, *cltypes.Deposit) error {
@@ -90,7 +90,7 @@ func TestProcessOperationsRejectsOversizedGloasLists(t *testing.T) {
 			require.NoError(t, validateGloasOperationCounts(body, &cfg))
 			test.append(body)
 
-			_, _, _, err := ProcessOperations(noopBlockOperationProcessor{}, s, body)
+			_, _, _, err := ProcessOperations(noopBlockOperationProcessor{}, s, body, 0)
 			require.ErrorContains(t, err, "too many "+test.name)
 		})
 	}

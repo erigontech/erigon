@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -50,13 +49,7 @@ type blobSidecarService struct {
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
 
-	blobSidecarsScheduledForLaterExecution sync.Map
-	test                                   bool
-}
-
-type blobSidecarJob struct {
-	blobSidecar  *cltypes.BlobSidecar
-	creationTime time.Time
+	test bool
 }
 
 // NewBlobSidecarService creates a new blob sidecar service
@@ -77,7 +70,6 @@ func NewBlobSidecarService(
 		ethClock:          ethClock,
 		emitters:          emitters,
 	}
-	// go b.loop(ctx)
 	return b
 }
 
@@ -142,7 +134,6 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	parentHeader, has := b.forkchoiceStore.GetHeader(msg.SignedBlockHeader.Header.ParentRoot)
 	if !has {
-		b.scheduleBlobSidecarForLaterExecution(msg)
 		return ErrIgnore
 	}
 	if msg.SignedBlockHeader.Header.Slot <= parentHeader.Slot {
@@ -220,16 +211,4 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 		return errors.New("blob signature validation: signature not valid")
 	}
 	return nil
-}
-
-func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *cltypes.BlobSidecar) {
-	blobSidecarJob := &blobSidecarJob{
-		blobSidecar:  blobSidecar,
-		creationTime: time.Now(),
-	}
-	blobSidecarHash, err := blobSidecar.HashSSZ()
-	if err != nil {
-		return
-	}
-	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
 }
