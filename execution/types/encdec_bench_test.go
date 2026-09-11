@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -37,16 +38,16 @@ func BenchmarkHeaderRLP(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			buf.Reset()
-			header.EncodeRLP(&buf)
+			_ = header.EncodeRLP(&buf)
 		}
 	})
 	b.Run(`Decode`, func(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
-		header.EncodeRLP(&buf)
+		_ = header.EncodeRLP(&buf)
 		var v Header
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &v)
+			_ = rlp.DecodeBytes(buf.Bytes(), &v)
 		}
 	})
 }
@@ -58,7 +59,7 @@ func BenchmarkLegacyTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -69,7 +70,7 @@ func BenchmarkAccessListTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -80,7 +81,7 @@ func BenchmarkDynamicFeeTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -91,7 +92,7 @@ func BenchmarkBlobTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -102,7 +103,7 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -171,7 +172,7 @@ func BenchmarkWithdrawalRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		w.EncodeRLP(&buf)
+		_ = w.EncodeRLP(&buf)
 	}
 }
 
@@ -185,7 +186,7 @@ func BenchmarkLogRLP(b *testing.B) {
 		for b.Loop() {
 			buf.Reset()
 			logStorage := (*LogForStorage)(log)
-			logStorage.EncodeRLP(&buf)
+			_ = logStorage.EncodeRLP(&buf)
 		}
 	})
 
@@ -193,10 +194,10 @@ func BenchmarkLogRLP(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
 		logStorage := (*LogForStorage)(log)
-		logStorage.EncodeRLP(&buf)
+		_ = logStorage.EncodeRLP(&buf)
 		var decoded LogForStorage
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
+			_ = rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
 }
@@ -230,7 +231,7 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		for b.Loop() {
 			buf.Reset()
 			receiptStorage := (*ReceiptForStorage)(receipt)
-			receiptStorage.EncodeRLP(&buf)
+			_ = receiptStorage.EncodeRLP(&buf)
 		}
 	})
 
@@ -238,10 +239,10 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
 		receiptStorage := (*ReceiptForStorage)(receipt)
-		receiptStorage.EncodeRLP(&buf)
+		_ = receiptStorage.EncodeRLP(&buf)
 		var decoded ReceiptForStorage
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
+			_ = rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
 }
@@ -375,3 +376,43 @@ var benchTxTypes = []struct {
 var benchJSONSink []byte
 
 var benchLogSink Log
+
+// Both readers, because only the slice-backed one can be pre-walked: a
+// *bytes.Reader leaves Peek empty, which is the path the txn pool takes.
+func BenchmarkDecodeAccessList(b *testing.B) {
+	for _, tuples := range []int{1, 10, 100} {
+		al := sampleAL(tuples, 2)
+		var buf bytes.Buffer
+		if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+			b.Fatal(err)
+		}
+		if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+			b.Fatal(err)
+		}
+		enc := buf.Bytes()
+
+		b.Run(fmt.Sprintf("slice/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				s := rlp.NewBytesStream(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, s); err != nil {
+					b.Fatal(err)
+				}
+				rlp.PutStream(s)
+			}
+		})
+
+		b.Run(fmt.Sprintf("streamed/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			r := bytes.NewReader(nil)
+			for b.Loop() {
+				r.Reset(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, rlp.NewStream(r, 0)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

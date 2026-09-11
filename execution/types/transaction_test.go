@@ -28,6 +28,7 @@ import (
 	"io"
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -787,7 +788,9 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
@@ -812,7 +815,9 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTrailingBytes(t *testing.T) {
@@ -922,4 +927,204 @@ func TestAATotalGasLimitOverflow(t *testing.T) {
 	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
 	assert.False(t, ok)
 	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
+}
+
+// decodeAccessList backs every tuple's StorageKeys with one arena, so a tuple's
+// slice must be capped: appending to it may not reach the next tuple's keys.
+func TestDecodeAccessListKeysDoNotAlias(t *testing.T) {
+	t.Parallel()
+	al := AccessList{
+		{Address: common.Address{1}, StorageKeys: []common.Hash{{0xaa}}},
+		{Address: common.Address{2}, StorageKeys: []common.Hash{{0xbb}}},
+	}
+	var buf bytes.Buffer
+	if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeALFrom(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d tuples, want 2", len(got))
+	}
+	got[0].StorageKeys = append(got[0].StorageKeys, common.Hash{0xcc})
+	if got[1].StorageKeys[0] != (common.Hash{0xbb}) {
+		t.Fatalf("append to tuple 0 overwrote tuple 1: %x", got[1].StorageKeys[0])
+	}
+}
+
+// decodeALFrom decodes b into a fresh AccessList, returning the pooled stream as
+// NewBytesStream requires.
+func decodeALFrom(b []byte) (AccessList, error) {
+	s := rlp.NewBytesStream(b)
+	defer rlp.PutStream(s)
+	var al AccessList
+	err := decodeAccessList(&al, s)
+	return al, err
+}
+
+func encodeAL(t *testing.T, al AccessList) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func sampleAL(tuples, keysPer int) AccessList {
+	al := make(AccessList, tuples)
+	for i := range al {
+		al[i].Address = common.Address{byte(i + 1)}
+		al[i].StorageKeys = make([]common.Hash, keysPer)
+		for j := range al[i].StorageKeys {
+			al[i].StorageKeys[j] = common.Hash{byte(i + 1), byte(j + 1)}
+		}
+	}
+	return al
+}
+
+// decodeAccessList sizes both slices from countAccessList, so a wrong count
+// silently costs allocations. Pin it against the shapes it must get right.
+func TestCountAccessList(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ tuples, keysPer int }{{0, 0}, {1, 0}, {1, 1}, {3, 2}, {2, 60}, {40, 1}} {
+		t.Run(fmt.Sprintf("%dx%d", c.tuples, c.keysPer), func(t *testing.T) {
+			enc := encodeAL(t, sampleAL(c.tuples, c.keysPer))
+			s := rlp.NewBytesStream(enc)
+			defer rlp.PutStream(s)
+			l, err := s.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := s.Peek()
+			if uint64(len(raw)) < l {
+				t.Fatalf("Peek gave %d bytes, want at least %d", len(raw), l)
+			}
+			gotT, gotK := countAccessList(raw[:l])
+			if gotT != c.tuples || gotK != c.tuples*c.keysPer {
+				t.Errorf("counted %d tuples %d keys, want %d and %d",
+					gotT, gotK, c.tuples, c.tuples*c.keysPer)
+			}
+		})
+	}
+}
+
+// countAccessList reads attacker-controlled bytes ahead of the decoder, so it
+// must never panic and must never stop the decoder reporting the real error.
+func TestDecodeAccessListMalformed(t *testing.T) {
+	t.Parallel()
+	enc := encodeAL(t, sampleAL(3, 2))
+	for i := range enc {
+		// A proper prefix is never a complete access list, so the pre-walk must
+		// not let one decode.
+		if _, err := decodeALFrom(enc[:i]); err == nil {
+			t.Errorf("truncation to %d bytes decoded without error", i)
+		}
+		for _, b := range []byte{0x00, 0x7f, 0x80, 0xb7, 0xbf, 0xf7, 0xff} {
+			corrupt := bytes.Clone(enc)
+			corrupt[i] = b
+			// A flipped byte can still spell a valid, different list, so only
+			// the absence of a panic is pinned here.
+			_, _ = decodeALFrom(corrupt)
+		}
+	}
+}
+
+// A stream that is not slice-backed cannot be walked ahead, so decodeAccessList
+// must fall back to growing rather than mis-decoding.
+func TestDecodeAccessListNonSliceReader(t *testing.T) {
+	t.Parallel()
+	want := sampleAL(3, 2)
+	enc := encodeAL(t, want)
+	var got AccessList
+	if err := decodeAccessList(&got, rlp.NewStream(bytes.NewReader(enc), 0)); err != nil {
+		t.Fatal(err)
+	}
+	require.Equal(t, want, got)
+}
+
+// countAccessList sizes the decode, so its results must stay bounded by the
+// bytes that produced them: a tuple needs at least 23 and a key at least 33.
+// rlp.Prefix checks a length against the whole payload, not against the
+// enclosing tuple, so overlapping tuples could otherwise count bytes repeatedly.
+func TestCountAccessListNoAmplification(t *testing.T) {
+	t.Parallel()
+	const units = 2000
+	raw := make([]byte, 0, units*23)
+	for range units {
+		u := make([]byte, 23)
+		u[0] = 0xd6  // list, payload 22: the tuple spans [1,23)
+		u[22] = 0xf8 // at tuplePos+21: long list, its length byte is the next u[0]
+		raw = append(raw, u...)
+	}
+	tuples, keys := countAccessList(raw)
+	assert.LessOrEqual(t, tuples, len(raw)/23, "more tuples than fit in the input")
+	assert.LessOrEqual(t, keys, len(raw)/33, "more keys than fit in the input")
+}
+
+// decodeAccessList replaces rather than appends, on both the walked and the
+// grown path.
+func TestDecodeAccessListReplacesExisting(t *testing.T) {
+	t.Parallel()
+	enc := encodeAL(t, sampleAL(1, 1))
+	stale := AccessList{{Address: common.Address{0xff}, StorageKeys: []common.Hash{{0xff}}}}
+	viaSlice := slices.Clone(stale)
+	viaSliceStream := rlp.NewBytesStream(enc)
+	require.NoError(t, decodeAccessList(&viaSlice, viaSliceStream))
+	rlp.PutStream(viaSliceStream)
+	viaReader := slices.Clone(stale)
+	require.NoError(t, decodeAccessList(&viaReader, rlp.NewStream(bytes.NewReader(enc), 0)))
+	require.Equal(t, viaSlice, viaReader)
+	require.Len(t, viaSlice, 1)
+}
+
+// Decoding a whole typed txn goes through the typed decoder's
+// tx.AccessList = AccessList{}, so an absent access list lands non-nil and
+// marshals as []. TestDecodeAccessListEmptyStaysNil starts from a nil slice
+// and pins the other branch; both shapes reach RPC, so both are pinned.
+func TestDecodeAccessListEmptyThroughTypedTxn(t *testing.T) {
+	t.Parallel()
+	to := common.Address{0x01}
+	txn := &AccessListTx{
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(1),
+				V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3),
+			},
+			GasPrice: *uint256.NewInt(1),
+		},
+		ChainID: *uint256.NewInt(1),
+	}
+	var buf bytes.Buffer
+	require.NoError(t, txn.EncodeRLP(&buf))
+
+	decoded, err := DecodeTransaction(buf.Bytes())
+	require.NoError(t, err)
+
+	al := decoded.GetAccessList()
+	require.NotNil(t, al, "the typed decoder preinitializes, so an absent list is empty, not nil")
+	require.Empty(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "[]", string(encoded))
+}
+
+// A typed txn with no access list decodes to a nil slice, which rpc/ethapi
+// marshals as null. A non-nil empty slice would silently move that to [].
+func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
+	t.Parallel()
+	al, err := decodeALFrom(encodeAL(t, AccessList{}))
+	require.NoError(t, err)
+	require.Nil(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "null", string(encoded))
 }

@@ -63,6 +63,12 @@ type VMContext struct {
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
 
+	// Rules is the resolved rule set the EVM ran under. Tracers classify
+	// precompiles from it rather than rebuilding one, so a chain whose forks or
+	// precompile set are resolved per-chain cannot dispatch in the EVM and stay
+	// invisible to the tracer.
+	Rules *chain.Rules
+
 	TxHash common.Hash
 }
 
