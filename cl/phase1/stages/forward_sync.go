@@ -104,8 +104,16 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	}
 
 	var highestProcessed, inserted uint64
+	// The lowest version in the batch: the insert skips the commitment inclusion proof from Gloas
+	// on, so taking the minimum keeps the proof required unless every block in the batch is Gloas.
+	version := clparams.GloasVersion
+	for _, block := range blocks {
+		if v := block.Version(); v < version {
+			version = v
+		}
+	}
 	// Verify and insert blobs into the blob store
-	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
+	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, version, nil); err != nil {
 		// Ban the peer if verification fails
 		cfg.rpc.BanPeer(blobs.Peer)
 		// Return an error if blobs could not be verified

@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 const testBlobSlot = 42
@@ -124,7 +124,7 @@ func TestStoreRemoteBlobsRejectsAnEmptyResponse(t *testing.T) {
 // longer serve. Judging completeness by this invocation's insert count aborts on data that is
 // already there; the requested identities must be read back from the store instead.
 func TestStoreRemoteBlobsAcceptsAStoreThatIsAlreadyComplete(t *testing.T) {
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	fs := afero.NewMemMapFs()
 	root := common.HexToHash("0xaa")
 
@@ -144,7 +144,7 @@ func TestStoreRemoteBlobsAcceptsAStoreThatIsAlreadyComplete(t *testing.T) {
 // The durable read must be keyed by the requested identities, not by the root alone: a store
 // holding some of the requested indices is still incomplete.
 func TestStoreRemoteBlobsRejectsAPartiallyPopulatedStore(t *testing.T) {
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	fs := afero.NewMemMapFs()
 	root := common.HexToHash("0xaa")
 
@@ -166,7 +166,7 @@ func TestStoreRemoteBlobsRejectsAPartiallyPopulatedStore(t *testing.T) {
 // existence check cannot distinguish from a complete store — while ReadBlobSidecars, which every
 // consumer uses, reads the row first and reports nothing found.
 func TestStoreRemoteBlobsRejectsFilesWithoutTheirMetadataRow(t *testing.T) {
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	fs := afero.NewMemMapFs()
 	root := common.HexToHash("0xaa")
 
@@ -217,7 +217,7 @@ func TestStoreRemoteBlobsAcceptsAProoflessGloasSidecar(t *testing.T) {
 	sidecar := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment),
 		common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
 
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	fs := afero.NewMemMapFs()
 	store := blob_storage.NewBlobStore(db, fs)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
@@ -272,7 +272,7 @@ func TestStoreRemoteBlobsRejectsASidecarCommittingToAnotherBlob(t *testing.T) {
 	block := testBlock(clparams.GloasVersion, testBlobSlot)
 	commitTo(t, block, gloasSidecarFor(t, header, 2).KzgCommitment)
 
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
 
 	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
@@ -294,7 +294,7 @@ func TestStoreRemoteBlobsRejectsAPreGloasSidecarWithABadInclusionProof(t *testin
 	block := testBlock(clparams.DenebVersion, testBlobSlot)
 	commitTo(t, block, sidecar.KzgCommitment)
 
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
 
 	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,

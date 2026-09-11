@@ -115,7 +115,7 @@ func TestChainEndpointRunDoesNotCommitABlobBearingHeadWithoutItsSidecars(t *test
 		outputFolder: outputFolder{Datadir: datadirPath},
 	}
 
-	require.Error(t, endpoint.Run(t.Context()), "a head whose sidecars are unavailable must fail the download")
+	require.Error(t, endpoint.Run(&Context{Context: t.Context()}), "a head whose sidecars are unavailable must fail the download")
 	require.Positive(t, blobRequests, "the head's sidecars were never requested")
 	require.Nil(t, headSlotInDB(t, datadirPath, root), "the head was committed without its blob sidecars")
 }
@@ -139,7 +139,7 @@ func TestChainEndpointRunCommitsAHeadWithNoCommitments(t *testing.T) {
 
 	// Run walks back from the head and the parent is not served, so it stops with an error; what
 	// matters is that the head itself was handed off to the loop.
-	require.Error(t, endpoint.Run(t.Context()))
+	require.Error(t, endpoint.Run(&Context{Context: t.Context()}))
 	require.Zero(t, blobRequests, "sidecars were requested for a head with no commitments")
 
 	slot := headSlotInDB(t, datadirPath, root)
