@@ -136,10 +136,11 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 
 	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
-	configured             bool
-	savedSalt              *uint32
-	disableFsync           bool
-	commitmentRefsOverride *bool
+	configured                    bool
+	savedSalt                     *uint32
+	disableFsync                  bool
+	commitmentRefsOverride        *bool
+	commitmentEdgeRecordsOverride *bool
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*Aggregator, error) {
@@ -293,6 +294,13 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 	a.d[domain].ReferencesInCommitmentBranches = v
 }
 
+func (a *Aggregator) ForTestEdgeRecordsInCommitment(domain kv.Domain, v bool) {
+	a.d[domain].EdgeRecordsInCommitment = v
+	if domain == kv.CommitmentDomain && a.d[domain].branchCache != nil {
+		a.d[domain].branchCache.SetEdgeRecords(v)
+	}
+}
+
 // referencesInCommitmentBranches reads the live commitment flag under the lock; merge and
 // squeeze paths must use it instead of touching the field directly.
 func (a *Aggregator) referencesInCommitmentBranches() bool {
@@ -312,6 +320,19 @@ func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 	defer a.commitmentRefsMu.Unlock()
 	if a.d[kv.CommitmentDomain] != nil {
 		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
+	}
+}
+
+func (a *Aggregator) applyEdgeRecordsInCommitment(edgeRecords bool) {
+	if !a.configured {
+		a.commitmentEdgeRecordsOverride = &edgeRecords
+		return
+	}
+	if a.d[kv.CommitmentDomain] != nil {
+		a.d[kv.CommitmentDomain].EdgeRecordsInCommitment = edgeRecords
+		if a.d[kv.CommitmentDomain].branchCache != nil {
+			a.d[kv.CommitmentDomain].branchCache.SetEdgeRecords(edgeRecords)
+		}
 	}
 }
 
@@ -376,6 +397,11 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
 	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
+	edgeRecords, err := ResolveCommitmentEdgeRecords(a.dirs, statecfg.Schema.CommitmentDomain.EdgeRecordsInCommitment, a.logger)
+	if err != nil {
+		return err
+	}
+	a.applyEdgeRecordsInCommitment(edgeRecords)
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
@@ -416,6 +442,9 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.commitmentRefsOverride != nil {
 		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
 	}
+	if a.commitmentEdgeRecordsOverride != nil {
+		schema.CommitmentDomain.EdgeRecordsInCommitment = *a.commitmentEdgeRecordsOverride
+	}
 	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
@@ -426,7 +455,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
 	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity, cd.EdgeRecordsInCommitment)
 			if !dbg.DisableAdaptivePin {
 				cd.adaptivePinController = commitment.NewAdaptivePinController(
 					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)
@@ -2650,6 +2679,14 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 	return at.d[kv.CommitmentDomain].d.branchCache
 }
 
+// CommitmentEdgeRecords reports the record format the commitment domain is configured for.
+func (at *AggregatorRoTx) CommitmentEdgeRecords() bool {
+	if at.d[kv.CommitmentDomain] == nil {
+		return false
+	}
+	return at.d[kv.CommitmentDomain].d.EdgeRecordsInCommitment
+}
+
 // AdaptivePinController attached to the commitment domain (implements
 // commitment.AdaptivePinControllerProvider).
 func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinController {
@@ -2728,6 +2765,17 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
 		branchCache.Put(k, v, uint64(step), txNum)
+	}
+}
+
+// cacheLatestBranchChildren fills a whole node's edge records in one call, so the cache pays two
+// allocations per node instead of two per record.
+func (at *AggregatorRoTx) cacheLatestBranchChildren(enabled bool, nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
+	if !enabled || present == 0 {
+		return
+	}
+	if branchCache := at.BranchCache(); branchCache != nil {
+		branchCache.PutChildren(nodeKey, present, records, steps, txNums)
 	}
 }
 

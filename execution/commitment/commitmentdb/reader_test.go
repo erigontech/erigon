@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // --- fakes: exercise reader routing without a real temporal DB ------------
@@ -49,8 +50,14 @@ type fakeTemporalTx struct {
 	kv.TemporalTx
 	values   map[string][]byte // GetAsOf (history) values
 	latest   map[string]getVal // GetLatest (pinned latest) values
+	history  map[string]historyVal
 	calls    []asOfCall
 	getCalls []getLatestCall
+}
+
+type historyVal struct {
+	v  []byte
+	ok bool
 }
 
 func (tx *fakeTemporalTx) GetAsOf(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
@@ -67,6 +74,13 @@ func (tx *fakeTemporalTx) GetLatest(d kv.Domain, k []byte, _ kv.GetLatestOptions
 		return gv.v, gv.step, nil
 	}
 	return nil, 0, nil
+}
+
+func (tx *fakeTemporalTx) HistorySeek(d kv.Domain, k []byte, _ uint64) ([]byte, bool, error) {
+	if hv, ok := tx.history[key(d, k)]; ok {
+		return hv.v, hv.ok, nil
+	}
+	return nil, false, nil
 }
 
 type putBranchCall struct {
@@ -94,6 +108,38 @@ func (p *fakePutDel) DomainDelPrefix(kv.Domain, []byte, uint64) error   { return
 func key(d kv.Domain, k []byte) string { return fmt.Sprintf("%d/%x", d, k) }
 
 // --- tests ----------------------------------------------------------------
+
+func TestHistoryStateReader_PreservesHistoricalTombstone(t *testing.T) {
+	t.Parallel()
+
+	childKey := nibbles.ChildKeyV3(nibbles.EncodeKeyV3(nil), 0)
+	tx := &fakeTemporalTx{history: map[string]historyVal{
+		key(kv.CommitmentDomain, childKey): {v: []byte{}, ok: true},
+	}}
+	reader := NewHistoryStateReader(tx, 100)
+
+	records, present, _, err := reader.ReadCommitmentRecords(nibbles.EncodeKeyV3(nil), 1, true)
+	require.NoError(t, err)
+	require.Equal(t, uint16(1), present)
+	require.NotNil(t, records[0])
+	require.Empty(t, records[0])
+	require.Empty(t, tx.getCalls)
+}
+
+func TestHistoryStateReader_PreservesLatestTombstoneFallback(t *testing.T) {
+	t.Parallel()
+
+	childKey := nibbles.ChildKeyV3(nibbles.EncodeKeyV3(nil), 0)
+	tx := &fakeTemporalTx{latest: map[string]getVal{
+		key(kv.CommitmentDomain, childKey): {v: []byte{}, step: 3},
+	}}
+	reader := NewHistoryStateReader(tx, 100)
+
+	_, present, _, err := reader.ReadCommitmentRecords(nibbles.EncodeKeyV3(nil), 1, true)
+	require.NoError(t, err)
+	require.Equal(t, uint16(1), present)
+	require.Len(t, tx.getCalls, 1)
+}
 
 func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	t.Parallel()

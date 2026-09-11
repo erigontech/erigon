@@ -115,6 +115,7 @@ func (w *Warmuper) Start() {
 				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
+			var compactBuf [maxCompactKeyLen]byte
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -123,7 +124,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKeyInto(trieCtx, item.hashedKey, item.startDepth, &compactBuf)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -142,12 +143,38 @@ func (w *Warmuper) Start() {
 }
 
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
-	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
+	w.warmupKeyInto(trieCtx, hashedKey, startDepth, &compactBuf)
+}
+
+// warmupKeyInto takes the compact-key scratch from the caller: the buffer escapes through the
+// interface call below, so one per worker goroutine costs what one per warmed key used to.
+func (w *Warmuper) warmupKeyInto(trieCtx PatriciaContext, hashedKey []byte, startDepth int, compactBuf *[maxCompactKeyLen]byte) {
+	depth := startDepth
+	// A v3 parent record carries its child's bitmap, so every node below the first can be read
+	// by its exact mask instead of probing all 16 nibbles across every commitment file.
+	recordReader, _ := trieCtx.(BranchRecordReader)
+	maskReader, _ := trieCtx.(BranchMaskReader)
+	var mask uint16
+	maskKnown := false
+	if recordReader != nil && recordReader.EdgeRecords() {
+		w.warmupKeyRecordsInto(recordReader, hashedKey, startDepth, compactBuf)
+		return
+	}
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
-		branchData, _, err := trieCtx.Branch(prefix)
+		var (
+			branchData      []byte
+			childMasks      [16]uint16
+			childMasksKnown uint16
+			err             error
+		)
+		if maskReader != nil {
+			branchData, _, childMasks, childMasksKnown, err = maskReader.BranchWithMask(prefix, mask, maskKnown)
+		} else {
+			branchData, _, err = trieCtx.Branch(prefix)
+		}
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
@@ -169,6 +196,11 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		if bitmap&childBit == 0 {
 			break
+		}
+
+		mask, maskKnown = 0, false
+		if childMasksKnown&childBit != 0 {
+			mask, maskKnown = childMasks[nextNibble], true
 		}
 
 		pos := 2
@@ -284,4 +316,47 @@ func (w *Warmuper) Close() {
 	// w.work is never closed: that would race a concurrent WarmKey send into a
 	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
+}
+
+func (w *Warmuper) warmupKeyRecordsInto(reader BranchRecordReader, hashedKey []byte, startDepth int, compactBuf *[maxCompactKeyLen]byte) {
+	depth := startDepth
+	var mask uint16
+	maskKnown := false
+	for depth <= len(hashedKey) && depth <= w.maxDepth {
+		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
+
+		records, present, _, err := reader.BranchRecords(prefix, mask, maskKnown)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] failed to read records", w.logPrefix),
+				"prefix", common.Bytes2Hex(prefix), "error", err)
+			return
+		}
+		if present == 0 || depth >= len(hashedKey) {
+			return
+		}
+
+		nextNibble := hashedKey[depth]
+		bit := uint16(1) << nextNibble
+		if present&bit == 0 || len(records[nextNibble]) == 0 {
+			return
+		}
+
+		var c cell
+		childMask, err := DecodeRecordInto(records[nextNibble], &c)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] failed to decode record", w.logPrefix),
+				"prefix", common.Bytes2Hex(prefix), "nibble", nextNibble, "error", err)
+			return
+		}
+		if c.accountAddrLen > 0 || c.storageAddrLen > 0 {
+			return
+		}
+
+		mask, maskKnown = childMask, childMask != 0
+		if c.extLen > 0 {
+			depth += int(c.extLen)
+			continue
+		}
+		depth++
+	}
 }

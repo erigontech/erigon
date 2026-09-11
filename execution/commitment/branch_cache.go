@@ -19,10 +19,12 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
 	"os"
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -33,10 +35,23 @@ import (
 func u64ident(k uint64) uint32 { return uint32(k) }
 
 // KeyCommitmentState must never enter the BranchCache: it changes every block.
-var KeyCommitmentState = []byte("state")
+var KeyCommitmentState = []byte{0x00}
 
-func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
+// LegacyKeyCommitmentState is the pre-v3 commitment state key.
+var LegacyKeyCommitmentState = []byte("state")
+
+// IsCommitmentStateKey reports whether prefix identifies a commitment state record.
+func IsCommitmentStateKey(prefix []byte) bool {
+	return bytes.Equal(prefix, KeyCommitmentState) || bytes.Equal(prefix, LegacyKeyCommitmentState)
+}
+
+// IsCommitmentStateKeyForFormat reports whether prefix is the state key for the
+// selected bundled-row or edge-record format.
+func IsCommitmentStateKeyForFormat(prefix []byte, edgeRecords bool) bool {
+	if edgeRecords {
+		return bytes.Equal(prefix, KeyCommitmentState)
+	}
+	return bytes.Equal(prefix, LegacyKeyCommitmentState)
 }
 
 // BranchCache: writer stripes only make stamped publications atomic with
@@ -46,6 +61,10 @@ type BranchCache struct {
 
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk *trunk
+
+	// edgeTrunk holds v3 edge records. An edge P->n and the node P||n share a (depth, path), so
+	// one trunk would make them evict each other on every write; they get separate arrays.
+	edgeTrunk *trunk
 
 	pinned        atomic.Pointer[maphash.Map[*trunk]]
 	pinnedMu      sync.Mutex
@@ -60,7 +79,8 @@ type BranchCache struct {
 
 	// trunkDisabled (env BRANCH_CACHE_TRUNK_DISABLE): A/B switch since the LRU
 	// self-heals stale entries via eviction and the trunk does not.
-	trunkDisabled bool
+	trunkDisabled           bool
+	edgeRecordsInCommitment atomic.Bool
 
 	rootHits, rootMisses     atomic.Uint64
 	trunkHits, trunkMisses   atomic.Uint64
@@ -84,6 +104,13 @@ type branchCacheEntry struct {
 	step  uint64 // on-disk file step; 0 = untracked
 	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
 	epoch uint32
+	// present is the node's child mask, set only when node is true. A node entry carries the mask
+	// and nothing else: the records themselves live one per edge key in edgeTrunk, and only the
+	// ones actually written are cached. An unwritten sibling is a db read, not a cache miss to fix.
+	present uint16
+	// node marks this entry as a v3 node's mask rather than a value. The v3 root's node key is
+	// byte-identical to KeyCommitmentState, so the root slot still needs the discriminator.
+	node bool
 }
 
 // MissCallback runs on the hot read path when lookup misses every tier that
@@ -227,7 +254,7 @@ func (c *BranchCache) unlockAllPutStripes() {
 	}
 }
 
-func NewBranchCache(tailCapacity int) *BranchCache {
+func NewBranchCache(tailCapacity int, edgeRecords ...bool) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
@@ -236,10 +263,28 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		tailCap:       uint32(tailCapacity),
 		maxDepth:      maxDepth,
 		accountTrunk:  newAccountTrunk(maxDepth),
+		edgeTrunk:     newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
+	}
+	if len(edgeRecords) == 0 || edgeRecords[0] {
+		bc.edgeRecordsInCommitment.Store(true)
 	}
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
+}
+
+func (c *BranchCache) SetEdgeRecords(edgeRecords bool) {
+	c.edgeRecordsInCommitment.Store(edgeRecords)
+}
+
+// EdgeRecords reports the commitment record format this datadir resolved to, which a caller
+// outside db/state has no other way to reach.
+func (c *BranchCache) EdgeRecords() bool {
+	return c.edgeRecordsInCommitment.Load()
+}
+
+func (c *BranchCache) isCommitmentStateKey(prefix []byte) bool {
+	return IsCommitmentStateKeyForFormat(prefix, c.edgeRecordsInCommitment.Load())
 }
 
 func (c *BranchCache) Close() {
@@ -272,11 +317,58 @@ func (c *BranchCache) tailLen() int {
 	return 0
 }
 
+// v3EdgeDepth reports the trie depth of the edge a v3 record key addresses -- the parent path
+// length plus its child nibble. ok=false for anything that is not a record key.
+func v3EdgeDepth(prefix []byte) (int, bool) {
+	if len(prefix) < 2 || prefix[len(prefix)-1]&0xf0 != 0x80 {
+		return 0, false
+	}
+	switch term := prefix[len(prefix)-2]; {
+	case term == 0x00:
+		return 2*len(prefix) - 3, true
+	case term&0xf0 == 0xf0:
+		return 2*len(prefix) - 2, true
+	default:
+		return 0, false
+	}
+}
+
+// v3EdgeNibble returns nibble i of the edge path a v3 record key addresses.
+func v3EdgeNibble(prefix []byte, depth, i int) byte {
+	switch {
+	case i == depth-1:
+		return prefix[len(prefix)-1] & 0x0f
+	case depth&1 == 0 && i == depth-2: // odd parent path: its last nibble lives in the term byte
+		return prefix[len(prefix)-2] & 0x0f
+	case i&1 == 0:
+		return prefix[i/2] >> 4
+	default:
+		return prefix[i/2] & 0x0f
+	}
+}
+
+// v3TrunkSlot routes by the edge path a record key spells out. Reading it as a compact key instead
+// drops the first byte from the index, so two edges differing only in their first nibbles alias.
+func (c *BranchCache) v3TrunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
+	depth, ok := v3EdgeDepth(prefix)
+	if !ok || depth > trunkDepthFull {
+		return nil
+	}
+	var nib [4]byte
+	for i := range depth {
+		nib[i] = v3EdgeNibble(prefix, depth, i)
+	}
+	return c.edgeTrunk.slot(&nib, depth, forWrite)
+}
+
 // trunkSlot: bit 4 of byte 0 is the odd-length flag; the low nibble of byte 0
 // is the first nibble when odd.
 func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
 	if c.trunkDisabled {
 		return nil
+	}
+	if c.edgeRecordsInCommitment.Load() {
+		return c.v3TrunkSlot(prefix, forWrite)
 	}
 	switch len(prefix) {
 	case 1:
@@ -308,28 +400,50 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 
 // storageRoute: ok=false means non-storage, caller falls through to the tail.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
-	if len(prefix) < 33 || prefix[0]&0x20 != 0 {
+	edgeRecords := c.edgeRecordsInCommitment.Load()
+	if !edgeRecords && (len(prefix) < 33 || prefix[0]&0x20 != 0) {
 		return nil, 0, false
 	}
 	p := c.pinned.Load()
 	if !create && p == nil {
 		return nil, 0, false
 	}
-	acctHash, ok := ContractHashFromPrefix(prefix)
+	acctHash, ok := contractHashFromPrefix(prefix, edgeRecords)
 	if !ok {
 		return nil, 0, false
 	}
 	packed := acctHash[:]
 	if p != nil {
 		if st, found := p.Get(packed); found {
-			return st, storageNibbles(prefix, nibBuf), true
+			return st, storageNibblesFor(prefix, nibBuf, edgeRecords), true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
 	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
-	return st, storageNibbles(prefix, nibBuf), true
+	return st, storageNibblesFor(prefix, nibBuf, edgeRecords), true
+}
+
+func storageNibblesFor(prefix []byte, nib *[4]byte, edgeRecords bool) int {
+	if edgeRecords {
+		return v3StorageNibbles(prefix, nib)
+	}
+	return storageNibbles(prefix, nib)
+}
+
+// v3StorageNibbles is storageNibbles for the edge-record layout: the number of edge nibbles below
+// the account boundary, with the first 4 written into nib.
+func v3StorageNibbles(prefix []byte, nib *[4]byte) (n int) {
+	depth, _ := v3EdgeDepth(prefix)
+	n = depth - 64
+	if n > 4 {
+		return n
+	}
+	for i := range n {
+		nib[i] = v3EdgeNibble(prefix, depth, 64+i)
+	}
+	return n
 }
 
 func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
@@ -346,8 +460,26 @@ func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
 	return p
 }
 
-// ContractHashFromPrefix: ok=false for non-storage prefixes.
-func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
+// ContractHash decodes the contract a storage prefix belongs to, in whichever record format this
+// cache holds. ok=false for non-storage prefixes.
+func (c *BranchCache) ContractHash(prefix []byte) (hash [32]byte, ok bool) {
+	return contractHashFromPrefix(prefix, c.edgeRecordsInCommitment.Load())
+}
+
+func contractHashFromPrefix(prefix []byte, edgeRecords bool) (hash [32]byte, ok bool) {
+	if !edgeRecords {
+		return legacyContractHashFromPrefix(prefix)
+	}
+	depth, ok := v3EdgeDepth(prefix)
+	if !ok || depth <= 64 {
+		return hash, false
+	}
+	copy(hash[:], prefix[:length.Hash])
+	return hash, true
+}
+
+// legacyContractHashFromPrefix: ok=false for non-storage prefixes.
+func legacyContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
 	}
@@ -388,7 +520,14 @@ func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
 // clearTrunk stores nil per-slot rather than swapping the pointer, since
 // lock-free readers deref c.accountTrunk concurrently.
 func (c *BranchCache) clearTrunk() {
-	t := c.accountTrunk
+	c.clearOneTrunk(c.accountTrunk)
+	c.clearOneTrunk(c.edgeTrunk)
+}
+
+func (c *BranchCache) clearOneTrunk(t *trunk) {
+	if t == nil {
+		return
+	}
 	t.d0.Store(nil)
 	for i := range t.d1 {
 		t.d1[i].Store(nil)
@@ -506,7 +645,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -542,12 +681,12 @@ func (c *BranchCache) PinnedCount() int {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
-	if !ok {
+	if !ok || entry.node {
 		return nil, 0, false
 	}
 	if coh.IsStale(entry.txN, entry.epoch) {
@@ -561,7 +700,19 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
+		return
+	}
+	if c.edgeRecordsInCommitment.Load() {
+		// v3 keeps one entry per node, so a single record write merges into its node's entry
+		// instead of claiming a slot of its own.
+		if nodeKey, nibble, ok := v3NodeKeyOf(prefix); ok {
+			var records [16][]byte
+			var steps, txNums [16]uint64
+			records[nibble] = data
+			steps[nibble], txNums[nibble] = step, txN
+			c.PutChildren(nodeKey, uint16(1)<<nibble, &records, &steps, &txNums)
+		}
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -579,7 +730,263 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
+// v3NodeDepth reads the nibble depth out of a node key (pack(P) || term).
+func v3NodeDepth(nodeKey []byte) (int, bool) {
+	if len(nodeKey) == 0 {
+		return 0, false
+	}
+	switch term := nodeKey[len(nodeKey)-1]; {
+	case term == 0x00:
+		return 2 * (len(nodeKey) - 1), true
+	case term&0xf0 == 0xf0:
+		return 2*len(nodeKey) - 1, true
+	default:
+		return 0, false
+	}
+}
+
+func v3NodeNibble(nodeKey []byte, depth, i int) byte {
+	if depth&1 == 1 && i == depth-1 { // an odd path keeps its last nibble in the term byte
+		return nodeKey[len(nodeKey)-1] & 0x0f
+	}
+	if i&1 == 0 {
+		return nodeKey[i/2] >> 4
+	}
+	return nodeKey[i/2] & 0x0f
+}
+
+// v3NodeKeyOf splits an edge record key into the node it belongs to and its child nibble.
+func v3NodeKeyOf(recordKey []byte) ([]byte, int, bool) {
+	if len(recordKey) < 2 || recordKey[len(recordKey)-1]&0xf0 != 0x80 {
+		return nil, 0, false
+	}
+	return recordKey[:len(recordKey)-1], int(recordKey[len(recordKey)-1] & 0x0f), true
+}
+
+func (c *BranchCache) v3NodeTrunkSlot(nodeKey []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
+	if c.trunkDisabled {
+		return nil
+	}
+	depth, ok := v3NodeDepth(nodeKey)
+	if !ok || depth == 0 || depth > trunkDepthFull {
+		return nil
+	}
+	var nib [4]byte
+	for i := range depth {
+		nib[i] = v3NodeNibble(nodeKey, depth, i)
+	}
+	return c.accountTrunk.slot(&nib, depth, forWrite)
+}
+
+func (c *BranchCache) storeNode(nodeKey []byte, entry *branchCacheEntry) {
+	if isRootPrefix(nodeKey) {
+		c.root.Store(entry)
+		return
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, true); slot != nil {
+		slot.Store(entry)
+		return
+	}
+	c.tailForWrite().Add(maphash.Hash(nodeKey), entry)
+}
+
+// peekNode reads without touching the hit counters: it serves the writer's merge, and counting it
+// would make the hit rate report the writer's own probes.
+func (c *BranchCache) peekNode(nodeKey []byte) *branchCacheEntry {
+	if isRootPrefix(nodeKey) {
+		return c.root.Load()
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		return slot.Load()
+	}
+	if tail := c.tail.Load(); tail != nil {
+		if entry, ok := tail.Get(maphash.Hash(nodeKey)); ok {
+			return entry
+		}
+	}
+	return nil
+}
+
+func (c *BranchCache) lookupNode(nodeKey []byte) *branchCacheEntry {
+	if isRootPrefix(nodeKey) {
+		entry := c.root.Load()
+		if entry == nil {
+			c.rootMisses.Add(1)
+			return nil
+		}
+		c.rootHits.Add(1)
+		return entry
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		if entry := slot.Load(); entry != nil {
+			c.trunkHits.Add(1)
+			return entry
+		}
+		c.trunkMisses.Add(1)
+		return nil
+	}
+	tail := c.tail.Load()
+	if tail == nil {
+		c.tailMisses.Add(1)
+		return nil
+	}
+	entry, ok := tail.Get(maphash.Hash(nodeKey))
+	if !ok {
+		c.tailMisses.Add(1)
+		return nil
+	}
+	c.tailHits.Add(1)
+	return entry
+}
+
+// GetNode serves the wanted edge records of a node. The node entry carries only the child mask;
+// each record is looked up under its own edge key, and only the wanted bits are probed -- an
+// unfold asking for one nibble costs one edge lookup, not a whole node. Returned slices alias
+// the cache's buffers, so a caller keeping them past the read must copy.
+func (c *BranchCache) GetNode(nodeKey []byte, wanted uint16, out *[16][]byte) (present uint16, step uint64, ok bool) {
+	coh := c.coh.Snapshot()
+	entry := c.lookupNode(nodeKey)
+	if entry == nil || !entry.node {
+		if entry == nil {
+			c.fireOnMiss(nodeKey)
+		}
+		return 0, 0, false
+	}
+	if coh.IsStale(entry.txN, entry.epoch) {
+		c.InvalidateNode(nodeKey)
+		c.staleEvicted.Add(1)
+		return 0, 0, false
+	}
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	for bitset := wanted & entry.present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		rec, recStep, hit := c.Get(childKey)
+		if !hit {
+			continue
+		}
+		out[nibble] = rec
+		present |= uint16(1) << nibble
+		step = max(step, recStep)
+	}
+	if present == 0 {
+		return 0, 0, false
+	}
+	return present, step, true
+}
+
+// putNodeMask ors bits into a node's mask entry. Callers hold the node's put stripe.
+func (c *BranchCache) putNodeMask(nodeKey []byte, add uint16, step, txN uint64) {
+	present, entryStep, entryTxN := add, step, txN
+	if existing := c.peekNode(nodeKey); existing != nil && existing.node {
+		present |= existing.present
+		entryStep = max(entryStep, existing.step)
+		// IsStale fires at txN >= floor, so the newest child decides: below the floor, all are.
+		entryTxN = max(entryTxN, existing.txN)
+	}
+	c.storeNode(nodeKey, &branchCacheEntry{present: present, step: entryStep, txN: entryTxN, epoch: c.coh.Epoch(), node: true})
+}
+
+func (c *BranchCache) InvalidateNode(nodeKey []byte) {
+	if isRootPrefix(nodeKey) {
+		c.root.Store(nil)
+		return
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		slot.Store(nil)
+		return
+	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(nodeKey))
+	}
+}
+
+// invalidateChild drops one record and keeps the node's siblings: a tombstoned edge should not cost
+// the whole node its cache entry.
+func (c *BranchCache) invalidateChild(nodeKey []byte, nibble int) {
+	stripe := c.putStripe(nodeKey)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	childKey[len(nodeKey)] = 0x80 | byte(nibble)
+	c.dropEdge(childKey)
+
+	entry := c.peekNode(nodeKey)
+	if entry == nil || !entry.node {
+		return
+	}
+	bit := uint16(1) << nibble
+	if entry.present&bit == 0 {
+		return
+	}
+	present := entry.present &^ bit
+	if present == 0 {
+		c.InvalidateNode(nodeKey)
+		return
+	}
+	c.storeNode(nodeKey, &branchCacheEntry{present: present, step: entry.step, txN: entry.txN, epoch: entry.epoch, node: true})
+}
+
+// dropEdge removes one edge record from whichever tier holds it.
+func (c *BranchCache) dropEdge(childKey []byte) {
+	if slot := c.trunkSlot(childKey, false); slot != nil {
+		slot.Store(nil)
+		return
+	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(childKey))
+	}
+}
+
+// PutChildren caches the records a publish actually wrote, one entry per edge key, and ors their
+// nibbles into the node's mask. Siblings that were not written are left alone: re-caching them
+// would mean re-encoding the whole node on every single-child write, and a later read for one is
+// a legitimate db read rather than a miss worth paying for.
+func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
+	if present == 0 {
+		return
+	}
+	stripe := c.putStripe(nodeKey)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	epoch := c.coh.Epoch()
+	var written uint16
+	var step, txN uint64
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		record := records[nibble]
+		if len(record) == 0 {
+			continue
+		}
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		data := make([]byte, len(record))
+		copy(data, record)
+		c.store(childKey, &branchCacheEntry{data: data, step: steps[nibble], txN: txNums[nibble], epoch: epoch})
+		written |= uint16(1) << nibble
+		step = max(step, steps[nibble])
+		txN = max(txN, txNums[nibble])
+	}
+	if written == 0 {
+		return
+	}
+	c.putNodeMask(nodeKey, written, step, txN)
+}
+
 func (c *BranchCache) Invalidate(prefix []byte) {
+	if c.edgeRecordsInCommitment.Load() {
+		if nodeKey, nibble, ok := v3NodeKeyOf(prefix); ok {
+			c.invalidateChild(nodeKey, nibble)
+		} else {
+			c.InvalidateNode(prefix)
+		}
+		return
+	}
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return

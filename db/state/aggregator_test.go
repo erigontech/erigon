@@ -531,11 +531,11 @@ func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRa
 	t.Helper()
 	ver := version.V1_0_standart
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
-		accessors := statecfg.AccessorHashMap
+		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
 		name = "commitment"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
-			Accessor(dirs.SnapDomain, ver).
+			BtIndex(ver).Existence(ver).
 			Build()
 		return name, schema
 	})

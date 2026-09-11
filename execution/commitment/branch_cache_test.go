@@ -30,7 +30,7 @@ import (
 )
 
 func TestBranchCache_AccountTrunkRouting(t *testing.T) {
-	c := NewBranchCache(10)
+	c := NewBranchCache(10, false)
 
 	trunkKey := []byte{0xa0, 0xb0}
 	c.Put(trunkKey, []byte("trunk-data"), 0, 100)
@@ -71,7 +71,7 @@ func TestBranchCache_PinnedCountSurvivesConcurrentInvalidate(t *testing.T) {
 			prefix := newPrefix(1, storageNibbles)
 
 			for range 20000 {
-				c := NewBranchCache(100)
+				c := NewBranchCache(100, false)
 				c.PinEntry(prefix, []byte("v0"), 0, 100)
 
 				var wg sync.WaitGroup
@@ -93,7 +93,7 @@ func TestBranchCache_PinnedCountSurvivesConcurrentInvalidate(t *testing.T) {
 }
 
 func TestBranchCache_StorageTrunkPin(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	prefix := make([]byte, 33)
 	for i := 1; i < 33; i++ {
@@ -112,53 +112,53 @@ func TestBranchCache_StorageTrunkPin(t *testing.T) {
 	require.False(t, ok, "pinned storage-trunk entry with txN=100 must drop at unwind floor 60")
 }
 
-func TestBranchCache_RootPinning(t *testing.T) {
-	c := NewBranchCache(100)
+func TestBranchCache_ShortKeyPinning(t *testing.T) {
+	c := NewBranchCache(100, false)
 
-	rootKey := []byte{0x00}
+	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34, 0x56}
-	c.Put(rootKey, []byte("root-data"), 0, 0)
+	c.Put(shortKey, []byte("short-data"), 0, 0)
 	c.Put(deepKey, []byte("deep-data"), 0, 0)
 
-	got, _, ok := c.Get(rootKey)
+	got, _, ok := c.Get(shortKey)
 	require.True(t, ok)
-	require.Equal(t, []byte("root-data"), got)
-	require.Equal(t, uint64(1), c.rootHits.Load())
+	require.Equal(t, []byte("short-data"), got)
+	require.Equal(t, uint64(1), c.trunkHits.Load())
 	require.Equal(t, uint64(0), c.tailHits.Load())
 
 	got, _, ok = c.Get(deepKey)
 	require.True(t, ok)
 	require.Equal(t, []byte("deep-data"), got)
-	require.Equal(t, uint64(1), c.rootHits.Load())
+	require.Equal(t, uint64(1), c.trunkHits.Load())
 	require.Equal(t, uint64(1), c.tailHits.Load())
 }
 
-func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
-	c := NewBranchCache(10)
-	rootKey := []byte{0x00}
-	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0)
+func TestBranchCache_ShortKeySurvivesEvictionPressure(t *testing.T) {
+	c := NewBranchCache(10, false)
+	shortKey := []byte{0x10}
+	c.Put(shortKey, []byte("SHORT-PERSISTS"), 0, 0)
 
 	for i := range 100 {
 		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0)
 	}
 
-	got, _, ok := c.Get(rootKey)
-	require.True(t, ok, "root should never be evicted from pinned slot")
-	require.Equal(t, []byte("ROOT-PERSISTS"), got)
+	got, _, ok := c.Get(shortKey)
+	require.True(t, ok, "short key should never be evicted from trunk slot")
+	require.Equal(t, []byte("SHORT-PERSISTS"), got)
 
 	require.LessOrEqual(t, c.tailLen(), 10, "tail should respect LRU capacity")
 }
 
 func TestBranchCache_Invalidate(t *testing.T) {
-	c := NewBranchCache(100)
-	rootKey := []byte{0x00}
+	c := NewBranchCache(100, false)
+	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34}
-	c.Put(rootKey, []byte("r"), 0, 0)
+	c.Put(shortKey, []byte("s"), 0, 0)
 	c.Put(deepKey, []byte("d"), 0, 0)
 
-	c.Invalidate(rootKey)
-	_, _, ok := c.Get(rootKey)
-	require.False(t, ok, "root invalidated")
+	c.Invalidate(shortKey)
+	_, _, ok := c.Get(shortKey)
+	require.False(t, ok, "short key invalidated")
 
 	c.Invalidate(deepKey)
 	_, _, ok = c.Get(deepKey)
@@ -166,31 +166,32 @@ func TestBranchCache_Invalidate(t *testing.T) {
 }
 
 func TestBranchCache_Clear(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
+	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34, 0x56}
-	c.Put([]byte{0x00}, []byte("r"), 0, 0)
+	c.Put(shortKey, []byte("s"), 0, 0)
 	c.Put(deepKey, []byte("d"), 0, 0)
-	_, _, _ = c.Get([]byte{0x00})
+	_, _, _ = c.Get(shortKey)
 	_, _, _ = c.Get(deepKey)
 
-	require.Equal(t, uint64(1), c.rootHits.Load())
+	require.Equal(t, uint64(1), c.trunkHits.Load())
 	require.Equal(t, uint64(1), c.tailHits.Load())
 
 	c.Clear()
 	require.Equal(t, uint64(0), c.rootHits.Load())
 	require.Equal(t, uint64(0), c.tailHits.Load())
-	_, _, ok := c.Get([]byte{0x00})
+	_, _, ok := c.Get(shortKey)
 	require.False(t, ok)
 	_, _, ok = c.Get(deepKey)
 	require.False(t, ok)
 }
 
 func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
-	key := []byte{0x00}
+	key := []byte{0x10}
 	preClearEpoch := c.coh.Epoch()
 	c.Clear()
 	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
@@ -229,7 +230,7 @@ func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write
 }
 
 func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
@@ -243,7 +244,7 @@ func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
 }
 
 func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
@@ -258,18 +259,19 @@ func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
 }
 
 func TestBranchCache_Stats(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	tailHit := []byte{0x12, 0x34, 0x56}
 	tailMiss := []byte{0x12, 0x34, 0x57}
-	c.Put([]byte{0x00}, []byte("rrr"), 0, 0)
+	shortKey := []byte{0x10}
+	c.Put(shortKey, []byte("rrr"), 0, 0)
 	c.Put(tailHit, []byte("ddd"), 0, 0)
-	_, _, _ = c.Get([]byte{0x00})
+	_, _, _ = c.Get(shortKey)
 	_, _, _ = c.Get(tailHit)
 	_, _, _ = c.Get(tailMiss)
 
 	s := c.Stats()
 	for _, want := range []string{
-		"root hit=1 miss=0",
+		"trunk hit=1 miss=0",
 		"tail hit=1 miss=1 (50.0%) entries=1",
 	} {
 		require.Contains(t, s, want, "Stats output: %s", s)
@@ -282,52 +284,52 @@ func TestBranchCache_Stats(t *testing.T) {
 const twoTailKeyCapacity = 2 * branchCacheTailShards
 
 func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
-	c := NewBranchCache(twoTailKeyCapacity)
+	c := NewBranchCache(twoTailKeyCapacity, false)
 
-	rootKey := []byte{0x00}
+	shortKey := []byte{0x10}
 	tailKeyKeep := []byte{0x1a, 0xb0, 0x00}
 	tailKeyDrop := []byte{0x1a, 0xb0, 0x01}
 
-	c.Put(rootKey, []byte("root-keep"), 0, 50)
+	c.Put(shortKey, []byte("short-keep"), 0, 50)
 	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50)
 	c.Put(tailKeyDrop, []byte("tail-drop"), 0, 100)
 
 	c.Unwind(60)
 
-	_, _, ok := c.Get(rootKey)
-	require.True(t, ok, "root entry with txN=50 must survive floor=60")
+	_, _, ok := c.Get(shortKey)
+	require.True(t, ok, "short entry with txN=50 must survive floor=60")
 	_, _, ok = c.Get(tailKeyKeep)
 	require.True(t, ok, "tail entry with txN=50 must survive floor=60")
 	_, _, ok = c.Get(tailKeyDrop)
 	require.False(t, ok, "tail entry with txN=100 must drop at floor=60")
-	require.Equal(t, uint64(2), c.tailHits.Load(), "both keys must exercise the LRU tail")
+	require.Equal(t, uint64(2), c.tailHits.Load(), "the tail keys must exercise the LRU tail")
 }
 
 func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
-	rootKey := []byte{0x00}
+	shortKey := []byte{0x10}
 	trunkKey := []byte{0xa0, 0xb0}
 	tailKey := []byte{0x1a, 0xb0, 0x00}
 
-	c.Put(rootKey, []byte("root"), 0, 100)
+	c.Put(shortKey, []byte("short"), 0, 100)
 	c.Put(trunkKey, []byte("trunk"), 0, 100)
 	c.Put(tailKey, []byte("tail"), 0, 100)
 
 	c.Unwind(50)
 
-	_, _, ok := c.Get(rootKey)
-	require.False(t, ok, "root entry at txN>=floor must drop")
+	_, _, ok := c.Get(shortKey)
+	require.False(t, ok, "short entry at txN>=floor must drop")
 	_, _, ok = c.Get(trunkKey)
 	require.False(t, ok, "trunk entry at txN>=floor must drop")
 	_, _, ok = c.Get(tailKey)
 	require.False(t, ok, "tail entry at txN>=floor must drop")
-	require.Equal(t, uint64(1), c.trunkHits.Load(), "trunk key must route to the account trunk")
+	require.Equal(t, uint64(2), c.trunkHits.Load(), "short and trunk keys must route to the account trunk")
 	require.Equal(t, uint64(1), c.tailHits.Load(), "tail key must route to the LRU tail")
 }
 
 func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
-	c := NewBranchCache(twoTailKeyCapacity)
+	c := NewBranchCache(twoTailKeyCapacity, false)
 
 	belowKey := []byte{0x1a, 0xb0, 0x00}
 	atKey := []byte{0x1a, 0xb0, 0x01}
@@ -344,7 +346,7 @@ func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_CurrentEpochSurvives(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	key := []byte{0xa0, 0xb0}
 	c.Put(key, []byte("old-fork"), 0, 100)
@@ -357,7 +359,7 @@ func TestBranchCache_Unwind_CurrentEpochSurvives(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	key := []byte{0xa0, 0xb0}
 	c.Put(key, []byte("frozen"), 0, 0)
 	c.Unwind(50)
@@ -374,16 +376,37 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
 
-	deepKey := []byte{0x12, 0x34}
+	// v3 keeps records under their node, so a real entry needs a real record key. The state key is
+	// byte-identical to the root's node key, which is exactly why invalidating it must not reach in.
+	deepKey := nibbles.ChildKeyV3(nibbles.EncodeKeyV3([]byte{1, 2}), 3)
 	c.Put(deepKey, []byte("d"), 0, 0)
 	c.Invalidate(KeyCommitmentState)
-	got, _, ok := c.Get(deepKey)
+	nodeKey, nibble, ok := v3NodeKeyOf(deepKey)
+	require.True(t, ok)
+	var records [16][]byte
+	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
 	require.True(t, ok, "invalidating the state key must not evict real entries")
-	require.Equal(t, []byte("d"), got)
+	require.NotZero(t, present&(uint16(1)<<nibble))
+	require.Equal(t, []byte("d"), records[nibble])
+}
+
+func TestBranchCache_LegacyStateKeyDoesNotBlockRoot(t *testing.T) {
+	c := NewBranchCache(100, false)
+	defer c.Close()
+
+	rootKey := []byte{0x00}
+	c.Put(rootKey, []byte("root"), 1, 1)
+	got, _, ok := c.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte("root"), got)
+
+	c.Put(LegacyKeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok = c.Get(LegacyKeyCommitmentState)
+	require.False(t, ok)
 }
 
 func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
-	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+	c := NewBranchCache(DefaultBranchCacheTailCapacity, false)
 	defer c.Close()
 
 	const n = 64
@@ -407,7 +430,7 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 }
 
 func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
-	c := NewBranchCache(4096)
+	c := NewBranchCache(4096, false)
 	defer c.Close()
 
 	const (
@@ -465,7 +488,7 @@ func TestBranchCache_StorageRouteRejectsTerminator(t *testing.T) {
 	}
 	for _, flag := range []byte{0x20, 0x30} {
 		prefix[0] = flag
-		c := NewBranchCache(100)
+		c := NewBranchCache(100, false)
 		var nibBuf [4]byte
 		_, _, routed := c.storageRoute(prefix, true, &nibBuf)
 		require.Falsef(t, routed, "terminator-flagged prefix (%#x) must fall through to the tail", flag)
@@ -479,7 +502,7 @@ func TestBranchCache_StorageRouteRejectsTerminator(t *testing.T) {
 }
 
 func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 
 	even := make([]byte, 33)
@@ -523,7 +546,7 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 		}
 
 		t.Run(fmt.Sprintf("depth%d", depth), func(t *testing.T) {
-			c := NewBranchCache(100)
+			c := NewBranchCache(100, false)
 			defer c.Close()
 			want := fmt.Sprintf("d%d", depth)
 			c.PinEntry(prefix, []byte(want), 0, 100)

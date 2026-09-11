@@ -135,6 +135,13 @@ func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	p.trieCtxFactory = f
 }
 
+func (p *ParallelPatriciaHashed) SetEdgeRecords(edgeRecords bool) {
+	p.cfg.EdgeRecords = edgeRecords
+	if p.template != nil {
+		p.template.SetEdgeRecords(edgeRecords)
+	}
+}
+
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -233,6 +240,7 @@ func (p *ParallelPatriciaHashed) Process(
 	if p.template == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process called after Release")
 	}
+	updatesCount := updates.Size()
 
 	p.rootHash.Store(nil)
 	p.deepLocalFolds.Store(0)
@@ -240,7 +248,8 @@ func (p *ParallelPatriciaHashed) Process(
 	// Per-round, matching HexPatriciaHashed.Process: the counters published for
 	// a round have to describe that round alone.
 	p.metrics.Reset()
-	p.metrics.AddRoundKeys(updates.Size())
+	p.metrics.AddRoundKeys(updatesCount)
+	p.metrics.updates.Store(updatesCount)
 	roundStart := time.Now()
 	defer func() { observeRound(p.metrics, roundStart) }()
 
@@ -282,8 +291,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
-		n := updates.Size()
-		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+		onProgress(&CommitProgress{KeyIndex: updatesCount, UpdateCount: updatesCount, Metrics: p.metrics.AsValues()})
 	}
 	return out, nil
 }

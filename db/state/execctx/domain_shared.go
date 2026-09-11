@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -48,7 +49,9 @@ import (
 )
 
 var (
-	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
+	mxFlushTook                 = metrics.GetOrCreateSummary("domain_flush_took")
+	mxCommitmentNodeReads       = metrics.GetOrCreateCounter(`domain_commitment_node_reads{mask="known"}`)
+	mxCommitmentNodeReadsNoMask = metrics.GetOrCreateCounter(`domain_commitment_node_reads{mask="unknown"}`)
 )
 
 // CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
@@ -398,6 +401,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	if p, ok := tx.AggTx().(interface{ CommitmentEdgeRecords() bool }); ok {
+		sd.sdCtx.SetCommitmentEdgeRecords(p.CommitmentEdgeRecords())
+	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -1363,6 +1369,90 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }
 
+// ReadCommitmentRecords resolves a node's edge records across mem, branch cache, db and files. wm
+// is the caller's read accumulator: v3 never reaches getLatest, so without it every
+// kv_read_count{domain="commitment"} series reads zero on a v3 node.
+// nodeChildKeyBufs backs ReadCommitmentRecords' per-node child key. Worker clones share one
+// *SharedDomains, so the scratch cannot be a field on it.
+var nodeChildKeyBufs = sync.Pool{New: func() any { b := make([]byte, 0, 72); return &b }}
+
+func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
+	wanted := mask
+	if maskKnown {
+		mxCommitmentNodeReads.Inc()
+	} else {
+		mxCommitmentNodeReadsNoMask.Inc()
+		wanted = ^uint16(0)
+	}
+	if !dbg.KVReadLevelledMetrics {
+		wm = nil
+	} else if wm == nil {
+		wm = sd.reqMetrics
+	}
+	var cacheStart time.Time
+	if wm != nil {
+		cacheStart = time.Now()
+	}
+	// Only the wanted nibbles are probed: the node entry carries the mask, each record its own key.
+	var cached [16][]byte
+	var cachedPresent uint16
+	var cachedStep uint64
+	if sd.branchCache != nil {
+		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, wanted, &cached)
+	}
+	// Neither lookup retains the key, so one scratch buffer serves every nibble.
+	childKeyBuf := nodeChildKeyBufs.Get().(*[]byte)
+	childKey := append(append((*childKeyBuf)[:0], nodeKey...), 0)
+	defer func() { *childKeyBuf = childKey[:0]; nodeChildKeyBufs.Put(childKeyBuf) }()
+	for bitset := wanted; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, childKey)
+		if !ok && cachedPresent&bit != 0 {
+			value, valueStep, ok = cached[nibble], kv.Step(cachedStep), true
+		}
+		if ok {
+			records[nibble] = bytes.Clone(value)
+			present |= bit
+			if valueStep > step {
+				step = valueStep
+			}
+			if wm != nil {
+				wm.UpdateCacheReads(kv.CommitmentDomain, cacheStart)
+			}
+		}
+		bitset ^= bit
+	}
+
+	remaining := wanted &^ present
+	if remaining == 0 || tx == nil {
+		return records, present, step, nil
+	}
+	source, ok := tx.AggTx().(interface {
+		ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error)
+	})
+	if !ok {
+		return records, present, step, nil
+	}
+	fileRecords, filePresent, fileStep, err := source.ReadCommitmentRecords(tx, nodeKey, remaining, true, ^uint64(0), wm)
+	if err != nil {
+		return records, present, step, err
+	}
+	for bitset := filePresent & remaining; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		// The inner read already returned owned bytes; cloning again just doubled the garbage.
+		records[nibble] = fileRecords[nibble]
+		present |= bit
+		bitset ^= bit
+	}
+	if fileStep > step {
+		step = fileStep
+	}
+	return records, present, step, nil
+}
+
 // servableUnderBound gates a value against an in-flight unwind's per-key
 // maxStep. Callers convert their unit first: StateCache stamps txNums, while
 // mem batches and BranchCache already use step indices.
@@ -1857,7 +1947,11 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+	v, ok, err = sd.mem.GetAsOf(domain, key, ts)
+	if domain == kv.CommitmentDomain && bytes.Equal(key, commitment.KeyCommitmentState) && !commitmentdb.IsCommitmentStateValue(v) {
+		return sd.mem.GetAsOf(domain, commitment.LegacyKeyCommitmentState, ts)
+	}
+	return v, ok, err
 }
 
 func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

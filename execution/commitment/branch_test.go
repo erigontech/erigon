@@ -86,14 +86,14 @@ func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 	return hash, true
 }
 
-func TestContractHashFromPrefix_MatchesReference(t *testing.T) {
+func TestLegacyContractHashFromPrefix_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for range 5000 {
 		l := 30 + rng.Intn(40)
 		prefix := make([]byte, l)
 		rng.Read(prefix)
 		wantHash, wantOK := contractHashFromPrefixReference(prefix)
-		gotHash, gotOK := ContractHashFromPrefix(prefix)
+		gotHash, gotOK := legacyContractHashFromPrefix(prefix)
 		require.Equalf(t, wantOK, gotOK, "ok mismatch len=%d prefix0=%#x", l, prefixByte0(prefix))
 		require.Equalf(t, wantHash, gotHash, "hash mismatch len=%d prefix0=%#x", l, prefixByte0(prefix))
 	}
@@ -106,12 +106,24 @@ func prefixByte0(p []byte) byte {
 	return p[0]
 }
 
-func TestContractHashFromPrefix_ZeroAlloc(t *testing.T) {
+func TestLegacyContractHashFromPrefix_ZeroAlloc(t *testing.T) {
 	prefix := make([]byte, 40)
 	prefix[0] = 0x10
-	allocs := testing.AllocsPerRun(1000, func() { _, _ = ContractHashFromPrefix(prefix) })
-	require.Zero(t, allocs, "ContractHashFromPrefix must not allocate")
+	allocs := testing.AllocsPerRun(1000, func() { _, _ = legacyContractHashFromPrefix(prefix) })
+	require.Zero(t, allocs, "legacyContractHashFromPrefix must not allocate")
 	prefix[0] = 0x00
-	allocs = testing.AllocsPerRun(1000, func() { _, _ = ContractHashFromPrefix(prefix) })
-	require.Zero(t, allocs, "ContractHashFromPrefix (even) must not allocate")
+	allocs = testing.AllocsPerRun(1000, func() { _, _ = legacyContractHashFromPrefix(prefix) })
+	require.Zero(t, allocs, "legacyContractHashFromPrefix (even) must not allocate")
+}
+
+func TestLegacyRowWithEdgeShapedPrefixIsParsedAsLegacy(t *testing.T) {
+	var cells [16]cellEncodeData
+	cells[12] = recordTestData("branch", nil)
+	legacy, err := NewBranchEncoder(1024).EncodeBranch(1<<12, 1<<12, 1<<12, &cells)
+	require.NoError(t, err)
+	require.True(t, BranchData(legacy).IsEdgeRecord())
+
+	count, err := BranchData(legacy).ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }

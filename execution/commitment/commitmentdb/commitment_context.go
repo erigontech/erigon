@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +40,7 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error)
 	// AsPutDelWithDiff is AsPutDel, but routes commitment-domain
 	// writes into diff explicitly instead of through SetChangesetAccumulator
 	// — see SharedDomainsCommitmentContext.ComputeCommitmentWithDiff.
@@ -65,7 +67,8 @@ type SharedDomainsCommitmentContext struct {
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
-	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
+	edgeRecords   bool
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
@@ -114,6 +117,15 @@ func (sdc *SharedDomainsCommitmentContext) checkParaTrieWired() error {
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// SetCommitmentEdgeRecords selects the state-key format used by new writes.
+func (sdc *SharedDomainsCommitmentContext) SetCommitmentEdgeRecords(v bool) {
+	sdc.edgeRecords = v
+	sdc.pendingCfg.EdgeRecords = v
+	if sdc.patriciaTrie != nil {
+		sdc.patriciaTrie.SetEdgeRecords(v)
+	}
 }
 
 // StateReader returns the currently installed custom state reader, or nil when
@@ -236,6 +248,7 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
 		variant:       commitment.VariantHexPatriciaTrie,
+		edgeRecords:   cfg.EdgeRecords,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -263,11 +276,12 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
-		putter:   putter,
-		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    txNum,
-		blockNum: blockNum,
-		traceW:   sdc.traceW,
+		putter:      putter,
+		stepSize:    sdc.sharedDomains.StepSize(),
+		txNum:       txNum,
+		blockNum:    blockNum,
+		traceW:      sdc.traceW,
+		edgeRecords: sdc.edgeRecords,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -434,10 +448,24 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		return 0, errors.New("BranchChildCount cannot read while deferred branch updates are pending")
 	}
 
+	if sdc.edgeRecords {
+		records, present, _, err := stateReader.ReadCommitmentRecords(nibbles.EncodeKeyV3(nibblePrefix), 0, false)
+		if err != nil {
+			return 0, err
+		}
+		count := 0
+		for bitset := present; bitset != 0; bitset &= bitset - 1 {
+			if len(records[bits.TrailingZeros16(bitset&-bitset)]) > 0 {
+				count++
+			}
+		}
+		return count, nil
+	}
+
 	key := nibbles.HexToCompact(nibblePrefix)
 	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
 	if ok {
-		return commitment.BranchData(enc).ChildCount(), nil
+		return commitment.BranchData(enc).ChildCount()
 	}
 	if maxStep != kv.NoStepBound {
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
@@ -447,7 +475,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 	if err != nil {
 		return 0, err
 	}
-	return commitment.BranchData(enc).ChildCount(), nil
+	return commitment.BranchData(enc).ChildCount()
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
@@ -648,9 +676,18 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			}
 		}()
 		for _, c := range collectors {
-			if loadErr := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			load := func(k, v []byte) error {
 				return trieContext.PutBranch(k, v, nil)
-			}, etl.TransformArgs{}); loadErr != nil {
+			}
+			var loadErr error
+			if sdc.edgeRecords {
+				loadErr = loadLatestCollectorRecords(c, load)
+			} else {
+				loadErr = c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+					return load(k, v)
+				}, etl.TransformArgs{})
+			}
+			if loadErr != nil {
 				return nil, loadErr
 			}
 		}
@@ -728,10 +765,11 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: stepSize,
-			txNum:    txNum,
-			traceW:   sdc.traceW,
+			putter:      sdc.sharedDomains.AsPutDel(roTx),
+			stepSize:    stepSize,
+			txNum:       txNum,
+			traceW:      sdc.traceW,
+			edgeRecords: sdc.edgeRecords,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -777,7 +815,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
+			localWrites:    make(map[string][]byte),
 			traceW:         sdc.traceW,
+			edgeRecords:    sdc.edgeRecords,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -828,6 +868,9 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
+// LegacyKeyCommitmentState aliases the pre-v3 commitment state key.
+var LegacyKeyCommitmentState = commitment.LegacyKeyCommitmentState
+
 var ErrBehindCommitment = errors.New("behind commitment")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
@@ -841,11 +884,28 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
+	stateKey := LegacyKeyCommitmentState
+	if sdc.edgeRecords {
+		stateKey = KeyCommitmentState
+	}
 	var step kv.Step
 
-	state, step, err = trieContext.Branch(KeyCommitmentState)
+	state, step, err = trieContext.Branch(stateKey)
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if !isCommitmentStateValue(state) {
+		alternateKey := KeyCommitmentState
+		if sdc.edgeRecords {
+			alternateKey = LegacyKeyCommitmentState
+		}
+		state, step, err = trieContext.Branch(alternateKey)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	if !isCommitmentStateValue(state) {
+		return 0, 0, nil, nil
 	}
 
 	if err := trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
@@ -911,9 +971,20 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, _, err := trieContext.Branch(KeyCommitmentState)
+	stateKey := LegacyKeyCommitmentState
+	if sdc.edgeRecords {
+		stateKey = KeyCommitmentState
+	}
+	prevState, _, err := trieContext.Branch(stateKey)
 	if err != nil {
 		return err
+	}
+	if sdc.edgeRecords && len(prevState) > 0 && !isCommitmentStateValue(prevState) {
+		stateKey = LegacyKeyCommitmentState
+		prevState, _, err = trieContext.Branch(stateKey)
+		if err != nil {
+			return err
+		}
 	}
 	if len(prevState) == 0 && prevState != nil {
 		prevState = nil
@@ -926,7 +997,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
+	return trieContext.PutBranch(stateKey, encodedState, prevState)
 }
 
 // Encodes current trie state and returns it
@@ -1013,8 +1084,21 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	localWrites    map[string][]byte
+	edgeRecords    bool
 
-	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
+	branchBuf   []byte // reused across Branch calls; see the ownership note on Branch
+	hexKeyBuf   []byte
+	nodeKeyBuf  []byte
+	childKeyBuf []byte
+}
+
+// v3NodeKey builds the node key for a compact prefix through this context's scratch buffers.
+// The result is valid until the next call on the same context, which owns one goroutine.
+func (sdc *TrieContext) v3NodeKey(pref []byte) []byte {
+	sdc.hexKeyBuf = nibbles.CompactToHexInto(sdc.hexKeyBuf, pref)
+	sdc.nodeKeyBuf = nibbles.EncodeKeyV3Into(sdc.nodeKeyBuf, sdc.hexKeyBuf)
+	return sdc.nodeKeyBuf
 }
 
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
@@ -1024,6 +1108,28 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if !sdc.edgeRecords || commitment.IsCommitmentStateKey(pref) {
+		return sdc.branchLegacy(pref)
+	}
+	enc, step, _, _, err := sdc.branchEdge(pref, 0, false)
+	return enc, step, err
+}
+
+func (sdc *TrieContext) BranchWithMask(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	if !sdc.edgeRecords {
+		enc, step, err := sdc.branchLegacy(pref)
+		return enc, step, [16]uint16{}, 0, err
+	}
+	return sdc.branchEdge(pref, mask, maskKnown)
+}
+
+func (sdc *TrieContext) branchLegacy(pref []byte) ([]byte, kv.Step, error) {
+	if data, ok := sdc.localWrites[string(pref)]; ok {
+		if sdc.traceW != nil {
+			fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, data)
+		}
+		return cloneBytesPreserveNil(data), 0, nil
+	}
 	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, err
@@ -1048,6 +1154,47 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branchBuf, step, nil
 }
 
+func (sdc *TrieContext) EdgeRecords() bool { return sdc.edgeRecords }
+
+// BranchRecords is branchEdge without the legacy row: the caller decodes what it needs.
+func (sdc *TrieContext) BranchRecords(pref []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	if !sdc.edgeRecords {
+		return records, 0, 0, nil
+	}
+	nodeKey := sdc.v3NodeKey(pref)
+	records, present, step, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	if err != nil {
+		return records, 0, 0, err
+	}
+	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &present)
+	return records, present, step, nil
+}
+
+func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	// No legacy read here: a v3 node is addressed only by its child records. Reading pref would
+	// also be wrong, not just wasteful, because a compact node key and a v3 child key can be the
+	// same bytes -- HexToCompact([8, n]) equals the root's child key for nibble n.
+	var records [16][]byte
+	var recordsPresent uint16
+	var recordsStep kv.Step
+	var err error
+	nodeKey := sdc.v3NodeKey(pref)
+	records, recordsPresent, recordsStep, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
+	}
+	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &recordsPresent)
+	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, nil)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
+	}
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, read.Data)
+	}
+	// SynthesizeBranchRow already returns owned bytes; cloning again just doubled the garbage.
+	return read.Data, recordsStep, read.ChildMasks, read.ChildMasksKnown, nil
+}
+
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
@@ -1056,9 +1203,98 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 		fmt.Fprintf(sdc.traceW, "[SDC] PutBranch %x: %x\n", prefix, data)
 	}
 	if sdc.localCollector != nil {
-		return sdc.localCollector.Collect(prefix, data)
+		if err := sdc.localCollector.Collect(prefix, data); err != nil {
+			return err
+		}
+		if sdc.edgeRecords {
+			if sdc.localWrites == nil {
+				sdc.localWrites = make(map[string][]byte)
+			}
+			sdc.localWrites[string(prefix)] = cloneBytesPreserveNil(data)
+		}
+		return nil
 	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
+}
+
+func (sdc *TrieContext) applyLocalEdgeWrites(nodeKey []byte, mask uint16, maskKnown bool, records *[16][]byte, present *uint16) {
+	if len(sdc.localWrites) == 0 {
+		return
+	}
+	wanted := ^uint16(0)
+	if maskKnown {
+		wanted = mask
+	}
+	sdc.childKeyBuf = append(append(sdc.childKeyBuf[:0], nodeKey...), 0)
+	key := sdc.childKeyBuf
+	for nibble := range 16 {
+		bit := uint16(1) << nibble
+		if wanted&bit == 0 {
+			continue
+		}
+		key[len(nodeKey)] = 0x80 | byte(nibble)
+		data, ok := sdc.localWrites[string(key)]
+		if !ok {
+			continue
+		}
+		records[nibble] = cloneBytesPreserveNil(data)
+		*present |= bit
+	}
+}
+
+func cloneBytesPreserveNil(data []byte) []byte {
+	if data == nil {
+		return nil
+	}
+	clone := make([]byte, len(data))
+	copy(clone, data)
+	return clone
+}
+
+// loadLatestCollectorRecords keeps only the last row per key. The row has to outlive the callback
+// that produced it, so it is copied -- into buffers that are reused, because every row but the last
+// of a run is thrown away and a fresh pair of allocations per row is the single largest allocation
+// site on the v3 write path. PutBranch copies what it keeps, which is what lets the buffers be
+// handed to it and then overwritten.
+func loadLatestCollectorRecords(collector *etl.Collector, putBranch func([]byte, []byte) error) error {
+	var key, value []byte
+	haveRecord := false
+	valueNil := true
+	flush := func() error {
+		if !haveRecord {
+			return nil
+		}
+		held := value
+		switch {
+		case valueNil:
+			held = nil
+		case held == nil:
+			// append(nil[:0], empty...) is nil, and DomainPut refuses a nil value. An empty
+			// record is a tombstone and has to stay distinguishable from an absent one.
+			held = []byte{}
+		}
+		if err := putBranch(key, held); err != nil {
+			return err
+		}
+		haveRecord = false
+		return nil
+	}
+	load := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if haveRecord && !bytes.Equal(key, k) {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		key = append(key[:0], k...)
+		value = append(value[:0], v...)
+		valueNil = v == nil
+		haveRecord = true
+		return nil
+	}
+	if err := collector.Load(nil, "", load, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	return flush()
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
@@ -1150,21 +1386,38 @@ func NewCommitmentState(txNum uint64, blockNum uint64, trieState []byte) *commit
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {
-	if len(buf) < 10 {
-		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
+	if len(buf) < 18 {
+		return fmt.Errorf("invalid commitment state buffer size %d, expected at least 18 bytes", len(buf))
 	}
 	pos := 0
 	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
 	pos += 8
 	cs.blockNum = binary.BigEndian.Uint64(buf[pos : pos+8])
 	pos += 8
-	cs.trieState = make([]byte, binary.BigEndian.Uint16(buf[pos:pos+2]))
+	stateLen := int(binary.BigEndian.Uint16(buf[pos : pos+2]))
 	pos += 2
-	if len(cs.trieState) == 0 && len(buf) == 10 {
-		return nil
+	if stateLen > len(buf)-pos {
+		return fmt.Errorf("commitment state payload size %d exceeds remaining buffer %d", stateLen, len(buf)-pos)
 	}
-	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
+	cs.trieState = bytes.Clone(buf[pos : pos+stateLen])
 	return nil
+}
+
+func isCommitmentStateValue(value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+	var state commitmentState
+	if err := state.Decode(value); err != nil {
+		return false
+	}
+	_, _, _, err := commitment.HexTrieExtractStateRoot(value)
+	return err == nil
+}
+
+// IsCommitmentStateValue reports whether value has the commitment state wrapper format.
+func IsCommitmentStateValue(value []byte) bool {
+	return isCommitmentStateValue(value)
 }
 
 func (cs *commitmentState) Encode() ([]byte, error) {
@@ -1183,7 +1436,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, err := LatestCommitmentStateValue(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -1192,4 +1445,25 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	}
 	_, minUnwindable := DecodeTxBlockNums(stateVal)
 	return minUnwindable, nil
+}
+
+// LatestCommitmentStateValue returns the newest commitment state from either key format.
+func LatestCommitmentStateValue(tx kv.TemporalGetter) ([]byte, error) {
+	newState, newStep, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	legacyState, legacyStep, err := tx.GetLatest(kv.CommitmentDomain, LegacyKeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	newValid := isCommitmentStateValue(newState)
+	legacyValid := isCommitmentStateValue(legacyState)
+	if newValid && (!legacyValid || newStep >= legacyStep) {
+		return newState, nil
+	}
+	if legacyValid {
+		return legacyState, nil
+	}
+	return nil, nil
 }

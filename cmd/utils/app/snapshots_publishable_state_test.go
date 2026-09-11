@@ -223,22 +223,30 @@ func setupWorkingStateMockDatadir(t *testing.T) datadir.Dirs {
 	createMockFile(t, dirs.SnapDomain, "v1.1-code.200-202.kv.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-code.200-202.kvei")
 	createMockFile(t, dirs.SnapDomain, "v1.1-code.200-202.kvei.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.bt")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.bt.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kv")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kv.torrent")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kvi")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kvei")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.0-128.kvei.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.bt")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.bt.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kv")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kv.torrent")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvi")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvei")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvei.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.bt")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.bt.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kv")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kv.torrent")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kvi")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kvei")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.192-200.kvei.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.bt")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.bt.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kv")
 	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kv.torrent")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kvi")
-	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kvei")
+	createMockFile(t, dirs.SnapDomain, "v1.1-commitment.200-202.kvei.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-receipt.0-128.bt")
 	createMockFile(t, dirs.SnapDomain, "v1.1-receipt.0-128.bt.torrent")
 	createMockFile(t, dirs.SnapDomain, "v1.1-receipt.0-128.kv")
@@ -501,9 +509,8 @@ func Test_CheckStateSnapshotFiles_SuccessCase(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
-	t.Parallel()
-	dirs := setupWorkingStateMockDatadir(t)
+func addRCacheMockFiles(t *testing.T, dirs datadir.Dirs) {
+	t.Helper()
 	// Add rcache domain files (.kv + .kvi for each range)
 	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv")
 	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv.torrent")
@@ -556,6 +563,12 @@ func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
 	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.192-200.v.torrent")
 	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.200-202.v")
 	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.200-202.v.torrent")
+}
+
+func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	addRCacheMockFiles(t, dirs)
 	err := checkStateSnapshotFiles(dirs, true, false)
 	require.NoError(t, err)
 }
@@ -688,12 +701,12 @@ func Test_CheckStateSnapshotFiles_MissingDomainKVEI(t *testing.T) {
 	require.ErrorIs(t, err, ErrSnapMissingFile)
 }
 
-// The commitment domain uses AccessorHashMap and requires a .kvi file for each range.
 func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
 	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
-	removeMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvi")
-	err := checkStateSnapshotFiles(dirs, false, false)
+	addRCacheMockFiles(t, dirs)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-rcache.128-192.kvi")
+	err := checkStateSnapshotFiles(dirs, true, false)
 	require.ErrorIs(t, err, ErrSnapMissingFile)
 }
 

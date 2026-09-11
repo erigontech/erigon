@@ -876,11 +876,6 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
-func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
-	t.Helper()
-	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
-}
-
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)

@@ -63,7 +63,7 @@ func writeCommitmentKV(t *testing.T, referencedContent bool) string {
 	require.NoError(t, err)
 	w := seg.NewWriter(comp, statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
 
-	_, err = w.Write(commitmentdb.KeyCommitmentState)
+	_, err = w.Write(commitmentdb.LegacyKeyCommitmentState)
 	require.NoError(t, err)
 	_, err = w.Write([]byte("state-blob"))
 	require.NoError(t, err)

@@ -57,6 +57,22 @@ func (rc *RecordingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return data, step, nil
 }
 
+func (rc *RecordingContext) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	reader, ok := rc.inner.(BranchMaskReader)
+	if !ok {
+		data, step, err := rc.Branch(prefix)
+		return data, step, [16]uint16{}, 0, err
+	}
+	data, step, childMasks, childMasksKnown, err := reader.BranchWithMask(prefix, mask, maskKnown)
+	if err != nil {
+		return data, step, childMasks, childMasksKnown, err
+	}
+	if data != nil {
+		rc.branches[string(bytes.Clone(prefix))] = bytes.Clone(data)
+	}
+	return data, step, childMasks, childMasksKnown, nil
+}
+
 func (rc *RecordingContext) Account(plainKey []byte) (*Update, error) {
 	u, err := rc.inner.Account(plainKey)
 	if err != nil {

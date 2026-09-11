@@ -55,6 +55,18 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 	return ws
 }
 
+func latestCommitmentStateForTest(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalTx) []byte {
+	t.Helper()
+	value, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	if commitmentdb.IsCommitmentStateValue(value) {
+		return value
+	}
+	value, _, err = doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.LegacyKeyCommitmentState)
+	require.NoError(t, err)
+	return value
+}
+
 func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
 	header := &types.Header{Number: *uint256.NewInt(blockNum)}
 	return &blockResult{
@@ -144,8 +156,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// Batch mode computes commitment only on an explicit request, which this
 	// stream never sends; the sole writer of a checkpoint is the step-boundary
 	// hook at txNum 15, so the latest checkpoint must decode to that edge.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"no commitment checkpoint was saved at the mid-block step edge — the step-boundary hook in handleMessage's txResult case never ran")
 	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
@@ -206,8 +217,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
 	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
@@ -343,8 +353,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, edgeTxNum, false))
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 
 	require.NoError(t, doms.Flush(ctx, tx))
 	it, err := tx.RangeAsOf(kv.AccountsDomain, nil, nil, edgeTxNum+1, order.Asc, -1)
@@ -438,8 +447,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	// The checkpoint must still advance to the step edge: the fix isolates the
 	// changeset, it does not suppress the checkpoint.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
 	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)
@@ -1034,4 +1042,30 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	res := feedBlock1Shadow(t, 4, bytes.Repeat([]byte{0xEE}, 32))
 	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
+}
+
+// A record read never goes through the getter, so it needs its own path to the worker's
+// accumulator. Without it kv_read_count{domain="commitment"} reads zero on a v3 node while the
+// v2 arm reports millions, and the two cannot be compared.
+func TestAsOfStateReaderWorkerMetersRecordReads(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	_, tx, doms := setupStepTest(t)
+
+	nodeKey := []byte{0x00}
+	childKey := []byte{0x00, 0x80 | 3}
+	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, childKey, []byte{1, 2, 3}, 0, nil))
+
+	wm := kvmetrics.NewDomainMetrics()
+	workerCtx := kvmetrics.ContextWithMetrics(context.Background(), wm)
+	reader := (&asOfStateReader{sd: doms, roTx: tx}).CloneForWorker(workerCtx, tx)
+
+	_, present, _, err := reader.ReadCommitmentRecords(nodeKey, 0, false)
+	require.NoError(t, err)
+	require.NotZero(t, present, "the record just written must be readable")
+
+	entry, ok := wm.Domains[kv.CommitmentDomain]
+	require.True(t, ok, "a worker's record read must land in its own accumulator")
+	require.Positive(t, entry.CacheReadCount+entry.DbReadCount+entry.FileReadCount)
 }

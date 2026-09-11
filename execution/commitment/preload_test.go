@@ -44,7 +44,7 @@ func TestContractTrunkPreload_ResumeAfterReaderError(t *testing.T) {
 	failingReader := fakeReader(tree, nil, valSz, r1)
 	healthyReader := fakeReader(tree, nil, valSz, "")
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreload(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestContractTrunkPreload_BudgetStopPreservesQueueHead(t *testing.T) {
 	}
 	budget += 10 // slack inside the want-th, below the (want+1)-th
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreload(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestContractTrunkPreload_StopsAtMaxDepth(t *testing.T) {
 		return v, 1, true, nil
 	}
 
-	c := NewBranchCache(1 << 16)
+	c := NewBranchCache(1<<16, false)
 	p, err := NewContractTrunkPreload(hash)
 	if err != nil {
 		t.Fatal(err)

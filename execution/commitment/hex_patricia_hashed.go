@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -137,6 +138,8 @@ type HexPatriciaHashed struct {
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
 	rootTouched   bool
 	rootPresent   bool
+	rootMask      uint16
+	rootMaskKnown bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte              // buffer to compute cell hash or write hash-related things
@@ -155,6 +158,11 @@ type HexPatriciaHashed struct {
 	mounted    bool  // true if this trie is mounted to some root trie
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
+
+	// A storage-only worker's grid starts below depth 64, so no account cell is in it for
+	// a v3 storage leaf to inherit its address from.
+	storageAccount    common.Address
+	storageAccountSet bool
 
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
@@ -212,6 +220,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
+	hph.branchEncoder.setEdgeRecords(cfg.EdgeRecords)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
@@ -248,12 +257,14 @@ func (hph *HexPatriciaHashed) SetCollapseTracer(tracer CollapseTracer) {
 // The large grid array is NOT zeroed — activeRows=0 means no cells are live,
 // and cells are properly initialized via cell.reset() during unfold/fold.
 func (hph *HexPatriciaHashed) resetForReuse() {
-	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
+	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent, rootMask,
 	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = false
+	hph.rootMask = 0
+	hph.rootMaskKnown = false
 	hph.currentKeyLen = 0
 	hph.activeRows = 0
 	for i := range hph.depths {
@@ -272,6 +283,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.mounted = false
 	hph.mountedNib = 0
 	hph.mountWall = 0
+	hph.storageAccountSet = false
 
 	// tracing
 	hph.traceW = nil
@@ -289,6 +301,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
 	hph.branchEncoder.setDeferUpdates(false) // will be re-set by applyConfig
+	hph.branchEncoder.setEdgeRecords(false)
 
 	// reset config to zero — caller sets via applyConfig after pool get
 	hph.cfg = TrieConfig{}
@@ -313,12 +326,15 @@ type cell struct {
 	storageAddr     [length.Addr + length.Hash]byte // storage plain key
 	hash            common.Hash                     // cell hash
 	stateHash       common.Hash
-	hashedExtLen    int16     // length of the hashed extension, if any
-	extLen          int16     // length of the extension, if any
-	accountAddrLen  int16     // length of account plain key
-	storageAddrLen  int16     // length of the storage plain key
-	hashLen         int16     // Length of the hash (or embedded)
-	stateHashLen    int16     // stateHash length, if > 0 can reuse
+	hashedExtLen    int16 // length of the hashed extension, if any
+	extLen          int16 // length of the extension, if any
+	accountAddrLen  int16 // length of account plain key
+	storageAddrLen  int16 // length of the storage plain key
+	hashLen         int16 // Length of the hash (or embedded)
+	stateHashLen    int16 // stateHash length, if > 0 can reuse
+	branchMask      uint16
+	branchMaskKnown bool
+	storageMask     uint16
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
 }
@@ -411,6 +427,9 @@ func (cell *cell) reset() {
 	cell.extLen = 0
 	cell.hashLen = 0
 	cell.stateHashLen = 0
+	cell.branchMask = 0
+	cell.branchMaskKnown = false
+	cell.storageMask = 0
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
 	clear(cell.extension[:])
@@ -553,6 +572,9 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	if upCell.hashLen > 0 {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
+	cell.branchMask = upCell.branchMask
+	cell.branchMaskKnown = upCell.branchMaskKnown
+	cell.storageMask = upCell.storageMask
 	cell.loaded = upCell.loaded
 }
 
@@ -602,6 +624,9 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
+	cell.branchMask = lowCell.branchMask
+	cell.branchMaskKnown = lowCell.branchMaskKnown
+	cell.storageMask = lowCell.storageMask
 	if lowDepth > 64 {
 		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
 	} else {
@@ -1471,6 +1496,11 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if childDepth > 64 {
 			c.accountAddrLen = 0
 		}
+		if hph.cfg.EdgeRecords {
+			if err := c.inheritStorageAddress(hph.enclosingAccountAddr()); err != nil {
+				return nil, fmt.Errorf("[witness] storage leaf at prefix %x: %w", branchPrefix, err)
+			}
+		}
 		if err := c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
@@ -1505,22 +1535,44 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte,
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
 func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
+	data, _, _, _, err := hph.readBranchAndCheckForFlushingWithMask(prefix, 0, false)
+	return data, err
+}
+
+func (hph *HexPatriciaHashed) flushPendingBranchPrefix(prefix []byte) error {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, err
+			return err
 		}
 		be.ClearDeferred()
 	}
-	return hph.branchFromCacheOrDB(prefix)
+	return nil
+}
+
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushingWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	if err := hph.flushPendingBranchPrefix(prefix); err != nil {
+		return nil, 0, [16]uint16{}, 0, err
+	}
+	if hph.cfg.EdgeRecords {
+		if reader, ok := hph.ctx.(BranchMaskReader); ok {
+			return reader.BranchWithMask(prefix, mask, maskKnown)
+		}
+	}
+	data, step, err := hph.ctx.Branch(prefix)
+	return data, step, [16]uint16{}, 0, err
 }
 
 // unfoldBranchNode returns true if unfolding has been done
-func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
+func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, mask uint16, maskKnown bool) error {
 	key := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, err := hph.readBranchAndCheckForFlushing(key)
+	if reader := hph.recordReader(); reader != nil {
+		return hph.unfoldBranchNodeRecords(reader, row, depth, deleted, mask, maskKnown, key)
+	}
+
+	branchData, _, childMasks, childMasksKnown, err := hph.readBranchAndCheckForFlushingWithMask(key, mask, maskKnown)
 	if err != nil {
 		return err
 	}
@@ -1554,6 +1606,51 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err := hph.decodeBranchIntoRow(row, depth, branchData, deleted); err != nil {
 		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 	}
+	hph.stampChildMasks(row, childMasks, childMasksKnown)
+	hph.depths[hph.activeRows] = depth
+	hph.activeRows++
+	return nil
+}
+
+// unfoldBranchNodeRecords is unfoldBranchNode for a v3 node: the records go straight into the row
+// instead of through a legacy branch row this function would immediately take apart again.
+func (hph *HexPatriciaHashed) unfoldBranchNodeRecords(reader BranchRecordReader, row int, depth int16, deleted bool, mask uint16, maskKnown bool, key []byte) error {
+	if err := hph.flushPendingBranchPrefix(key); err != nil {
+		return err
+	}
+	records, present, _, err := reader.BranchRecords(key, mask, maskKnown)
+	if err != nil {
+		return err
+	}
+	hph.depthsToTxNum[depth] = 0
+	read := 0
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		read += len(records[bits.TrailingZeros16(bitset&-bitset)])
+	}
+	hph.metrics.AddBranchRead(read)
+
+	effectiveMask, err := hph.unfoldRecordsIntoRow(row, depth, records, present, mask, maskKnown)
+	if err != nil {
+		return fmt.Errorf("prefix [%x]: %w", hph.currentKey[:hph.currentKeyLen], err)
+	}
+	if effectiveMask == 0 {
+		if !hph.rootChecked && hph.currentKeyLen == 0 {
+			hph.rootChecked = true
+			return nil
+		}
+		log.Warn("got empty branch data during unfold", "key", traceHex(key), "row", row, "depth", depth, "deleted", deleted)
+		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
+	}
+	if deleted {
+		hph.touchMap[row], hph.afterMap[row] = effectiveMask, 0
+	} else {
+		hph.touchMap[row], hph.afterMap[row] = 0, effectiveMask
+	}
+	if hph.traceW != nil {
+		fmt.Fprintf(hph.traceW, "unfoldBranchNodeRecords prefix '%x', nibbles [%x] depth %d row %d mask %04x\n",
+			key, hph.currentKey[:hph.currentKeyLen], depth, row, effectiveMask)
+	}
+	hph.branchBefore[row] = true
 	hph.depths[hph.activeRows] = depth
 	hph.activeRows++
 	return nil
@@ -1569,10 +1666,19 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 	}
 	hph.touchMap[row] = maps.TouchMap
 	hph.afterMap[row] = maps.AfterMap
+	var account []byte
+	if hph.cfg.EdgeRecords {
+		account = hph.enclosingAccountAddr()
+	}
 	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
+		if hph.cfg.EdgeRecords {
+			if err := cell.inheritStorageAddress(account); err != nil {
+				return fmt.Errorf("storage leaf at depth %d nibble %x: %w", depth, nibble, err)
+			}
+		}
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
@@ -1582,6 +1688,33 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 		bitset ^= bit
 	}
 	return nil
+}
+
+func (hph *HexPatriciaHashed) enclosingAccountAddr() []byte {
+	if hph.storageAccountSet {
+		return hph.storageAccount[:]
+	}
+	if hph.root.accountAddrLen == length.Addr {
+		return hph.root.accountAddr[:]
+	}
+	for row := 0; row < hph.activeRows; row++ {
+		pathPos := hph.depths[row] - 1
+		if pathPos < 0 || pathPos >= hph.currentKeyLen {
+			continue
+		}
+		ancestor := &hph.grid[row][hph.currentKey[pathPos]]
+		if ancestor.accountAddrLen == length.Addr {
+			return ancestor.accountAddr[:]
+		}
+	}
+	return nil
+}
+
+func (hph *HexPatriciaHashed) SetStorageAccount(addr []byte) {
+	hph.storageAccountSet = len(addr) == length.Addr
+	if hph.storageAccountSet {
+		copy(hph.storageAccount[:], addr)
+	}
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
@@ -1623,7 +1756,11 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
-		return hph.unfoldBranchNode(row, depth, touched && !present)
+		mask, maskKnown := hph.rootMask, hph.rootMaskKnown
+		if hph.activeRows > 0 {
+			mask, maskKnown = upCell.branchMask, upCell.branchMaskKnown
+		}
+		return hph.unfoldBranchNode(row, depth, touched && !present, mask, maskKnown)
 	}
 
 	lowest := min(unfolding, upCell.hashedExtLen)
@@ -1736,6 +1873,18 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 
 // foldBranch handles the updateKindBranch case: branch of 2+ cells.
 func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, upCell *cell, updateKey []byte) error {
+	if row == 0 {
+		hph.rootMask = hph.afterMap[row]
+		hph.rootMaskKnown = hph.cfg.EdgeRecords
+	}
+	upCell.branchMask = hph.afterMap[row]
+	upCell.branchMaskKnown = hph.cfg.EdgeRecords
+	if upDepth == 64 {
+		// upCell is the account and this row is its storage branch, so the row's afterMap is the
+		// storage mask the fused account record carries. Only a branch fold sets it: a lone slot
+		// folds through foldPropagate and must keep the zero mask that marks a singleton.
+		upCell.storageMask = hph.afterMap[row]
+	}
 	if hph.touchMap[row] != 0 { // any modifications
 		if row == 0 {
 			hph.rootTouched = true
@@ -1959,6 +2108,8 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 			// A propagate fold leaves exactly one survivor, so the root exists; without this
 			// the next unfold reads touched && !present and deletes the whole subtree.
 			hph.rootPresent = true
+			hph.rootMask = 0
+			hph.rootMaskKnown = hph.cfg.EdgeRecords
 		} else {
 			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
@@ -1981,6 +2132,15 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+	if upDepth == 64 {
+		// The account edge carries one mask, and it names the node the storage extension leads to.
+		// fillFromLowerCell brings up the survivor's own storageMask, which describes a different
+		// node and goes stale the moment this one gains a child. A hoisted slot keeps the zero mask.
+		upCell.storageMask = 0
+		if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
+			upCell.storageMask = cell.branchMask
+		}
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err
@@ -1999,6 +2159,8 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 			// Root is deleted because the tree is empty
 			hph.rootTouched = true
 			hph.rootPresent = false
+			hph.rootMask = 0
+			hph.rootMaskKnown = hph.cfg.EdgeRecords
 		case upDepth == 64:
 			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 			// Therefore we are not propagating deletion upwards, but turn it into a modification
@@ -2017,10 +2179,14 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 	return hph.collectDeleteUpdate(updateKey, row)
 }
 
-// collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
+// collectDeleteUpdate removes the child records of a branch that is no longer persisted.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
-	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
+	if hph.branchBefore[row] || hph.cfg.EdgeRecords {
+		touchMap := hph.touchMap[row]
+		if hph.cfg.EdgeRecords {
+			touchMap |= hph.afterMap[row]
+		}
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, touchMap, 0, nil, false); err != nil {
 			return fmt.Errorf("failed to encode branch deletion: %w", err)
 		}
 	}
@@ -2120,6 +2286,8 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	if hph.activeRows == 0 { // Remove the root
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, false
+		hph.rootMask = 0
+		hph.rootMaskKnown = false
 	} else {
 		row := hph.activeRows - 1
 		if hph.depths[row] < int16(len(hashedKey)) {
@@ -2241,6 +2409,8 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	if hph.activeRows == 0 {
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, true
+		hph.rootMask = 0
+		hph.rootMaskKnown = false
 	} else {
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
@@ -2729,6 +2899,11 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.leaveDeferredForCaller = leave
 }
 
+func (hph *HexPatriciaHashed) SetEdgeRecords(edgeRecords bool) {
+	hph.cfg.EdgeRecords = edgeRecords
+	hph.branchEncoder.setEdgeRecords(edgeRecords)
+}
+
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
 // The aggregator-scope BranchCache is intentionally not cleared here;
 // SharedDomains.Unwind handles correctness via txN-tagged eviction.
@@ -2737,6 +2912,9 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
+	hph.rootMask = 0
+	hph.rootMaskKnown = false
+	hph.storageAccountSet = false
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
@@ -2749,6 +2927,84 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	return data, err
 }
 
+// branchWithMasksFromCacheOrDB keeps the child bitmaps a v3 record carries; the mask-less read
+// drops them, and every descent below then has to probe all 16 nibbles.
+func (hph *HexPatriciaHashed) branchWithMasksFromCacheOrDB(key []byte) ([]byte, [16]uint16, uint16, error) {
+	if hph.cfg.EdgeRecords {
+		if reader, ok := hph.ctx.(BranchMaskReader); ok {
+			data, _, childMasks, childMasksKnown, err := reader.BranchWithMask(key, 0, false)
+			return data, childMasks, childMasksKnown, err
+		}
+	}
+	data, _, err := hph.ctx.Branch(key)
+	return data, [16]uint16{}, 0, err
+}
+
+// recordReader returns the context's v3 record reader, or nil when this trie or that context is
+// not on edge records.
+func (hph *HexPatriciaHashed) recordReader() BranchRecordReader {
+	if !hph.cfg.EdgeRecords {
+		return nil
+	}
+	reader, ok := hph.ctx.(BranchRecordReader)
+	if !ok || !reader.EdgeRecords() {
+		return nil
+	}
+	return reader
+}
+
+// unfoldRecordsIntoRow decodes a node's edge records straight into grid[row], skipping the legacy
+// row a v3 read would otherwise build and immediately take apart. Caller resets the row first.
+func (hph *HexPatriciaHashed) unfoldRecordsIntoRow(row int, depth int16, records [16][]byte, present, mask uint16, maskKnown bool) (uint16, error) {
+	if missing := mask &^ present; maskKnown && missing != 0 {
+		return 0, fmt.Errorf("missing record for mask bit %d", bits.TrailingZeros16(missing))
+	}
+	var tombstones uint16
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		bit := bitset & -bitset
+		if len(records[bits.TrailingZeros16(bit)]) == 0 {
+			tombstones |= bit
+		}
+	}
+	effectiveMask := present &^ tombstones
+	if effectiveMask == 0 {
+		return 0, nil
+	}
+
+	childMasks, childMasksKnown, err := decodeRecordsIntoCells(effectiveMask, records, present, nil, 0, &hph.grid[row])
+	if err != nil {
+		return 0, err
+	}
+	account := hph.enclosingAccountAddr()
+	for bitset := effectiveMask; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		c := &hph.grid[row][nibble]
+		if err := c.inheritStorageAddress(account); err != nil {
+			return 0, fmt.Errorf("storage leaf at depth %d nibble %x: %w", depth, nibble, err)
+		}
+		if err := c.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return 0, err
+		}
+		bitset ^= bit
+	}
+	hph.stampChildMasks(row, childMasks, childMasksKnown)
+	return effectiveMask, nil
+}
+
+// stampChildMasks records, per decoded cell, the bitmap of the node it points at.
+func (hph *HexPatriciaHashed) stampChildMasks(row int, childMasks [16]uint16, childMasksKnown uint16) {
+	for bitset := childMasksKnown; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		hph.grid[row][nibble].branchMask = childMasks[nibble]
+		hph.grid[row][nibble].branchMaskKnown = true
+		// One record field carries both: a branch child's mask and a fused account's storage mask.
+		hph.grid[row][nibble].storageMask = childMasks[nibble]
+		bitset ^= bit
+	}
+}
+
 // No Go-side cache; reads straight from the AccountsDomain.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Account(plainKey)
@@ -2759,24 +3015,23 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 	return hph.ctx.Storage(plainKey)
 }
 
-type stateRootFlag int8
+type stateRootFlag uint8
 
-var (
-	stateRootPresent stateRootFlag = 1
-	stateRootChecked stateRootFlag = 2
-	stateRootTouched stateRootFlag = 4
+const (
+	stateRootPresent     stateRootFlag = 1
+	stateRootChecked     stateRootFlag = 2
+	stateRootTouched     stateRootFlag = 4
+	stateRootVersionV2   stateRootFlag = 8
+	stateRootVersionMask stateRootFlag = 0xf8
 )
 
 // represents state of the tree
 type state struct {
-	Root         []byte      // encoded root cell
-	Depths       [128]int16  // For each row, the depth of cells in that row
-	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
-	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
-	RootTouched  bool
-	RootPresent  bool
+	Root        []byte // encoded root cell
+	RootMask    uint16
+	RootChecked bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	RootTouched bool
+	RootPresent bool
 }
 
 func (s *state) Encode(buf []byte) ([]byte, error) {
@@ -2790,6 +3045,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	if s.RootTouched {
 		rootFlags |= stateRootTouched
 	}
+	rootFlags |= stateRootVersionV2
 
 	ee := bytes.NewBuffer(buf)
 	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
@@ -2801,45 +3057,27 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	if n, err := ee.Write(s.Root); err != nil || n != len(s.Root) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
-	d := make([]byte, len(s.Depths))
-	for i := range len(s.Depths) {
-		d[i] = byte(s.Depths[i])
-	}
-	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
-		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
-		return nil, fmt.Errorf("encode afterMap: %w", err)
-	}
-
-	var before1, before2 uint64
-	for i := range 64 {
-		if s.BranchBefore[i] {
-			before1 |= 1 << i
-		}
-	}
-	for i, j := 64, 0; i < 128; i, j = i+1, j+1 {
-		if s.BranchBefore[i] {
-			before2 |= 1 << j
-		}
-	}
-	if err := binary.Write(ee, binary.BigEndian, before1); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_1: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, before2); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_2: %w", err)
+	if err := binary.Write(ee, binary.BigEndian, s.RootMask); err != nil {
+		return nil, fmt.Errorf("encode root mask: %w", err)
 	}
 	return ee.Bytes(), nil
 }
 
 func (s *state) Decode(buf []byte) error {
 	aux := bytes.NewBuffer(buf)
+	s.Root = nil
+	s.RootMask = 0
+	s.RootChecked = false
+	s.RootTouched = false
+	s.RootPresent = false
+
 	var rootFlags stateRootFlag
 	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
 		return fmt.Errorf("rootFlags: %w", err)
+	}
+	version := rootFlags & stateRootVersionMask
+	if version != 0 && version != stateRootVersionV2 {
+		return fmt.Errorf("unsupported state version %x", version)
 	}
 
 	if rootFlags&stateRootPresent != 0 {
@@ -2857,40 +3095,37 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("root size: %w", err)
 	}
 	s.Root = make([]byte, rootSize)
-	if _, err := aux.Read(s.Root); err != nil {
+	if _, err := io.ReadFull(aux, s.Root); err != nil {
 		return fmt.Errorf("root: %w", err)
 	}
-	d := make([]byte, len(s.Depths))
-	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
-		return fmt.Errorf("depths: %w", err)
+
+	if version == stateRootVersionV2 {
+		if err := binary.Read(aux, binary.BigEndian, &s.RootMask); err != nil {
+			return fmt.Errorf("root mask: %w", err)
+		}
+		return nil
 	}
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(d[i])
+
+	var depths [128]byte
+	if _, err := io.ReadFull(aux, depths[:]); err != nil {
+		return fmt.Errorf("legacy depths: %w", err)
 	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
+	var touchMap [128]uint16
+	if err := binary.Read(aux, binary.BigEndian, &touchMap); err != nil {
+		return fmt.Errorf("legacy touchMap: %w", err)
 	}
-	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
-		return fmt.Errorf("afterMap: %w", err)
+	var afterMap [128]uint16
+	if err := binary.Read(aux, binary.BigEndian, &afterMap); err != nil {
+		return fmt.Errorf("legacy afterMap: %w", err)
 	}
 	var branch1, branch2 uint64
 	if err := binary.Read(aux, binary.BigEndian, &branch1); err != nil {
-		return fmt.Errorf("branchBefore1: %w", err)
+		return fmt.Errorf("legacy branchBefore1: %w", err)
 	}
 	if err := binary.Read(aux, binary.BigEndian, &branch2); err != nil {
-		return fmt.Errorf("branchBefore2: %w", err)
+		return fmt.Errorf("legacy branchBefore2: %w", err)
 	}
-
-	for i := range 64 {
-		if branch1&(1<<i) != 0 {
-			s.BranchBefore[i] = true
-		}
-	}
-	for i, j := 64, 0; i < 128; i, j = i+1, j+1 {
-		if branch2&(1<<j) != 0 {
-			s.BranchBefore[i] = true
-		}
-	}
+	s.RootMask = afterMap[0]
 	return nil
 }
 
@@ -3004,16 +3239,13 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		RootChecked: hph.rootChecked,
 		RootTouched: hph.rootTouched,
 		RootPresent: hph.rootPresent,
+		RootMask:    hph.rootMask,
 	}
 	if hph.currentKeyLen > 0 {
 		panic("currentKeyLen > 0")
 	}
 
 	s.Root = hph.root.Encode()
-	copy(s.Depths[:], hph.depths[:])
-	copy(s.BranchBefore[:], hph.branchBefore[:])
-	copy(s.TouchMap[:], hph.touchMap[:])
-	copy(s.AfterMap[:], hph.afterMap[:])
 
 	return s.Encode(buf)
 }
@@ -3028,6 +3260,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootChecked = false
 		hph.rootTouched = false
 		hph.rootPresent = false
+		hph.rootMask = 0
 		hph.activeRows = 0
 
 		for i := range len(hph.depths) {
@@ -3053,11 +3286,8 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	hph.rootChecked = s.RootChecked
 	hph.rootTouched = s.RootTouched
 	hph.rootPresent = s.RootPresent
-
-	copy(hph.depths[:], s.Depths[:])
-	copy(hph.branchBefore[:], s.BranchBefore[:])
-	copy(hph.touchMap[:], s.TouchMap[:])
-	copy(hph.afterMap[:], s.AfterMap[:])
+	hph.rootMask = s.RootMask
+	hph.rootMaskKnown = true
 
 	if hph.root.accountAddrLen > 0 {
 		if hph.ctx == nil {
@@ -3151,32 +3381,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
-	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
-	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
-	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
-
-	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
-		fmt.Fprintf(sb, "\t::%s::\n\n", name)
-		lastNonZero := 0
-		for i, l := range slices.Backward(list) {
-			if l != 0 {
-				lastNonZero = i
-				break
-			}
-		}
-		for i, v := range list {
-			newBranchSuf := ""
-			if !existedBefore[i] {
-				newBranchSuf = " NEW"
-			}
-
-			fmt.Fprintf(sb, " d=%3d %016b%s\n", depths[i], v, newBranchSuf)
-			if i == lastNonZero {
-				break
-			}
-		}
-	}
-	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
+	fmt.Fprintf(sb, " rootNode: %x [mask=%016b, touched=%t, present=%t, checked=%t]\n", s.Root, s.RootMask, s.RootTouched, s.RootPresent, s.RootChecked)
 
 	root := new(cell)
 	if err := root.Decode(s.Root); err != nil {
@@ -3184,7 +3389,6 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	}
 
 	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
-	printAfterMap(sb, "afterMap", s.AfterMap[:], s.Depths[:], s.BranchBefore[:])
 
 	return sb.String(), nil
 }

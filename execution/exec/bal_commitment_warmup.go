@@ -59,12 +59,18 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 }
 
 type balCommitmentContext struct {
-	tx         kv.TemporalTx
-	cache      *commitment.BranchCache
-	cacheStats *balCommitmentCacheStats
+	tx          kv.TemporalTx
+	cache       *commitment.BranchCache
+	cacheStats  *balCommitmentCacheStats
+	edgeRecords bool
 }
 
+// Branch addresses a node by its legacy compact key. A v3 datadir stores commitment one record per
+// edge and has no row at that key, so every lookup would miss: end the descent instead of paying it.
 func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if c.edgeRecords {
+		return nil, 0, nil
+	}
 	if c.cache == nil {
 		return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 	}
@@ -125,9 +131,10 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 			cache = provider.BranchCache()
 		}
 		return &balCommitmentContext{
-			tx:         txTemporal,
-			cache:      cache,
-			cacheStats: cacheStats,
+			tx:          txTemporal,
+			cache:       cache,
+			cacheStats:  cacheStats,
+			edgeRecords: cache != nil && cache.EdgeRecords(),
 		}, tx.Rollback
 	}
 

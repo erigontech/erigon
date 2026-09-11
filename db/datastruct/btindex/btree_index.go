@@ -728,7 +728,6 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	return c, nil
 }
 
-// OrdinalLookup returns cursor for key at position i
 func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	k, v, _, err := b.dataLookup(i, getter)
 	if err != nil {

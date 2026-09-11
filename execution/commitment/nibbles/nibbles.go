@@ -76,6 +76,30 @@ func CompactToHex(compact []byte) []byte {
 	return base[chop:]
 }
 
+// CompactToHexInto is CompactToHex writing into dst when it has the capacity. The result aliases
+// dst, so a caller reusing dst must be done with the previous result.
+func CompactToHexInto(dst, compact []byte) []byte {
+	if len(compact) == 0 {
+		return compact
+	}
+	l := len(compact)*2 + 1
+	buf := dst
+	if cap(buf) < l {
+		buf = make([]byte, l)
+	} else {
+		buf = buf[:l]
+	}
+	for i, b := range compact {
+		buf[i*2] = b / Terminator
+		buf[i*2+1] = b % Terminator
+	}
+	buf[l-1] = Terminator
+	if buf[0] < 2 {
+		buf = buf[:l-1]
+	}
+	return buf[2-buf[0]&1:]
+}
+
 // KeybytesToHex converts a key byte slice (packed, 2 nibbles per byte) to hex
 // nibble encoding with a trailing Terminator byte.
 func KeybytesToHex(str []byte) []byte {

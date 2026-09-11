@@ -64,6 +64,8 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.rootPresent = true
 
 	hph.root = root.root
+	hph.rootMask = root.rootMask
+	hph.rootMaskKnown = root.rootMaskKnown
 
 	hph.activeRows = root.activeRows
 	hph.currentKeyLen = root.currentKeyLen
@@ -73,6 +75,9 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.touchMap[:], root.touchMap[:])
 	copy(hph.afterMap[:], root.afterMap[:])
 	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
+
+	hph.storageAccount = root.storageAccount
+	hph.storageAccountSet = root.storageAccountSet
 
 	hph.mountedNib = nibble
 	hph.mounted = true
@@ -322,5 +327,7 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 	if sr.hashLen > 0 {
 		copy(c.hash[:], sr.hash[:sr.hashLen])
 	}
+	c.branchMask = sr.branchMask
+	c.storageMask = sr.branchMask
 	c.stateHashLen = 0
 }

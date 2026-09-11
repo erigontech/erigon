@@ -60,10 +60,18 @@ type ConvertOpts struct {
 	Continue bool
 }
 
+type keyEncoding uint8
+
+const (
+	keyEncodingV1 keyEncoding = iota
+	keyEncodingV2
+	keyEncodingV3
+)
+
 // fileState describes the detected current encoding of a commitment .kv file.
 type fileState struct {
-	keysV2   bool
-	squeezed bool
+	keyEncoding keyEncoding
+	squeezed    bool
 }
 
 // errSkip signals "file is already in the target encoding"; the orchestrator
@@ -71,7 +79,8 @@ type fileState struct {
 var (
 	errSkip              = errors.New("file already in target state")
 	errRangeMatch        = errors.New("no matching account/storage file for range")
-	errNoNonStateSamples = errors.New("no non-state samples to vote with")
+	errNoNonStateSamples = errors.New("no non-state samples to detect encoding")
+	errV3Conversion      = errors.New("commitment v3 edge records are not supported by this converter")
 )
 
 // sampledPair is one (k, v) read out of a commitment .kv file at a sampled offset.
@@ -80,41 +89,41 @@ type sampledPair struct {
 	k, v []byte
 }
 
-// detectKeyEncoding votes V1 vs V2 by feeding every non-state key to
-// nibbles.DecodeKeyV2 and observing whether it returns one of the four
-// V2 canonicality errors.
-//
-//   - any sample returns an error → file is V1 (return false, nil)
-//   - all samples decode canonically → file is V2 (return true, nil)
-//   - zero non-state samples → return errNoNonStateSamples; caller widens
-//
-// V1 and V2 canonical forms overlap byte-wise — a real V1 key may also
-// decode V2-canonically. Across 48 distributed samples the probability of
-// every sample independently satisfying V2 canonicality on a real V1 file
-// is vanishingly small (≈10⁻⁹⁶ under uniformly distributed nibble content
-// given the trailing-byte + pad-nibble constraints). Distributed sampling
-// (not consecutive reads) is the load-bearing assumption here because
-// commitment files are prefix-sorted and consecutive entries cluster on
-// shared prefixes whose byte distribution is not representative.
-func detectKeyEncoding(samples []sampledPair) (bool, error) {
+func detectKeyEncodingForStateKey(samples []sampledPair, stateKey []byte) (keyEncoding, error) {
+	legacy, err := detectLegacyKeyEncodingForStateKey(samples, stateKey)
+	if err != nil {
+		return legacy, err
+	}
+	for _, p := range samples {
+		if bytes.Equal(p.k, stateKey) {
+			continue
+		}
+		if nibbles.IsChildKeyV3(p.k) {
+			return keyEncodingV3, nil
+		}
+	}
+	return legacy, nil
+}
+
+func detectLegacyKeyEncodingForStateKey(samples []sampledPair, stateKey []byte) (keyEncoding, error) {
 	sawAny := false
 	for _, p := range samples {
-		if bytes.Equal(p.k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(p.k, stateKey) {
 			continue
 		}
 		sawAny = true
 		if _, err := nibbles.DecodeKeyV2(p.k); err != nil {
-			return false, nil
+			return keyEncodingV1, nil
 		}
 	}
 	if !sawAny {
-		return false, errNoNonStateSamples
+		return keyEncodingV1, errNoNonStateSamples
 	}
-	return true, nil
+	return keyEncodingV2, nil
 }
 
 // detectFileState reads `samples` distributed (k, v) pairs from the commitment
-// file to vote the key encoding (V1/V2), and derives the squeeze (referenced)
+// file to detect the key encoding, and derives the squeeze (referenced)
 // state from the file version. Uses BT ordinal lookup when available (constant
 // per-sample cost regardless of file size); falls back to stride-skip on a
 // sequential seg.Reader if the file has no BT index.
@@ -141,14 +150,21 @@ func detectFileState(at *AggregatorRoTx, file VisibleFile, samples int) (fileSta
 		return fileState{}, fmt.Errorf("detectFileState: %q is empty", file.Fullpath())
 	}
 
-	keysV2, err := detectKeyEncoding(pairs)
+	stateKey := commitmentdb.LegacyKeyCommitmentState
+	keyEncoding, err := detectKeyEncodingForStateKey(pairs, stateKey)
 	if err != nil {
-		return fileState{}, fmt.Errorf("detectFileState: %q: key-encoding vote: %w", file.Fullpath(), err)
+		return fileState{}, fmt.Errorf("detectFileState: %q: key-encoding detection: %w", file.Fullpath(), err)
+	}
+	if keyEncoding == keyEncodingV3 {
+		keyEncoding, err = detectLegacyKeyEncodingForStateKey(pairs, stateKey)
+		if err != nil {
+			return fileState{}, fmt.Errorf("detectFileState: %q: legacy key-encoding detection: %w", file.Fullpath(), err)
+		}
 	}
 	// Squeeze (referenced) state follows the version gate, like the live read path: referenced iff
 	// the file version is below the plain ceiling and its range reaches the threshold. No sampling.
 	squeezed := CommitmentBranchReferenced(file.Version(), at.StepSize(), file.StartRootNum(), file.EndRootNum())
-	return fileState{keysV2: keysV2, squeezed: squeezed}, nil
+	return fileState{keyEncoding: keyEncoding, squeezed: squeezed}, nil
 }
 
 // sampleCommitmentFile returns up to `samples` (k, v) pairs read at evenly
@@ -357,6 +373,10 @@ func convertCommitmentFile(
 	grandTotalKeys, processedKeys uint64,
 	logger log.Logger,
 ) (sizeDelta int64, deltaPct float32, ki uint64, err error) {
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), errV3Conversion)
+	}
+
 	st, err := detectFileState(at, file, 48)
 	if err != nil {
 		// A file with only the state row (no non-state samples) has no branches
@@ -366,6 +386,9 @@ func convertCommitmentFile(
 			return 0, 0, 0, errSkip
 		}
 		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
+	}
+	if st.keyEncoding == keyEncodingV3 {
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), errV3Conversion)
 	}
 
 	stepSize := at.StepSize()
@@ -391,7 +414,8 @@ func convertCommitmentFile(
 			"[commitment_convert] %s: step span %d-%d below squeeze threshold; squeeze axis treated as already-target",
 			filepath.Base(file.Fullpath()), stepFrom, stepTo))
 	}
-	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze {
+	detectedV2 := st.keyEncoding == keyEncodingV2
+	if detectedV2 == opts.TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze {
 		return 0, 0, 0, errSkip
 	}
 
@@ -399,7 +423,7 @@ func convertCommitmentFile(
 	accountsRo := at.d[kv.AccountsDomain]
 	storageRo := at.d[kv.StorageDomain]
 
-	kxform := keyXform(st.keysV2, opts.TargetNibblesV2)
+	kxform := keyXform(detectedV2, opts.TargetNibblesV2)
 	rng := MergeRange{name: "convert", needMerge: true, from: startTxNum, to: endTxNum}
 	// Account+storage files are only needed when the squeeze axis changes (the
 	// value transformer dereferences/expands plain-key offsets). For pure key-
@@ -452,6 +476,7 @@ func convertCommitmentFile(
 	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
 	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var k, v []byte
+	stateKey := commitmentdb.LegacyKeyCommitmentState
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
 		if !reader.HasNext() {
@@ -460,7 +485,7 @@ func convertCommitmentFile(
 		v, _ = reader.Next(v[:0])
 		ki++
 
-		isState := bytes.Equal(k, commitmentdb.KeyCommitmentState)
+		isState := bytes.Equal(k, stateKey)
 		var outKey []byte
 		if isState {
 			outKey = append([]byte(nil), k...)

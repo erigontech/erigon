@@ -70,7 +70,7 @@ func TestCheckCommitmentKvDerefCounts(t *testing.T) {
 	t.Run("plain file reports what it walked", func(t *testing.T) {
 		branch := accountStorageBranch(make([]byte, length.Addr), make([]byte, length.Addr+length.Hash))
 		f := fakeVisibleFile{path: writeCommitmentRecords(t,
-			commitmentdb.KeyCommitmentState, []byte("state-blob"),
+			commitmentdb.LegacyKeyCommitmentState, []byte("state-blob"),
 			[]byte("\x01"), branch,
 		), endTxNum: 20, version: version.V2_0}
 
@@ -88,7 +88,7 @@ func TestCheckCommitmentKvDerefCounts(t *testing.T) {
 
 	t.Run("a key with no value is referencing, not a cleared plain scan", func(t *testing.T) {
 		f := fakeVisibleFile{path: writeCommitmentRecords(t,
-			commitmentdb.KeyCommitmentState, []byte("state-blob"),
+			commitmentdb.LegacyKeyCommitmentState, []byte("state-blob"),
 			[]byte("\x01"),
 		), endTxNum: 20, version: version.V2_0}
 

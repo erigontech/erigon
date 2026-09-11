@@ -1106,6 +1106,9 @@ type asOfStateReader struct {
 	roTx   kv.TemporalTx
 	getter execctxapi.StateGetter
 	txNum  uint64
+	// metrics is the per-worker read accumulator. Read() reaches it through the getter, but a
+	// commitment record read never goes through a getter, so it has to be carried here too.
+	metrics *kvmetrics.DomainMetrics
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1148,6 +1151,15 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	return enc, step, err
 }
 
+func (r *asOfStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	// A typed nil in the interface would read as non-nil and silence the request-scoped fallback.
+	var wm kv.GetLatestMetrics
+	if r.metrics != nil {
+		wm = r.metrics
+	}
+	return r.sd.ReadCommitmentRecords(r.roTx, nodeKey, mask, maskKnown, wm)
+}
+
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
 }
@@ -1158,8 +1170,9 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	getterOpts := execctxapi.StateGetterOptions{}
-	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
+	metrics := kvmetrics.MetricsFromContext(workerCtx)
+	if metrics != nil {
 		getterOpts = getterOpts.WithMetrics(metrics)
 	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum, metrics: metrics}
 }

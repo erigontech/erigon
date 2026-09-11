@@ -91,6 +91,7 @@ type Trie interface {
 
 	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
+	SetEdgeRecords(bool)
 
 	Variant() TrieVariant
 
@@ -116,6 +117,19 @@ type PatriciaContext interface {
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
+}
+
+type BranchMaskReader interface {
+	BranchWithMask(prefix []byte, mask uint16, maskKnown bool) (data []byte, step kv.Step, childMasks [16]uint16, childMasksKnown uint16, err error)
+}
+
+// BranchRecordReader hands back a node's edge records unencoded, so a v3 reader can decode the
+// cells it wants instead of paying for a legacy row it would only take apart again.
+// EdgeRecords is part of the contract rather than inferred: a v2 context implements this
+// interface too, and an empty record set there means "wrong format", not "empty node".
+type BranchRecordReader interface {
+	EdgeRecords() bool
+	BranchRecords(prefix []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
 }
 
 type TrieVariant string
@@ -179,12 +193,32 @@ type cellEncodeData struct {
 	storageAddr [length.Addr + length.Hash]byte
 	hash        [32]byte
 	stateHash   [32]byte
+	branchMask  uint16
+	storageMask uint16
 
 	extLen         int16
 	accountAddrLen int16
 	storageAddrLen int16
 	hashLen        int16
 	stateHashLen   int16
+}
+
+var ErrStorageLeafWithoutAccount = errors.New("commitment: storage leaf has no enclosing account")
+
+func (c *cell) inheritStorageAddress(accountAddr []byte) error {
+	if c.accountAddrLen != 0 || c.storageAddrLen != length.Hash {
+		return nil
+	}
+	if len(accountAddr) != length.Addr {
+		return ErrStorageLeafWithoutAccount
+	}
+
+	var slot [length.Hash]byte
+	copy(slot[:], c.storageAddr[:length.Hash])
+	copy(c.storageAddr[:length.Addr], accountAddr)
+	copy(c.storageAddr[length.Addr:], slot[:])
+	c.storageAddrLen = length.Addr + length.Hash
+	return nil
 }
 
 func cellEncodeDataFromCell(c *cell) cellEncodeData {
@@ -194,6 +228,8 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	d.storageAddrLen = c.storageAddrLen
 	d.hashLen = c.hashLen
 	d.stateHashLen = c.stateHashLen
+	d.branchMask = c.branchMask
+	d.storageMask = c.storageMask
 	copy(d.extension[:], c.extension[:c.extLen])
 	copy(d.accountAddr[:], c.accountAddr[:c.accountAddrLen])
 	copy(d.storageAddr[:], c.storageAddr[:c.storageAddrLen])
@@ -203,10 +239,11 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 }
 
 type DeferredBranchUpdate struct {
-	prefix  []byte
-	raw     BranchData
-	prev    []byte
-	encoded BranchData
+	prefix     []byte
+	raw        BranchData
+	prev       []byte
+	encoded    BranchData
+	edgeRecord bool
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
@@ -236,7 +273,14 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.edgeRecord = false
 
+	return upd
+}
+
+func getDeferredRecordUpdate(prefix []byte, raw []byte) *DeferredBranchUpdate {
+	upd := getDeferredUpdate(prefix, raw, nil)
+	upd.edgeRecord = true
 	return upd
 }
 
@@ -268,6 +312,7 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
 		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
+		upd.edgeRecord = false
 		deferredUpdatePool.Put(upd)
 	}
 }
@@ -293,10 +338,13 @@ func (p *PendingCommitmentUpdate) Clear() {
 
 // BranchCache is populated by SharedDomains.Commit, not by this encoder.
 type BranchEncoder struct {
-	buf       *bytes.Buffer
-	bitmapBuf [binary.MaxVarintLen64]byte
-	merger    *BranchMerger
-	metrics   *Metrics
+	buf         *bytes.Buffer
+	bitmapBuf   [binary.MaxVarintLen64]byte
+	merger      *BranchMerger
+	metrics     *Metrics
+	edgeRecords bool
+
+	recordScratch []byte
 
 	deferUpdates       bool
 	maxDeferredUpdates int
@@ -327,6 +375,10 @@ func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
+func (be *BranchEncoder) setEdgeRecords(edgeRecords bool) {
+	be.edgeRecords = edgeRecords
+}
+
 func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
 	if be.pendingPrefixes == nil {
 		return false
@@ -348,7 +400,7 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
-	if len(upd.prev) > 0 {
+	if upd.prev != nil {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
 			return nil
@@ -393,6 +445,7 @@ func ApplyDeferredBranchUpdates(
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 	m *Metrics,
 ) (n int, err error) {
+	deferred = latestDeferredRecords(deferred)
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -468,6 +521,44 @@ func ApplyDeferredBranchUpdates(
 	return written, nil
 }
 
+func latestDeferredRecords(deferred []*DeferredBranchUpdate) []*DeferredBranchUpdate {
+	var hasEdgeRecords bool
+	for _, upd := range deferred {
+		if upd.edgeRecord {
+			hasEdgeRecords = true
+			break
+		}
+	}
+	if !hasEdgeRecords {
+		return deferred
+	}
+
+	last := maphash.NewNonConcurrentMap[int]()
+	kept := 0
+	for i, upd := range deferred {
+		if upd.edgeRecord {
+			if _, seen := last.Get(upd.prefix); !seen {
+				kept++
+			}
+			last.Set(upd.prefix, i)
+			continue
+		}
+		kept++
+	}
+
+	result := make([]*DeferredBranchUpdate, 0, kept)
+	for i, upd := range deferred {
+		if !upd.edgeRecord {
+			result = append(result, upd)
+			continue
+		}
+		if lastIdx, ok := last.Get(upd.prefix); ok && lastIdx == i {
+			result = append(result, upd)
+		}
+	}
+	return result
+}
+
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
@@ -479,6 +570,10 @@ func (be *BranchEncoder) CollectUpdate(
 	cells *[16]cellEncodeData,
 	isNew bool,
 ) error {
+	if be.edgeRecords {
+		return be.collectEdgeRecords(ctx, prefix, bitmap, touchMap, afterMap, cells)
+	}
+
 	var prev []byte
 	var err error
 
@@ -516,6 +611,49 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
+// edgeRecordFor builds the record for one changed child. A delete carries afterMap 0 and no cells
+// at all, so the tombstone has to be decided before cells is indexed.
+func (be *BranchEncoder) edgeRecordFor(afterMap, bit uint16, nibble int, cells *[16]cellEncodeData) []byte {
+	if afterMap&bit == 0 {
+		return make([]byte, 0)
+	}
+	cell := &cells[nibble]
+	if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+		be.recordScratch = AppendLeafChild(be.recordScratch, cell)
+	} else {
+		be.recordScratch = AppendBranchChild(be.recordScratch, cell.branchMask, cell)
+	}
+	return be.recordScratch
+}
+
+func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) error {
+	changed := bitmap | (touchMap &^ afterMap)
+	if changed == 0 {
+		return nil
+	}
+
+	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+	// PutBranch copies both key and record before it returns, so one scratch of each serves the node.
+	key := make([]byte, len(nodeKey)+1)
+	copy(key, nodeKey)
+	written, bytesOut := 0, 0
+	for bitset := changed; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		key[len(nodeKey)] = 0x80 | byte(nibble)
+		record := be.edgeRecordFor(afterMap, bit, nibble, cells)
+		if err := ctx.PutBranch(key, record, nil); err != nil {
+			publishBranchWrites(written, bytesOut, be.metrics)
+			return err
+		}
+		written++
+		bytesOut += len(record)
+		bitset ^= bit
+	}
+	publishBranchWrites(written, bytesOut, be.metrics)
+	return nil
+}
+
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -528,7 +666,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		limit = DefaultMaxDeferredUpdates
 	}
 	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
+	if !be.edgeRecords && !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}
 
@@ -537,6 +675,27 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
+	}
+
+	if be.edgeRecords {
+		changed := bitmap | (touchMap &^ afterMap)
+		if changed == 0 {
+			return nil
+		}
+		be.pendingPrefixes.Set(prefix, struct{}{})
+		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+		// getDeferredRecordUpdate copies the key into a pooled buffer, so one scratch serves all.
+		key := make([]byte, len(nodeKey)+1)
+		copy(key, nodeKey)
+		for bitset := changed; bitset != 0; {
+			bit := bitset & -bitset
+			nibble := bits.TrailingZeros16(bit)
+			key[len(nodeKey)] = 0x80 | byte(nibble)
+			record := be.edgeRecordFor(afterMap, bit, nibble, cells)
+			be.deferred = append(be.deferred, getDeferredRecordUpdate(key, record))
+			bitset ^= bit
+		}
+		return nil
 	}
 
 	var prev []byte
@@ -641,17 +800,26 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 
 type BranchData []byte
 
-func (branchData BranchData) ChildCount() int {
-	if len(branchData) < 4 {
-		return 0
+func (branchData BranchData) IsEdgeRecord() bool {
+	if len(branchData) == 0 {
+		return false
 	}
-	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+	var c cell
+	_, err := DecodeRecordInto(branchData, &c)
+	return err == nil
 }
 
-func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+func (branchData BranchData) ChildCount() (int, error) {
+	if len(branchData) < 4 {
+		return 0, nil
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4])), nil
+}
+
+func (branchData BranchData) IsTombstone() bool { return branchData != nil && len(branchData) == 0 }
 
 func (branchData BranchData) String() string {
-	if branchData.IsTombstone() {
+	if branchData == nil || branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -873,13 +1041,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	return newData, nil
 }
 
-func (branchData BranchData) IsComplete() bool {
+func (branchData BranchData) IsComplete() (bool, error) {
 	if len(branchData) < 4 {
-		return false
+		return false, nil
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	return ^touchMap&afterMap == 0
+	return ^touchMap&afterMap == 0, nil
 }
 
 // branch2 shadows branch1 where both touch the same cell.
@@ -887,7 +1055,10 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	if branchData2 == nil {
 		return branchData, nil
 	}
-	if branchData == nil {
+	if branchData2.IsTombstone() {
+		return branchData2, nil
+	}
+	if branchData == nil || branchData.IsTombstone() {
 		return branchData2, nil
 	}
 
@@ -962,6 +1133,9 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 }
 
 func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
+	if len(branchData) < 4 {
+		return 0, 0, row, errors.New("decodeCells: branch data too short for maps")
+	}
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -969,6 +1143,9 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		if afterMap&bit != 0 {
+			if pos >= len(branchData) {
+				return touchMap, afterMap, row, fmt.Errorf("decodeCells: missing cell fields at nibble %x", nibble)
+			}
 			fields := cellFields(branchData[pos])
 			pos++
 			row[nibble] = new(cell)
@@ -1073,10 +1250,13 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // branch2 shadows branch1 where both touch the same cell.
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if len(branch2) == 0 {
+	if branch2 == nil {
 		return branch1, nil
 	}
-	if len(branch1) == 0 {
+	if branch2.IsTombstone() {
+		return branch2, nil
+	}
+	if branch1 == nil || branch1.IsTombstone() {
 		return branch2, nil
 	}
 
@@ -1237,22 +1417,23 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 	bs.LeafHashCount += other.LeafHashCount
 }
 
-func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat {
+func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) (*BranchStat, error) {
 	stat := &BranchStat{}
 	if len(key) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	stat.KeySize = uint64(len(key))
 	stat.ValSize = uint64(len(branch))
 	stat.IsRoot = true
 
-	if !bytes.Equal(key, []byte("state")) {
+	isState := bytes.Equal(key, LegacyKeyCommitmentState)
+	if !isState {
 		stat.IsRoot = false
 
 		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		stat.TAMapsSize = uint64(2 + 2)
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
@@ -1313,7 +1494,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 		}
 	}
-	return stat
+	return stat, nil
 }
 
 type Mode uint

@@ -116,7 +116,7 @@ func forEachCommitmentBranch(t *testing.T, path string, fn func(prefix, val []by
 	for g.HasNext() {
 		k, _ = g.Next(k[:0])
 		v, _ = g.Next(v[:0])
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(k, commitmentdb.LegacyKeyCommitmentState) {
 			continue
 		}
 		fn(k, v)
@@ -248,6 +248,7 @@ func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.Tem
 	setB := mkAddrs(0xf0, 12)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	dirs := agg.Dirs()
 	agg.SetErigondbDomainStepsInFrozenFile(frozenSteps)
 
@@ -329,6 +330,7 @@ func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dir
 	}
 
 	newAgg := testAgg(t, dirs, stepSize, log.New())
+	newAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder(newDB))
@@ -345,6 +347,7 @@ func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 	agg.Close()
 
 	newAgg := testAgg(t, dirs, stepSize, log.New())
+	newAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 

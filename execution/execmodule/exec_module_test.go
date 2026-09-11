@@ -228,6 +228,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
 		require.NoError(t, err)
+		if !commitmentdb.IsCommitmentStateValue(v) {
+			v, _, err = extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.LegacyKeyCommitmentState)
+			require.NoError(t, err)
+		}
 		inMemTxNum = binary.BigEndian.Uint64(v[:8])
 		inMemBlockNum = binary.BigEndian.Uint64(v[8:16])
 		return nil
@@ -434,7 +438,7 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, err := commitmentdb.LatestCommitmentStateValue(tx)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -519,7 +523,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, err := commitmentdb.LatestCommitmentStateValue(tx)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])

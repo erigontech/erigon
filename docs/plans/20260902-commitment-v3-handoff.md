@@ -1,0 +1,155 @@
+# commitment-v3 handoff — 2026-09-02
+
+Branch `awskii/commitment-v3`, off `origin/main @ 0124ab5a0c`, merged with `origin/main @ 2eb5d827efa` on 2026-09-10.
+The calcState fix it carries is PR #23737 against main.
+
+## Where the model stands
+
+v3 stores one commitment record per touched trie edge instead of one bundled row per branch.
+`changed = bitmap | (touchMap &^ afterMap)` with `bitmap = touchMap & afterMap` gives
+`changed == touchMap`, so v3 writes exactly the touched edges. The **3.03x record multiplier is
+inherent, not a defect**, and it is the cost.
+
+Measured on hoodi from 0, both arms on identical hardware (AMD EPYC 4344P, 16 threads, 125 GiB),
+v2 on snap-arb1 and v3 on edev, at equal `domain_commitment_keys` (1.150e7):
+
+| measure                        |      v2 |      v3 | ratio |
+|--------------------------------|---------|---------|-------|
+| records written                | 6.37e6  | 1.93e7  | 3.03  |
+| commitment compute (batched)   | 11.88s  | 23.86s  | 2.01  |
+| commitment `.kv` on disk       | 605 MB  | 637 MB  | 1.05  |
+| commitment `.bt` index         | 3.68 MB | 12.5 MB | 3.39  |
+| commitment `.kvei` existence   | 3.54 MB | 14.1 MB | 3.97  |
+| chaindata (mdbx)               | 7.38 GB | 11.5 GB | 1.56  |
+| objects allocated (cumulative) | 825M    | 932M    | 1.13  |
+
+The `.kv` byte premise holds at near parity. Everything keyed **per record** tracks the 3.03x
+multiplier: btree index, existence filter, mdbx. The storage story is not "v3 writes more trie",
+it is "v3 writes the same trie as 3x as many keys, and every per-key structure pays for it".
+
+## Commitment history
+
+`CommitmentDomain.Hist` sets `HistoryDisabled: true` **and** `SnapshotsDisabled: true`, so by
+default commitment produces no `.v` history and no `.ef` inverted index. They are off for
+different reasons and should not be lumped:
+
+- history is `.v` (in `history/`) plus `.vi` (in `accessor/`) — disabled outright.
+- the inverted index is `.ef` (in `idx/`) plus `.efi` (in `accessor/`) — `IiCfg.Enabled: true`,
+  it is live, but `SnapshotsDisabled` keeps it out of files. It exists only in chaindata as
+  `TblCommitmentIdx` and `TblCommitmentHistoryKeys`, so it is inside the 1.56x chaindata delta
+  and has **never been broken out per table**.
+
+`statecfg.EnableHistoricalCommitment()` flips both, gated on `cfg.KeepExecutionProofs`, set by
+`--prune.include-commitment-history`. The setting is persisted per datadir at first start and
+requires `TblAccountVals` to be empty, so it can only be chosen on a fresh chaindata.
+
+Every non-archive prune mode keeps `CommitmentHistory: KeepAllBlocksPruneMode`, so
+`--prune.mode=full --prune.include-commitment-history` is the right shape for measuring
+commitment history without running an archive node. `DefaultMode = ArchiveMode`, so dropping
+`--prune.mode` does nothing — non-archive has to be explicit.
+
+## Resolved: the per-block regime was throttled by two map scans in the calculator
+
+Under `--prune.include-commitment-history` (`forcePerBlockCompute`), run 5 showed v3 at 22 blk/s
+against v2's 40-95 and `parallel committed blk=0` for a 21790-block first cycle. Neither number
+meant what the previous version of this file said:
+
+- `committed blk=0` is a log artifact. `computeAndCheck` publishes only on a root mismatch and
+  `lastCommittedBlockNum` moves only when the apply channel closes, so any cycle longer than the
+  log interval prints the previous cycle's end. `domain_commitment_took_count` tracked the executed
+  block on both arms (v3: 33327 calls at blk 33324), so per-block compute was running all along.
+- `invalid=3.20k` / `repeat%=36.87` is chain content. v2 shows repeat 22-33% and invalid
+  1.8-4.7k over the same block range (1744-21567, and again from ~44k); the old table compared
+  v2 at blk 36013, a light range, with v3 at 18401, the heavy one.
+
+The real cost was in `calc_state.go`, identical on main: `cs.accounts` keeps every account written
+since the batch started, and `FlushToUpdates` plus `ResetBlockFlags` walked the whole map once per
+block. A 30 s CPU profile of v3 at blk ~31k (edev, 09:54Z) put 27.5 s of the calculator's 30 s in
+those two scans, about 60 ms per block. A cycle ends on the byte cut (2 x sd.mem > 512 MB); v2 gets
+there in ~350 blocks (bundled rows plus their history, ~750 KB/block), v3 in ~2300 (~117 KB/block),
+so v3 ran 6x longer cycles and paid the quadratic 6x harder. v2's own slow-range cycles (7-8k
+blocks at 43-57 blk/s) pay it too.
+
+Fix: a per-block dirty list (`markDirty`), PR #23737 (`awskii/calcstate-dirty-accounts`, commit
+`2ab3850420b`), cherry-picked here as `315bb3404bb`. Benchmark at 300k accumulated accounts:
+5.0 ms -> 22 us per block. Run 6 (both arms from 0 on `d7a9d63f`, 10:14Z) is the rig check: at
+four minutes in, v2 blk 12893 at 42 blk/s and v3 blk 11911 at 39-42 blk/s, where run 5 had v3 at
+blk 5016 and 22 blk/s. Evidence: research log, section "Two map scans in the calculator".
+
+## What was fixed on this branch, and what it bought
+
+Read path, in order of what the profile said:
+
+1. `4e1726f0ea` — the db read did one B-tree descent per nibble (up to 16 per node) while the file
+   path already walked with one seek plus `Next()`. Both now share `scanCommitmentRecordRun`.
+   The key encoding makes the run correct: for even-length `P` the term byte is `0x00` and every
+   descendant sorts at `0xf0` or higher at that offset, so the 16 edge records are contiguous;
+   only a path ending in nibble `0xf` can have a descendant sort between them, and the run
+   re-seeks past those.
+2. `88d009ddc4` — `loadLatestCollectorRecords` cloned key and value on every etl row but keeps
+   only the last per key. Now reuses buffers. **This one shipped a bug** (see below).
+3. `a24f91ab1e` + `b2b41e3a27` — v3 record reads were entirely unmetered, so every
+   `kv_read_count{domain="commitment"}` read zero on a v3 node while v2 reported millions. The
+   gap was in `asOfStateReader` (execution/stagedsync), the reader the parallel commitment
+   calculator hands its workers: `Read()` reaches the accumulator through its getter, but a
+   record read never uses a getter and was passing a literal nil.
+4. `fbcf29d7f4` then `a3c5ddc4ef` — branch cache. First batched the fill per node, then keyed the
+   whole entry by node.
+
+The cache work is the one to understand before touching it again. `v3TrunkSlot` routed a record
+for edge `P->n` by the **child's** nibble path at depth `d+1`; with `trunkDepthFull = 4`, every
+node at depth 4 had all 16 children spill past the trunk into the LRU tail, while v2 kept that
+same node in the `d4` array. v3 lost a whole level of trunk coverage *and* multiplied entries by
+the branching factor. Hit rate was 56.2% on v2 against 16.7% on v3.
+
+Node-granularity caching (one entry per node, `present:2 | len:2 per child | payloads`) took the
+v3 hit rate to 32.1% and cut db record reads 18.4% — **and moved commitment compute by 1.1%**.
+So the reads were never what made v3's commitment slow. Do not spend more effort on the read side.
+
+Three details in that entry that are not optional:
+
+- `branchCacheEntry.node` — the v3 root's node key is byte-identical to `KeyCommitmentState`, and
+  an edge record for `P->n` routes to the same trunk slot as node `P||n`. Without the
+  discriminator `Get` hands a blob back as a value.
+- `step` and `txN` are both the **max** over children. `IsStale` is
+  `epoch != s.epoch && txNum >= s.floor`, monotone in txNum, so max makes the entry stale exactly
+  when any child would be. Min is wrong.
+- `PutChildren` merges rather than replaces: a publish carries only the changed records.
+
+## Traps this branch has already paid for
+
+- **nil is not empty.** `append(nil[:0], empty...)` returns nil, and `DomainPut` refuses a nil
+  value outright. An empty record is a tombstone and must stay non-nil. This killed v3 at block
+  34028 and the guard test passed the whole time by ordering luck — its tombstone row came after
+  a row that had already given the buffer capacity. The test that bites puts the empty record
+  first (`TestLoadLatestCollectorRecordsKeepsFirstEmptyRecordNonNil`).
+- **A typed nil in an interface reads as non-nil.** A nil `*kvmetrics.DomainMetrics` assigned
+  straight into a `kv.GetLatestMetrics` parameter silences the request-scoped fallback.
+- **Test coverage claims need mutation.** `TestCommitmentReadsAreMeteredInBothFormats` drives
+  `ComputeCommitment` serial and parallel and still does not cover `asOfStateReader` — it passes
+  with the nil restored. The guard that bites is `TestAsOfStateReaderWorkerMetersRecordReads`.
+  Likewise the first branch-cache collision test did not fire: it used a node key whose own
+  lookup missed the trunk. The real collision needs `Get(recordKey for P->n)` against a stored
+  node `P||n`.
+- **`AggOpts.NewTest()` pins test aggregators to v2.** A green suite proves nothing about v3
+  unless the test calls `ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)`.
+- The staleness rejection in the db cursor run is **not** observable through a latest-view oracle
+  (a stale db record and the file record hold the same bytes). No guard test exists for it; it
+  stays because it mirrors `getLatestFromDb`'s contract.
+
+## Decisions still open
+
+1. Whether run 6 holds parity with v2 past the heavy range and what the v3 cycle length does to
+   flush cost: read `parallel done` (blocks per cycle, `in=`) on both arms once they pass 100k.
+2. Whether the 3.03x record multiplier is acceptable at all. Every per-key structure scales with
+   it, and the read-side lever turned out to be worth ~1%. If the answer is no, the design fork
+   worth considering is bundled rows for the trunk and edge records only in storage subtrees.
+3. `#6` from the earlier review: eight `*ForFormat` parse-guard wrappers whose `edgeRecords=true`
+   argument has no production caller. Deliberately skipped as a wider refactor than the finding
+   warrants.
+4. Per-table breakdown of the 1.56x chaindata delta — never measured.
+5. Whether the child mask must always travel with the parent. A node read without a mask wants
+   all 16 children, absent nibbles never resolve, so `readCommitmentRecords` walks every v3 file
+   and probes each file's existence filter for every absent nibble. Invisible at from-0 with 1-2
+   files; at the tip it is files x absent nibbles per such read. Counters are in place (see
+   "State at handoff"); the rig binary has to be rebuilt to report them.

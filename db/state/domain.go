@@ -167,6 +167,33 @@ func (d *Domain) kvWriteVersion() version.Version {
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kvNewFilePathIn("", fromStep, toStep)
 }
+
+// kvMergeFilePath names a merged .kv from the format its inputs carry. A merge copies values
+// through unchanged, so taking the version from the live edge-records flag instead would stamp
+// v3.0 on bundled v2 rows, and every read-side gate keys off that version.
+func (d *Domain) kvMergeFilePath(inputs []*FilesItem, fromStep, toStep kv.Step) (string, error) {
+	if d.Name != kv.CommitmentDomain || len(inputs) == 0 {
+		return d.kvNewFilePath(fromStep, toStep), nil
+	}
+	v, err := commitmentMergeVersion(&d.DomainCfg, inputs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", v.String(), d.FilenameBase, fromStep, toStep)), nil
+}
+
+// commitmentMergeVersion refuses a mixed range: one .kv carries one encoding, and the file
+// name is the only thing that tells a reader which.
+func commitmentMergeVersion(cfg *statecfg.DomainCfg, inputs []*FilesItem) (version.Version, error) {
+	edgeRecords := statecfg.CommitmentEdgeRecords(inputs[0].version)
+	for _, item := range inputs[1:] {
+		if statecfg.CommitmentEdgeRecords(item.version) != edgeRecords {
+			return version.Version{}, fmt.Errorf("merge commitment: mixed record formats in range, %s and %s",
+				inputs[0].version.String(), item.version.String())
+		}
+	}
+	return statecfg.CommitmentKVWriteVersionFor(cfg, edgeRecords), nil
+}
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kviAccessorNewFilePathIn("", fromStep, toStep)
 }
