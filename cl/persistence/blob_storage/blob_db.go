@@ -238,7 +238,7 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateV
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 			return errors.New("blob response contains incomplete sidecar")
 		}
-		if sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
 			return errors.New("blob sidecar commitment inclusion proof has the wrong length")
 		}
 		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
@@ -300,7 +300,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		// The reader always decodes a fixed-length proof, so a shorter one would replace a readable
 		// file with an undecodable one. Checked for every version, including those that skip the
 		// proof's contents.
-		if sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
 			return 0, 0, errors.New("blob sidecar commitment inclusion proof has the wrong length")
 		}
 		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
