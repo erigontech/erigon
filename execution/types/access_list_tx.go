@@ -296,14 +296,19 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		return fmt.Errorf("open accessList: %w", err)
 	}
 	*al = (*al)[:0] // both paths below must agree
-	// One arena backs every tuple's StorageKeys. A non-slice reader can't be
-	// walked, so there both slices stay nil and grow. An empty list is left
-	// alone: allocating it would decode to [] where the caller marshals null.
+	// One arena backs every tuple's StorageKeys, but only when the pre-walk
+	// sized it. Growing a shared arena instead would copy every key decoded so
+	// far and keep each retired array alive through the earlier tuples' views,
+	// so a reader that cannot be walked gets an exact slice per tuple. An empty
+	// list is left alone: allocating it would decode to [] where the caller
+	// marshals null.
 	var keys []common.Hash
+	arena := false
 	if raw := s.Peek(); l > 0 && uint64(len(raw)) >= l {
 		nTuples, nKeys := countAccessList(raw[:l])
 		*al = make(AccessList, 0, nTuples)
 		keys = make([]common.Hash, 0, nKeys)
+		arena = true
 	}
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
@@ -313,11 +318,15 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		start := len(keys)
-		if keys, err = decodeHashListTo(s, keys); err != nil {
+		if arena {
+			start := len(keys)
+			if keys, err = decodeHashListTo(s, keys); err != nil {
+				return fmt.Errorf("read StorageKeys: %w", err)
+			}
+			tuple.StorageKeys = keys[start:len(keys):len(keys)]
+		} else if tuple.StorageKeys, err = decodeHashListTo(s, nil); err != nil {
 			return fmt.Errorf("read StorageKeys: %w", err)
 		}
-		tuple.StorageKeys = keys[start:len(keys):len(keys)]
 		// end of tuple
 		if err = s.ListEnd(); err != nil {
 			return fmt.Errorf("close AccessTuple: %w", err)
