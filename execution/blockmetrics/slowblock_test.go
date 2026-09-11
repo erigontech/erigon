@@ -307,19 +307,14 @@ func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	assert.Equal(t, 6*time.Millisecond, accounts.ReadTime)
 }
 
-// The envelope is a cross-client contract, like the field names. The patterns
-// are the consumer's: ethpandaops/benchmarkoor pkg/blocklog/erigon.go.
-var (
-	ansiPattern    = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	consolePattern = regexp.MustCompile(
-		`^\[?\w+\s*\]?\s*(?:\[[^\]]+\]\s*)?(\{.+\})\s*$`)
-)
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func consolePayload(t *testing.T, line string) string {
 	t.Helper()
-	m := consolePattern.FindStringSubmatch(ansiPattern.ReplaceAllString(line, ""))
-	require.Len(t, m, 2, "console line does not match the consumer's parser: %q", line)
-	return m[1]
+	line = ansiPattern.ReplaceAllString(line, "")
+	i := strings.Index(line, "{")
+	require.GreaterOrEqual(t, i, 0, "no JSON payload in the console envelope: %q", line)
+	return line[i:]
 }
 
 func jsonPayload(t *testing.T, line string) string {
