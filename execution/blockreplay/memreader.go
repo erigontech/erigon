@@ -178,6 +178,18 @@ func (r *memBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint
 
 // --- TxnReader ---
 
+func (r *memBlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) ([]common.Hash, error) {
+	if blockNum != r.num {
+		return nil, nil
+	}
+	txns := r.block.Transactions()
+	hashes := make([]common.Hash, len(txns))
+	for i, txn := range txns {
+		hashes[i] = txn.Hash()
+	}
+	return hashes, nil
+}
+
 func (r *memBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return 0, 0, false, nil
 }
