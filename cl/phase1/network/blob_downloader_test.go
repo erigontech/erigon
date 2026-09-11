@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1053,6 +1054,33 @@ func validDenebRecoverySidecar(t *testing.T, slot uint64) (*cltypes.SignedBeacon
 	return block, cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusionProof)
 }
 
+func validDenebRecoverySidecars(t *testing.T, slot uint64, count int) (*cltypes.SignedBeaconBlock, []*cltypes.BlobSidecar) {
+	t.Helper()
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	for range count {
+		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
+	}
+	_, err = block.Block.HashSSZ()
+	require.NoError(t, err)
+	sidecars := make([]*cltypes.BlobSidecar, 0, count)
+	for idx := range count {
+		branch, err := block.Block.Body.KzgCommitmentMerkleProof(idx)
+		require.NoError(t, err)
+		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+		for i := range branch {
+			inclusionProof.Set(i, common.Hash(branch[i]))
+		}
+		sidecars = append(sidecars, cltypes.NewBlobSidecar(uint64(idx), (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusionProof))
+	}
+	return block, sidecars
+}
+
 type staticBlobPeerClient struct{ responses []*cltypes.BlobSidecar }
 
 func (staticBlobPeerClient) Peers() (uint64, error) { return 1, nil }
@@ -1150,3 +1178,35 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testin
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "an archive slot whose sidecar files are gone must stay queued")
 }
+
+// A rewrite that publishes early indices and then fails leaves the count row whole while only part
+// of the data reaches disk, so a file at index zero is not evidence the slot can be served.
+func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *testing.T) {
+	block, sidecars := validDenebRecoverySidecars(t, 100, 2)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fs := afero.NewMemMapFs()
+	storage := blob_storage.NewBlobStore(db, fs)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, sidecars))
+	require.NoError(t, fs.Remove(fmt.Sprintf("%d/%s_1", block.Block.Slot/10_000, common.Hash(blockRoot).String())))
+
+	count, err := storage.KzgCommitmentsCount(t.Context(), blockRoot)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), count, "the count row must survive the lost file")
+	first, err := storage.BlobSidecarExists(t.Context(), block.Block.Slot, blockRoot, 0)
+	require.NoError(t, err)
+	require.True(t, first, "index zero must stay present for the fixture to be meaningful")
+	second, err := storage.BlobSidecarExists(t.Context(), block.Block.Slot, blockRoot, 1)
+	require.NoError(t, err)
+	require.False(t, second)
+
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = true
+
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "a partially stored archive slot must stay queued")
+}
+

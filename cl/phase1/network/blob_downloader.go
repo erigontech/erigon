@@ -843,17 +843,25 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 	return batch, visited, nil
 }
 
-// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. PruneBelow
-// drops sidecar files but leaves their count rows, so on an archive node a matching count alone is
-// not evidence the store can serve the slot. Only the first index is probed: pruning removes whole
-// bucket directories, so absence is all-or-nothing, and writes commit the count row after the files.
+// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. Pruning
+// drops sidecar files but leaves their count rows, and a rewrite can fail partway, so on an archive
+// node a matching count alone is not evidence the store can serve the slot.
 //
 // Non-archive nodes prune on purpose, so a missing file there is expected and must not be re-queued.
 func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, slot uint64, commitments int) (bool, error) {
-	if !b.archiveBlobs || commitments == 0 {
+	if !b.archiveBlobs {
 		return true, nil
 	}
-	return b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, 0)
+	for idx := range commitments {
+		exists, err := b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, uint64(idx))
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) bool {
