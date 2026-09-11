@@ -56,6 +56,18 @@ func TestVerifyBlobSidecarsGloasDoesNotRequireInclusionProof(t *testing.T) {
 
 	require.NoError(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.GloasVersion, nil))
 	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.FuluVersion, nil))
+
+	// Not checking the proof's contents does not make its shape optional: the reader always decodes
+	// a fixed-length vector, so a short one is unreadable once stored.
+	short := cltypes.NewBlobSidecar(
+		0,
+		(*cltypes.Blob)(&blob),
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		solid.NewHashVector(0),
+	)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil))
 }
 
 // Skipping the inclusion-proof check for Gloas must not also skip checking that the sidecar can be

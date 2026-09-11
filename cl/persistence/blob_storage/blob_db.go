@@ -238,6 +238,9 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateV
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 			return errors.New("blob response contains incomplete sidecar")
 		}
+		if sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+			return errors.New("blob sidecar commitment inclusion proof has the wrong length")
+		}
 		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return errors.New("could not verify blob's inclusion proof")
 		}
