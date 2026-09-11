@@ -35,20 +35,20 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash      common.Hash           `json:"parentHash"    gencodec:"required"`
-	FeeRecipient    common.Address        `json:"feeRecipient"  gencodec:"required"`
-	StateRoot       common.Hash           `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot    common.Hash           `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom       hexutil.Bytes         `json:"logsBloom"     gencodec:"required"`
-	PrevRandao      common.Hash           `json:"prevRandao"    gencodec:"required"`
-	BlockNumber     hexutil.Uint64        `json:"blockNumber"   gencodec:"required"`
-	GasLimit        hexutil.Uint64        `json:"gasLimit"      gencodec:"required"`
-	GasUsed         hexutil.Uint64        `json:"gasUsed"       gencodec:"required"`
-	Timestamp       hexutil.Uint64        `json:"timestamp"     gencodec:"required"`
-	ExtraData       hexutil.Bytes         `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash       common.Hash           `json:"blockHash"     gencodec:"required"`
-	Transactions    []hexutil.Bytes       `json:"transactions"  gencodec:"required"`
+	ParentHash      common.Hash           `json:"parentHash"`
+	FeeRecipient    common.Address        `json:"feeRecipient"`
+	StateRoot       common.Hash           `json:"stateRoot"`
+	ReceiptsRoot    common.Hash           `json:"receiptsRoot"`
+	LogsBloom       hexutil.Bytes         `json:"logsBloom"`
+	PrevRandao      common.Hash           `json:"prevRandao"`
+	BlockNumber     hexutil.Uint64        `json:"blockNumber"`
+	GasLimit        hexutil.Uint64        `json:"gasLimit"`
+	GasUsed         hexutil.Uint64        `json:"gasUsed"`
+	Timestamp       hexutil.Uint64        `json:"timestamp"`
+	ExtraData       hexutil.Bytes         `json:"extraData"`
+	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas"`
+	BlockHash       common.Hash           `json:"blockHash"`
+	Transactions    []hexutil.Bytes       `json:"transactions"`
 	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64       `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64       `json:"excessBlobGas"`
@@ -57,18 +57,18 @@ type ExecutionPayload struct {
 	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
-// PayloadAttributes represent the attributes required to start assembling a payload
+// ForkChoiceState is the head/safe/finalized triple of engine_forkchoiceUpdated.
 type ForkChoiceState struct {
-	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
-	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
-	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
+	HeadHash           common.Hash `json:"headBlockHash"`
+	SafeBlockHash      common.Hash `json:"safeBlockHash"`
+	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
-	Timestamp             hexutil.Uint64        `json:"timestamp"             gencodec:"required"`
-	PrevRandao            common.Hash           `json:"prevRandao"            gencodec:"required"`
-	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient" gencodec:"required"`
+	Timestamp             hexutil.Uint64        `json:"timestamp"`
+	PrevRandao            common.Hash           `json:"prevRandao"`
+	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient"`
 	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
 	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
@@ -78,18 +78,18 @@ type PayloadAttributes struct {
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
 type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty" gencodec:"required"`
-	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"       gencodec:"required"`
-	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
+	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty"`
+	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"`
+	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"`
 }
 
 // BlobsBundle holds the blobs of an execution payload.
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments" gencodec:"required"`
-	Proofs      []hexutil.Bytes       `json:"proofs"      gencodec:"required"`
-	Blobs       []hexutil.Bytes       `json:"blobs"       gencodec:"required"`
+	Commitments []hexutil.Bytes       `json:"commitments"`
+	Proofs      []hexutil.Bytes       `json:"proofs"`
+	Blobs       []hexutil.Bytes       `json:"blobs"`
 	SSZVersion  clparams.StateVersion `json:"-"`
 }
 
@@ -131,29 +131,29 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 
 // BlobAndProofV1 holds one item for engine_getBlobsV1
 type BlobAndProofV1 struct {
-	Blob  hexutil.Bytes `json:"blob" gencodec:"required"`
-	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
+	Blob  hexutil.Bytes `json:"blob"`
+	Proof hexutil.Bytes `json:"proof"`
 }
 
 // BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
 type BlobAndProofV2 struct {
-	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
-	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
+	Blob       hexutil.Bytes   `json:"blob"`
+	CellProofs []hexutil.Bytes `json:"proofs"`
 }
 
 type ExecutionPayloadBody struct {
-	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	Transactions []hexutil.Bytes     `json:"transactions"`
+	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
 }
 
 type ExecutionPayloadBodyV2 struct {
-	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	Transactions    []hexutil.Bytes     `json:"transactions"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
-	Status          EngineStatus      `json:"status" gencodec:"required"`
+	Status          EngineStatus      `json:"status"`
 	ValidationError *StringifiedError `json:"validationError"`
 	LatestValidHash *common.Hash      `json:"latestValidHash"`
 	CriticalError   error             `json:"-"`
@@ -165,7 +165,7 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	ExecutionPayload      *ExecutionPayload `json:"executionPayload"`
 	BlockValue            *hexutil.Big      `json:"blockValue"`
 	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
@@ -173,10 +173,10 @@ type GetPayloadResponse struct {
 }
 
 type ClientVersionV1 struct {
-	Code    string `json:"code" gencodec:"required"`
-	Name    string `json:"name" gencodec:"required"`
-	Version string `json:"version" gencodec:"required"`
-	Commit  string `json:"commit" gencodec:"required"`
+	Code    string `json:"code"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
 }
 
 func (c ClientVersionV1) String() string {
@@ -361,10 +361,10 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	out := make([]*typesproto.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &typesproto.Withdrawal{
-			Index:          w.Index,
-			ValidatorIndex: w.Validator,
+			Index:          uint64(w.Index),
+			ValidatorIndex: uint64(w.Validator),
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         w.Amount,
+			Amount:         uint64(w.Amount),
 		})
 	}
 	return out
@@ -377,10 +377,10 @@ func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal 
 	out := make([]*types.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types.Withdrawal{
-			Index:     w.Index,
-			Validator: w.ValidatorIndex,
+			Index:     hexutil.Uint64(w.Index),
+			Validator: hexutil.Uint64(w.ValidatorIndex),
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    w.Amount,
+			Amount:    hexutil.Uint64(w.Amount),
 		})
 	}
 	return out

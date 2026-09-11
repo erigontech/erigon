@@ -152,6 +152,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 type NewCfgOpts struct {
 	// If set, clobber the default torrent config value.
 	DisableTrackers          g.Option[bool]
+	DisableTCP               g.Option[bool]
 	Verify                   bool
 	UploadRateLimit          g.Option[rate.Limit]
 	DownloadRateLimit        g.Option[rate.Limit]
@@ -208,6 +209,10 @@ func New(
 	// Override value set by download rate-limit.
 	for value := range opts.DisableTrackers.Iter {
 		torrentConfig.DisableTrackers = value
+	}
+
+	for value := range opts.DisableTCP.Iter {
+		torrentConfig.DisableTCP = value
 	}
 
 	var analogLevel analog.Level

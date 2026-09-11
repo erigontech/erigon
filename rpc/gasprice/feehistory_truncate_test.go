@@ -67,13 +67,15 @@ func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Re
 
 func (b *gapBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
 
+func (b *gapBackend) CheckBlockRewardsAvailable(context.Context, uint64) error { return nil }
+
 // Zero hashes keep every height unresolved, so the oracle serves the range
 // uncached through HeaderByNumber and the missing-block gap stays visible.
 func (b *gapBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
 	return make([]common.Hash, to-from+1), nil
 }
 
-func (b *gapBackend) FrozenBlocks() (uint64, error) { return 0, nil }
+func (b *gapBackend) FrozenBlocks() uint64 { return 0 }
 
 func (b *gapBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, number uint64) (*types.Header, error) {
 	return b.HeaderByNumber(ctx, rpc.BlockNumber(number))

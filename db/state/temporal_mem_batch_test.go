@@ -82,7 +82,6 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 				if v, _, ok := sd.GetLatest(domain, []byte(key)); ok && string(v) != key {
 					t.Errorf("domain %s key %s: got %q", domain, key, v)
 				}
-				sd.HasPrefixInRAM(domain, []byte(key))
 			}
 		})
 	}
