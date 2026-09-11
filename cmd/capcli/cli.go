@@ -1049,7 +1049,7 @@ func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Du
 type BlobArchiveStoreCheck struct {
 	// A partial sidecar set is still worth refetching one blob for, so discarding it is opt-in:
 	// the audit has to be safe to run on a datadir about to be published from.
-	RemoveMismatched bool `name:"remove-mismatched" help:"delete the stored sidecars and index entry of every mismatched slot instead of only reporting it" default:"false"`
+	RemoveMismatched bool
 
 	chainCfg
 	outputFolder
@@ -1087,23 +1087,21 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	mismatched, err := checkBlobStore(ctx, tx, snr, blobStorage, b.FromSlot, targetSlot, b.RemoveMismatched)
-	if err != nil {
-		return err
-	}
-	log.Info("Blob archive store check finished", "mismatchedSlots", mismatched,
+	mismatched, unresolved, err := checkBlobStore(ctx, tx, snr, blobStorage, b.FromSlot, targetSlot, b.RemoveMismatched)
+	log.Info("Blob archive store check finished", "mismatchedSlots", mismatched, "unresolvedSlots", unresolved,
 		"scannedFrom", b.FromSlot, "scannedTo", targetSlot, "removed", b.RemoveMismatched)
-	return nil
+	return err
 }
 
 // checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
-// their block commits to.
-func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, error) {
-	var mismatched uint64
+// their block commits to, and how many could not be checked at all. Unresolved slots are an error:
+// an audit that silently skips them reports completeness it never established.
+func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
+	var mismatched, unresolved uint64
 	for i := fromSlot; i >= targetSlot; i-- {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
-			return mismatched, err
+			return mismatched, unresolved, err
 		}
 		if blk == nil {
 			continue
@@ -1114,21 +1112,21 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if blk.Block.Slot%10_000 == 0 {
 			log.Info("Checking slot", "slot", blk.Block.Slot)
 		}
-		// The canonical root from the index, never blk.Block.HashSSZ():
-		// ReadBeaconBlockBodyBySlot strips the execution payload, so hashing the block yields a
-		// root that never existed and the store lookup below reports zero for every slot.
+		// Sidecars are keyed by the canonical root, and ReadBeaconBlockBodyBySlot returns a block
+		// without its execution payload, so its own hash is not that root.
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
 		if err != nil {
-			return mismatched, err
+			return mismatched, unresolved, err
 		}
 		if blockRoot == (common.Hash{}) {
-			log.Warn("Slot has no canonical root, skipping", "slot", i)
+			unresolved++
+			log.Warn("Slot has no canonical root, cannot be checked", "slot", i)
 			continue
 		}
 
 		haveBlobs, err := blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 		if err != nil {
-			return mismatched, err
+			return mismatched, unresolved, err
 		}
 		wantBlobs := 0
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
@@ -1138,14 +1136,17 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 			mismatched++
 			if removeMismatched {
 				if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
-					return mismatched, err
+					return mismatched, unresolved, err
 				}
 			}
 			log.Warn("Slot", "slot", i, "blockRoot", fmt.Sprintf("%x", blockRoot),
 				"have", haveBlobs, "want", wantBlobs, "removed", removeMismatched)
 		}
 	}
-	return mismatched, nil
+	if unresolved > 0 {
+		return mismatched, unresolved, fmt.Errorf("%d slots could not be checked: no canonical block root, so the index is incomplete over this range", unresolved)
+	}
+	return mismatched, unresolved, nil
 }
 
 type DumpBlobsSnapshots struct {

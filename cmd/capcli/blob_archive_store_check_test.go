@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -82,7 +83,7 @@ func TestBlobArchiveStoreCheckReadsTheCountUnderTheCanonicalRoot(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	mismatched, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
+	mismatched, _, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
 	require.NoError(t, err)
 	require.Zero(t, mismatched, "a slot complete under its canonical root must not be reported as a gap")
 }
@@ -92,18 +93,70 @@ func TestBlobArchiveStoreCheckReadsTheCountUnderTheCanonicalRoot(t *testing.T) {
 func TestBlobArchiveStoreCheckDoesNotDeleteUnlessAsked(t *testing.T) {
 	const slot = uint64(1_000)
 	ctrl := gomock.NewController(t)
-	db, reader, canonical := storeCheckFixture(t, slot, 2)
+	db, reader, _ := storeCheckFixture(t, slot, 2)
 
 	storage := blob_mock_services.NewMockBlobStorage(ctrl)
 	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 	storage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
-	_ = canonical
 
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	mismatched, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
+	mismatched, _, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), mismatched, "the short slot must still be reported")
+}
+
+// An audit that cannot resolve a slot's root has not checked it, so finishing with
+// mismatchedSlots=0 would be false confidence before publication. The snapshot reader serves block
+// bodies independently of the canonical index, so a missing or partial index is exactly the state
+// this has to surface rather than skip.
+func TestBlobArchiveStoreCheckFailsWhenASlotHasNoCanonicalRoot(t *testing.T) {
+	const slot = uint64(1_000)
+	ctrl := gomock.NewController(t)
+
+	// A readable blob-bearing block with no canonical row for its slot.
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	reader := &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}
+
+	// Probing the store under a zero root would be meaningless.
+	storage := blob_mock_services.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Times(0)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	mismatched, unresolved, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
+	require.Error(t, err, "an unresolvable slot must not let the audit report success")
+	require.Equal(t, uint64(1), unresolved, "the slot must be counted as unchecked")
+	require.Zero(t, mismatched, "an unchecked slot is not a mismatch")
+}
+
+// The opt-in delete flag has to exist on the command the CLI actually builds, and be assigned when
+// parsed: a struct tag alone leaves --remove-mismatched undefined at the command line.
+func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {
+	b := &BlobArchiveStoreCheck{}
+	cmd := b.command()
+
+	names := map[string]bool{}
+	for _, f := range cmd.Flags {
+		for _, n := range f.Names() {
+			names[n] = true
+		}
+	}
+	require.True(t, names["remove-mismatched"], "the command must define --remove-mismatched")
+
+	parsed := &cli.Command{
+		Flags: cmd.Flags,
+		Action: func(_ context.Context, c *cli.Command) error {
+			return b.fromCmd(c)
+		},
+	}
+	require.NoError(t, parsed.Run(t.Context(), []string{"capcli", "--datadir", t.TempDir(), "--remove-mismatched"}))
+	require.True(t, b.RemoveMismatched, "parsing --remove-mismatched must set the field")
 }
