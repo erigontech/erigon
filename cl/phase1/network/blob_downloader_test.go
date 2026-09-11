@@ -18,17 +18,22 @@ package network
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -197,4 +202,118 @@ func TestCollectIncompleteBlocksSkipsAnUnindexedSlotInsteadOfFailing(t *testing.
 	require.NoError(t, err, "an unindexed slot must be skipped, not fail the pass")
 	require.Empty(t, batch, "an unindexed slot must not be queued for download")
 	require.Equal(t, uint64(1), visited, "the pass must advance past the slot rather than stall on it")
+}
+
+// Prune removes whole bucket directories but leaves their BlockRootToKzgCommitments rows, so a
+// datadir pruned as non-archive and later reopened with --caplin.blobs-archive carries counts that
+// no file backs. A matching count is then not evidence the store can serve the slot, and skipping it
+// lets the pass report completion and move its target past work an archive node still owes.
+func TestCollectIncompleteBlocksAndPrunedFiles(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	commitment := cltypes.KZGCommitment{}
+	commitment[0] = 0x01
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+
+	sidecar := &cltypes.BlobSidecar{
+		Index:                    0,
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+
+	for _, tc := range []struct {
+		name         string
+		archiveBlobs bool
+		wantQueued   int
+	}{
+		{"archive node must re-queue a slot whose files are gone", true, 1},
+		{"non-archive node must leave what it deliberately pruned", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := memdb.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+			}))
+			fs := afero.NewMemMapFs()
+			store := blob_storage.NewBlobStore(db, fs, math.MaxUint64, &clparams.MainnetBeaconConfig, nil)
+			require.NoError(t, store.WriteBlobSidecars(context.Background(), canonical, []*cltypes.BlobSidecar{sidecar}))
+
+			// What Prune leaves behind: the bucket directory is gone, the count row is not.
+			require.NoError(t, fs.RemoveAll("0"))
+			count, err := store.KzgCommitmentsCount(context.Background(), canonical)
+			require.NoError(t, err)
+			require.Equal(t, uint32(1), count)
+
+			b := &BlobHistoryDownloader{
+				ctx:          context.Background(),
+				beaconCfg:    &clparams.MainnetBeaconConfig,
+				indiciesDB:   db,
+				blobStorage:  store,
+				blockReader:  stubBlockReader{slot: slot, block: block},
+				archiveBlobs: tc.archiveBlobs,
+				logger:       log.New(),
+			}
+
+			batch, _, err := b.collectIncompleteBlocks(slot, slot)
+			require.NoError(t, err)
+			require.Len(t, batch, tc.wantQueued)
+		})
+	}
+}
+
+// A rewrite that publishes early indices and then fails leaves the count row whole while only part
+// of the data reaches disk, so a file at index zero is not evidence the slot can be served.
+func TestCollectIncompleteBlocksMissingALaterSidecarFile(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	sidecars := make([]*cltypes.BlobSidecar, 0, 2)
+	for idx := range 2 {
+		commitment := cltypes.KZGCommitment{}
+		commitment[0] = byte(idx + 1)
+		block.Block.Body.BlobKzgCommitments.Append(&commitment)
+		sidecars = append(sidecars, &cltypes.BlobSidecar{
+			Index:                    uint64(idx),
+			SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}},
+			CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+		})
+	}
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+	}))
+	fs := afero.NewMemMapFs()
+	store := blob_storage.NewBlobStore(db, fs, math.MaxUint64, &clparams.MainnetBeaconConfig, nil)
+	require.NoError(t, store.WriteBlobSidecars(context.Background(), canonical, sidecars))
+
+	require.NoError(t, fs.Remove(fmt.Sprintf("%d/%s_1", slot/10_000, canonical.String())))
+	count, err := store.KzgCommitmentsCount(context.Background(), canonical)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), count, "the count row must survive the lost file")
+	first, err := store.BlobSidecarExists(context.Background(), slot, canonical, 0)
+	require.NoError(t, err)
+	require.True(t, first, "index zero must stay present for the fixture to be meaningful")
+	second, err := store.BlobSidecarExists(context.Background(), slot, canonical, 1)
+	require.NoError(t, err)
+	require.False(t, second)
+
+	b := &BlobHistoryDownloader{
+		ctx:          context.Background(),
+		beaconCfg:    &clparams.MainnetBeaconConfig,
+		indiciesDB:   db,
+		blobStorage:  store,
+		blockReader:  stubBlockReader{slot: slot, block: block},
+		archiveBlobs: true,
+		logger:       log.New(),
+	}
+
+	batch, _, err := b.collectIncompleteBlocks(slot, slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "a partially stored archive slot must stay queued")
 }
