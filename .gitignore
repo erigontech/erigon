@@ -126,8 +126,10 @@ mdbx.lck
 */**/*.local.json
 .claude/skills/
 
-# Prevent accidental commit of locally-built binaries
+# Prevent accidental commit of locally-built binaries: `go build ./cmd/<name>`
+# from the repo root drops them here, the real build writes to build/bin.
 /erigon
+/mcp
 
 # place to store task-specific agent .md files that we do not want to commit to main repo
 agentspecs/
