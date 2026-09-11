@@ -35,11 +35,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	mdbxtest "github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -1065,4 +1067,37 @@ func (c cancelingBlobPeerClient) SendBlobsSidecarByIdentifierReq(ctx context.Con
 	c.cancel()
 	<-ctx.Done()
 	return nil, "", ctx.Err()
+}
+
+// ReadBeaconBlockBodyBySlot returns a block without its execution payload, so hashing it gives
+// a root that never existed on chain. Looking the blob count up under that root always misses,
+// which marks every blob-bearing block incomplete no matter what the store holds; the backfill
+// then re-requests data it already has and its pass never settles. The fixture therefore keeps
+// the indexed root distinct from the block's own hash, as a stripped read does.
+func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const slot = 100
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	canonical := common.HexToHash("0xc0ffee")
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	// Complete under the canonical root, absent under anything else.
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), canonical).
+		Return(uint32(block.GetBlobKzgCommitments().Len()), nil).AnyTimes()
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Not(gomock.Eq(canonical))).
+		Return(uint32(0), nil).AnyTimes()
+
+	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = blobStorage
+	// Override the fixture's root for this slot so it is not the block's own hash.
+	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+	}))
+
+	batch, _, err := downloader.collectIncompleteBlocks(slot, slot)
+	require.NoError(t, err)
+	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
 }

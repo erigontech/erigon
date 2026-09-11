@@ -739,3 +739,63 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 		require.Equal(t, uint64((i+1)*32_000_000_000), eb)
 	}
 }
+
+func staticSnapshotHeaderReader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+	return &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:       slot,
+			Root:       common.Hash{byte(slot % 251)},
+			ParentRoot: common.Hash{byte((slot + 1) % 251)},
+		},
+	}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+}
+
+// BlocksAvailable is the inclusive last readable slot and ReadBeaconBlockBodyBySlot serves that slot
+// from the snapshot path, but indexBeaconSnapshots takes an exclusive bound. Handing it the
+// inclusive tip leaves that slot unindexed while the cursor records it as done, so a reader that
+// resolves roots through the canonical index sees a block with no root there for as long as the tip
+// stays put.
+func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(antiquaryIndexBatchSlots + 3)
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, db, func() uint64 { return tip },
+		staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, tip)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root, "the visible snapshot tip was left unindexed")
+
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		return nil
+	}))
+}
+
+// Re-running against an unchanged tip must be a no-op rather than treating a cursor of tip+1 as
+// progress that ran ahead of the snapshots.
+func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
+	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(4)
+	tipFn := func() uint64 { return tip }
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, baseDB, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	db := &countingRwDB{RwDB: baseDB}
+	_, err = rebuildBeaconSnapshotIndex(ctx, db, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+	require.Zero(t, db.commits, "a static tip must not be re-indexed")
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress)
+		return nil
+	}))
+}
