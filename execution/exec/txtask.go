@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -551,14 +550,14 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		if det, ok := engine.(systemTxDetector); ok {
-			isSys, sysErr := det.IsSystemTransaction(txTask.Tx(), header)
+		if sysEngine, ok := asSystemTxEngine(engine); ok {
+			isSys, sysErr := sysEngine.IsSystemTransaction(txTask.Tx(), header)
 			if sysErr != nil {
 				result.Err = sysErr
 				return &result
 			}
 			if isSys {
-				result = *txTask.executeSystemTx(evm, ibs)
+				result = *txTask.executeSystemTx(sysEngine, evm, ibs)
 				break
 			}
 		}
@@ -726,15 +725,17 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-// systemTxDetector is implemented by engines (Parlia) that embed system
-// transactions in the block body.
-type systemTxDetector interface {
-	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
+// asSystemTxEngine keeps the rules-package reference out of Execute, where a
+// local variable shadows the package name.
+func asSystemTxEngine(e rules.Engine) (rules.SystemTxEngine, bool) {
+	s, ok := e.(rules.SystemTxEngine)
+	return s, ok
 }
 
 // executeSystemTx runs a Parlia system transaction as a free consensus call
-// (no gas pool, no intrinsic gas), bumping the sender nonce.
-func (txTask *TxTask) executeSystemTx(evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+// (no gas pool, no intrinsic gas). The engine owns the surrounding state effect;
+// the run closure bumps the sender nonce and performs the EVM call.
+func (txTask *TxTask) executeSystemTx(engine rules.SystemTxEngine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
 	var result TxResult
 
 	msg, err := txTask.TxMessage()
@@ -742,41 +743,27 @@ func (txTask *TxTask) executeSystemTx(evm *vm.EVM, ibs *state.IntraBlockState) *
 		result.Err = err
 		return &result
 	}
-
 	from := msg.From()
 
-	// Mirror distributeToSystem/distributeToValidator: move the reward from
-	// SystemAddress to the validator before forwarding it on-chain.
-	if value := msg.Value(); !value.IsZero() {
-		if err = ibs.SubBalance(protocolparams.SystemAddress, *value, tracing.BalanceChangeUnspecified); err != nil {
-			result.Err = err
-			return &result
+	run := func(ibs *state.IntraBlockState) (uint64, error) {
+		nonce, nerr := ibs.GetNonce(from)
+		if nerr != nil {
+			return 0, nerr
 		}
-		if err = ibs.AddBalance(from, *value, tracing.BalanceChangeUnspecified); err != nil {
-			result.Err = err
-			return &result
+		if nerr := ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); nerr != nil {
+			return 0, nerr
 		}
+		_, _, gasUsed, cerr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+		return gasUsed.Total(), cerr
 	}
 
-	nonce, err := ibs.GetNonce(from)
-	if err != nil {
-		result.Err = err
-		return &result
-	}
-	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
-		result.Err = err
-		return &result
-	}
-
-	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	gasUsed, callErr := engine.ApplySystemTx(txTask.Tx(), ibs, txTask.Header, run)
 	if callErr != nil {
 		// A reverted system call yields a failed receipt but a valid block.
 		result.ExecutionResult.Err = callErr
 	}
-
-	g := gasUsed.Total()
-	result.ExecutionResult.ReceiptGasUsed = g
-	result.ExecutionResult.BlockExecutionGasUsed = g
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 
 	if !ibs.IsVersioned() {
 		ibs.SoftFinalise()
