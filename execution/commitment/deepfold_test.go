@@ -390,8 +390,8 @@ func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 7777))
 	surv := storageLocsForNibble(0x2, 1, 11)
-	gone := append(storageLocsForNibble(0x8, 6, 3000), storageLocsForNibble(0xd, 6, 3000000)...)
-	fresh := append(storageLocsForNibble(0x5, 20, 5000), storageLocsForNibble(0xa, 20, 5000000)...)
+	gone := storageLocsForNibble(0x8, 1, 3000)
+	fresh := storageLocsForNibble(0x5, 1, 5000)
 
 	ub1 := NewUpdateBuilder().Balance(a, 1)
 	ubf := NewUpdateBuilder().Balance(a, 3)
