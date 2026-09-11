@@ -132,6 +132,38 @@ func TestExecutionPayloadFromBlockRejectsReceiptCountMismatch(t *testing.T) {
 	require.EqualError(t, err, "transaction and receipt counts differ: 2 != 1")
 }
 
+func TestExecutionPayloadFromBlockRejectsTransactionHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	block.Block.Transactions()[0] = block.Block.Transactions()[1]
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.ErrorContains(t, err, "transaction hash mismatch")
+}
+
+func TestExecutionPayloadFromBlockRejectsMissingWithdrawalsHash(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	header := block.Block.Header()
+	header.WithdrawalsHash = nil
+	block.Block = types.NewBlockFromNetwork(header, &types.Body{
+		Transactions: block.Block.Transactions(),
+		Withdrawals:  block.Block.Withdrawals(),
+	}, block.Block.BlockAccessListSidecar())
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.EqualError(t, err, "header is missing withdrawals hash")
+}
+
+func TestExecutionPayloadFromBlockRejectsWithdrawalsHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	block, cfg := payloadFixture(t)
+	block.Block.Withdrawals()[0].Amount++
+	_, err := ExecutionPayloadFromBlock(block, cfg)
+	require.ErrorContains(t, err, "withdrawals hash mismatch")
+}
+
 func TestExecutionPayloadFromBlockRejectsReceiptHashMismatch(t *testing.T) {
 	t.Parallel()
 

@@ -137,6 +137,9 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	if header.RequestsHash == nil {
 		return nil, errors.New("header is missing execution requests hash")
 	}
+	if header.WithdrawalsHash == nil {
+		return nil, errors.New("header is missing withdrawals hash")
+	}
 	if len(header.Extra) > 32 {
 		return nil, fmt.Errorf("extra data length %d exceeds limit 32", len(header.Extra))
 	}
@@ -158,6 +161,10 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	if err != nil {
 		return nil, err
 	}
+	transactionCommitment := types.DeriveSha(block.Transactions())
+	if transactionCommitment != header.TxHash {
+		return nil, fmt.Errorf("transaction hash mismatch: header %x, computed %x", header.TxHash, transactionCommitment)
+	}
 	receipts, err := encodeReceipts(input.Receipts)
 	if err != nil {
 		return nil, err
@@ -169,6 +176,10 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	withdrawals, err := encodeWithdrawals(block.Withdrawals())
 	if err != nil {
 		return nil, err
+	}
+	withdrawalsCommitment := types.DeriveSha(block.Withdrawals())
+	if withdrawalsCommitment != *header.WithdrawalsHash {
+		return nil, fmt.Errorf("withdrawals hash mismatch: header %x, computed %x", *header.WithdrawalsHash, withdrawalsCommitment)
 	}
 	requestsHash, err := executionRequestsRoot(input.Requests, cfg.BeaconConfig)
 	if err != nil {
