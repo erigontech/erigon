@@ -261,6 +261,9 @@ type SharedDomains struct {
 	discardCommitment bool
 	mem               kv.TemporalMemBatch
 	metrics           kvmetrics.DomainMetrics
+	nonExecMetrics    kvmetrics.DomainMetrics
+
+	commitmentNanos atomic.Int64
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -369,6 +372,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd := &SharedDomains{
 		logger:           logger,
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		nonExecMetrics:   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
 		baseTxWritable:   baseTxWritable,
@@ -606,24 +610,30 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	return &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx)}
 }
 
-// MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
-// per-batch sd.metrics (under one lock, for the per-batch log line) and the
-// process-level collector (grouped by source, for Prometheus). For low-frequency
+// MergeMetrics hands a boundary producer's accumulator to three sinks: the
+// per-batch sd.metrics (under one lock, for the per-batch log line), the
+// process-level collector (grouped by source), and, unless the source is exec,
+// sd.nonExecMetrics, subtracted back out of a block's read breakdown. For low-frequency
 // boundary producers (commitment fold, warmup teardown) off the per-tx hot path:
 // the collector send blocks if the buffer is momentarily full (rare, brief, and
 // lossless). Ownership of wm transfers to the collector — the caller must not
-// touch wm again. The exec hot path does NOT use this (see LogMergeMetrics +
+// touch wm again. The exec hot path does NOT use this (see MergeExecMetrics +
 // Collector().TrySend, which never blocks and retains on a full buffer).
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
+	if dbg.KVReadLevelledMetrics && source != kvmetrics.SourceExec {
+		sd.nonExecMetrics.Merge(wm)
+	}
 	sd.collector.Send(source, wm)
 }
 
-// LogMergeMetrics folds wm into the per-batch sd.metrics aggregate only (the log
+// MergeExecMetrics folds wm into the per-batch sd.metrics aggregate only (the log
 // line), without touching the collector. The exec hot path calls this each task
 // for the log, and feeds the collector separately via a retained accumulator so
 // a full collector buffer can never block or drop. wm is read, not retained.
-func (sd *SharedDomains) LogMergeMetrics(wm *kvmetrics.DomainMetrics) {
+// Reads only, and exec-only by contract: writes never reach nonExecMetrics, and a
+// non-exec producer that skips MergeMetrics has its reads billed to execution.
+func (sd *SharedDomains) MergeExecMetrics(wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
 }
 
@@ -1436,7 +1446,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		if wm != nil {
 			if ok {
-				wm.UpdateStateCacheHit(domain)
+				wm.UpdateStateCacheHit(domain, start)
 			} else {
 				wm.UpdateStateCacheMiss(domain)
 			}
@@ -1761,6 +1771,18 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
 	return &sd.metrics
+}
+
+func (sd *SharedDomains) NonExecMetrics() *kvmetrics.DomainMetrics {
+	return &sd.nonExecMetrics
+}
+
+func (sd *SharedDomains) AddCommitmentTime(d time.Duration) {
+	sd.commitmentNanos.Add(int64(d))
+}
+
+func (sd *SharedDomains) TakeCommitmentTime() time.Duration {
+	return time.Duration(sd.commitmentNanos.Swap(0))
 }
 
 func (sd *SharedDomains) LogMetrics() []any {

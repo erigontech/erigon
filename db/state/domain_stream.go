@@ -482,12 +482,11 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
-		k := common.ToBytesZeroCopy(ramIter.Key())
+		ramKey := common.ToBytesZeroCopy(ramIter.Key())
+		ramVal := ramIter.Value()[len(ramIter.Value())-1].data
 
-		v = ramIter.Value()[len(ramIter.Value())-1].data
-
-		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: bytes.Clone(k), val: bytes.Clone(v), iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
+		if len(ramKey) > 0 && bytes.HasPrefix(ramKey, prefix) {
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: bytes.Clone(ramKey), val: bytes.Clone(ramVal), iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
 		}
 	}
 

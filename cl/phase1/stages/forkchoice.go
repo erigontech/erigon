@@ -216,31 +216,71 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
-	headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
-	previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for previous_duty_dependent_root: %w", err)
-	}
-	current_duty_dependent_root, err := headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for current_duty_dependent_root: %w", err)
-	}
-
 	stateRoot, err := headState.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("failed to hash ssz: %w", err)
 	}
-	// emit the head event
-	cfg.emitter.State().SendHead(&beaconevents.HeadData{
-		Slot:                      headSlot,
-		Block:                     headRoot,
-		State:                     stateRoot,
-		EpochTransition:           true,
-		PreviousDutyDependentRoot: previous_duty_dependent_root,
-		CurrentDutyDependentRoot:  current_duty_dependent_root,
-		ExecutionOptimistic:       false,
+	currentHeadRoot, currentHeadSlot, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		return fmt.Errorf("failed to revalidate head event: %w", err)
+	}
+	if currentHeadRoot != headRoot || currentHeadSlot != headSlot {
+		return nil
+	}
+	isGloas := headState.Version() >= clparams.GloasVersion
+	payloadStatus := "full"
+	if isGloas {
+		payloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+	}
+	executionOptimistic := cfg.forkChoice.IsRootOptimistic(headRoot)
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		cfg.beaconCfg,
+		headState,
+		headSlot,
+		headRoot,
+		stateRoot,
+		payloadStatus,
+		executionOptimistic,
+	)
+	if err != nil {
+		return err
+	}
+	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
+		root, slot, err := cfg.forkChoice.GetHead(nil)
+		currentPayloadStatus := "full"
+		if isGloas {
+			currentPayloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+		}
+		return root, slot, currentPayloadStatus, cfg.forkChoice.IsRootOptimistic(root), err
 	})
-	return nil
+}
+
+func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
+	var validationErr error
+	current := func() bool {
+		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
+		if err != nil {
+			validationErr = fmt.Errorf("failed to revalidate head event: %w", err)
+			return false
+		}
+		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
+	}
+	emitter.WithHeadEventLock(func() {
+		if !current() {
+			return
+		}
+		emitter.State().TrySendHead(&beaconevents.HeadData{
+			Slot:                      headSlot,
+			Block:                     headRoot,
+			State:                     stateRoot,
+			EpochTransition:           headEvent.Data.EpochTransition,
+			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+		})
+		emitter.State().SendHeadV2(headEvent)
+	})
+	return validationErr
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
