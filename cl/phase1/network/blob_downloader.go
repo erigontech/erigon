@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
@@ -803,9 +804,19 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if block.Version() < clparams.DenebVersion {
 			break
 		}
-		blockRoot, err := block.Block.HashSSZ()
+		// The canonical root from the index, never block.Block.HashSSZ():
+		// ReadBeaconBlockBodyBySlot strips the execution payload, so hashing the block yields a
+		// root that never existed on chain and the blob-store lookup below always misses.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-visited)
 		if err != nil {
 			return nil, 0, err
+		}
+		if blockRoot == (common.Hash{}) {
+			// Below BlocksAvailable the reader goes straight to the segment without consulting the
+			// canonical index, so a zero root means indexing has not caught up rather than an empty
+			// slot. Failing the pass leaves the target and completion state intact; skipping would
+			// count the slot as visited and let the pass report success with its blobs unfetched.
+			return nil, 0, fmt.Errorf("no canonical block root for slot %d: snapshot indexing has not caught up", currentSlot-visited)
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {
