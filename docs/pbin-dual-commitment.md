@@ -81,8 +81,9 @@ observable without turning a migration comparison into a consensus failure.
 
 Shadow roots are stored by `WriteShadowStateRoot` (`db/rawdb/accessors_shadow_root.go`) under
 `dbutils.BlockBodyKey(number, hash)`. The block hash is part of the key, so competing blocks at one
-height do not overwrite one another. The execute-stage and chain-pruning paths remove these records
-with their block data.
+height do not overwrite one another. `PruneBlocks` and `TruncateBlocks` (`db/rawdb/accessors_chain.go`)
+remove these records with their block data. Finality does not, because the activation block's witness
+reads its parent's record.
 
 Diffsets now carry a version and domain count in `serializeKeys` and `deserializeKeys`
 (`db/state/changeset/state_changeset.go`). The reader accepts the old six-domain framing and leaves
