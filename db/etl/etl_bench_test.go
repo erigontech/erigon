@@ -42,7 +42,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				tmpdir, _ := os.MkdirTemp("", "bench-fdp-")
-				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
