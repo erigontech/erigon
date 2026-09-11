@@ -293,12 +293,17 @@ func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
 // The same trie carried across blocks, as a running node holds it. A sole-account root folds via
 // propagate and writes no root branch record, so its state travels only in the carried trie or
 // the state blob — a fresh trie per batch is not a lifecycle this shape has.
-func carriedRoot(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) []byte {
+func lifecycleRoots(t *testing.T, batches ...*UpdateBuilder) (carried, restored []byte) {
 	t.Helper()
-	ms := NewMockState(t)
+	ms, msr := NewMockState(t), NewMockState(t)
 	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	processBatch(t, ms, tr, k1, u1)
-	return processBatch(t, ms, tr, k2, u2)
+	var blob []byte
+	for _, ub := range batches {
+		k, u := ub.Build()
+		carried = processBatch(t, ms, tr, k, u)
+		restored, blob = processModeBatchState(t, msr, modeSeq, 0, k, u, blob)
+	}
+	return carried, restored
 }
 
 // A trie whose only leaf is one account reaches it through a root extension down to depth 64.
@@ -330,13 +335,11 @@ func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
 				ub1.Storage(a, loc, loc)
 				ub2.DeleteStorage(a, loc)
 			}
-			k1, u1 := ub1.Build()
-			k2, u2 := ub2.Build()
 			kf, uf := ubf.Build()
 
 			want, _ := engineRoot(t, modeSeq, 0, kf, uf)
-			restored, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
-			require.Equal(t, want, carriedRoot(t, k1, u1, k2, u2), "carried trie lost the untouched surviving slots")
+			carried, restored := lifecycleRoots(t, ub1, ub2)
+			require.Equal(t, want, carried, "carried trie lost the untouched surviving slots")
 			require.Equal(t, want, restored, "state-restored trie lost the untouched surviving slots")
 		})
 	}
@@ -352,7 +355,6 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	for _, loc := range all {
 		ub1.Storage(a, loc, loc)
 	}
-	k1, u1 := ub1.Build()
 
 	t.Run("delete_storage_keeps_account", func(t *testing.T) {
 		t.Parallel()
@@ -360,12 +362,11 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 		for _, loc := range all {
 			ub2.DeleteStorage(a, loc)
 		}
-		k2, u2 := ub2.Build()
 
 		kf, uf := NewUpdateBuilder().Balance(a, 2).Build()
 		want, _ := engineRoot(t, modeSeq, 0, kf, uf)
-		restored, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
-		require.Equal(t, want, carriedRoot(t, k1, u1, k2, u2), "carried trie: deleting all storage must leave the bare account")
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, want, carried, "carried trie: deleting all storage must leave the bare account")
 		require.Equal(t, want, restored, "state-restored trie: deleting all storage must leave the bare account")
 	})
 
@@ -375,10 +376,9 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 		for _, loc := range all {
 			ub2.DeleteStorage(a, loc)
 		}
-		k2, u2 := ub2.Build()
 
-		restored, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
-		require.Equal(t, empty.RootHash[:], carriedRoot(t, k1, u1, k2, u2), "carried trie: deleting the sole account must empty the trie")
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, empty.RootHash[:], carried, "carried trie: deleting the sole account must empty the trie")
 		require.Equal(t, empty.RootHash[:], restored, "state-restored trie: deleting the sole account must empty the trie")
 	})
 }
@@ -409,23 +409,11 @@ func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
 		ub3.Storage(a, loc, loc)
 		ubf.Storage(a, loc, loc)
 	}
-	k1, u1 := ub1.Build()
-	k2, u2 := ub2.Build()
-	k3, u3 := ub3.Build()
 	kf, uf := ubf.Build()
 
 	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
-
-	ms := NewMockState(t)
-	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	processBatch(t, ms, tr, k1, u1)
-	processBatch(t, ms, tr, k2, u2)
-	require.Equal(t, want, processBatch(t, ms, tr, k3, u3), "carried trie re-expanded the survivor under the wrong nibble")
-
-	msr := NewMockState(t)
-	_, blob := processModeBatchState(t, msr, modeSeq, 0, k1, u1, nil)
-	_, blob = processModeBatchState(t, msr, modeSeq, 0, k2, u2, blob)
-	restored, _ := processModeBatchState(t, msr, modeSeq, 0, k3, u3, blob)
+	carried, restored := lifecycleRoots(t, ub1, ub2, ub3)
+	require.Equal(t, want, carried, "carried trie re-expanded the survivor under the wrong nibble")
 	require.Equal(t, want, restored, "state-restored trie re-expanded the survivor under the wrong nibble")
 }
 
@@ -446,13 +434,11 @@ func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
 		ub2.Storage(a, loc, loc)
 		ubf.Storage(a, loc, loc)
 	}
-	k1, u1 := ub1.Build()
-	k2, u2 := ub2.Build()
 	kf, uf := ubf.Build()
 
 	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
-	restored, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
-	require.Equal(t, want, carriedRoot(t, k1, u1, k2, u2), "carried trie lost the storage extension below the sole account")
+	carried, restored := lifecycleRoots(t, ub1, ub2)
+	require.Equal(t, want, carried, "carried trie lost the storage extension below the sole account")
 	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
 }
 
