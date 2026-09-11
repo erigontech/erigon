@@ -4,8 +4,11 @@ run-name: "Docs cutover${{ inputs.dry_run && ' (dry run)' || '' }}"
 
 # Moves the published docs to a new release series when one goes stable.
 #
-# A release changes nothing in the docs pipeline on its own. Making the new
-# series live takes two edits in two different places:
+# A PATCH release needs nothing: docs-deploy-cron.yml dispatches a build daily,
+# and that build resolves its install version with `stableInSeries`, so the
+# newest patch of the series already being published goes live on its own.
+#
+# A new SERIES is the gap. Making it live takes two edits in two places:
 #
 #   1. `on.push.branches` in docs-deploy.yml ON THE NEW RELEASE BRANCH, which
 #      arrives wrong in one of two ways. Cut from the previous release branch,
