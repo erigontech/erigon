@@ -844,8 +844,22 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 	}
-	currEpoch := a.ethClock.GetCurrentEpoch()
-	random := baseState.GetRandaoMixes(currEpoch)
+	// ⚠ THE STATE'S EPOCH, NOT THE WALL CLOCK'S.
+	//
+	// The verifier checks `payload.prev_randao == get_randao_mix(state, get_current_epoch(state))`
+	// against the state at the block's own slot (ProcessExecutionPayload runs before ProcessRandao).
+	// Reading the mix at `ethClock.GetCurrentEpoch()` agreed with that only while the chain was
+	// keeping up with its clock. Let the clock run ahead of the head — a 2s-slot L2 whose proposer
+	// misses a slot, which is ordinary — and this indexes a LATER entry of the randao ring, one that
+	// still holds its GENESIS value on the first pass round. The payload then carries a genesis mix
+	// at slot 5, the verifier expects the evolved one, and the block is rejected.
+	//
+	// That rejection is self-reinforcing and fatal: the head stops, so the clock drifts further, so
+	// the gap widens, so every block after it is rejected too. Measured on a three-chain dev node —
+	// the 12s chains kept up and were fine, the 2s venue chain wedged at block 5 and never produced
+	// another. `emitNextPaylodAttributesEvent` already carries this exact lesson for the hint path
+	// ("genesis on the first pass round the ring"); the proposer was never given it.
+	random := baseState.GetRandaoMixes(state.Epoch(baseState))
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64

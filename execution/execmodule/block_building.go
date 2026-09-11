@@ -144,7 +144,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		e.pendingBlockMu.Lock()
 		e.pendingBlock[e.nextPayloadId] = params
 		e.pendingBlockMu.Unlock()
-		e.logger.Info("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash)
+		e.logger.Info("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash, "ts", params.Timestamp, "randao", params.PrevRandao)
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
 
