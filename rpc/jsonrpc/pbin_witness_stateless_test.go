@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -373,6 +374,26 @@ func TestPBinWitnessStatelessMissingNodeErrors(t *testing.T) {
 		}
 	}
 	require.Equal(t, len(nodes), broke, "a node can be dropped without any read noticing")
+}
+
+func TestPBinWitnessStatelessSystemAddressBlindedReadsAbsent(t *testing.T) {
+	t.Parallel()
+
+	c := pbinStatelessNewCorpus()
+	sys := common.Address(params.SystemAddress.Value())
+	hidden := pbinStatelessAddr(0x66)
+	c.state.setAccount(sys, 0, 1, nil)
+	c.state.setAccount(hidden, 0, 1, nil)
+	pbinStatelessProcess(t, c.state, append(c.accessed(), sys[:], hidden[:]))
+	nodes, root := pbinStatelessWitness(t, c.state, c.accessed())
+	stateless := pbinStatelessVerifierOver(t, nodes, root)
+
+	acc, err := stateless.ReadAccountData(params.SystemAddress)
+	require.NoError(t, err)
+	require.Nil(t, acc)
+
+	_, err = stateless.ReadAccountData(accounts.InternAddress(hidden))
+	require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
 }
 
 // pbinStatelessReadsAll replays every read the corpus makes and returns the first

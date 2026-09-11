@@ -309,7 +309,7 @@ func (w *pbinWitnessTree) leaf(key []byte) ([]byte, bool, error) {
 		node, ok := w.nodes[hash]
 		if !ok {
 			return nil, false, fmt.Errorf("%w: no preimage for %x, reached at bit %d of key %x",
-				errPBinWitnessBlinded, hash, pos, key)
+				ErrPBinWitnessBlinded, hash, pos, key)
 		}
 		if node.isLeaf() {
 			if !bytes.Equal(node.key, key) {

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -149,6 +150,9 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 
 func (s *pbinWitnessStateless) preStateAccount(addr common.Address) (*accounts.Account, error) {
 	witnessAcc, ok, err := s.state.Account(addr[:])
+	if errors.Is(err, commitment.ErrPBinWitnessBlinded) && addr == common.Address(params.SystemAddress.Value()) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

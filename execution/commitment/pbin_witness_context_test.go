@@ -121,7 +121,7 @@ func TestPBinWitnessContextBlindedBranchErrors(t *testing.T) {
 	path := pbinWitnessBlindedPath(t, f.tree)
 
 	record, _, err := f.witness.Branch(pbinEncodeBitPath(&path))
-	require.ErrorIs(t, err, errPBinWitnessBlinded)
+	require.ErrorIs(t, err, ErrPBinWitnessBlinded)
 	require.Empty(t, record)
 	require.Contains(t, err.Error(), hex.EncodeToString(path.appendPackedBits(nil)), "the error does not name the path")
 }

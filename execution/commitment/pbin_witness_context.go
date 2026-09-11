@@ -33,7 +33,7 @@ import (
 // binary trie written beside it.
 
 var (
-	errPBinWitnessBlinded = errors.New("pbin: witness node is blinded")
+	ErrPBinWitnessBlinded = errors.New("pbin: witness node is blinded")
 	errPBinWitnessNoState = errors.New("pbin: witness holds no state")
 )
 
@@ -141,7 +141,7 @@ func (c *pbinWitnessContext) rootRecord() ([]byte, error) {
 		return []byte{}, nil
 	}
 	if _, ok := c.tree.nodes[c.tree.root]; !ok {
-		return nil, fmt.Errorf("%w: no preimage for root %x", errPBinWitnessBlinded, c.tree.root)
+		return nil, fmt.Errorf("%w: no preimage for root %x", ErrPBinWitnessBlinded, c.tree.root)
 	}
 	var cell pbinCell
 	cell.reset()
@@ -273,7 +273,7 @@ func (c *pbinWitnessContext) nodeAt(p *pbinBitpath) (pbinWitnessNode, error) {
 		node, ok := c.tree.nodes[hash]
 		if !ok {
 			return node, fmt.Errorf("%w: no preimage for %x, reached at bit %d of the %d-bit path %x",
-				errPBinWitnessBlinded, hash, pos, p.bitLen, p.appendPackedBits(nil))
+				ErrPBinWitnessBlinded, hash, pos, p.bitLen, p.appendPackedBits(nil))
 		}
 		if node.isLeaf() {
 			return node, fmt.Errorf("%w: a leaf covers bit %d of the %d-bit path %x",
