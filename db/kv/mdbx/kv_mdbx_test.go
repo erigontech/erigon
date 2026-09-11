@@ -60,7 +60,7 @@ func TestChaindataReadahead(t *testing.T) {
 		value           string
 		wantNoReadahead bool
 	}{
-		{name: "default", wantNoReadahead: false},
+		{name: "default", wantNoReadahead: true},
 		{name: "disabled", value: "false", wantNoReadahead: true},
 		{name: "enabled", value: "true", wantNoReadahead: false},
 	}
