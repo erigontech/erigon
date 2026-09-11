@@ -109,6 +109,9 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 	config.AmsterdamTime, config.BinaryTrieTime = &amsterdam, &activation
 	balance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
 	genesis := &types.Genesis{Config: config, Difficulty: uint256.NewInt(0), Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).Set(balance)}, to: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")}}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+	for i := range 256 {
+		genesis.Alloc[common.BytesToAddress([]byte{0x02, byte(i)})] = types.GenesisAccount{Balance: big.NewInt(1)}
+	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key), execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, true) }))
 	tx, err := m.DB.BeginTemporalRw(t.Context())

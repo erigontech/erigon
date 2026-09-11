@@ -249,8 +249,12 @@ func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, origi
 // being dropped on a guess.
 func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addr := address.Value()
-	if _, err := s.preStateAccount(addr); err != nil {
+	acc, err := s.preStateAccount(addr)
+	if err != nil {
 		return err
+	}
+	if _, updated := s.accountUpdates[addr]; acc == nil && !updated {
+		return nil
 	}
 	delete(s.accountUpdates, addr)
 	delete(s.storageWrites, addr)

@@ -633,7 +633,9 @@ func TestPBinWitnessStatelessRemovesAccountCreatedInBlock(t *testing.T) {
 	c := pbinStatelessNewCorpus()
 	stateless, _, parentRoot := c.verifier(t)
 
-	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(c.fresh), nil))
+	fresh := accounts.InternAddress(c.fresh)
+	require.NoError(t, stateless.UpdateAccountData(fresh, nil, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}))
+	require.NoError(t, stateless.DeleteAccount(fresh, nil))
 
 	got, err := stateless.Finalize(context.Background())
 	require.NoError(t, err)
