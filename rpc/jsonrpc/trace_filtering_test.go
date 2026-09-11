@@ -212,7 +212,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 			Index:     0,
 			Validator: 42,
 			Address:   withdrawalAddr,
-			Amount:    withdrawalGwei,
+			Amount:    hexutil.Uint64(withdrawalGwei),
 		})
 	})
 	require.NoError(t, err)
@@ -343,8 +343,8 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
-		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: hexutil.Uint64(wd1Gwei)})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: hexutil.Uint64(wd2Gwei)})
 	})
 	require.NoError(t, err)
 	err = m.InsertChain(generated)
@@ -390,7 +390,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: hexutil.Uint64(withdrawalGwei)})
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
@@ -434,8 +434,8 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
-		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: hexutil.Uint64(wd1Gwei)})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: hexutil.Uint64(wd2Gwei)})
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
