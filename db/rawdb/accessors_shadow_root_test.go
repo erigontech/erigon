@@ -23,9 +23,27 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 )
+
+func TestPruneBlocksKeepsShadowStateRoot(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	hash := common.Hash{5}
+	root := []byte{6}
+	require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(1, hash), []byte{0}))
+	require.NoError(t, rawdb.WriteShadowStateRoot(tx, hash, 1, root))
+
+	deleted, err := rawdb.PruneBlocks(tx, 2, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	got, err := rawdb.ReadShadowStateRoot(tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, root, got)
+}
 
 func TestShadowStateRootStorageUsesBlockHash(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)

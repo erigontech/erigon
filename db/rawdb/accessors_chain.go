@@ -932,9 +932,6 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
 			return deleted, err
 		}
-		if err := tx.Delete(kv.ShadowStateRoot, kCopy); err != nil {
-			return deleted, err
-		}
 		if err := tx.Delete(kv.Headers, kCopy); err != nil {
 			return deleted, err
 		}
