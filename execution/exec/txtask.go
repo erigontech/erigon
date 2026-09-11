@@ -58,7 +58,6 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
-	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -231,10 +230,6 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
-
-	// BlockStateCache holds pre-block account state for stable committed reads.
-	// Shared across all tasks in the same block. Set by the parallel executor.
-	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -436,10 +431,6 @@ func (t *TxTask) Dependencies() []int {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
-}
-
-func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
-	return t.BlockStateCache
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
