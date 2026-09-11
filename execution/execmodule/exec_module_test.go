@@ -929,6 +929,10 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
+	provider := &observingTxnProvider{
+		TxnProvider: m.TxPool,
+		txnCounts:   make(chan int, 16),
+	}
 
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
@@ -940,14 +944,16 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
 
-	// Add new transactions with a delay
-	time.Sleep(300 * time.Millisecond)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 
-	// The block should have all four transactions
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
