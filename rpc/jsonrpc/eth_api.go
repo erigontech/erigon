@@ -621,6 +621,11 @@ func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uin
 		// Every block the count leaves room for one in was read and none records a
 		// transaction, so the count is inflation alone: there is none to be missing.
 		return true, true, nil
+	case earlyTxnSpent:
+		// What spent the budget is the chain shape the search read, so a second walk
+		// reaches the same place: worth remembering, unlike a verdict the datadir was
+		// too empty to give.
+		return false, true, nil
 	default:
 		return false, false, nil
 	}
@@ -641,6 +646,7 @@ type earlyTxnSearch uint8
 
 const (
 	earlyTxnUnread earlyTxnSearch = iota
+	earlyTxnSpent
 	earlyTxnNone
 	earlyTxnFound
 )
@@ -672,7 +678,7 @@ func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, low uint64
 		high := bounds[len(bounds)-1]
 		for low < high.num {
 			if budget <= 0 {
-				return 0, earlyTxnUnread, nil
+				return 0, earlyTxnSpent, nil
 			}
 			budget--
 			middle := low + (high.num-low)/2

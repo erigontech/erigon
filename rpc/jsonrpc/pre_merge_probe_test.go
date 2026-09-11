@@ -507,7 +507,7 @@ func TestPreMergeSearchStopsAtItsReadBudget(t *testing.T) {
 	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
 	require.NoError(t, err)
 	require.False(t, data.holds, "a search that stopped short has not observed an archive")
-	require.False(t, decided, "and has nothing to remember")
+	require.True(t, decided, "what spent the budget is the chain shape it read, which a second walk reads again")
 	require.LessOrEqual(t, reader.bodyReads.Load(), int64(earlyTxnSearchBudget+16), "the budget bounds the walk")
 }
 
@@ -575,6 +575,28 @@ func TestPreMergeVerdictHoldsAcrossChainShapes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestPreMergeVerdictRemembersASpentSearch pins what a search that ran out of budget
+// costs the requests behind it: it is the most expensive walk there is, and every one
+// of them reaches the same place until the datadir holds different blocks.
+func TestPreMergeVerdictRemembersASpentSearch(t *testing.T) {
+	t.Parallel()
+
+	const length = 1024
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: slices.Repeat([]int{1}, length)}
+	api := newProbeAPI(reader)
+
+	first, err := api.holdsPreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.False(t, first.holds)
+	walk := reader.bodyReads.Load()
+	require.NotZero(t, walk)
+
+	second, err := api.holdsPreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.Equal(t, first, second, "the answer behind a spent search does not change")
+	require.Equal(t, walk, reader.bodyReads.Load(), "the walk is not repeated within the TTL")
 }
 
 // TestPreMergeSearchKeepsTheBoundsItRead measures the walk on the shape that costs the
