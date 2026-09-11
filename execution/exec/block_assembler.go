@@ -298,6 +298,11 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 	}()
 
+	minTxGas := params.TxGas
+	if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+		minTxGas = params.TxBaseEIP2780
+	}
+
 	done := false
 
 LOOP:
@@ -322,15 +327,8 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		// Post-Amsterdam EIP-2780 lowers the minimum intrinsic cost to 12,000.
-		// Only execution gas is checked: AA transactions (RIP-7560) bypass
-		// CheckBlockGasInclusion and consume execution gas only, so a state-gas
-		// early exit would incorrectly skip valid AA txns. State-gas exhaustion
-		// is handled per-tx by CheckBlockGasInclusion inside commitTx.
-		minTxGas := params.TxGas
-		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
-			minTxGas = params.TxBaseEIP2780
-		}
+		// Only the execution dimension bounds this exit: AA txns draw solely on the
+		// execution pool, so a state-gas exit would drop ones that still fit.
 		if gasPool.Gas() < minTxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
