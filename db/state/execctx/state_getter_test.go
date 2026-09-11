@@ -83,7 +83,7 @@ func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	key := []byte{0xaa, 0xbb}

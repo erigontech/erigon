@@ -142,6 +142,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		ni, ch := nib, child
 		g.Go(func() error {
 			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
+			w.metrics.setSink(p.metrics.sink)
 			// Tries come from a pool and Release does not clear their counters,
 			// so a checkout carries the previous round's numbers into the merge.
 			w.metrics.Reset()
@@ -276,7 +277,7 @@ func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatr
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
+	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW, p.metrics.sink)
 }
 
 func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {

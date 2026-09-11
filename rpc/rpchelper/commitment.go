@@ -18,11 +18,14 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
+	"os"
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
@@ -59,6 +63,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	tx kv.TemporalTx,
 	baseBlockNum uint64,
 	deltaComputation func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error),
+	targetDomain ...kv.Domain,
 ) ([]byte, error) {
 	// Prepare a temporary data storage for commitment replay computation.
 	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
@@ -68,15 +73,23 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	if runtime.GOOS == "windows" {
 		mapSize = 1 * datasize.GB
 	}
+	tempDir, err := os.MkdirTemp(r.dirs.Tmp, "commitment-replay-")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.RemoveAll(tempDir)
+	replayDirs := datadir.New(tempDir)
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(replayDirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)
 	if err != nil {
 		return nil, err
 	}
-	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
+	replaySettings := *erigonDBSettings
+	replaySettings.FrozenAtTxNum = nil
+	agg, err := dbstate.New(replayDirs).Logger(r.logger).WithErigonDBSettings(&replaySettings).Open(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -88,24 +101,36 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer tdb.Close()
 
-	ttx, err := tdb.BeginTemporalRo(ctx)
+	ttx, err := tdb.BeginTemporalRw(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer ttx.Rollback()
-
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
-	if err != nil {
-		return nil, err
-	}
-	defer tsd.Close()
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
 	}
+	if genesis == nil {
+		if statecfg.ExperimentalBinCommitment && !statecfg.ExperimentalHexBinCommitment {
+			return nil, execctx.ErrBinCommitmentUnsupported
+		}
+		return nil, errors.New("genesis block not found")
+	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
+	commitmentDomain := kv.CommitmentDomain
+	if genesis.Config != nil && genesis.Config.IsBinaryTrie(genesisHeader.Time) {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
+	if len(targetDomain) > 0 {
+		commitmentDomain = targetDomain[0]
+	}
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment(), execctx.WithCommitmentDomain(commitmentDomain))
+	if err != nil {
+		return nil, err
+	}
+	defer tsd.Close()
 	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
 	if err != nil {
 		return nil, err
@@ -128,7 +153,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReaderForDomain(ttx, tx, tsd, tsd.GetCommitmentCtx().CommitmentDomain(), maxTxNum+1))
 		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 		if err != nil {

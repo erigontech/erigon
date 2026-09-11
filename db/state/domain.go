@@ -1943,6 +1943,12 @@ func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
+	if dt.name == kv.CommitmentDomain || dt.name == kv.CommitmentBinDomain {
+		untilTx = min(untilTx, dt.files.EndTxNum())
+		if untilTx == 0 {
+			return false
+		}
+	}
 	canDomain, _ := dt.canScanPruneDomainTables(tx, untilTx)
 	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
 	return canHistory || canDomain
@@ -2003,6 +2009,8 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 		mxPrunableDCode.Set(delta)
 	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
+	case kv.CommitmentBinDomain:
+		mxPrunableDCommBin.Set(delta)
 	}
 	return !done, maxStepToPrune
 }
@@ -2054,14 +2062,14 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
+	if dt.name == kv.CommitmentDomain || dt.name == kv.CommitmentBinDomain || dt.files.EndTxNum() > 0 {
 		txTo = min(txTo, dt.files.EndTxNum())
 	}
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
+	if dt.name == kv.CommitmentDomain || dt.name == kv.CommitmentBinDomain || dt.files.EndTxNum() > 0 {
 		txTo = min(txTo, dt.files.EndTxNum())
 	}
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)

@@ -37,7 +37,7 @@ func (s *pbinStateStubSD) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainM
 	return nil
 }
 func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil }
-func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff) kv.TemporalPutDel {
+func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff, kv.Domain) kv.TemporalPutDel {
 	return nil
 }
 func (s *pbinStateStubSD) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {
@@ -52,7 +52,11 @@ func pbinStateTestCtx(t *testing.T, variant commitment.TrieVariant) *SharedDomai
 	t.Helper()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = variant
-	sdc := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, commitment.ModeDirect, t.TempDir(), cfg)
+	domain := kv.CommitmentDomain
+	if variant == commitment.VariantBinPatriciaTrie {
+		domain = kv.CommitmentBinDomain
+	}
+	sdc := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
 	t.Cleanup(sdc.Close)
 	return sdc
 }

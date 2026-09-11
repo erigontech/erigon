@@ -164,3 +164,38 @@ func TestDomain_PrunableGaugeInterruptedRotation(t *testing.T) {
 	drt.canScanPruneDomainTables(tx, uint64(totalSteps)*aggStep)
 	require.Equal(t, uint64(totalSteps), mxPrunableDComm.GetValueUint64(), "unfinished rotation bounds nothing")
 }
+
+func TestAggregator_PrunableBacklogIncludesBinaryCommitment(t *testing.T) {
+	const aggStep = uint64(4)
+	const totalSteps = kv.Step(5)
+
+	ctx := t.Context()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentBinDomain, aggStep, log.New())
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	drt := d.beginForTests()
+	w := drt.NewWriter()
+	prev := map[string][]byte{}
+	for txNum := range uint64(totalSteps) * aggStep {
+		k := fmt.Appendf(nil, "key-%d", txNum%3)
+		v := fmt.Appendf(nil, "val-%d", txNum)
+		require.NoError(t, w.PutWithPrev(k, v, txNum, prev[string(k)]))
+		prev[string(k)] = v
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	drt.Close()
+	for step := range totalSteps {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	for _, gauge := range []metrics.Gauge{mxPrunableDAcc, mxPrunableDSto, mxPrunableDCode, mxPrunableDComm} {
+		gauge.Set(0)
+	}
+	drt = d.beginForTests()
+	defer drt.Close()
+	drt.canScanPruneDomainTables(tx, uint64(totalSteps)*aggStep)
+	require.Equal(t, uint64(totalSteps), (*Aggregator)(nil).MaxPrunableStepsBacklog())
+}

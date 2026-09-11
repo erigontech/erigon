@@ -78,6 +78,73 @@ func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
 }
 
+func TestSharedDomainsCommitmentDiffUsesDomain(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	for domain, value := range map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {1},
+		kv.CommitmentBinDomain: {2},
+	} {
+		key := []byte{byte(domain), 0xaa}
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, value, 1, nil, &cs.Diffs[domain]))
+		got, _, err := sd.GetLatest(domain, rwTx, key)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+
+	require.Len(t, cs.Diffs[kv.CommitmentDomain].GetDiffSet(), 1)
+	require.Len(t, cs.Diffs[kv.CommitmentBinDomain].GetDiffSet(), 1)
+}
+
+func TestSharedDomainsCommitmentDiffUnwindUsesBothDomains(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	keys := map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {0xaa, 0x01},
+		kv.CommitmentBinDomain: {0xbb, 0x01},
+	}
+	for domain, key := range keys {
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, []byte{byte(domain + 1)}, 1, nil, &cs.Diffs[domain]))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for domain := range keys {
+		diffs[domain] = cs.Diffs[domain].GetDiffSet()
+	}
+	require.NoError(t, rwTx.Unwind(t.Context(), 0, &diffs))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for domain, key := range keys {
+		value, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
+}
+
 func TestSharedDomain_Unwind(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1211,7 +1278,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer rwTx.Rollback()
 
 		ac := state.AggTx(rwTx)
-		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...)))
 
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)

@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -19,20 +20,18 @@ import (
 const ERIGONDB_SETTINGS_FILE = "erigondb.toml"
 
 const (
-	TrieVariantHex = "hex"
-	TrieVariantBin = "bin"
+	TrieVariantHex    = "hex"
+	TrieVariantBin    = "bin"
+	TrieVariantHexBin = "hex+bin"
 )
 
 type ErigonDBSettings struct {
-	StepSize                       uint64 `toml:"step_size"`
-	StepsInFrozenFile              uint64 `toml:"steps_in_frozen_file"`
-	ReferencesInCommitmentBranches *bool  `toml:"references_in_commitment_branches"`
-	// TrieVariant is the commitment trie the datadir was created with ("hex" or
-	// "bin"); absent means hex. Like every erigondb.toml key it wins over the CLI.
-	TrieVariant *string `toml:"trie_variant,omitempty"`
-	// TrieHash is H for a "bin" datadir ("keccak" or "blake3"); absent means
-	// keccak. Meaningless under "hex", which has no choice of hash.
-	TrieHash *string `toml:"trie_hash,omitempty"`
+	StepSize                       uint64            `toml:"step_size"`
+	StepsInFrozenFile              uint64            `toml:"steps_in_frozen_file"`
+	ReferencesInCommitmentBranches *bool             `toml:"references_in_commitment_branches"`
+	TrieVariant                    *string           `toml:"trie_variant,omitempty"`
+	TrieHash                       *string           `toml:"trie_hash,omitempty"`
+	FrozenAtTxNum                  map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -61,16 +60,25 @@ func (s *ErigonDBSettings) TrieHashName() string {
 	return *s.TrieHash
 }
 
-// reconcileTrieVariant applies the datadir's trie variant to the process: a bin
-// datadir turns the bin flag on process-wide, and a combination the bin engine
-// cannot honour is refused rather than degraded to a wrong-root run.
+func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
+	if s == nil || s.FrozenAtTxNum == nil {
+		return 0, false
+	}
+	txNum, ok := s.FrozenAtTxNum[domain.String()]
+	return txNum, ok
+}
+
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	switch s.TrieVariantName() {
-	case TrieVariantBin:
-		if s.RefsInCommitmentBranches() {
-			return errors.New("trie_variant \"bin\" conflicts with references_in_commitment_branches = true")
+	case TrieVariantBin, TrieVariantHexBin:
+		hexBin := s.TrieVariantName() == TrieVariantHexBin
+		if !hexBin && s.RefsInCommitmentBranches() {
+			return errors.New("the bin commitment trie does not support references_in_commitment_branches; set it to false")
 		}
-		if statecfg.ExperimentalParallelCommitment {
+		if statecfg.ExperimentalHexBinCommitment != hexBin {
+			statecfg.ExperimentalHexBinCommitment = hexBin
+		}
+		if !hexBin && statecfg.ExperimentalParallelCommitment {
 			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
 		}
 		if !statecfg.ExperimentalBinCommitment {
@@ -93,6 +101,9 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			}
 		}
 	case TrieVariantHex:
+		if statecfg.ExperimentalHexBinCommitment {
+			statecfg.ExperimentalHexBinCommitment = false
+		}
 		if s.TrieHash != nil {
 			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
 		}
@@ -157,9 +168,6 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 	return resolveErigonDBSettings(dirs, logger, noDownloader, refsFirstStart, false)
 }
 
-// ResolveErigonDBSettingsForGenesis is ResolveErigonDBSettings for a chain whose genesis schedules
-// EIP-8297. A datadir being created for such a chain records the bin trie without anyone naming it
-// on the command line, so `erigon init` alone is enough; an existing toml still wins.
 func ResolveErigonDBSettingsForGenesis(dirs datadir.Dirs, logger log.Logger, noDownloader, binTrieScheduled bool) (*ErigonDBSettings, error) {
 	return resolveErigonDBSettings(dirs, logger, noDownloader, nil, binTrieScheduled)
 }
@@ -202,6 +210,9 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 	var trieVariant, trieHash *string
 	if statecfg.ExperimentalBinCommitment || binTrieScheduled {
 		v := TrieVariantBin
+		if statecfg.ExperimentalHexBinCommitment {
+			v = TrieVariantHexBin
+		}
 		trieVariant = &v
 		h := statecfg.BinCommitmentHash
 		if h == "" {

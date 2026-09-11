@@ -17,6 +17,8 @@
 package genesiswrite_test
 
 import (
+	"fmt"
+	"io/fs"
 	"math/big"
 	"testing"
 
@@ -25,7 +27,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,6 +61,17 @@ func withBinCommitment(t *testing.T, on bool) {
 	}
 }
 
+func withCommitmentVariant(t *testing.T, bin, hexBin bool) {
+	t.Helper()
+	withBinCommitment(t, bin)
+	origHexBin, origHash, origSuite := statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = origHexBin, origHash
+		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
+	})
+	statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = hexBin, ""
+}
+
 func pbinTestGenesis() *types.Genesis {
 	return &types.Genesis{
 		Config: chain.AllProtocolChanges,
@@ -64,6 +80,87 @@ func pbinTestGenesis() *types.Genesis {
 			common.HexToAddress("0x00000000000000000000000000000000000000ff"): {Balance: big.NewInt(0xdeadbeef), Nonce: 3},
 		},
 	}
+}
+
+func delayedPBinGenesis() *types.Genesis {
+	amsterdamTime := uint64(10)
+	binaryTrieTime := uint64(20)
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = &amsterdamTime
+	cfg.BinaryTrieTime = &binaryTrieTime
+	g := pbinTestGenesis()
+	g.Config = cfg
+	g.Timestamp = amsterdamTime
+	return g
+}
+
+func TestPBinGenesisDelayedScheduleRequiresDualDatadir(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		bin     bool
+		hexBin  bool
+		wantErr bool
+	}{
+		{name: "hex", wantErr: true},
+		{name: "bin", bin: true, wantErr: true},
+		{name: "hex+bin", bin: true, hexBin: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withCommitmentVariant(t, tc.bin, tc.hexBin)
+			_, _, err := genesiswrite.GenesisToBlock(delayedPBinGenesis(), datadir.New(t.TempDir()), log.New())
+			if tc.wantErr {
+				require.ErrorContains(t, err, "binaryTrieTime")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestPBinGenesisRejectsBinaryTrieBeforeAmsterdam(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	binaryTrieTime := uint64(5)
+	g.Config.BinaryTrieTime = &binaryTrieTime
+	_, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), log.New())
+	require.ErrorContains(t, err, "needs amsterdamTime")
+}
+
+func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer sd.Close()
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
+	headerRoot, _, err := genesiswrite.ComputeGenesisCommitment(t.Context(), g, tx, sd, head)
+	require.NoError(t, err)
+
+	hexRoot, err := sd.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().RootHash()
+	require.NoError(t, err)
+	binRoot, err := sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	require.Equal(t, hexRoot, headerRoot)
+	require.NotEqual(t, hexRoot, binRoot)
+	got, err := rawdb.ReadShadowStateRoot(tx, head.Hash(), 0)
+	require.NoError(t, err)
+	require.Equal(t, binRoot, got)
+}
+
+func TestHexGenesisWithoutScheduleIsStable(t *testing.T) {
+	withCommitmentVariant(t, false, false)
+	g := pbinTestGenesis()
+	first, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), log.New())
+	require.NoError(t, err)
+	second, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), log.New())
+	require.NoError(t, err)
+	require.Equal(t, first.Hash(), second.Hash())
+	require.Equal(t, first.Root(), second.Root())
 }
 
 // Genesis produces the block-0 root the executor is later checked against, so it must
@@ -102,4 +199,22 @@ func pbinGenesisRoot(t *testing.T, g *types.Genesis) []byte {
 	root, _, err := genesiswrite.ComputeGenesisCommitment(t.Context(), g, tx, sd, head)
 	require.NoError(t, err)
 	return root
+}
+
+func TestPBinGenesisDelayedScheduleRetryWithHexBin(t *testing.T) {
+	for _, bin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bin=%t", bin), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			withCommitmentVariant(t, bin, false)
+			_, _, refused := genesiswrite.GenesisToBlock(delayedPBinGenesis(), dirs, log.New())
+			require.ErrorContains(t, refused, "binaryTrieTime")
+			_, err := dbstate.ReadErigonDBSettings(dirs)
+			require.ErrorIs(t, err, fs.ErrNotExist)
+			require.ErrorContains(t, refused, "COMMITMENT_HEX_BIN")
+
+			withCommitmentVariant(t, false, true)
+			_, _, err = genesiswrite.GenesisToBlock(delayedPBinGenesis(), dirs, log.New())
+			require.NoError(t, err)
+		})
+	}
 }

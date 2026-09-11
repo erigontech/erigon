@@ -72,7 +72,6 @@ func pbinCodeSizeAccount(codeHash common.Hash) *accounts.Account {
 
 // BASIC_DATA's code_size is the length of the account's code in the CodeDomain.
 func TestPBinTrieContextAccountReadsCodeSize(t *testing.T) {
-	t.Parallel()
 
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xfd}
 	addr := pbinCodeSizeAddr(1)
@@ -87,7 +86,6 @@ func TestPBinTrieContextAccountReadsCodeSize(t *testing.T) {
 // The hex trie does not hash code_size, so it must not pay for the extra
 // CodeDomain read.
 func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
-	t.Parallel()
 
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xfd}
 	addr := pbinCodeSizeAddr(2)
@@ -102,7 +100,6 @@ func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
 // belongs to the account. code_size follows the account's own code hash, so the
 // residue must not move the root.
 func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
-	t.Parallel()
 
 	residue := []byte{0xef, 0x01, 0x00}
 	addr := pbinCodeSizeAddr(3)
@@ -117,7 +114,6 @@ func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
 // A code hash with no code behind it (an eth_simulateV1 overlay, a truncated
 // datadir) would hash as code_size 0 and silently produce a wrong root.
 func TestPBinTrieContextRefusesCodeBearingAccountWithoutCode(t *testing.T) {
-	t.Parallel()
 
 	addr := pbinCodeSizeAddr(4)
 	ttx := pbinCodeSizeTrieContext(t, true, addr, pbinCodeSizeAccount(common.Hash{0xAB}), nil)
@@ -128,8 +124,6 @@ func TestPBinTrieContextRefusesCodeBearingAccountWithoutCode(t *testing.T) {
 
 // Only a bin SharedDomains must insist the code is there.
 func TestPBinSharedDomainsReadsCodeSizeUnderBin(t *testing.T) {
-	t.Parallel()
-
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 

@@ -48,6 +48,11 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
 		return err
 	}
+	if ExperimentalHexBinCommitment {
+		if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentBinDomain), salt, dirs, logger); err != nil {
+			return err
+		}
+	}
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -90,6 +95,7 @@ type SchemaGen struct {
 	StorageDomain         DomainCfg
 	CodeDomain            DomainCfg
 	CommitmentDomain      DomainCfg
+	CommitmentBinDomain   DomainCfg
 	ReceiptDomain         DomainCfg
 	RCacheDomain          DomainCfg
 	LogAddrIdx            InvIdxCfg
@@ -104,7 +110,7 @@ type SchemaGen struct {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
@@ -136,6 +142,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) DomainCfg {
 		v = s.CodeDomain
 	case kv.CommitmentDomain:
 		v = s.CommitmentDomain
+	case kv.CommitmentBinDomain:
+		v = s.CommitmentBinDomain
 	case kv.ReceiptDomain:
 		v = s.ReceiptDomain
 	case kv.RCacheDomain:
@@ -206,6 +214,8 @@ var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 // persisted to erigondb.toml on first start and adopted from it on later
 // starts, so a flagless restart of a bin datadir stays bin.
 var ExperimentalBinCommitment = dbg.EnvBool("COMMITMENT_BIN", false)
+
+var ExperimentalHexBinCommitment = dbg.EnvBool("COMMITMENT_HEX_BIN", false)
 
 // BinCommitmentHash names H for the binary trie ("keccak" or "blake3", empty
 // meaning keccak). Persisted and adopted exactly like ExperimentalBinCommitment:
@@ -309,6 +319,33 @@ var Schema = SchemaGen{
 			},
 		},
 	},
+	CommitmentBinDomain: DomainCfg{
+		Name: kv.CommitmentBinDomain, ValuesTable: kv.TblCommitmentBinVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: false,
+
+		Hist: HistCfg{
+			ValuesTable:   kv.TblCommitmentBinHistoryVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
+			HistoryIdx: kv.CommitmentBinHistoryIdx,
+			Accessors:  AccessorHashMap,
+
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 64,
+
+			SnapshotsDisabled: true,
+			HistoryDisabled:   true,
+
+			IiCfg: InvIdxCfg{
+				Enabled:      true,
+				FilenameBase: kv.CommitmentBinDomain.String(), KeysTable: kv.TblCommitmentBinHistoryKeys, ValuesTable: kv.TblCommitmentBinIdx,
+				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
+			},
+		},
+	},
 	ReceiptDomain: DomainCfg{
 		Name: kv.ReceiptDomain, ValuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
@@ -394,10 +431,10 @@ var Schema = SchemaGen{
 }
 
 func EnableHistoricalCommitment() {
-	cfg := Schema.CommitmentDomain
-	cfg.Hist.HistoryDisabled = false
-	cfg.Hist.SnapshotsDisabled = false
-	Schema.CommitmentDomain = cfg
+	for _, cfg := range []*DomainCfg{&Schema.CommitmentDomain, &Schema.CommitmentBinDomain} {
+		cfg.Hist.HistoryDisabled = false
+		cfg.Hist.SnapshotsDisabled = false
+	}
 }
 
 /*

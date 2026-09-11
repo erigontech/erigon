@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -238,7 +239,9 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 }
 
 type SharedDomains struct {
-	sdCtx *commitmentdb.SharedDomainsCommitmentContext
+	sdCtx            *commitmentdb.SharedDomainsCommitmentContext
+	commitmentCtxs   map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext
+	commitmentDomain kv.Domain
 
 	stepSize uint64
 
@@ -324,6 +327,17 @@ type SharedDomains struct {
 	adaptivePinController *commitment.AdaptivePinController
 }
 
+func (sd *SharedDomains) commitmentDomainValue() kv.Domain {
+	if sd.commitmentDomain == kv.CommitmentBinDomain {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
+func (sd *SharedDomains) HasSharedBranchCacheFor(domain kv.Domain) bool {
+	return domain == kv.CommitmentDomain && sd.branchCache != nil
+}
+
 // cacheUnwindState records the lowest boundary that the next durable cache
 // publication must invalidate. It is separate from mem-batch changesets
 // because an unwind without changesets must still revoke cache entries;
@@ -360,15 +374,30 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	for _, opt := range opts {
 		opt(&o)
 	}
-	if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
-		if o.hexCommitmentOnly {
+	commitmentDomains := []kv.Domain{kv.CommitmentDomain}
+	if p, ok := tx.AggTx().(interface{ CommitmentDomains() []kv.Domain }); ok {
+		commitmentDomains = p.CommitmentDomains()
+	} else if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		commitmentDomains = []kv.Domain{kv.CommitmentBinDomain}
+	}
+	if o.hexCommitmentOnly {
+		if len(commitmentDomains) == 1 && (statecfg.ExperimentalBinCommitment || o.trieCfg.Variant == commitment.VariantBinPatriciaTrie) {
 			return nil, ErrBinCommitmentUnsupported
 		}
-		// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
-		// commitment-context ctor refuses a bin SD that shares the cache.
-		WithoutSharedBranchCache()(&o)
+		commitmentDomains = []kv.Domain{kv.CommitmentDomain}
+		o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 	}
-	trieCfg := o.trieCfg
+	commitmentDomain := commitmentDomains[0]
+	if o.commitmentDomain != nil {
+		requestedDomain := *o.commitmentDomain
+		if requestedDomain == kv.CommitmentBinDomain && o.trieCfg.Variant == commitment.VariantBinPatriciaTrie && !slices.Contains(commitmentDomains, requestedDomain) {
+			requestedDomain = kv.CommitmentDomain
+		}
+		if !slices.Contains(commitmentDomains, requestedDomain) {
+			return nil, fmt.Errorf("commitment domain %s is not registered", *o.commitmentDomain)
+		}
+		commitmentDomain = requestedDomain
+	}
 
 	generationTx := cacheGenerationTx(tx)
 	if generationTx == nil {
@@ -381,6 +410,8 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
 		logger:           logger,
+		commitmentDomain: commitmentDomain,
+		commitmentCtxs:   make(map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext),
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
@@ -393,25 +424,36 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	} else {
 		sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
 	}
-	// Fetch the aggregator-scope branch cache (lives on the commitment
-	// Domain, shared across all SharedDomains derived from this
-	// aggregator). The duck-typed BranchCacheProvider lookup avoids
-	// importing db/state directly — db/state already imports execctx, so
-	// the reverse import would create a cycle.
 	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
-		branchCache = p.BranchCache()
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache && (len(commitmentDomains) > 1 || o.trieCfg.Variant != commitment.VariantBinPatriciaTrie) {
+		branchCache = p.BranchCache(commitmentDomain)
 	}
 	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	for _, domain := range commitmentDomains {
+		cfg := o.trieCfg
+		if domain == kv.CommitmentBinDomain {
+			cfg.Variant = commitment.VariantBinPatriciaTrie
+		} else if len(commitmentDomains) > 1 && cfg.Variant == commitment.VariantBinPatriciaTrie {
+			if statecfg.ExperimentalParallelCommitment {
+				cfg.Variant = commitment.VariantParallelHexPatricia
+			} else {
+				cfg.Variant = commitment.VariantHexPatriciaTrie
+			}
+		}
+		ctx := commitmentdb.NewSharedDomainsCommitmentContext(sd, domain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, cfg)
+		sd.commitmentCtxs[domain] = ctx
+		if domain == commitmentDomain {
+			sd.sdCtx = ctx
+		}
+	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
 	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
-		sd.adaptivePinController = p.AdaptivePinController()
+		sd.adaptivePinController = p.AdaptivePinController(commitmentDomain)
 	}
 
 	// After adaptivePinController is assigned: the wrapper binds it, and the
@@ -552,8 +594,11 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	if p, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(sd.commitmentDomainValue()) {
+		return nil
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
+		return sd.DomainPutCommitmentDiff(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData, nil)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
@@ -565,9 +610,12 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return nil
 	}
 	defer upd.Clear()
+	if p, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(sd.commitmentDomainValue()) {
+		return nil
+	}
 
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+		return sd.DomainPut(sd.commitmentDomainValue(), tx, prefix, data, upd.TxNum, prevData)
 	}
 
 	if !lockHeld {
@@ -599,7 +647,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// Apply deferred branch writes under the pending update's block
 		// changeset, then save it back. All accesses under changesetMu —
 		// see concurrency contract on the wrappers above.
-		defer sd.SwapCommitmentDiffLocked(cs)()
+		defer sd.SwapCommitmentDiffLocked(sd.commitmentDomainValue(), cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
 			return err
@@ -729,7 +777,7 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 // silently drops the explicit diff and records into whatever
 // SetChangesetAccumulator last installed.
 type commitmentBranchDiffWriter interface {
-	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
+	PutCommitmentBranchDiff(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
 }
 
 // DomainPutCommitmentDiff is DomainPut(kv.CommitmentDomain, ...) with an
@@ -737,19 +785,22 @@ type commitmentBranchDiffWriter interface {
 // recently installed on the commitment writer. The commitment domain has
 // exactly one writer (the parallel commitment calculator), so this needs no
 // lock to stay race-free — see TemporalMemBatch.PutCommitmentBranchDiff.
-func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+func (sd *SharedDomains) DomainPutCommitmentDiff(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
+		return err
+	}
 	if v == nil {
 		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
 	}
 	ks := string(k)
-	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, k, ks, v, prevVal)
+	prevVal, err := sd.resolvePrevVal(domain, roTx, k, ks, v, prevVal)
 	if err != nil {
 		return err
 	}
 	if bytes.Equal(prevVal, v) {
 		return nil
 	}
-	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
+	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(domain, ks, v, txNum, prevVal, diff)
 }
 
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
@@ -759,26 +810,27 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // (the only real caller) only ever writes kv.CommitmentDomain.
 type commitmentDiffPutDel struct {
 	temporalPutDel
-	diff *kv.DomainDiff
+	commitmentDomain kv.Domain
+	diff             *kv.DomainDiff
 }
 
 func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	if domain == kv.CommitmentDomain {
-		return p.sd.DomainPutCommitmentDiff(p.tx, k, v, txNum, prevVal, p.diff)
+	if domain == p.commitmentDomain {
+		return p.sd.DomainPutCommitmentDiff(domain, p.tx, k, v, txNum, prevVal, p.diff)
 	}
 	return p.temporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	if domain == kv.CommitmentDomain {
-		panic("commitmentDiffPutDel.DomainDel called for kv.CommitmentDomain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
+	if domain == p.commitmentDomain {
+		panic("commitmentDiffPutDel.DomainDel called for commitment domain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
 	}
 	return p.temporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
-	if domain == kv.CommitmentDomain {
-		panic("commitmentDiffPutDel.DomainDelPrefix called for kv.CommitmentDomain: not supported by the explicit-diff routing path")
+	if domain == p.commitmentDomain {
+		panic("commitmentDiffPutDel.DomainDelPrefix called for commitment domain: not supported by the explicit-diff routing path")
 	}
 	return p.temporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
@@ -786,17 +838,17 @@ func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, 
 // AsPutDelWithDiff is AsPutDel, but commitment-domain writes route
 // through diff explicitly rather than the shared SetChangesetAccumulator
 // target — see commitmentDiffPutDel.
-func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
-	return &commitmentDiffPutDel{temporalPutDel{sd, tx}, diff}
+func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff, commitmentDomain kv.Domain) kv.TemporalPutDel {
+	return &commitmentDiffPutDel{temporalPutDel: temporalPutDel{sd, tx}, commitmentDomain: commitmentDomain, diff: diff}
 }
 
 // commitmentDiffSwapper must be implemented by every mem batch behind
 // SharedDomains: the only alternative is redirecting all domain writers,
 // which is unsafe now that DomainPut takes no lock.
 type commitmentDiffSwapper interface {
-	SetCommitmentDiff(acc *changeset.StateChangeSet)
-	SetCommitmentDiffRaw(d *kv.DomainDiff)
-	CommitmentDiff() *kv.DomainDiff
+	SetCommitmentDiff(domain kv.Domain, acc *changeset.StateChangeSet)
+	SetCommitmentDiffRaw(domain kv.Domain, d *kv.DomainDiff)
+	CommitmentDiff(domain kv.Domain) *kv.DomainDiff
 }
 
 // SwapCommitmentDiffLocked points the commitment writer's diff at acc and
@@ -804,11 +856,11 @@ type commitmentDiffSwapper interface {
 // alone, so apply-side writes need no lock. Callers must hold changesetMu.
 // Used only by flushPendingUpdates's hash-aware routing — a call with a known
 // target diff should use DomainPutCommitmentDiff instead, which needs no lock.
-func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
+func (sd *SharedDomains) SwapCommitmentDiffLocked(domain kv.Domain, acc *changeset.StateChangeSet) (restore func()) {
 	h := sd.mem.(commitmentDiffSwapper)
-	prev := h.CommitmentDiff()
-	h.SetCommitmentDiff(acc)
-	return func() { h.SetCommitmentDiffRaw(prev) }
+	prev := h.CommitmentDiff(domain)
+	h.SetCommitmentDiff(domain, acc)
+	return func() { h.SetCommitmentDiffRaw(domain, prev) }
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
@@ -953,6 +1005,10 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 	return sd.sdCtx
 }
 
+func (sd *SharedDomains) GetCommitmentCtxForDomain(domain kv.Domain) *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.commitmentCtxs[domain]
+}
+
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache hands this SD the process-global state cache to manage:
@@ -1026,10 +1082,18 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // aggregator-scope BranchCache shared across SharedDomains instances.
 func (sd *SharedDomains) HasSharedBranchCache() bool { return sd.branchCache != nil }
 
+func (sd *SharedDomains) CommitmentDomains() []kv.Domain {
+	domains := make([]kv.Domain, 0, len(sd.commitmentCtxs))
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if sd.commitmentCtxs[domain] != nil {
+			domains = append(domains, domain)
+		}
+	}
+	return domains
+}
+
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
-// commitment is not yet frozen into files — where a step-boundary checkpoint
-// must be written.
-func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
+func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, domain kv.Domain, txNum uint64) bool {
 	ss := sd.stepSize
 	if ss == 0 || sd.discardCommitment {
 		return false
@@ -1037,7 +1101,7 @@ func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bo
 	if (txNum+1)%ss != 0 {
 		return false
 	}
-	return txNum/ss >= uint64(roTx.StepsInFiles(kv.CommitmentDomain))
+	return txNum/ss >= uint64(roTx.StepsInFiles(domain))
 }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
@@ -1091,7 +1155,10 @@ func (sd *SharedDomains) Close() {
 
 	sd.CloseBlockOverlay()
 
-	sd.sdCtx.Close()
+	for domain, ctx := range sd.commitmentCtxs {
+		ctx.Close()
+		delete(sd.commitmentCtxs, domain)
+	}
 	sd.sdCtx = nil
 }
 
@@ -1236,7 +1303,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			if domain == kv.CommitmentDomain {
+			if domain == sd.commitmentDomainValue() {
 				pendingBranches = append(pendingBranches, branchCacheUpdate{
 					key:  append([]byte(nil), k...),
 					val:  append([]byte(nil), v...),
@@ -1255,7 +1322,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	var opts []kv.FlushOption
 	if sd.branchCache != nil {
-		opts = append(opts, stash(kv.CommitmentDomain))
+		opts = append(opts, stash(sd.commitmentDomainValue()))
 	}
 	if sd.stateCache != nil {
 		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain))
@@ -1296,14 +1363,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+				v, step, err := ttx.GetLatest(sd.commitmentDomainValue(), prefix, kv.GetLatestOptions{})
 				if err != nil {
 					return nil, 0, false, err
 				}
 				return v, uint64(step), len(v) > 0, nil
 			}
 			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				return pinBranchResolver(ttx), nil, nil
+				return pinBranchResolver(ttx, sd.commitmentDomainValue()), nil, nil
 			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}
@@ -1491,7 +1558,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. Snapshot-isolated readers must disable it because
 	// concurrent commits can advance the cache beyond their transaction view.
-	useBranchCache := domain == kv.CommitmentDomain && sd.branchCache != nil
+	useBranchCache := domain == sd.commitmentDomainValue() && sd.branchCache != nil
 	if useBranchCache {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
@@ -1865,6 +1932,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 }
 
 func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
+		return err
+	}
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1882,6 +1952,17 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+}
+
+func (sd *SharedDomains) ensureDomainWritable(tx kv.TemporalTx, domain kv.Domain) error {
+	if p, ok := tx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+	}); ok {
+		if frozenAt, frozen := p.IsDomainFrozen(domain); frozen {
+			return fmt.Errorf("DomainPut: %s is frozen at txnum %d", domain, frozenAt)
+		}
+	}
+	return nil
 }
 
 // resolvePrevVal runs DomainPut's shared prologue: touches ks for the
@@ -1999,7 +2080,11 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(sd.commitmentCtxs))
+	for _, domain := range sd.CommitmentDomains() {
+		contexts = append(contexts, sd.commitmentCtxs[domain])
+	}
+	txNum, blockNum, err = commitmentdb.SeekCommitments(ctx, tx, contexts...)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -2027,7 +2112,9 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.EnableParaTrieDB(db)
+	for _, ctx := range sd.commitmentCtxs {
+		ctx.EnableParaTrieDB(db)
+	}
 	if sd.adaptivePinController != nil {
 		sd.adaptivePinController.Bind()
 	}

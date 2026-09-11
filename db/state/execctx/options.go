@@ -31,6 +31,7 @@ type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
 	hexCommitmentOnly    bool
+	commitmentDomain     *kv.Domain
 	skipCommitmentSeek   bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
@@ -42,6 +43,10 @@ type SharedDomainOption func(*sharedDomainOptions)
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg = cfg }
+}
+
+func WithCommitmentDomain(domain kv.Domain) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.commitmentDomain = &domain }
 }
 
 // WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that

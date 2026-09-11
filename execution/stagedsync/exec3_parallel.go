@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -483,6 +484,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				pe.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
+			}
+			if cr.shadowRoot != nil {
+				if err := rawdb.WriteShadowStateRoot(rwTx, cr.blockHash, cr.blockNum, cr.shadowRoot); err != nil {
+					return fmt.Errorf("[%s] commitment shadow root: %w", pe.logPrefix, err)
+				}
+			}
+			if err := recordStoppedCommitmentDomains(rwTx); err != nil {
+				return fmt.Errorf("[%s] commitment shadow stop: %w", pe.logPrefix, err)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 			pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
@@ -1838,6 +1847,7 @@ func (be *blockExecutor) takeSuperseded() supersededWrites {
 type txResult struct {
 	blockNum              uint64
 	blockHash             common.Hash
+	blockTime             uint64
 	txNum                 uint64
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
@@ -3141,6 +3151,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
+				blockTime:             be.block.Time(),
 				traceFroms:            result.TraceFroms,
 				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
@@ -3347,6 +3358,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
+				blockTime:             be.block.Time(),
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
 				writes:                finalizeWrites,

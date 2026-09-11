@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ type AggOpts struct { //nolint:gocritic
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
+	frozenAtTxNum                   map[string]uint64
 
 	genSaltIfNeed       bool
 	sanityOldNaming     bool // prevent start directory with old file names
@@ -82,6 +84,9 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	if opts.referencesInCommitmentBranches != nil {
 		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
+	}
+	if opts.frozenAtTxNum != nil {
+		a.setFrozenAtTxNums(opts.frozenAtTxNum)
 	}
 
 	if err := a.ConfigureDomains(); err != nil {
@@ -144,6 +149,7 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
 	refs := s.RefsInCommitmentBranches()
 	opts.referencesInCommitmentBranches = &refs
+	opts.frozenAtTxNum = maps.Clone(s.FrozenAtTxNum)
 	return opts
 }
 

@@ -124,6 +124,18 @@ Selecting the binary trie is process-global, not a per-tester option: set `state
 
 The EIP-8297 embedding is not versioned on disk. `erigondb.toml` records `trie_variant` and `trie_hash` and guards a change of either, but nothing records which embedding wrote the state — so a change to key derivation or leaf layout silently recomputes different roots over an existing bin datadir. Rebuild bin datadirs from genesis whenever the embedding changes.
 
+Dual commitment keeps trie ownership and canonical role separate. `kv.CommitmentDomain` is the hex
+domain and `kv.CommitmentBinDomain` is the binary domain in `hex+bin` mode; a binary-only datadir
+uses the existing commitment domain with the binary algorithm. Block-correct code must derive the
+role from `Config.IsBinaryTrie(blockTime)` or `Aggregator.CanonicalCommitmentDomain()`, not from the
+process-global `PickTrieVariant`. The shadow root is keyed by block number and hash, and a shadow
+fold error stops that domain without invalidating the block.
+
+When adding a commitment-domain consumer, use `Aggregator.CommitmentDomains()` and
+`kv.StateDomains(canonicalDomain)` instead of assuming the hex domain. Binary commitment branches
+do not use the hex branch cache or inter-domain references. A frozen domain remains on disk but must
+reject writes, folds, merges, and unwinds below its recorded `frozen_at_txnum`.
+
 Cite by name, never by line number. An EIP reference is `eip:"<section name>"`, not `eip:NNN-NNN`; a reference to erigon source from `docs/` names the identifier and its file, not `file.go:NNN`. Line anchors rot on the next edit in either repo, and a stale one is worse than none — it points a reader at unrelated code with full confidence.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.

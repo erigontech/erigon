@@ -357,6 +357,15 @@ func (e *ExecModule) Close() {
 	}
 }
 
+func (e *ExecModule) ResetCurrentContext(ctx context.Context) error {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer e.semaphore.Release(1)
+	e.closeModuleContext()
+	return nil
+}
+
 // closeModuleContext closes and clears e.currentContext. The nil swap happens
 // under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
 // never obtain a SharedDomains that is about to be closed.

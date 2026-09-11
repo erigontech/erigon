@@ -730,6 +730,9 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block access list", "err", err)
 	}
+	if err := db.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(number, hash)); err != nil {
+		log.Crit("Failed to delete shadow state root", "err", err)
+	}
 }
 
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
@@ -978,6 +981,9 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.ShadowStateRoot, kCopy); err != nil {
 			return err
 		}
 		if err := tx.Delete(kv.Headers, kCopy); err != nil {

@@ -30,7 +30,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -236,6 +235,10 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 // Metrics exposes the trie's counters so a caller applying its deferred writes
 // can carry them into this trie's log and CSV totals.
 func (hph *HexPatriciaHashed) Metrics() *Metrics { return hph.metrics }
+
+func (hph *HexPatriciaHashed) SetMetricsEnabled(enabled bool) {
+	hph.metrics.SetMetricsEnabled(enabled)
+}
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
 // during commitment calculation. This is used by witness generation to capture paths
@@ -444,15 +447,19 @@ func (cell *cell) FullString() string {
 	return b.String()
 }
 
-func (cell *cell) setFromUpdate(update *Update) {
+func (cell *cell) setFromUpdate(update *Update, sinks ...*metricsSink) {
+	sink := defaultMetricsSink
+	if len(sinks) > 0 && sinks[0] != nil {
+		sink = sinks[0]
+	}
 	cell.Update.Merge(update)
 	if update.Flags&StorageUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadStorage)
-		hadToLoad.Add(1)
+		sink.hadToLoad.Add(1)
 	}
 	if update.Flags&BalanceUpdate != 0 || update.Flags&NonceUpdate != 0 || update.Flags&CodeUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadAccount)
-		hadToLoad.Add(1)
+		sink.hadToLoad.Add(1)
 	}
 }
 
@@ -975,7 +982,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
 			}
-			skippedLoad.Add(1)
+			metricsSinkFor(hph.metrics).skippedLoad.Add(1)
 			if !singleton {
 				return res, storageRootHashIsSet, nil, err
 			} else {
@@ -991,7 +998,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
 				}
-				cell.setFromUpdate(update)
+				cell.setFromUpdate(update, metricsSinkFor(hph.metrics))
 				if hph.traceW != nil {
 					fmt.Fprintf(hph.traceW, "Storage %x was not loaded\n", cell.storageAddr[:cell.storageAddrLen])
 				}
@@ -1010,7 +1017,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				storageRootHash = *(*common.Hash)(aux[1:])
 				storageRootHashIsSet = true
 				cell.stateHashLen = 0
-				hadToReset.Add(1)
+				metricsSinkFor(hph.metrics).hadToReset.Add(1)
 			} else {
 				if hph.traceW != nil {
 					fmt.Fprintf(hph.traceW, "leafHashWithKeyVal for [%s]=>[%x] %v\n", traceHex(hashedKeyBuf[:64-hashedKeyOffset+1]), cell.Storage[:cell.StorageLen], cell.String())
@@ -1051,7 +1058,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 					fmt.Fprintf(hph.traceW, "EXTENSION HASH %x DROPS stateHash\n", storageRootHash)
 				}
 				cell.stateHashLen = 0
-				hadToReset.Add(1)
+				metricsSinkFor(hph.metrics).hadToReset.Add(1)
 				storageRootHashIsSet = true
 			case cell.hashLen > 0:
 				storageRootHash = cell.hash
@@ -1065,7 +1072,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
 
-				skippedLoad.Add(1)
+				metricsSinkFor(hph.metrics).skippedLoad.Add(1)
 				if hph.traceW != nil {
 					fmt.Fprintf(hph.traceW, "REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
 				}
@@ -1077,7 +1084,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
 			}
-			cell.setFromUpdate(update)
+			cell.setFromUpdate(update, metricsSinkFor(hph.metrics))
 		}
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
@@ -1142,7 +1149,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
-			skippedLoad.Add(1)
+			metricsSinkFor(hph.metrics).skippedLoad.Add(1)
 			if !singleton {
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
@@ -1183,7 +1190,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			storageRootHash = *(*common.Hash)(leafHash[1:])
 			storageRootHashIsSet = true
 			cell.stateHashLen = 0
-			hadToReset.Add(1)
+			metricsSinkFor(hph.metrics).hadToReset.Add(1)
 		}
 	}
 	if cell.accountAddrLen > 0 {
@@ -1207,7 +1214,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 					fmt.Fprintf(hph.traceW, "EXTENSION HASH %x DROPS stateHash\n", storageRootHash)
 				}
 				cell.stateHashLen = 0
-				hadToReset.Add(1)
+				metricsSinkFor(hph.metrics).hadToReset.Add(1)
 			case cell.hashLen > 0:
 				storageRootHash = cell.hash
 			default:
@@ -1218,7 +1225,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if cell.stateHashLen > 0 {
 				hph.keccak.Reset()
 
-				skippedLoad.Add(1)
+				metricsSinkFor(hph.metrics).skippedLoad.Add(1)
 				if hph.traceW != nil {
 					fmt.Fprintf(hph.traceW, "REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
 				}
@@ -1230,7 +1237,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if err != nil {
 				return nil, err
 			}
-			cell.setFromUpdate(update)
+			cell.setFromUpdate(update, metricsSinkFor(hph.metrics))
 		}
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
@@ -1605,37 +1612,6 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 	return !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
 }
 
-// Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
-// "skipRatio"/"resetRatio" Debug log at the end of ComputeCommitment.
-var (
-	hadToLoad   atomic.Uint64
-	skippedLoad atomic.Uint64
-	hadToReset  atomic.Uint64
-)
-
-var (
-	rateFlushMu       sync.Mutex
-	loadRatePublished uint64
-	skipRatePublished uint64
-)
-
-// flushTrieStateRates publishes the cumulative load/skip atomics to their
-// prometheus counters once per Process, replacing the per-key .Inc() on the hot
-// path. The atomics are monotonic and the publish is delta-based, so the emitted
-// counter value is identical regardless of how often this is called.
-func flushTrieStateRates() {
-	rateFlushMu.Lock()
-	defer rateFlushMu.Unlock()
-	if l := hadToLoad.Load(); l > loadRatePublished {
-		mxTrieStateLoadRate.AddUint64(l - loadRatePublished)
-		loadRatePublished = l
-	}
-	if s := skippedLoad.Load(); s > skipRatePublished {
-		mxTrieStateSkipRate.AddUint64(s - skipRatePublished)
-		skipRatePublished = s
-	}
-}
-
 type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
 }
@@ -1870,7 +1846,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 				fmt.Fprintf(hph.traceW, "DROP hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 			}
 			cell.stateHashLen = 0
-			hadToReset.Add(1)
+			metricsSinkFor(hph.metrics).hadToReset.Add(1)
 			if cell.accountAddrLen > 0 {
 				counters.accReset++
 			}
@@ -2038,7 +2014,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			if err != nil {
 				return counters, err
 			}
-			cell.setFromUpdate(upd)
+			cell.setFromUpdate(upd, metricsSinkFor(hph.metrics))
 			// if the update is empty, the loaded flag was not updated so do it manually
 			cell.loaded = cell.loaded.addFlag(cellLoadAccount)
 			counters.accLoaded++
@@ -2049,7 +2025,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			if err != nil {
 				return counters, err
 			}
-			cell.setFromUpdate(upd)
+			cell.setFromUpdate(upd, metricsSinkFor(hph.metrics))
 			// if the update is empty, the loaded flag was not updated so do it manually
 			cell.loaded = cell.loaded.addFlag(cellLoadStorage)
 			counters.storLoaded++
@@ -2221,7 +2197,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	}
 	cell.stateHashLen = 0
 
-	cell.setFromUpdate(u)
+	cell.setFromUpdate(u, metricsSinkFor(hph.metrics))
 	if hph.traceW != nil {
 		fmt.Fprintf(hph.traceW, "updateCell %x => %s\n", plainKey, u.String())
 	}
@@ -2298,7 +2274,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
 
-	mxTrieProcessedKeys.Inc()
+	metricsSinkFor(hph.metrics).recordProcessedKey()
 	return nil
 }
 
@@ -2596,15 +2572,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		hph.branchEncoder.ClearDeferred()
 	}
 
-	flushTrieStateRates()
+	metricsSinkFor(hph.metrics).flushTrieStateRates()
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 		log.Debug("commitment finished, counters updated (no reset)",
-			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
-			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
-			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
-			"resetRatio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(metricsSinkFor(hph.metrics).skippedLoad.Load())/float64(metricsSinkFor(hph.metrics).hadToLoad.Load()+metricsSinkFor(hph.metrics).skippedLoad.Load()))),
+			"resetRatio", fmt.Sprintf("%.1f%%", 100*(float64(metricsSinkFor(hph.metrics).hadToReset.Load())/float64(metricsSinkFor(hph.metrics).hadToLoad.Load()))),
 			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 		)
 		ends := make([]uint64, 0, len(hph.hadToLoadL))
@@ -2623,10 +2597,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
 				Li++
 
-				mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
-				mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
-				mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
-				mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+				sink := metricsSinkFor(hph.metrics)
+				if sink.stateLevelledSkipRatesAccount[0] != nil {
+					sink.stateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
+					sink.stateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
+					sink.stateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
+					sink.stateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+				}
 			}
 		}
 	}
@@ -3014,7 +2991,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if err != nil {
 			return err
 		}
-		hph.root.setFromUpdate(update)
+		hph.root.setFromUpdate(update, metricsSinkFor(hph.metrics))
 	}
 	if hph.root.storageAddrLen > 0 {
 		if hph.ctx == nil {
@@ -3024,7 +3001,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if err != nil {
 			return err
 		}
-		hph.root.setFromUpdate(update)
+		hph.root.setFromUpdate(update, metricsSinkFor(hph.metrics))
 	}
 	// A leaf root's navigation path is derivable but not reliably persisted: without it a
 	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.

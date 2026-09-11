@@ -1,6 +1,7 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"testing"
@@ -33,13 +34,193 @@ func Test_EncodeCommitmentState(t *testing.T) {
 }
 
 type testStateReader struct {
-	branchData   []byte
-	step         kv.Step
-	readDomain   kv.Domain
-	readKey      []byte
-	readStepSize uint64
-	readCalls    int
-	withHistory  bool
+	branchData       []byte
+	step             kv.Step
+	commitmentDomain kv.Domain
+	readDomain       kv.Domain
+	readKey          []byte
+	readStepSize     uint64
+	readCalls        int
+	withHistory      bool
+}
+
+type seekStateReader struct {
+	domain kv.Domain
+	state  []byte
+}
+
+func (r *seekStateReader) WithHistory() bool { return false }
+
+func (r *seekStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *seekStateReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, kv.Step, error) {
+	if domain == r.domain && bytes.Equal(key, KeyCommitmentState) {
+		return r.state, 0, nil
+	}
+	return nil, 0, nil
+}
+
+func (r *seekStateReader) Clone(kv.TemporalTx) StateReader { return r }
+
+func (r *seekStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+
+type seekSharedDomains struct {
+	sd
+}
+
+func (seekSharedDomains) StepSize() uint64 { return 1 }
+
+func (seekSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return &fakePutDel{} }
+
+func (seekSharedDomains) HasSharedBranchCache() bool { return false }
+
+type seekTemporalTx struct {
+	kv.TemporalTx
+	progress []byte
+	agg      any
+}
+
+func (tx *seekTemporalTx) GetOne(string, []byte) ([]byte, error) { return tx.progress, nil }
+func (tx *seekTemporalTx) AggTx() any                            { return tx.agg }
+
+type seekCommitmentLifecycle struct {
+	frozen  map[kv.Domain]uint64
+	stopped map[kv.Domain]bool
+}
+
+func (s seekCommitmentLifecycle) IsDomainFrozen(domain kv.Domain) (uint64, bool) {
+	txNum, ok := s.frozen[domain]
+	return txNum, ok
+}
+
+func (s seekCommitmentLifecycle) CommitmentDomainStopped(domain kv.Domain) bool {
+	return s.stopped[domain]
+}
+
+func TestSeekCommitmentsRestoresFrozenHexAndAdvancedBin(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 9, 28, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 28, txNum)
+	require.EqualValues(t, 9, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.True(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsIgnoresStoppedShadowOnRecreation(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 9, 28, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 7, 22, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{stopped: map[kv.Domain]bool{kv.CommitmentBinDomain: true}}}
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 28, txNum)
+	require.EqualValues(t, 9, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.False(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsRejectsInvalidFrozenCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		txNum     uint64
+		withState bool
+	}{
+		{name: "before freeze", txNum: 21, withState: true},
+		{name: "after freeze", txNum: 23, withState: true},
+		{name: "missing state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, tc.txNum, tc.withState)
+			binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 9, 28, true)
+			tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+			_, _, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+			require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+			require.ErrorContains(t, err, "frozen domain commitment must have commitment state at tx 22")
+			require.False(t, hexCtx.justRestored.Load())
+			require.False(t, binCtx.justRestored.Load())
+		})
+	}
+}
+
+func TestSeekCommitmentsRejectsLiveStateBehindFreeze(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 6, 19, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{frozen: map[kv.Domain]uint64{kv.CommitmentDomain: 22}}}
+	_, _, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+	require.ErrorContains(t, err, "ahead of live commitment")
+}
+
+func seekContext(t *testing.T, domain kv.Domain, variant commitment.TrieVariant, blockNum, txNum uint64, withState bool) *SharedDomainsCommitmentContext {
+	t.Helper()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = variant
+	sdc := NewSharedDomainsCommitmentContext(seekSharedDomains{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	if withState {
+		stateful, ok := sdc.patriciaTrie.(commitment.StatefulTrie)
+		require.True(t, ok)
+		trieState, err := stateful.EncodeCurrentState(nil)
+		require.NoError(t, err)
+		storedState, err := NewCommitmentState(txNum, blockNum, trieState).Encode()
+		require.NoError(t, err)
+		sdc.SetStateReader(&seekStateReader{domain: domain, state: storedState})
+	} else {
+		sdc.SetStateReader(&seekStateReader{domain: domain})
+	}
+	t.Cleanup(sdc.Close)
+	return sdc
+}
+
+func TestSeekCommitmentsRestoresBothDomainsAtSamePosition(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 7, 22, true)
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 22, txNum)
+	require.EqualValues(t, 7, blockNum)
+	require.True(t, hexCtx.justRestored.Load())
+	require.True(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsRejectsMismatchedPositions(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 8, 22, true)
+
+	_, _, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
+	require.False(t, hexCtx.justRestored.Load())
+	require.False(t, binCtx.justRestored.Load())
+}
+
+func TestSeekCommitmentsTreatsMissingProgressAsFresh(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 0, 0, false)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 0, 0, false)
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.Zero(t, txNum)
+	require.Zero(t, blockNum)
+}
+
+func TestSeekCommitmentsRejectsOneDomainMissingState(t *testing.T) {
+	t.Parallel()
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 0, 0, false)
+
+	_, _, err := SeekCommitments(t.Context(), &seekTemporalTx{}, hexCtx, binCtx)
+	require.ErrorIs(t, err, ErrTornCommitmentDatadir)
 }
 
 var _ StateReader = (*testStateReader)(nil)
@@ -53,7 +234,11 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 	r.readDomain = d
 	r.readKey = append(r.readKey[:0], key...)
 	r.readStepSize = stepSize
-	if r.readDomain != kv.CommitmentDomain {
+	commitmentDomain := r.commitmentDomain
+	if commitmentDomain == kv.AccountsDomain {
+		commitmentDomain = kv.CommitmentDomain
+	}
+	if r.readDomain != commitmentDomain {
 		return nil, 0, nil
 	}
 	return r.branchData, r.step, nil
@@ -97,10 +282,28 @@ func Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant(t *testing.T) {
 
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	sdc := NewSharedDomainsCommitmentContext(nil, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
 	defer sdc.Close()
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.Trie().Variant())
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.variant)
+}
+
+func TestCommitmentContextUsesBoundBinDomain(t *testing.T) {
+	t.Parallel()
+
+	reader := &testStateReader{branchData: []byte{1, 2, 3}, commitmentDomain: kv.CommitmentBinDomain}
+	putter := &fakePutDel{}
+	sdc := &SharedDomainsCommitmentContext{commitmentDomain: kv.CommitmentBinDomain, stateReader: reader}
+	trieContext := &TrieContext{commitmentDomain: sdc.CommitmentDomain(), stateReader: reader, putter: putter, txNum: 7}
+
+	branch, _, err := trieContext.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Equal(t, []byte{1, 2, 3}, branch)
+	require.Equal(t, kv.CommitmentBinDomain, reader.readDomain)
+
+	require.NoError(t, trieContext.PutBranch([]byte{0xbb}, []byte{4}, []byte{5}))
+	require.Len(t, putter.puts, 1)
+	require.Equal(t, kv.CommitmentBinDomain, putter.puts[0].domain)
 }
 
 type branchChildCountDomains struct {

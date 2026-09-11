@@ -69,7 +69,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	var b *types.Block
 
-	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
+	lastFrozenStep := se.applyTx.StepsInFiles(canonicalCommitmentDomain(se.applyTx))
 
 	var lastFrozenTxNum uint64
 	if lastFrozenStep > 0 {

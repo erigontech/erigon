@@ -211,7 +211,8 @@ func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
 
 	p, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
-	cache := p.BranchCache()
+	cache := p.BranchCache(kv.CommitmentDomain)
+	require.Nil(t, p.BranchCache(kv.CommitmentBinDomain))
 	require.NotNil(t, cache, "test aggregator has no branch cache, nothing to bind")
 
 	// A storage prefix, so a miss reaches the controller's own callback too.
@@ -230,4 +231,29 @@ func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
 	cache.Get(prefix)
 	require.Equal(t, 1, misses,
 		"WithParaTrieDB left the pin controller unbound: the callback is still the test's, so onCacheMiss never fires and nothing is pinned")
+}
+
+func TestAggregatorBranchCachesAreDomainScoped(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	hexCache := provider.BranchCache(kv.CommitmentDomain)
+	require.NotNil(t, hexCache)
+	require.Nil(t, provider.BranchCache(kv.CommitmentBinDomain))
+	adaptiveProvider, ok := roTx.AggTx().(commitment.AdaptivePinControllerProvider)
+	require.True(t, ok)
+	require.Nil(t, adaptiveProvider.AdaptivePinController(kv.CommitmentBinDomain))
+
+	key := []byte{0x01, 0x02}
+	value := []byte("hex branch")
+	hexCache.Put(key, value, 0, 0)
+	got, _, ok := provider.BranchCache(kv.CommitmentDomain).Get(key)
+	require.True(t, ok)
+	require.Equal(t, value, got)
 }

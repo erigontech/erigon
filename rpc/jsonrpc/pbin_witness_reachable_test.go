@@ -84,9 +84,10 @@ func TestPBinExecutionWitnessReachable(t *testing.T) {
 
 	m, _, _, _ := chainWithDeployedContract(t)
 	enableCommitmentHistoryFlag(t, m.DB)
-	require.True(t, binCommitmentTrie(), "the chain above is committed with the binary trie")
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	base := newBaseApiForTest(m)
+	require.True(t, base._chainConfig.Load().IsBinaryTrie(m.Genesis.Time()), "the chain above is committed with the binary trie")
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	// Block 2 calls the contract deployed by block 1, so its witness covers an account
 	// read, a storage write and a code read.
@@ -153,19 +154,13 @@ func TestPBinGetWitnessRefusesBin(t *testing.T) {
 	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 }
 
-// debug_executionWitness is the only caller that stopped declaring itself hex-only.
-// The refusal of the rest is a source property — each has to keep passing the option
-// whose bin behaviour execctx.TestPBinHexOnlyCommitmentRefusesBin pins — so it is
-// checked where it lives rather than by re-deriving every caller's preconditions.
 func TestPBinHexOnlyCallersStillRefuse(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.Join("..", "..")
 	for _, rel := range []string{
-		"rpc/jsonrpc/eth_call.go",       // eth_getProof, eth_getWitness
-		"rpc/jsonrpc/eth_simulation.go", // eth_simulateV1
+		"rpc/jsonrpc/eth_call.go", // eth_getProof, eth_getWitness
 		"rpc/jsonrpc/receipts/receipts_generator.go",
-		"rpc/rpchelper/commitment.go",
 		"db/integrity/commitment_integrity.go",
 	} {
 		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))

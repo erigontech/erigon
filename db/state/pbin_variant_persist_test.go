@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,10 +37,12 @@ func pbinWithVariantFlags(t *testing.T, bin, parallel bool) {
 	t.Helper()
 	origBin := statecfg.ExperimentalBinCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
+	origHexBin := statecfg.ExperimentalHexBinCommitment
 	origHash, origSuite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = origBin
 		statecfg.ExperimentalParallelCommitment = origPar
+		statecfg.ExperimentalHexBinCommitment = origHexBin
 		statecfg.BinCommitmentHash = origHash
 		// A datadir resolve binds the process suite through reconcileTrieVariant; leaving it
 		// bound makes every later test in this binary read this test's hash.
@@ -122,21 +125,33 @@ func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
 	require.ErrorContains(t, err, "sequential-only")
 }
 
-func TestPBinVariantRefusesReferences(t *testing.T) {
-	t.Run("persisted", func(t *testing.T) {
-		pbinWithVariantFlags(t, false, false)
-		dirs := datadir.New(t.TempDir())
-		pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
-		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.ErrorContains(t, err, "references_in_commitment_branches")
-	})
-	t.Run("first_start", func(t *testing.T) {
-		pbinWithVariantFlags(t, true, false)
-		dirs := datadir.New(t.TempDir())
-		refs := true
-		_, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, &refs)
-		require.ErrorContains(t, err, "references_in_commitment_branches")
-	})
+func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
+	pbinWithVariantFlags(t, false, true)
+	dirs := datadir.New(t.TempDir())
+	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"hex+bin\"\ntrie_hash = \"blake3\"\n")
+
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, TrieVariantHexBin, settings.TrieVariantName())
+	require.True(t, settings.RefsInCommitmentBranches())
+	require.True(t, statecfg.ExperimentalParallelCommitment)
+	require.True(t, statecfg.ExperimentalBinCommitment)
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+}
+
+func TestPBinVariantRejectsReferencesSetting(t *testing.T) {
+	for _, stored := range []bool{false, true} {
+		t.Run(fmt.Sprint(stored), func(t *testing.T) {
+			pbinWithVariantFlags(t, true, false)
+			dirs := datadir.New(t.TempDir())
+			if stored {
+				pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
+			}
+			refs := true
+			_, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, &refs)
+			require.ErrorContains(t, err, "bin commitment trie does not support references")
+		})
+	}
 }
 
 func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {

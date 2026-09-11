@@ -222,8 +222,9 @@ func requirePBinChainShape(t *testing.T, c *pbinWitnessChain) {
 func pbinWitnessAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *DebugAPIImpl {
 	t.Helper()
 	enableCommitmentHistoryFlag(t, m.DB)
-	require.True(t, binCommitmentTrie(), "the chain is committed with the binary trie")
-	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	base := newBaseApiForTest(m)
+	require.True(t, base._chainConfig.Load().IsBinaryTrie(m.Genesis.Time()), "the chain is committed with the binary trie")
+	return NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 }
 
 // requirePBinWitnessVerifies re-executes the block from the witness alone and

@@ -33,3 +33,10 @@ func TestIsBinaryTrie(t *testing.T) {
 
 	require.False(t, (&Config{}).IsBinaryTrie(0), "an unscheduled binary trie is never active")
 }
+
+func TestIsBinaryTrieScheduled(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, (&Config{BinaryTrieTime: new(uint64)}).IsBinaryTrieScheduled())
+	require.False(t, (&Config{}).IsBinaryTrieScheduled())
+}

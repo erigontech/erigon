@@ -619,12 +619,6 @@ func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	}
 }
 
-// binCommitmentTrie reports whether the datadir runs the EIP-8297 binary commitment
-// trie, which skips the witness pipeline's MPT-shaped phases.
-func binCommitmentTrie() bool {
-	return execctx.PickTrieVariant() == commitment.VariantBinPatriciaTrie
-}
-
 // buildAccessedState re-executes a block against a recording historical-state reader
 // and rolls the recorded accesses into an accessedState. The returned accessedBlockHashes
 // are the block numbers the BLOCKHASH opcode resolved during execution.
@@ -741,16 +735,24 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
-	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie())
-	if err != nil {
-		return nil, err
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	blockHeader, err := api.resolveWitnessHeader(ctx, tx, blockNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	resolvedMode, err := resolveWitnessMode(mode, chainConfig.IsBinaryTrie(blockHeader.Time))
+	if err != nil {
+		return nil, err
+	}
 
 	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode)
 	if ok {
@@ -859,20 +861,20 @@ type headCaptureSource struct {
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
 // end in both modes, commitment from the pinned parent latest (head-capture) or the
 // parent-block history txNum (durable).
-func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
+func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, endTxNum)
 	}
-	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	return commitmentdb.NewSplitHistoryReaderForDomain(tx, commitmentDomain, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
 
 // trieReaderFor selects the witness-trie state reader: plain state at the parent
 // (firstTxNumInBlock) in both modes, commitment from the pinned parent latest
 // (head-capture) or the same parent history txNum (durable). Both report
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
-func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
+func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, firstTxNumInBlock)
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -896,7 +898,6 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
 func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	binTrie := binCommitmentTrie()
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -906,6 +907,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	binTrie := chainConfig.IsBinaryTrie(block.Time())
+	commitmentDomain := kv.CommitmentDomain
+	if binTrie {
+		commitmentDomain = kv.CommitmentBinDomain
 	}
 
 	engine := api.engine()
@@ -927,12 +933,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Witness capture is served by the sequential HexPatriciaHashed and by
 	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
 	// cannot serve it and is demoted.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
+	tx = commitmentReconstructionView(tx)
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New(), execctx.WithCommitmentDomain(commitmentDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
+	commitmentDomain = sdCtx.CommitmentDomain()
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
@@ -946,12 +954,22 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot = parentHeader.Root
+	if binTrie && !chainConfig.IsBinaryTrie(parentHeader.Time) {
+		shadowRoot, err := rawdb.ReadShadowStateRoot(tx, parentHeader.Hash(), parentNum)
+		if err != nil {
+			return nil, fmt.Errorf("read binary parent shadow root: %w", err)
+		}
+		if len(shadowRoot) != 32 {
+			return nil, fmt.Errorf("binary parent shadow root missing or invalid for block %d (%s)", parentNum, parentHeader.Hash())
+		}
+		expectedParentRoot = common.BytesToHash(shadowRoot)
+	}
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
 	// history, so the history-availability check only applies to the durable path.
 	if hc == nil {
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(commitmentDomain)
 		if firstTxNumInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 		}
@@ -1319,12 +1337,13 @@ func detectCollapseSiblings(
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
-	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
+	splitStateReader := collapseReaderFor(hc, tx, sdCtx.CommitmentDomain(), firstTxNumInBlock, endTxNum)
 	sdCtx.SetStateReader(splitStateReader)
-	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	seekTxNum, seekBlockNum, err := sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
+	domains.SetTxNum(seekTxNum)
 	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
 	// parent block's committed state. Any other position means the history has been pruned
 	// for this block range.
@@ -1408,10 +1427,12 @@ func buildWitnessTrie(
 
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
-	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, sdCtx.CommitmentDomain(), firstTxNumInBlock))
+	seekTxNum, _, err := sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
+	domains.SetTxNum(seekTxNum)
 
 	accessed.touchAll(sdCtx, binTrie)
 
@@ -1507,6 +1528,27 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 		EndTxNum:          endTxNum,
 		ParentNum:         parentNum,
 	}, nil
+}
+
+func (api *DebugAPIImpl) resolveWitnessHeader(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	blockNrOrHash rpc.BlockNumberOrHash,
+) (*types.Header, error) {
+	resolve := blockNrOrHash
+	resolve.RequireCanonical = false
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
+	header, err := api._blockReader.Header(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+	return header, nil
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor

@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -110,6 +112,35 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 	require.NoError(t, err)
 }
 
+func TestResetExecClearsBothCommitmentDomains(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+	})
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Put(kv.TblCommitmentVals, []byte("branch"), []byte{1}))
+	require.NoError(t, tx.Put(kv.TblCommitmentBinVals, []byte("branch"), []byte{1}))
+	require.NoError(t, tx.Commit())
+
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+	require.NoError(t, db.ViewTemporal(t.Context(), func(roTx kv.TemporalTx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			value, _, err := roTx.GetLatest(domain, []byte("branch"), kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Nil(t, value)
+		}
+		return nil
+	}))
+}
+
 // TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB exercises the
 // idempotency guarantee: calling on a fresh db with no canonical entries
 // and no frozen blocks must succeed and leave everything empty.
@@ -132,4 +163,22 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestResetExecClearsCommitmentStopMarkers(t *testing.T) {
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.StopCommitmentDomain(kv.CommitmentBinDomain)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	require.NoError(t, rawdbreset.ResetExec(ctx, db))
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+		require.NoError(t, err)
+		require.False(t, stopped)
+		return nil
+	}))
 }

@@ -89,10 +89,6 @@ type Config struct {
 	// track head-of-spec set it; no scheduled network does. BinaryTrieTime implies it.
 	EIP8038Revised bool `json:"eip8038Revised,omitempty"`
 
-	// BinaryTrieTime schedules EIP-8297's partitioned binary tree. The key is shared with
-	// the other clients, so one genesis.json serves a mixed network. Not earlier than
-	// AmsterdamTime, which is where the tree is first defined, and not later than genesis:
-	// erigon commits through the tree from block 0 or not at all.
 	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
@@ -424,6 +420,10 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 // time or greater.
 func (c *Config) IsBinaryTrie(time uint64) bool {
 	return isForked(c.BinaryTrieTime, time)
+}
+
+func (c *Config) IsBinaryTrieScheduled() bool {
+	return c.BinaryTrieTime != nil
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.

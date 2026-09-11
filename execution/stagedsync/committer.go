@@ -15,21 +15,25 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
 type commitmentResult struct {
-	blockNum  uint64
-	blockHash common.Hash
-	txNum     uint64
-	rootHash  []byte
-	err       error
+	blockNum   uint64
+	blockHash  common.Hash
+	txNum      uint64
+	rootHash   []byte
+	shadowRoot []byte
+	err        error
 }
 
 // commitComputeRequest is sent through the commitResults channel to tell
@@ -49,6 +53,8 @@ type pendingBlock struct {
 // only tests read it (to assert compute-ahead actually engaged rather than
 // silently degrading to incremental).
 var computedAheadCount atomic.Int64
+
+var mxCommitmentShadowFolds = metrics.GetOrCreateCounter("commitment_shadow_folds_total")
 
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
@@ -162,8 +168,10 @@ type commitmentCalculator struct {
 	// computedAhead marks blocks already computed by computeBlockFromBAL, so the
 	// later blockResult(N) does not recompute them. balRoots holds each
 	// BAL-driven root for the shadow-mode cross-check.
-	computedAhead map[uint64]bool
-	balRoots      map[uint64][]byte
+	computedAhead     map[uint64]bool
+	balRoots          map[uint64][]byte
+	shadowStopped     map[kv.Domain]bool
+	onDualArmComplete func(kv.Domain)
 
 	// lastComputedAheadBlock is the highest block computed ahead so far. Computing
 	// ahead reads the commitment domain for its baseline, so it may only run when
@@ -288,7 +296,12 @@ func newCommitmentCalculator(
 
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
-	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
+	collectorContext := doms.GetCommitmentContext()
+	if len(doms.CommitmentDomains()) > 1 {
+		collectorContext = doms.GetCommitmentCtxForDomain(kv.CommitmentDomain)
+		forcePerBlockCompute = true
+	}
+	sdCtxUpdates := collectorContext.GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
 	spareUpdates := sdCtxUpdates.NewEmpty()
 	if sdCtxUpdates.Mode() != commitment.ModeParallel {
@@ -314,7 +327,7 @@ func newCommitmentCalculator(
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
 	// (avoids future sd.mem state) and GetLatest for commitment branches
 	// (written sequentially by this calculator).
-	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: doms.GetCommitmentContext().CommitmentDomain(), txNum: 0}
 
 	return &commitmentCalculator{
 		doms:                 doms,
@@ -487,8 +500,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// step's commitment .kv inconsistent — so exactly one of the two paths
 		// checkpoints a block. loop() drains a block's request before its results,
 		// so computedAhead[n] is already settled when this hook fires.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
-			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum})
+		if !cc.computedAhead[r.blockNum] && cc.isUnfrozenStepEdge(r.txNum) {
+			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum, blockTime: r.blockTime})
 		}
 
 	case *blockResult:
@@ -696,6 +709,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		blockHash: req.blockHash,
 		stateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
+		blockTime: req.blockTime,
 	}
 	// EIP-161 empty-removal inputs, matching Normalize on the exec path.
 	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
@@ -710,11 +724,12 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		cc.fail(ctx, target, err)
 		return
 	}
-	rh, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, eip8246, target)
+	result, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, eip8246, target)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
+	rh := result.canonicalRoot
 	if headerRootMismatch(rh, req.stateRoot[:]) {
 		cc.fail(ctx, target, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
@@ -730,7 +745,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// Shadow mode defers publish to the incremental cross-check at
 	// blockResult(N); otherwise publish the verified root now.
 	if !dbg.BALShadowCompute {
-		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
+		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh, shadowRoot: result.shadowRoot})
 	}
 }
 
@@ -749,10 +764,10 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 		return nil
 	}
 	for edge := ((req.firstTxNum/ss)+1)*ss - 1; edge < req.lastTxNum; edge += ss {
-		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
+		if !cc.isUnfrozenStepEdge(edge) {
 			continue
 		}
-		target := commitTarget{blockNum: req.blockNum, blockHash: req.blockHash, lastTxNum: edge}
+		target := commitTarget{blockNum: req.blockNum, blockHash: req.blockHash, lastTxNum: edge, blockTime: req.blockTime}
 		if _, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, eip8246, target); err != nil {
 			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
@@ -763,12 +778,23 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // computeRootFromBAL builds a calcState from the BAL restricted to maxTxIndex,
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) (dualCommitmentResult, error) {
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: cc.doms.GetCommitmentContext().CommitmentDomain(), txNum: req.firstTxNum}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
-		return nil, fmt.Errorf("lazy-load: %w", err)
+		return dualCommitmentResult{}, fmt.Errorf("lazy-load: %w", err)
+	}
+	reader.balState = balState
+	reader.balFirstTxNum = req.firstTxNum
+	reader.balCodes = make(map[accounts.Address][]byte)
+	for i := range req.bal {
+		account := &req.bal[i]
+		for _, change := range account.CodeChanges {
+			if change.Index <= maxTxIndex {
+				reader.balCodes[account.Address] = change.Bytecode
+			}
+		}
 	}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
@@ -781,7 +807,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
-	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
+	return cc.computeRootFromUpdatesResult(ctx, t, balUpdates, reader)
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -790,15 +816,24 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // flushing its own deferred update) so its branch deltas never pend into a
 // later window block's changeset. Used by BAL compute-ahead, which supplies
 // its own balState-derived updates rather than cc.state.
-func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, error) {
+func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) (dualCommitmentResult, error) {
+	cc.setCanonicalCommitmentDomain(t.blockTime)
+	if hexCtx, binCtx, ok := cc.dualCommitmentContexts(); ok {
+		return cc.computeDualFromUpdatesWithRole(ctx, t, updates, reader, hexCtx, binCtx)
+	}
 	sdCtx := cc.doms.GetCommitmentContext()
+	if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
+		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is frozen", sdCtx.CommitmentDomain())
+	}
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
-		return cc.computeIsolated(ctx, t)
+		root, err := cc.computeIsolated(ctx, t, cc.doms.GetCommitmentContext(), cc.roTx, nil, nil)
+		return dualCommitmentResult{canonicalRoot: root}, err
 	}
-	return cc.computeWithBlockAccumulator(ctx, t)
+	root, err := cc.computeWithBlockAccumulator(ctx, t, cc.doms.GetCommitmentContext(), cc.roTx, nil, nil)
+	return dualCommitmentResult{canonicalRoot: root}, err
 }
 
 // shadowCrossCheck recomputes block N the incremental way and asserts the
@@ -813,11 +848,12 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	rh, err := cc.computeRootFromUpdates(ctx, target, cc.handOffUpdates(), cc.asOfReader)
+	result, err := cc.computeRootFromUpdatesResult(ctx, target, cc.handOffUpdates(), cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
+	rh := result.canonicalRoot
 	// Both operands are roots this node computed, so the header-root toggle does
 	// not apply: this is the only thing validating the BAL-driven path.
 	if !bytes.Equal(rh, balRoot) {
@@ -825,7 +861,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 			ErrWrongTrieRoot, target.blockNum, rh, balRoot))
 		return
 	}
-	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh})
+	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh, shadowRoot: result.shadowRoot})
 }
 
 // fail publishes a calculator error. It does NOT cancel execution: the apply
@@ -870,11 +906,12 @@ type commitTarget struct {
 	blockNum  uint64
 	blockHash common.Hash
 	lastTxNum uint64
+	blockTime uint64
 	stateRoot common.Hash
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, blockTime: br.Block.Time(), stateRoot: br.Block.Root()}
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
@@ -898,6 +935,7 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	cc.setCanonicalCommitmentDomain(t.blockTime)
 	if err := cc.state.LazyLoadErr(); err != nil {
 		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
@@ -908,18 +946,27 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.state.ResetBlockFlags()
 	}
 
-	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.handOffUpdates())
-
-	cc.asOfReader.txNum = t.lastTxNum + 1
-	sdCtx.SetStateReader(cc.asOfReader)
-
-	var rh []byte
+	var rh, shadowRoot []byte
 	var err error
-	if !cc.ownsChangeset(t.blockNum) {
-		rh, err = cc.computeIsolated(ctx, t)
+	if hexCtx, binCtx, ok := cc.dualCommitmentContexts(); ok {
+		var result dualCommitmentResult
+		result, err = cc.computeDualFromUpdatesWithRole(ctx, t, cc.handOffUpdates(), cc.asOfReader, hexCtx, binCtx)
+		rh, shadowRoot = result.canonicalRoot, result.shadowRoot
 	} else {
-		rh, err = cc.computeWithBlockAccumulator(ctx, t)
+		sdCtx := cc.doms.GetCommitmentContext()
+		if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
+			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
+				err: fmt.Errorf("commitmentCalculator: %scommitment domain %s is frozen", m.label, sdCtx.CommitmentDomain())})
+			return
+		}
+		sdCtx.SetUpdates(cc.handOffUpdates())
+		cc.asOfReader.txNum = t.lastTxNum + 1
+		sdCtx.SetStateReader(cc.asOfReader)
+		if !cc.ownsChangeset(t.blockNum) {
+			rh, err = cc.computeIsolated(ctx, t, sdCtx, cc.roTx, nil, nil)
+		} else {
+			rh, err = cc.computeWithBlockAccumulator(ctx, t, sdCtx, cc.roTx, nil, nil)
+		}
 	}
 	if err != nil {
 		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
@@ -935,39 +982,291 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.checkRoot {
 		return
 	}
-	mismatch := headerRootMismatch(rh, t.stateRoot[:])
-	if !m.publishRoot && !mismatch {
+	rootErr := canonicalRootError(t, rh)
+	if !m.publishRoot && rootErr == nil && shadowRoot == nil {
 		return
 	}
-	r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: rh}
-	if mismatch {
-		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, t.blockNum, rh, t.stateRoot)
-	}
+	r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: rh, shadowRoot: shadowRoot}
+	r.err = rootErr
 	cc.publish(ctx, r)
+}
+
+func canonicalRootError(t commitTarget, root []byte) error {
+	if !headerRootMismatch(root, t.stateRoot[:]) {
+		return nil
+	}
+	return fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, t.blockNum, root, t.stateRoot)
+}
+
+type commitmentFoldArm struct {
+	ctx      *commitmentdb.SharedDomainsCommitmentContext
+	reader   *asOfStateReader
+	updates  *commitment.Updates
+	buffered *commitmentdb.BufferedPatriciaContext
+}
+
+func (cc *commitmentCalculator) dualCommitmentContexts() (*commitmentdb.SharedDomainsCommitmentContext, *commitmentdb.SharedDomainsCommitmentContext, bool) {
+	hexCtx := cc.doms.GetCommitmentCtxForDomain(kv.CommitmentDomain)
+	binCtx := cc.doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain)
+	return hexCtx, binCtx, hexCtx != nil && binCtx != nil
+}
+
+func (cc *commitmentCalculator) beginCommitmentWorkerTxs(ctx context.Context) (kv.TemporalTx, kv.TemporalTx, kv.TemporalFilesPin, error) {
+	var pin kv.TemporalFilesPin
+	if pinner, ok := cc.roTx.(interface{ Pin() kv.TemporalFilesPin }); ok {
+		pin = pinner.Pin()
+	}
+	hexTx, err := commitmentdb.BeginWorkerRo(ctx, cc.db, pin)
+	if err != nil {
+		if pin != nil {
+			pin.Close()
+		}
+		return nil, nil, nil, err
+	}
+	binTx, err := commitmentdb.BeginWorkerRo(ctx, cc.db, pin)
+	if err != nil {
+		hexTx.Rollback()
+		if pin != nil {
+			pin.Close()
+		}
+		return nil, nil, nil, err
+	}
+	return hexTx, binTx, pin, nil
+}
+
+type dualCommitmentResult struct {
+	canonicalRoot []byte
+	shadowRoot    []byte
+}
+
+type dualFoldResult struct {
+	domain kv.Domain
+	root   []byte
+	err    error
+}
+
+func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Context, t commitTarget, hexUpdates *commitment.Updates, reader *asOfStateReader, hexCtx, binCtx *commitmentdb.SharedDomainsCommitmentContext) (dualCommitmentResult, error) {
+	cc.setCanonicalCommitmentDomain(t.blockTime)
+	hexTx, binTx, pin, err := cc.beginCommitmentWorkerTxs(ctx)
+	if err != nil {
+		return dualCommitmentResult{}, err
+	}
+	defer hexTx.Rollback()
+	defer binTx.Rollback()
+	if pin != nil {
+		defer pin.Close()
+	}
+
+	binUpdates := binCtx.NewBinUpdates(hexUpdates.PlainKeys())
+	defer binUpdates.Close()
+	hexArm := commitmentFoldArm{
+		ctx:     hexCtx,
+		reader:  cloneCommitmentReader(reader, hexTx, kv.CommitmentDomain, t.lastTxNum+1),
+		updates: hexUpdates,
+	}
+	binArm := commitmentFoldArm{
+		ctx:     binCtx,
+		reader:  cloneCommitmentReader(reader, binTx, kv.CommitmentBinDomain, t.lastTxNum+1),
+		updates: binUpdates,
+	}
+
+	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
+	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	if cc.ShadowDomainStopped(canonicalDomain) {
+		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is stopped", canonicalDomain)
+	}
+	if cc.domainFrozenAfter(canonicalDomain, t.lastTxNum) {
+		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is frozen", canonicalDomain)
+	}
+	hexCtx.SetDeferCommitmentUpdates(false)
+	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
+	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
+	arms := []*commitmentFoldArm{&hexArm, &binArm}
+	folds := make([]dualFoldResult, len(arms))
+	var wg sync.WaitGroup
+	for i, arm := range arms {
+		if cc.domainFrozenAfter(arm.ctx.CommitmentDomain(), t.lastTxNum) ||
+			(arm.ctx.CommitmentDomain() == shadowDomain && cc.ShadowDomainStopped(shadowDomain)) {
+			continue
+		}
+		wg.Go(func() {
+			decorate := func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+				if arm.ctx.CommitmentDomain() == shadowDomain {
+					arm.buffered = commitmentdb.NewBufferedPatriciaContext(inner)
+					return arm.buffered
+				}
+				return inner
+			}
+			root, armErr := cc.computeCommitmentArm(ctx, t, arm, decorate)
+			if cc.onDualArmComplete != nil {
+				cc.onDualArmComplete(arm.ctx.CommitmentDomain())
+			}
+			folds[i] = dualFoldResult{domain: arm.ctx.CommitmentDomain(), root: root, err: armErr}
+		})
+	}
+	wg.Wait()
+
+	shadowArm := &binArm
+	if shadowDomain == kv.CommitmentDomain {
+		shadowArm = &hexArm
+	}
+	return cc.finishDualFolds(canonicalDomain, shadowDomain, folds, shadowArm)
+}
+
+func (cc *commitmentCalculator) finishDualFolds(canonicalDomain, shadowDomain kv.Domain, folds []dualFoldResult, shadowArm *commitmentFoldArm) (dualCommitmentResult, error) {
+	var result dualCommitmentResult
+	for _, fold := range folds {
+		if fold.domain == canonicalDomain {
+			if fold.err != nil {
+				return result, fold.err
+			}
+			result.canonicalRoot = fold.root
+			continue
+		}
+		if fold.domain != shadowDomain {
+			continue
+		}
+		if fold.err != nil {
+			cc.stopShadowDomain(shadowDomain)
+			continue
+		}
+		result.shadowRoot = fold.root
+	}
+	if shadowArm.buffered != nil && result.shadowRoot != nil {
+		if err := shadowArm.buffered.Replay(); err != nil {
+			cc.stopShadowDomain(shadowDomain)
+			result.shadowRoot = nil
+		}
+	}
+	if result.canonicalRoot == nil {
+		return result, fmt.Errorf("commitment: canonical domain %s did not produce a root", canonicalDomain)
+	}
+	if result.shadowRoot != nil {
+		mxCommitmentShadowFolds.Inc()
+	}
+	return result, nil
+}
+
+func otherCommitmentDomain(domain kv.Domain) kv.Domain {
+	if domain == kv.CommitmentBinDomain {
+		return kv.CommitmentDomain
+	}
+	return kv.CommitmentBinDomain
+}
+
+func (cc *commitmentCalculator) canonicalCommitmentDomain(blockTime uint64) kv.Domain {
+	if cc.chainConfig != nil && cc.chainConfig.IsBinaryTrie(blockTime) {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
+func (cc *commitmentCalculator) setCanonicalCommitmentDomain(blockTime uint64) {
+	domain := cc.canonicalCommitmentDomain(blockTime)
+	if cc.roTx == nil {
+		return
+	}
+	if p, ok := cc.roTx.AggTx().(interface{ SetCanonicalCommitmentDomain(kv.Domain) }); ok {
+		p.SetCanonicalCommitmentDomain(domain)
+	}
+}
+
+func (cc *commitmentCalculator) domainFrozenAfter(domain kv.Domain, txNum uint64) bool {
+	if cc.roTx == nil {
+		return false
+	}
+	p, ok := cc.roTx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+	})
+	if !ok {
+		return false
+	}
+	frozenAt, frozen := p.IsDomainFrozen(domain)
+	return frozen && txNum > frozenAt
+}
+
+func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
+	if cc.shadowStopped == nil {
+		cc.shadowStopped = make(map[kv.Domain]bool)
+	}
+	cc.shadowStopped[domain] = true
+	if cc.roTx != nil {
+		if p, ok := cc.roTx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) }); ok {
+			p.StopCommitmentDomain(domain)
+		}
+	}
+	if cc.doms != nil {
+		if ctx := cc.doms.GetCommitmentCtxForDomain(domain); ctx != nil {
+			ctx.ResetPendingUpdates()
+		}
+	}
+}
+
+func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
+	if cc.roTx != nil {
+		if p, ok := cc.roTx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(domain) {
+			return true
+		}
+	}
+	return cc.shadowStopped[domain]
+}
+
+func recordStoppedCommitmentDomains(tx kv.TemporalRwTx) error {
+	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
+	if !ok {
+		return nil
+	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if !stopped.CommitmentDomainStopped(domain) {
+			continue
+		}
+		if err := rawdb.WriteCommitmentDomainStopped(tx, domain); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cloneCommitmentReader(reader *asOfStateReader, roTx kv.TemporalTx, domain kv.Domain, txNum uint64) *asOfStateReader {
+	clone := *reader
+	clone.roTx = roTx
+	clone.getter = nil
+	clone.commitmentDomain = domain
+	clone.txNum = txNum
+	return &clone
+}
+
+func (cc *commitmentCalculator) computeCommitmentArm(ctx context.Context, t commitTarget, arm *commitmentFoldArm, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) ([]byte, error) {
+	arm.ctx.SetUpdates(arm.updates)
+	arm.ctx.SetStateReader(arm.reader)
+	if !cc.ownsChangeset(t.blockNum) {
+		return cc.computeIsolated(ctx, t, arm.ctx, arm.reader.roTx, arm.reader, decorate)
+	}
+	return cc.computeWithBlockAccumulator(ctx, t, arm.ctx, arm.reader.roTx, arm.reader, decorate)
 }
 
 // computeIsolated computes and flushes its own deferred updates with no
 // changeset diff, so a block that owns no changeset records into none.
-func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
-	// Flushes the previous block's own pending update, hash-routed. The swap to
-	// nil covers the case where that block owns no saved changeset: without it
-	// the flush falls back to whatever accumulator is currently live, leaking a
-	// pre-window block's branch deltas into a later window block's changeset.
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		defer cc.doms.SwapCommitmentDiffLocked(nil)()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	}(); err != nil {
-		return nil, err
+func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget, sdc *commitmentdb.SharedDomainsCommitmentContext, roTx kv.TemporalTx, reader commitmentdb.StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) ([]byte, error) {
+	if sdc == cc.doms.GetCommitmentContext() {
+		if err := func() error {
+			cc.doms.LockChangesetAccumulator()
+			defer cc.doms.UnlockChangesetAccumulator()
+			defer cc.doms.SwapCommitmentDiffLocked(sdc.CommitmentDomain(), nil)()
+			return cc.doms.FlushPendingUpdatesLocked(ctx, roTx)
+		}(); err != nil {
+			return nil, err
+		}
 	}
 
-	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil)
+	rh, err := sdc.ComputeCommitmentWithDiffAndReader(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil, reader, decorate)
 	if err != nil {
 		return nil, err
 	}
-	if err := cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx); err != nil {
-		return nil, err
+	if sdc == cc.doms.GetCommitmentContext() {
+		if err := cc.doms.FlushPendingUpdatesWithoutChangeset(roTx); err != nil {
+			return nil, err
+		}
 	}
 	return rh, nil
 }
@@ -987,6 +1286,18 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target 
 // still needs the pre-edge dirty keys.
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
+}
+
+func (cc *commitmentCalculator) isUnfrozenStepEdge(txNum uint64) bool {
+	for _, domain := range cc.doms.CommitmentDomains() {
+		if cc.domainFrozenAfter(domain, txNum) {
+			continue
+		}
+		if cc.doms.IsUnfrozenStepEdge(cc.roTx, domain, txNum) {
+			return true
+		}
+	}
+	return false
 }
 
 // computeAndCheck computes per-block commitment and validates the root,
@@ -1053,13 +1364,13 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // Also annotates the pending deferred update (set inside ComputeCommitment
 // when defer mode is on) with the block's hash, so the next call's
 // FlushPendingUpdates uses the same hash-aware routing.
-func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
+func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget, sdc *commitmentdb.SharedDomainsCommitmentContext, roTx kv.TemporalTx, reader commitmentdb.StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) ([]byte, error) {
 	defer func() {
 		// Stamp the pending update (if any was set during ComputeCommitment)
 		// with this block's hash so FlushPendingUpdates on the next call
 		// routes to the exact (BlockNum, BlockHash) entry rather than
 		// guessing among ambiguous block-number-only matches.
-		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {
+		if upd := sdc.PeekPendingUpdate(); sdc == cc.doms.GetCommitmentContext() && upd != nil && upd.BlockNum == t.blockNum {
 			upd.BlockHash = t.blockHash
 		}
 	}()
@@ -1068,9 +1379,12 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// changeset, independent of N's diff below) — the one remaining
 	// changesetMu window, brief rather than spanning the fold that follows.
 	if err := func() error {
+		if sdc != cc.doms.GetCommitmentContext() {
+			return nil
+		}
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+		return cc.doms.FlushPendingUpdatesLocked(ctx, roTx)
 	}(); err != nil {
 		return nil, err
 	}
@@ -1089,14 +1403,15 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Using nil here would silently drop this step's writes.
 	live := cc.doms.GetChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+	commitmentDomain := sdc.CommitmentDomain()
 
 	var diff *kv.DomainDiff
 	if cs != nil {
-		diff = &cs.Diffs[kv.CommitmentDomain]
+		diff = &cs.Diffs[commitmentDomain]
 	} else if live != nil {
-		diff = &live.Diffs[kv.CommitmentDomain]
+		diff = &live.Diffs[commitmentDomain]
 	}
-	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff)
+	return sdc.ComputeCommitmentWithDiffAndReader(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff, reader, decorate)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
@@ -1104,10 +1419,14 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd     *execctx.SharedDomains
-	roTx   kv.TemporalTx
-	getter execctxapi.StateGetter
-	txNum  uint64
+	sd               *execctx.SharedDomains
+	roTx             kv.TemporalTx
+	getter           execctxapi.StateGetter
+	commitmentDomain kv.Domain
+	txNum            uint64
+	balState         *calcState
+	balFirstTxNum    uint64
+	balCodes         map[accounts.Address][]byte
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1117,7 +1436,7 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 }
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if d == kv.CommitmentDomain {
+	if d == r.commitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
 			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
@@ -1125,17 +1444,42 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
 	} else {
+		txNum := r.txNum
+		if r.balState != nil {
+			txNum = r.balFirstTxNum
+			switch d {
+			case kv.AccountsDomain:
+				if acc, ok := r.balState.accounts[accounts.InternAddress(common.BytesToAddress(plainKey))]; ok {
+					if acc.Deleted {
+						return nil, 0, nil
+					}
+					return accounts.SerialiseV3(&accounts.Account{Nonce: acc.Nonce, Balance: acc.Balance, CodeHash: accounts.InternCodeHash(acc.CodeHash), Incarnation: acc.Incarnation}), 0, nil
+				}
+			case kv.StorageDomain:
+				if len(plainKey) == 52 {
+					addr := accounts.InternAddress(common.BytesToAddress(plainKey[:20]))
+					key := accounts.InternKey(common.BytesToHash(plainKey[20:]))
+					if value, ok := r.balState.storageState[addr][key]; ok {
+						return value.Bytes(), 0, nil
+					}
+				}
+			case kv.CodeDomain:
+				if code, ok := r.balCodes[accounts.InternAddress(common.BytesToAddress(plainKey))]; ok {
+					return code, 0, nil
+				}
+			}
+		}
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then
 		// fall through to DB files for data not in the batch.
 		var ok bool
-		enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
+		enc, ok, err = r.sd.GetAsOf(d, plainKey, txNum)
 		if err != nil {
 			return nil, 0, err
 		}
 		if !ok {
 			// Not in sd.mem — read from DB files
-			enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
+			enc, ok, err = r.roTx.GetAsOf(d, plainKey, txNum)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -1151,7 +1495,10 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	clone := *r
+	clone.roTx = tx
+	clone.getter = nil
+	return &clone
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1163,5 +1510,8 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
 		getterOpts = getterOpts.WithMetrics(metrics)
 	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	clone := *r
+	clone.roTx = tx
+	clone.getter = r.sd.AsStateGetter(tx, getterOpts)
+	return &clone
 }

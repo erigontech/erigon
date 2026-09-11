@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/bits"
 	"reflect"
 	"slices"
@@ -89,11 +90,75 @@ var (
 	}
 )
 
+type metricsSink struct {
+	processedKeys                 metrics.Counter
+	branchesUpdated               metrics.Counter
+	stateSkipRate                 metrics.Counter
+	stateLoadRate                 metrics.Counter
+	stateLevelledSkipRatesAccount [6]metrics.Counter
+	stateLevelledSkipRatesStorage [6]metrics.Counter
+	stateLevelledLoadRatesAccount [6]metrics.Counter
+	stateLevelledLoadRatesStorage [6]metrics.Counter
+
+	hadToLoad         atomic.Uint64
+	skippedLoad       atomic.Uint64
+	hadToReset        atomic.Uint64
+	rateFlushMu       sync.Mutex
+	loadRatePublished uint64
+	skipRatePublished uint64
+}
+
+var defaultMetricsSink = &metricsSink{
+	processedKeys:                 mxTrieProcessedKeys,
+	branchesUpdated:               mxTrieBranchesUpdated,
+	stateSkipRate:                 mxTrieStateSkipRate,
+	stateLoadRate:                 mxTrieStateLoadRate,
+	stateLevelledSkipRatesAccount: mxTrieStateLevelledSkipRatesAccount,
+	stateLevelledSkipRatesStorage: mxTrieStateLevelledSkipRatesStorage,
+	stateLevelledLoadRatesAccount: mxTrieStateLevelledLoadRatesAccount,
+	stateLevelledLoadRatesStorage: mxTrieStateLevelledLoadRatesStorage,
+}
+
+var disabledMetricsSink = &metricsSink{}
+
+func metricsSinkFor(m *Metrics) *metricsSink {
+	if m == nil || m.sink == nil {
+		return defaultMetricsSink
+	}
+	return m.sink
+}
+
+func (s *metricsSink) recordProcessedKey() {
+	if s.processedKeys != nil {
+		s.processedKeys.Inc()
+	}
+}
+
+func (s *metricsSink) recordBranchUpdate(n int) {
+	if s.branchesUpdated != nil {
+		s.branchesUpdated.AddInt(n)
+	}
+}
+
+func (s *metricsSink) flushTrieStateRates() {
+	s.rateFlushMu.Lock()
+	defer s.rateFlushMu.Unlock()
+	if l := s.hadToLoad.Load(); l > s.loadRatePublished && s.stateLoadRate != nil {
+		s.stateLoadRate.AddUint64(l - s.loadRatePublished)
+		s.loadRatePublished = l
+	}
+	if skipped := s.skippedLoad.Load(); skipped > s.skipRatePublished && s.stateSkipRate != nil {
+		s.stateSkipRate.AddUint64(skipped - s.skipRatePublished)
+		s.skipRatePublished = skipped
+	}
+}
+
 type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
+	SetMetricsEnabled(enabled bool)
 
 	Variant() TrieVariant
 
@@ -152,7 +217,8 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
 		// hex-nibble structure and the binary key space has no nibbles.
 		trie := NewPBinPatriciaHashed(nil)
-		tree := NewUpdates(ModeDirect, tmpdir, trie.setHashSuite(pbinSelectedSum))
+		trie.setHashSuite(pbinSelectedSum)
+		tree := NewBinUpdates(tmpdir, nil)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -442,7 +508,7 @@ func ApplyDeferredBranchUpdates(
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
+		metricsSinkFor(m).recordBranchUpdate(written)
 		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
@@ -487,7 +553,7 @@ func ApplyDeferredBranchUpdates(
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
+	metricsSinkFor(m).recordBranchUpdate(written)
 	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
@@ -537,7 +603,7 @@ func (be *BranchEncoder) CollectUpdate(
 		return err
 	}
 	publishBranchWrites(1, len(updateCopy), be.metrics)
-	mxTrieBranchesUpdated.Inc()
+	metricsSinkFor(be.metrics).recordBranchUpdate(1)
 	return nil
 }
 
@@ -1530,14 +1596,29 @@ func (t *Updates) spillDirect() {
 func (t *Updates) Mode() Mode { return t.mode }
 
 func (t *Updates) PlainKeys() map[string]struct{} {
-	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
+	switch t.mode {
+	case ModeDirect, ModeParallel:
+		return maps.Clone(t.keys)
+	case ModeUpdate:
+		if t.treeIdx == nil {
+			return nil
+		}
+		keys := make(map[string]struct{}, len(t.treeIdx))
+		for key := range t.treeIdx {
+			keys[key] = struct{}{}
+		}
+		return keys
+	default:
 		return nil
 	}
-	cp := make(map[string]struct{}, len(t.keys))
-	for k := range t.keys {
-		cp[k] = struct{}{}
+}
+
+func NewBinUpdates(tmpdir string, plainKeys map[string]struct{}) *Updates {
+	updates := NewUpdates(ModeDirect, tmpdir, pbinKeyHasherWith(pbinSelectedSum))
+	for key := range plainKeys {
+		updates.TouchPlainKey(key, nil, nil)
 	}
-	return cp
+	return updates
 }
 
 func (t *Updates) Size() (updates uint64) {

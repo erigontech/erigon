@@ -58,6 +58,9 @@ var (
 
 func parseName(name string) (string, string) {
 	name = strings.ToLower(name)
+	if name == "commitmentbindomain" {
+		return "commitment-bin", domainType
+	}
 	if strings.HasSuffix(name, domainType) {
 		name, _ = strings.CutSuffix(name, domainType)
 		return name, domainType

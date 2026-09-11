@@ -36,6 +36,49 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+type commitmentFileDependencies struct {
+	accounts *FilesItem
+	storage  *FilesItem
+}
+
+func (a *Aggregator) commitmentDependencies(files visibleFiles) map[[2]uint64]commitmentFileDependencies {
+	var dependencies map[[2]uint64]commitmentFileDependencies
+	for _, file := range files {
+		if !CommitmentBranchReferenced(file.Version(), a.StepSize(), file.startTxNum, file.endTxNum) {
+			continue
+		}
+		lookup := func(domain kv.Domain) *FilesItem {
+			d := a.d[domain]
+			if d == nil {
+				return nil
+			}
+			item, ok := d.dirtyFiles.Get(&FilesItem{startTxNum: file.startTxNum, endTxNum: file.endTxNum})
+			if !ok || !checkForVisibility(item, d.Accessors, false) {
+				return nil
+			}
+			return item
+		}
+		if dependencies == nil {
+			dependencies = make(map[[2]uint64]commitmentFileDependencies)
+		}
+		dependencies[[2]uint64{file.startTxNum, file.endTxNum}] = commitmentFileDependencies{accounts: lookup(kv.AccountsDomain), storage: lookup(kv.StorageDomain)}
+	}
+	return dependencies
+}
+
+func (at *AggregatorRoTx) commitmentDependency(domain kv.Domain, from, to uint64) (*FilesItem, error) {
+	if at.visible != nil {
+		dependency := at.visible.commitmentDependencies[[2]uint64{from, to}]
+		if domain == kv.AccountsDomain && dependency.accounts != nil {
+			return dependency.accounts, nil
+		}
+		if domain == kv.StorageDomain && dependency.storage != nil {
+			return dependency.storage, nil
+		}
+	}
+	return at.d[domain].lookupVisibleFileByRange(from, to)
+}
+
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
 func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
@@ -50,8 +93,15 @@ func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
+	if at.a.trieVariant == TrieVariantBin {
+		return false
+	}
 	stepSize := at.StepSize()
-	for _, f := range at.d[kv.CommitmentDomain].files {
+	commitmentDomain := kv.CommitmentDomain
+	if at.d[commitmentDomain] == nil {
+		return false
+	}
+	for _, f := range at.d[commitmentDomain].files {
 		if CommitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
@@ -83,8 +133,8 @@ func commitmentMergeNeedsTransform(inputs []*FilesItem, refsEnabled bool, stepSi
 
 // commitmentFileVersionByRange returns the version of the commitment file covering from..to
 // (zero if missing, treated as referenced) and its metric bucket index.
-func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version.Version, int) {
-	for i, f := range at.d[kv.CommitmentDomain].files {
+func (at *AggregatorRoTx) commitmentFileVersionByRange(commitmentDomain kv.Domain, from, to uint64) (version.Version, int) {
+	for i, f := range at.d[commitmentDomain].files {
 		if f.startTxNum == from && f.endTxNum == to {
 			if i > 5 {
 				return f.Version(), 5
@@ -103,25 +153,25 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
+	if at.a.trieVariant == TrieVariantBin || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+		aggTx.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...) == 0 {
 
 		return branch, nil // do not transform, return as is
 	}
 
-	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
+	fileVersion, metricI := aggTx.commitmentFileVersionByRange(kv.CommitmentDomain, fStartTxNum, fEndTxNum)
 	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
 		return branch, nil // input file was written plain (v2.2) or below the referencing threshold
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
 	acc := aggTx.d[kv.AccountsDomain]
-	storageItem, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	storageItem, err := at.commitmentDependency(kv.StorageDomain, fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	accountItem, err := acc.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	accountItem, err := at.commitmentDependency(kv.AccountsDomain, fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err

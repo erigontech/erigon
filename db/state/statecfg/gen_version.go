@@ -85,6 +85,8 @@ func goStruct(dom string) string {
 		return "CodeDomain"
 	case "commitment":
 		return "CommitmentDomain"
+	case "commitment-bin":
+		return "CommitmentBinDomain"
 	case "receipt":
 		return "ReceiptDomain"
 	case "rcache":

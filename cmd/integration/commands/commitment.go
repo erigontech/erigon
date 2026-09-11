@@ -72,6 +72,7 @@ import (
 var (
 	branchPrefixFlag string
 	txnumFlag        uint64
+	freezeTrieFlag   string
 )
 
 // visualize command flags
@@ -127,6 +128,12 @@ func init() {
 		"steps one rebuild shard covers; 0 sizes it from the machine's RAM")
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
+	withChain(cmdCommitmentFreeze)
+	withDataDir(cmdCommitmentFreeze)
+	withConfig(cmdCommitmentFreeze)
+	cmdCommitmentFreeze.Flags().StringVar(&freezeTrieFlag, "trie", dbstate.TrieVariantHex, "commitment trie to freeze")
+	commitmentCmd.AddCommand(cmdCommitmentFreeze)
+
 	// commitment print
 	withChain(cmdCommitmentPrint)
 	withDataDir(cmdCommitmentPrint)
@@ -180,6 +187,86 @@ func init() {
 var commitmentCmd = &cobra.Command{
 	Use:   "commitment",
 	Short: "Commitment domain commands",
+}
+
+var cmdCommitmentFreeze = &cobra.Command{
+	Use:   "freeze",
+	Short: "Freeze a commitment trie at the current state",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		if freezeTrieFlag != dbstate.TrieVariantHex {
+			logger.Error("only the hex commitment trie can be frozen", "trie", freezeTrieFlag)
+			return
+		}
+		dirs := datadir.New(datadirCli)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			logger.Error("Failed to begin temporal tx", "error", err)
+			return
+		}
+		defer tx.Rollback()
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		txNum, err := freezeHexCommitment(tx, agg)
+		if err != nil {
+			logger.Error("Failed to freeze commitment domain", "error", err)
+			return
+		}
+		fmt.Printf("froze %s at txnum %d\n", kv.CommitmentDomain, txNum)
+	},
+}
+
+func freezeHexCommitment(tx kv.TemporalTx, agg *dbstate.Aggregator) (uint64, error) {
+	if !slices.Contains(agg.CommitmentDomains(), kv.CommitmentBinDomain) {
+		return 0, errors.New("freezing hex commitment requires a hex+bin datadir")
+	}
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if len(state) < 18 {
+		return 0, errors.New("hex commitment state is missing or truncated")
+	}
+	txNum, blockNum := commitmentdb.DecodeTxBlockNums(state)
+	binaryState, _, err := tx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if len(binaryState) < 18 {
+		return 0, errors.New("binary commitment state is missing or truncated")
+	}
+	binaryTxNum, binaryBlockNum := commitmentdb.DecodeTxBlockNums(binaryState)
+	if binaryTxNum != txNum || binaryBlockNum != blockNum {
+		return 0, errors.New("binary commitment is not aligned with hex commitment")
+	}
+	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return 0, err
+	}
+	config, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return 0, err
+	}
+	if config == nil {
+		return 0, errors.New("chain configuration is missing")
+	}
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if header == nil {
+		return 0, fmt.Errorf("header for commitment block %d is missing", blockNum)
+	}
+	if !config.IsBinaryTrie(header.Time) {
+		return 0, errors.New("hex commitment is still canonical")
+	}
+	if err := agg.FreezeDomain(kv.CommitmentDomain, txNum); err != nil {
+		return 0, err
+	}
+	return txNum, nil
 }
 
 // integration commitment branch
@@ -565,7 +652,8 @@ func resolvePathForOverlap(path string) (string, error) {
 }
 
 func isCommitmentFileName(name string) bool {
-	return strings.Contains(name, kv.CommitmentDomain.String())
+	parsed, _, ok := snaptype.ParseFileName("", name)
+	return ok && parsed.TypeString == kv.CommitmentDomain.String()
 }
 
 // commitmentFileSize is one commitment .kv as it ended up on disk.
@@ -852,6 +940,13 @@ func checkRebuildFlags(target dbstate.RebuildTarget, hasOutput bool) error {
 	return refuseSqueezeForBinTarget(target, squeeze)
 }
 
+func commitmentRebuildDomain(target dbstate.RebuildTarget, domains []kv.Domain) kv.Domain {
+	if target.Variant == commitment.VariantBinPatriciaTrie && slices.Contains(domains, kv.CommitmentBinDomain) {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
 	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
 		return err
@@ -861,6 +956,8 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	rebuildDomain := commitmentRebuildDomain(rebuildTarget, agg.CommitmentDomains())
 
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br, dbg.MaxReorgDepth)
@@ -872,7 +969,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	defer rwTx.Rollback()
 
 	if !clearCommitment {
-		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		domainProgress := rwTx.Debug().DomainProgress(rebuildDomain)
 		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
 		if err != nil {
 			return err
@@ -932,13 +1029,13 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			DryRun:                 false,
 			StepRange:              "0-999999",
 			OnlyDomain:             !withHistory,
-			DomainNames:            []string{kv.CommitmentDomain.String()},
+			DomainNames:            []string{rebuildDomain.String()},
 		}); err != nil {
 			return err
 		}
 
 		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-		sconf := statecfg.Schema.CommitmentDomain
+		sconf := statecfg.Schema.GetDomainCfg(rebuildDomain)
 		for _, tn := range sconf.Tables() {
 			log.Info("Clearing", "table", tn)
 			if err := rwTx.ClearTable(tn); err != nil {
@@ -957,13 +1054,12 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(rebuildDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()

@@ -451,7 +451,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if !executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL) {
+	if len(doms.CommitmentDomains()) == 1 && !executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
@@ -752,8 +752,9 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader dbservices.
 	return kv.RetireCutoffs{
 		Default: historyTxNum,
 		PerDomain: map[kv.Domain]uint64{
-			kv.CommitmentDomain: commitmentTxNum,
-			kv.RCacheDomain:     rcacheTxNum,
+			kv.CommitmentDomain:    commitmentTxNum,
+			kv.CommitmentBinDomain: commitmentTxNum,
+			kv.RCacheDomain:        rcacheTxNum,
 		},
 	}, nil
 }

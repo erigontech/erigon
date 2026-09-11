@@ -145,7 +145,11 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
+	commitmentDomain := kv.CommitmentDomain
+	if b.chainConfig.IsBinaryTrie(param.Timestamp) {
+		commitmentDomain = kv.CommitmentBinDomain
+	}
+	sd, err := execctx.NewSharedDomains(ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithCommitmentDomain(commitmentDomain))
 	if err != nil {
 		return nil, err
 	}

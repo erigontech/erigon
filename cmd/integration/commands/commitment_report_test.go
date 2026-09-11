@@ -42,11 +42,12 @@ func reportSnapDomain(t *testing.T, sizes map[string]int) string {
 
 func TestCommitmentFileSizesMatchDisk(t *testing.T) {
 	snapDomain := reportSnapDomain(t, map[string]int{
-		"v1.0-commitment.0-64.kv":    4096,
-		"v1.0-commitment.64-128.kv":  512,
-		"v1.0-commitment.128-256.kv": 256,
-		"v1.0-commitment.0-64.kvi":   99,   // an accessor is not the file the rebuild sized
-		"v1.0-accounts.0-64.kv":      8192, // another domain's data, hardlinked into the output
+		"v1.0-commitment.0-64.kv":     4096,
+		"v1.0-commitment.64-128.kv":   512,
+		"v1.0-commitment.128-256.kv":  256,
+		"v1.0-commitment-bin.0-64.kv": 1024,
+		"v1.0-commitment.0-64.kvi":    99,
+		"v1.0-accounts.0-64.kv":       8192,
 	})
 
 	files, err := commitmentFileSizes(snapDomain)
@@ -73,6 +74,13 @@ func TestCommitmentFileSizesMatchDisk(t *testing.T) {
 	}
 	require.Equal(t, int64(4864), total)
 	require.Equal(t, total, totalCommitmentBytes(files))
+}
+
+func TestCommitmentRebuildDomainFollowsTarget(t *testing.T) {
+	registered := []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}, registered))
+	require.Equal(t, kv.CommitmentBinDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, registered))
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, []kv.Domain{kv.CommitmentDomain}))
 }
 
 func TestCommitmentFileSizesMissingDir(t *testing.T) {

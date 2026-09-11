@@ -226,7 +226,7 @@ func resetDomainGauges(ctx context.Context) {
 }
 
 func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvmetrics.DomainMetrics, interval time.Duration,
-	executing bool) *kvmetrics.DomainMetrics {
+	executing bool, commitmentDomain kv.Domain) *kvmetrics.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
@@ -373,10 +373,10 @@ func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvme
 		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
 	}
 
-	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
+	if commitmentMetrics, ok := metrics.Domains[commitmentDomain]; !executing && ok {
 		var prevCommitmentMetrics kvmetrics.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
+		if prev, ok := prevMetrics.Domains[commitmentDomain]; ok {
 			prevCommitmentMetrics = *prev
 		}
 
@@ -405,10 +405,17 @@ func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvme
 		mxCommitmentDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 		prevCommitmentMetrics = *commitmentMetrics
-		prevMetrics.Domains[kv.CommitmentDomain] = &prevCommitmentMetrics
+		prevMetrics.Domains[commitmentDomain] = &prevCommitmentMetrics
 	}
 
 	return prevMetrics
+}
+
+func executorCanonicalCommitmentDomain(te *txExecutor) kv.Domain {
+	if te.applyTx == nil {
+		return kv.CommitmentDomain
+	}
+	return canonicalCommitmentDomain(te.applyTx)
 }
 
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, logPrefix string, logger log.Logger) *Progress {
@@ -690,7 +697,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, uncommitedGas, 0, execVals)
 
-	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, true)
+	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, true, executorCanonicalCommitmentDomain(te))
 
 	p.prevExecTime = currentTime
 
@@ -756,7 +763,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
 		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, gasSec, 0, stepsInDb, commitVals)
 
-	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
+	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false, executorCanonicalCommitmentDomain(te))
 
 	p.prevCommitTime = currentTime
 

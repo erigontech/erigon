@@ -63,6 +63,7 @@ const (
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
 	// BlockAccessList stores RLP-encoded block access lists, keyed by block_num_u64 + hash.
 	BlockAccessList = "BlockAccessList"
+	ShadowStateRoot = "ShadowStateRoot"
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
@@ -148,6 +149,11 @@ const (
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
+
+	TblCommitmentBinVals        = "CommitmentBinVals"
+	TblCommitmentBinHistoryKeys = "CommitmentBinHistoryKeys"
+	TblCommitmentBinHistoryVals = "CommitmentBinHistoryVals"
+	TblCommitmentBinIdx         = "CommitmentBinIdx"
 
 	TblReceiptVals        = "ReceiptVals"
 	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
@@ -307,6 +313,7 @@ var ChaindataTables = []string{
 	BadHeaderNumber,
 	BlockBody,
 	BlockAccessList,
+	ShadowStateRoot,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -344,6 +351,10 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
+	TblCommitmentBinVals,
+	TblCommitmentBinHistoryKeys,
+	TblCommitmentBinHistoryVals,
+	TblCommitmentBinIdx,
 
 	TblReceiptVals,
 	TblReceiptHistoryKeys,
@@ -527,6 +538,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
 
+	TblCommitmentBinVals:        {Flags: DupSort},
+	TblCommitmentBinHistoryKeys: {Flags: DupSort},
+	TblCommitmentBinHistoryVals: {Flags: DupSort},
+	TblCommitmentBinIdx:         {Flags: DupSort},
+
 	TblReceiptVals:        {Flags: DupSort},
 	TblReceiptHistoryKeys: {Flags: DupSort},
 	TblReceiptHistoryVals: {Flags: DupSort},
@@ -645,29 +661,33 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = 0 // Eth Accounts
-	StorageDomain    Domain = 1 // Eth Account's Storage
-	CodeDomain       Domain = 2 // Eth Smart-Contract Code
-	CommitmentDomain Domain = 3 // Merkle Trie
-	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
-	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
-	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
+	AccountsDomain      Domain = 0
+	StorageDomain       Domain = 1
+	CodeDomain          Domain = 2
+	CommitmentDomain    Domain = 3
+	ReceiptDomain       Domain = 4
+	RCacheDomain        Domain = 5
+	CommitmentBinDomain Domain = 6
+	DomainLen           Domain = 7
 )
 
-var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
+func StateDomains(commitmentDomain Domain) []Domain {
+	return []Domain{AccountsDomain, StorageDomain, CodeDomain, commitmentDomain}
+}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = 0
-	StorageHistoryIdx    InvertedIdx = 1
-	CodeHistoryIdx       InvertedIdx = 2
-	CommitmentHistoryIdx InvertedIdx = 3
-	ReceiptHistoryIdx    InvertedIdx = 4
-	RCacheHistoryIdx     InvertedIdx = 5
+	AccountsHistoryIdx      InvertedIdx = 0
+	StorageHistoryIdx       InvertedIdx = 1
+	CodeHistoryIdx          InvertedIdx = 2
+	CommitmentHistoryIdx    InvertedIdx = 3
+	ReceiptHistoryIdx       InvertedIdx = 4
+	RCacheHistoryIdx        InvertedIdx = 5
+	CommitmentBinHistoryIdx InvertedIdx = 6
 
-	LogTopicIdx   InvertedIdx = 6
-	LogAddrIdx    InvertedIdx = 7
-	TracesFromIdx InvertedIdx = 8
-	TracesToIdx   InvertedIdx = 9
+	LogTopicIdx   InvertedIdx = 7
+	LogAddrIdx    InvertedIdx = 8
+	TracesFromIdx InvertedIdx = 9
+	TracesToIdx   InvertedIdx = 10
 
 	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
@@ -686,6 +706,8 @@ func (idx InvertedIdx) String() string {
 		return "receipt"
 	case RCacheHistoryIdx:
 		return "rcache"
+	case CommitmentBinHistoryIdx:
+		return "commitment-bin"
 	case LogAddrIdx:
 		return "logaddrs"
 	case LogTopicIdx:
@@ -713,6 +735,8 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return ReceiptHistoryIdx, nil
 	case "rcache":
 		return RCacheHistoryIdx, nil
+	case "commitment-bin":
+		return CommitmentBinHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
 	case "logaddr":
@@ -756,6 +780,8 @@ func (d Domain) String() string {
 		return "receipt"
 	case RCacheDomain:
 		return "rcache"
+	case CommitmentBinDomain:
+		return "commitment-bin"
 	default:
 		return "unknown domain"
 	}
@@ -775,6 +801,8 @@ func String2Domain(in string) (Domain, error) {
 		return ReceiptDomain, nil
 	case "rcache":
 		return RCacheDomain, nil
+	case "commitment-bin":
+		return CommitmentBinDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}
