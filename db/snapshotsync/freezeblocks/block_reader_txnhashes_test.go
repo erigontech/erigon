@@ -164,7 +164,7 @@ func openTxnHashesTestSegment(t *testing.T, baseTxnID uint64, txns []types.Trans
 	view := snapshots.View()
 	seg, ok := view.Segment(snaptype2.Transactions, 1)
 	require.True(t, ok)
-	return NewBlockReader(snapshots, nil), seg, view.Close
+	return NewBlockReader(snapshots), seg, view.Close
 }
 
 // TestTxnHashesFromDB covers TxnHashes' dispatch rather than either reader: with no
@@ -177,7 +177,7 @@ func TestTxnHashesFromDB(t *testing.T) {
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Zero(t, snapshots.BlocksAvailable())
-	r := NewBlockReader(snapshots, nil)
+	r := NewBlockReader(snapshots)
 
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)

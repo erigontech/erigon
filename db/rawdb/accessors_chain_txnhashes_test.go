@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
@@ -62,7 +62,7 @@ func txnHashesTestTxns(t *testing.T, n int) []types.Transaction {
 // in-memory encoding, so a change in what WriteTransactions persists breaks it.
 func TestCanonicalTransactionHashesMatchesDecode(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	const baseTxnID = types.BaseTxnID(7)
 	txns := txnHashesTestTxns(t, 6)
@@ -83,7 +83,7 @@ func TestCanonicalTransactionHashesMatchesDecode(t *testing.T) {
 
 func TestCanonicalTransactionHashesEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	// Non-nil empty, not nil: callers read nil as "body not found".
 	got, err := rawdb.CanonicalTransactionHashes(tx, 1, 0)
@@ -96,7 +96,7 @@ func TestCanonicalTransactionHashesEmpty(t *testing.T) {
 // is an error, where CanonicalTransactions returns what it found.
 func TestCanonicalTransactionHashesShortRead(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	const baseTxnID = types.BaseTxnID(1)
 	txns := txnHashesTestTxns(t, 2)
@@ -111,7 +111,7 @@ func TestCanonicalTransactionHashesShortRead(t *testing.T) {
 // requested range are an error, which counting the records read would not catch.
 func TestCanonicalTransactionHashesGap(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	const baseTxnID = types.BaseTxnID(1)
 	txns := txnHashesTestTxns(t, 4)
@@ -128,7 +128,7 @@ func TestCanonicalTransactionHashesGap(t *testing.T) {
 // empty slice (index nothing, no warning).
 func TestReadBodyTxnHashesNilVsEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	missing, err := rawdb.ReadBodyTxnHashes(tx, common.Hash{0xaa}, 1)
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestReadBodyTxnHashesNilVsEmpty(t *testing.T) {
 // cannot change which hashes land in the index.
 func TestReadBodyTxnHashesMatchesBodyWithTransactions(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := temporaltest.NewTestTx(t)
 
 	header := &types.Header{Number: *common.Num1}
 	body := &types.Body{Transactions: txnHashesTestTxns(t, 4)}

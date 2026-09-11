@@ -801,8 +801,7 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 
 	// One view for both segments: the txn ids read from the bodies file must be
 	// looked up in a transactions file of the same generation.
-	view, release := r.view(tx)
-	defer release()
+	view := r.view(tx)
 
 	seg, ok := view.Segment(snaptype2.Bodies, blockHeight)
 	if !ok {
