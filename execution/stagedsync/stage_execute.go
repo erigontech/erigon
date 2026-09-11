@@ -451,7 +451,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+	// Parlia embeds system transactions in the block body; executeSystemTx relies
+	// on serial ordering (sequential coinbase-nonce bump, cumulative gas), so keep
+	// Parlia on the serial executor.
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) || cfg.chainConfig.Parlia != nil {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
