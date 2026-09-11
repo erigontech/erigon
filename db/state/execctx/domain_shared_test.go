@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -80,14 +79,7 @@ func composite(k, k2 []byte) []byte {
 }
 
 func TestSharedDomainsCommitmentDiffUsesDomain(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-	})
+	withDualCommitmentFlags(t)
 
 	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -115,14 +107,7 @@ func TestSharedDomainsCommitmentDiffUsesDomain(t *testing.T) {
 }
 
 func TestSharedDomainsCommitmentDiffUnwindUsesBothDomains(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-	})
+	withDualCommitmentFlags(t)
 
 	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(t.Context())

@@ -21,7 +21,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 )
 
 func TestParseDomainsFlagIncludesCommitmentBin(t *testing.T) {
@@ -38,4 +41,14 @@ func TestParseDomainsFlagIncludesCommitmentBin(t *testing.T) {
 	selected, err := parseDomainsFlag("commitment-bin")
 	require.NoError(t, err)
 	require.Equal(t, []kv.Domain{kv.CommitmentBinDomain}, selected)
+}
+
+func TestCalculateWriteAmplificationSkipsUnregisteredDomain(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	domains, err := parseDomainsFlag("all")
+	require.NoError(t, err)
+	require.NotPanics(t, func() {
+		err = calculateWriteAmplification(t.Context(), db, domains, log.New())
+	})
+	require.NoError(t, err)
 }

@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -91,7 +90,7 @@ func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts k
 }
 
 func TestSharedDomainsStepEdgeUsesDomainFrontier(t *testing.T) {
-	db, tx, doms := setupStepTest(t)
+	_, tx, doms := setupStepTest(t)
 	frontierTx := &domainStepFrontierTx{
 		TemporalTx: tx,
 		frontiers: map[kv.Domain]kv.Step{
@@ -103,24 +102,11 @@ func TestSharedDomainsStepEdgeUsesDomainFrontier(t *testing.T) {
 	require.True(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 15))
 	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentBinDomain, 15))
 	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 14))
-	_ = db
 }
 
 func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalParallelCommitment = originalParallel
-	})
-
 	ctx := context.Background()
-	db, tx, doms := setupStepTest(t)
+	db, tx, doms := dualCalculatorTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)

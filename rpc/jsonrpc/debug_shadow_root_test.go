@@ -35,7 +35,9 @@ func TestDebugShadowStateRoot(t *testing.T) {
 	api := newDebugApiForTest(m)
 
 	root := common.HexToHash("0x1234")
-	writeDebugShadowRoot(t, m.DB, m.Genesis.Hash(), 0, root[:])
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteShadowStateRoot(tx, m.Genesis.Hash(), 0, root[:])
+	}))
 
 	got, err := api.ShadowStateRoot(context.Background(), m.Genesis.Hash())
 	require.NoError(t, err)
@@ -71,6 +73,7 @@ func TestDebugMigrationProgress(t *testing.T) {
 		{mode: dbstate.TrieVariantHex},
 		{mode: dbstate.TrieVariantBin, binaryTrieTime: new(uint64), flipped: true},
 		{mode: dbstate.TrieVariantHexBin, binaryTrieTime: &activation},
+		{mode: dbstate.TrieVariantHexBin, binaryTrieTime: new(uint64), flipped: true},
 	}
 
 	for _, tc := range cases {
@@ -82,7 +85,9 @@ func TestDebugMigrationProgress(t *testing.T) {
 
 			if tc.mode == dbstate.TrieVariantHexBin {
 				shadowRoot := common.HexToHash("0x4321")
-				writeDebugShadowRoot(t, m.DB, head.Hash(), head.NumberU64(), shadowRoot[:])
+				require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+					return rawdb.WriteShadowStateRoot(tx, head.Hash(), head.NumberU64(), shadowRoot[:])
+				}))
 			}
 
 			progress, err := api.MigrationProgress(ctx)
@@ -98,25 +103,39 @@ func TestDebugMigrationProgress(t *testing.T) {
 			}
 
 			if tc.mode == dbstate.TrieVariantHexBin {
-				tx, err := m.DB.BeginTemporalRw(ctx)
-				require.NoError(t, err)
-				defer tx.Rollback()
-				require.NoError(t, tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(head.NumberU64(), head.Hash())))
-				require.NoError(t, tx.Commit())
+				require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(head.NumberU64(), head.Hash()))
+				}))
 
+				progress, err = api.MigrationProgress(ctx)
+				require.NoError(t, err)
+				require.False(t, progress.ShadowStopped)
+
+				shadowDomain, otherDomain := kv.CommitmentBinDomain, kv.CommitmentDomain
+				if tc.flipped {
+					shadowDomain, otherDomain = otherDomain, shadowDomain
+				}
+				t.Cleanup(func() {
+					require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+						if err := rawdb.DeleteCommitmentDomainStopped(tx, kv.CommitmentDomain); err != nil {
+							return err
+						}
+						return rawdb.DeleteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+					}))
+				})
+				require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+					return rawdb.WriteCommitmentDomainStopped(tx, otherDomain)
+				}))
+				progress, err = api.MigrationProgress(ctx)
+				require.NoError(t, err)
+				require.False(t, progress.ShadowStopped)
+				require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+					return rawdb.WriteCommitmentDomainStopped(tx, shadowDomain)
+				}))
 				progress, err = api.MigrationProgress(ctx)
 				require.NoError(t, err)
 				require.True(t, progress.ShadowStopped)
 			}
 		})
 	}
-}
-
-func writeDebugShadowRoot(t *testing.T, db kv.TemporalRwDB, hash common.Hash, number uint64, root []byte) {
-	t.Helper()
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	require.NoError(t, rawdb.WriteShadowStateRoot(tx, hash, number, root))
-	require.NoError(t, tx.Commit())
 }

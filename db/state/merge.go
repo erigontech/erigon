@@ -109,8 +109,6 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // the maximally aligned merge range whose endTxNum <= maxEndTxNum. Smaller files
 // inside an already-selected span are skipped — the outer merge will absorb them.
 //
-// maxEndTxNum is the synchronization frontier set by AggregatorRoTx.findMergeRange:
-//
 // When the natural start (endTxNum minus the largest power-of-two step span)
 // falls strictly inside an existing visible file, the window is clipped so its
 // from aligns with that file's endTxNum boundary. Without this clip, on

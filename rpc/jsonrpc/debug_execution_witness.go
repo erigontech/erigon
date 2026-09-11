@@ -619,10 +619,6 @@ func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	}
 }
 
-func binCommitmentTrie(chainConfig *chain.Config, header *types.Header) bool {
-	return chainConfig.IsBinaryTrie(header.Time)
-}
-
 // buildAccessedState re-executes a block against a recording historical-state reader
 // and rolls the recorded accesses into an accessedState. The returned accessedBlockHashes
 // are the block numbers the BLOCKHASH opcode resolved during execution.
@@ -753,7 +749,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
-	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie(chainConfig, blockHeader))
+	resolvedMode, err := resolveWitnessMode(mode, chainConfig.IsBinaryTrie(blockHeader.Time))
 	if err != nil {
 		return nil, err
 	}
@@ -912,7 +908,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if err != nil {
 		return nil, err
 	}
-	binTrie := binCommitmentTrie(chainConfig, block.HeaderNoCopy())
+	binTrie := chainConfig.IsBinaryTrie(block.Time())
 	commitmentDomain := kv.CommitmentDomain
 	if binTrie {
 		commitmentDomain = kv.CommitmentBinDomain

@@ -86,7 +86,7 @@ func TestPBinExecutionWitnessReachable(t *testing.T) {
 	enableCommitmentHistoryFlag(t, m.DB)
 
 	base := newBaseApiForTest(m)
-	require.True(t, binCommitmentTrie(base._chainConfig.Load(), m.Genesis.HeaderNoCopy()), "the chain above is committed with the binary trie")
+	require.True(t, base._chainConfig.Load().IsBinaryTrie(m.Genesis.Time()), "the chain above is committed with the binary trie")
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	// Block 2 calls the contract deployed by block 1, so its witness covers an account

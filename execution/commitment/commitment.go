@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/bits"
 	"reflect"
 	"slices"
@@ -1595,29 +1596,21 @@ func (t *Updates) spillDirect() {
 func (t *Updates) Mode() Mode { return t.mode }
 
 func (t *Updates) PlainKeys() map[string]struct{} {
-	var keys map[string]struct{}
 	switch t.mode {
 	case ModeDirect, ModeParallel:
-		keys = t.keys
+		return maps.Clone(t.keys)
 	case ModeUpdate:
-		if t.treeIdx != nil {
-			keys = make(map[string]struct{}, len(t.treeIdx))
-			for key := range t.treeIdx {
-				keys[key] = struct{}{}
-			}
+		if t.treeIdx == nil {
+			return nil
+		}
+		keys := make(map[string]struct{}, len(t.treeIdx))
+		for key := range t.treeIdx {
+			keys[key] = struct{}{}
 		}
 		return keys
 	default:
 		return nil
 	}
-	if keys == nil {
-		return nil
-	}
-	cp := make(map[string]struct{}, len(keys))
-	for k := range keys {
-		cp[k] = struct{}{}
-	}
-	return cp
 }
 
 func NewBinUpdates(tmpdir string, plainKeys map[string]struct{}) *Updates {

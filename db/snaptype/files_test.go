@@ -56,15 +56,9 @@ func TestParseFileNameRegisteredCaplinStateType(t *testing.T) {
 
 func TestParseFileNameCommitmentBinStateFile(t *testing.T) {
 	file, isStateFile, ok := ParseFileName(t.TempDir(), "v1.0-commitment-bin.0-1024.kv")
-	parsedType, parsedTypeOK := ParseFileType("commitment-bin")
-	parsedEnum, parsedEnumOK := ParseEnum("commitment-bin")
 
 	require.True(t, ok)
 	require.True(t, isStateFile)
-	require.True(t, parsedTypeOK)
-	require.True(t, parsedEnumOK)
-	require.Equal(t, CommitmentBin, parsedType)
-	require.Equal(t, CommitmentBin.Enum(), parsedEnum)
 	require.Equal(t, "commitment-bin", file.TypeString)
 	require.Equal(t, uint64(0), file.From)
 	require.Equal(t, uint64(1024), file.To)

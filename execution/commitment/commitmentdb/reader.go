@@ -367,7 +367,6 @@ func (crsr *CommitmentReplayStateReader) CloneForWorker(workerCtx context.Contex
 type RebuildStateReader struct {
 	commitmentReader StateReader
 	plainStateReader StateReader
-	commitmentDomain kv.Domain
 	plainStateAsOf   uint64
 	sd               sd
 }
@@ -375,14 +374,9 @@ type RebuildStateReader struct {
 var _ StateReader = (*RebuildStateReader)(nil)
 
 func NewRebuildStateReader(tx kv.TemporalTx, sharedDomains sd, plainStateAsOf uint64) *RebuildStateReader {
-	return NewRebuildStateReaderForDomain(tx, sharedDomains, kv.CommitmentDomain, plainStateAsOf)
-}
-
-func NewRebuildStateReaderForDomain(tx kv.TemporalTx, sharedDomains sd, commitmentDomain kv.Domain, plainStateAsOf uint64) *RebuildStateReader {
 	return &RebuildStateReader{
 		commitmentReader: NewLatestStateReader(tx, sharedDomains, LatestStateReaderOptions{}),
 		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
-		commitmentDomain: commitmentDomain,
 		plainStateAsOf:   plainStateAsOf,
 		sd:               sharedDomains,
 	}
@@ -398,14 +392,14 @@ func (r *RebuildStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 }
 
 func (r *RebuildStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d == r.commitmentDomain {
+	if d == kv.CommitmentDomain {
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
 func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
-	return NewRebuildStateReaderForDomain(tx, r.sd, r.commitmentDomain, r.plainStateAsOf)
+	return NewRebuildStateReader(tx, r.sd, r.plainStateAsOf)
 }
 
 // CloneForWorker mirrors Clone but the commitment (Latest) reader meters into
@@ -414,7 +408,6 @@ func (r *RebuildStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tem
 	return &RebuildStateReader{
 		commitmentReader: NewLatestStateReader(tx, r.sd, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx))),
 		plainStateReader: NewHistoryStateReader(tx, r.plainStateAsOf),
-		commitmentDomain: r.commitmentDomain,
 		plainStateAsOf:   r.plainStateAsOf,
 		sd:               r.sd,
 	}

@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"errors"
 	"maps"
 	"math/big"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -164,8 +162,7 @@ func pbinDualWitnessFixture(t *testing.T) (*DebugAPIImpl, *execmoduletester.Exec
 	}
 	pack.TopBlock = pack.Blocks[len(pack.Blocks)-1]
 	require.NoError(t, m.InsertChain(pack))
-	api := NewPrivateDebugAPI(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, &rpccfg.DebugApiConfig{})
-	return api, m
+	return newDebugApiForTest(m), m
 }
 
 func TestPBinDualExecutionWitness(t *testing.T) {
@@ -190,65 +187,62 @@ func TestPBinDualExecutionWitness(t *testing.T) {
 	})
 }
 
-func TestPBinFrozenHexHistoricalWitness(t *testing.T) {
+func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 	api, m := pbinDualWitnessFixture(t)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	selector := rpc.BlockNumberOrHashWithNumber(2)
-	before, err := api.ExecutionWitness(t.Context(), selector, nil)
+	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	keys := []hexutil.Bytes{{0}}
+	witnessBefore, err := api.ExecutionWitness(t.Context(), selector, nil)
 	require.NoError(t, err)
-	tx, err := m.DB.BeginTemporalRo(t.Context())
+	proofBefore, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
 	require.NoError(t, err)
-	defer tx.Rollback()
-	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	state = bytes.Clone(state)
+	require.NotEmpty(t, proofBefore.AccountProof)
+	require.Len(t, proofBefore.StorageProof, 1)
+
+	_, state := readCommittedCommitmentState(t, t.Context(), m.DB)
 	txNum, _ := commitmentdb.DecodeTxBlockNums(state)
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
 	settingsPath := filepath.Join(m.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
 	frozenSettings, err := os.ReadFile(settingsPath)
 	require.NoError(t, err)
-	api = NewPrivateDebugAPI(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, &rpccfg.DebugApiConfig{})
-	after, err := api.ExecutionWitness(t.Context(), selector, nil)
+
+	witnessAfter, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), selector, nil)
 	require.NoError(t, err)
-	require.Equal(t, before, after)
+	require.Equal(t, witnessBefore, witnessAfter)
+	proofAfter, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
+	require.NoError(t, err)
+	require.Equal(t, proofBefore, proofAfter)
 	currentSettings, err := os.ReadFile(settingsPath)
 	require.NoError(t, err)
 	require.Equal(t, frozenSettings, currentSettings)
+	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+	require.True(t, frozen)
+	require.Equal(t, txNum, frozenAt)
+
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	require.ErrorContains(t, domains.DomainPut(kv.CommitmentDomain, tx, []byte("branch"), []byte("value"), txNum+1, nil), "is frozen")
-	currentState, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Equal(t, state, currentState)
+	_, current := readCommittedCommitmentState(t, t.Context(), m.DB)
+	require.Equal(t, state, current)
 }
 
-func TestPBinFrozenHexHistoricalProof(t *testing.T) {
+func TestPBinDualPostFlipProofAndWitnessRefuse(t *testing.T) {
 	_, m := pbinDualWitnessFixture(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	selector := rpc.BlockNumberOrHashWithNumber(2)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
-	keys := []hexutil.Bytes{{0}}
-	before, err := api.GetProof(t.Context(), address, keys, &selector)
-	require.NoError(t, err)
-	require.NotEmpty(t, before.AccountProof)
-	require.Len(t, before.StorageProof, 1)
-	tx, err := m.DB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	saved, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	saved = bytes.Clone(saved)
-	txNum, _ := commitmentdb.DecodeTxBlockNums(saved)
-	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
-	after, err := api.GetProof(t.Context(), address, keys, &selector)
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-	current, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Equal(t, saved, current)
-	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
-	require.True(t, frozen)
-	require.Equal(t, txNum, frozenAt)
+	for _, n := range []rpc.BlockNumber{3, 4} {
+		t.Run(n.String(), func(t *testing.T) {
+			selector := rpc.BlockNumberOrHashWithNumber(n)
+			_, err := api.GetProof(t.Context(), address, []hexutil.Bytes{{0}}, &selector)
+			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+			_, err = api.GetWitness(t.Context(), selector)
+			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+		})
+	}
 }

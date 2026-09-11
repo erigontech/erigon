@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -162,4 +163,22 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestResetExecClearsCommitmentStopMarkers(t *testing.T) {
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.StopCommitmentDomain(kv.CommitmentBinDomain)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	require.NoError(t, rawdbreset.ResetExec(ctx, db))
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+		require.NoError(t, err)
+		require.False(t, stopped)
+		return nil
+	}))
 }

@@ -449,9 +449,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			sd.sdCtx = ctx
 		}
 	}
-	if sd.sdCtx == nil {
-		sd.sdCtx = sd.commitmentCtxs[commitmentDomains[0]]
-	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -926,10 +923,8 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	if sd.branchCache != nil {
 		sd.branchCache.Unwind(txNumUnwindTo)
 		if changeset != nil {
-			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-				for _, diff := range changeset[domain] {
-					sd.branchCache.Invalidate([]byte(diff.Key))
-				}
+			for _, diff := range changeset[kv.CommitmentDomain] {
+				sd.branchCache.Invalidate([]byte(diff.Key))
 			}
 		}
 	}
@@ -2088,9 +2083,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(sd.commitmentCtxs))
 	for _, domain := range sd.CommitmentDomains() {
 		contexts = append(contexts, sd.commitmentCtxs[domain])
-	}
-	if len(contexts) == 0 && sd.sdCtx != nil {
-		contexts = append(contexts, sd.sdCtx)
 	}
 	txNum, blockNum, err = commitmentdb.SeekCommitments(ctx, tx, contexts...)
 	if err != nil {

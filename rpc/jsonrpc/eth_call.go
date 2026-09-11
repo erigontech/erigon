@@ -485,6 +485,13 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if header == nil {
 		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
+	chainConfig, err := api.chainConfig(ctx, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.IsBinaryTrie(header.Time) {
+		return nil, execctx.ErrBinCommitmentUnsupported
+	}
 
 	if !isLatest {
 		roTx = commitmentReconstructionView(roTx)
@@ -735,6 +742,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("error loading chain config: %w", err)
+	}
+	if chainConfig.IsBinaryTrie(block.Time()) {
+		return nil, execctx.ErrBinCommitmentUnsupported
 	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)

@@ -73,7 +73,7 @@ Sorts data before database insertion to reduce write amplification:
 
 ## Runtime settings (`snapshots/erigondb.toml`)
 
-Per-datadir settings that travel with a snapshot set rather than the binary, resolved by `state.ResolveErigonDBSettings` (`state/erigondb_settings.go`). A downloaded `erigondb.toml` is synced snapshot metadata and is never rewritten, so a producer's published values survive on consumers.
+Per-datadir settings that travel with a snapshot set rather than the binary, resolved by `state.ResolveErigonDBSettings` (`state/erigondb_settings.go`). A downloaded `erigondb.toml` is synced snapshot metadata and is never rewritten, so a producer's published values survive on consumers. The one exception is `frozen_at_txnum`: `integration commitment freeze` writes it into the local file.
 
 | Field | Meaning |
 |-------|---------|

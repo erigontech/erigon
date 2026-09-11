@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -90,7 +91,7 @@ func TestDualCompletionDiscardsFailedBinaryFold(t *testing.T) {
 	buffered := commitmentdb.NewBufferedPatriciaContext(backend)
 	require.NoError(t, buffered.PutBranch([]byte{1}, []byte{2}, []byte{3}))
 	cc := &commitmentCalculator{}
-	result, err := cc.finishDualFolds(commitTarget{}, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+	result, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
 		{domain: kv.CommitmentDomain, root: []byte{4}},
 		{domain: kv.CommitmentBinDomain, err: errors.New("fold failed")},
 	}, &commitmentFoldArm{buffered: buffered})
@@ -101,27 +102,37 @@ func TestDualCompletionDiscardsFailedBinaryFold(t *testing.T) {
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
 }
 
-func TestDualCompletionClassifiesReplayErrors(t *testing.T) {
+func TestDualCompletionStopsShadowOnReplayError(t *testing.T) {
 	for _, canonical := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		t.Run(canonical.String(), func(t *testing.T) {
-			replayErr := errors.New("write failed")
-			backend := &dualReplayContext{err: replayErr}
+			shadow := otherCommitmentDomain(canonical)
+			backend := &dualReplayContext{err: errors.New("write failed")}
 			buffered := commitmentdb.NewBufferedPatriciaContext(backend)
 			require.NoError(t, buffered.PutBranch([]byte{1}, []byte{2}, nil))
 			cc := &commitmentCalculator{}
-			result, err := cc.finishDualFolds(commitTarget{}, canonical, otherCommitmentDomain(canonical), []dualFoldResult{
+			result, err := cc.finishDualFolds(canonical, shadow, []dualFoldResult{
 				{domain: kv.CommitmentDomain, root: []byte{3}},
 				{domain: kv.CommitmentBinDomain, root: []byte{4}},
 			}, &commitmentFoldArm{buffered: buffered})
+			require.NoError(t, err)
 			require.Equal(t, 1, backend.writes)
-			if canonical == kv.CommitmentBinDomain {
-				require.ErrorIs(t, err, replayErr)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, []byte{3}, result.canonicalRoot)
-				require.Nil(t, result.shadowRoot)
-				require.True(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
-			}
+			require.NotNil(t, result.canonicalRoot)
+			require.Nil(t, result.shadowRoot)
+			require.True(t, cc.ShadowDomainStopped(shadow))
 		})
 	}
+}
+
+func TestRecordStoppedCommitmentDomainsPersistsStop(t *testing.T) {
+	_, tx, _ := dualCalculatorTest(t)
+	stopper, ok := tx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) })
+	require.True(t, ok)
+	stopper.StopCommitmentDomain(kv.CommitmentBinDomain)
+	require.NoError(t, recordStoppedCommitmentDomains(tx))
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	require.NoError(t, err)
+	require.True(t, stopped)
+	stopped, err = rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	require.NoError(t, err)
+	require.False(t, stopped)
 }

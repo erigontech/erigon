@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 )
@@ -44,4 +45,20 @@ func TestShadowStateRootStorageUsesBlockHash(t *testing.T) {
 	got, err = rawdb.ReadShadowStateRoot(tx, secondHash, 7)
 	require.NoError(t, err)
 	require.Equal(t, secondRoot, got)
+}
+
+func TestCommitmentDomainStoppedMarker(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	require.NoError(t, err)
+	require.False(t, stopped)
+	require.NoError(t, rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain))
+	stopped, err = rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	require.NoError(t, err)
+	require.True(t, stopped)
+	stopped, err = rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	require.NoError(t, err)
+	require.False(t, stopped)
 }

@@ -167,7 +167,7 @@ func TestDeserializeNilValue(t *testing.T) {
 }
 
 func TestStateChangeSetFramingRoundTrip(t *testing.T) {
-	db := newChangesetTestDB(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blockHash := common.Hash{1}
 	diffSet := &changeset.StateChangeSet{}
 	diffSet.Diffs[kv.AccountsDomain].DomainUpdate([]byte("account"), kv.Step(3), []byte("previous"))
@@ -189,13 +189,13 @@ func TestStateChangeSetFramingRoundTrip(t *testing.T) {
 }
 
 func TestStateChangeSetFramingShortDomainCount(t *testing.T) {
-	db := newChangesetTestDB(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blockHash := common.Hash{2}
 	payload := frameDiffDomains(
 		changeset.SerializeDiffSet([]kv.DomainEntryDiff{{Key: "account", Value: []byte("value")}}, nil),
 		changeset.SerializeDiffSet(nil, nil),
 	)
-	payload = append([]byte{1, 2}, payload...)
+	payload = append([]byte{0xff, 1, 2}, payload...)
 	writeRawDiffSet(t, db, 2, blockHash, payload)
 
 	tx, err := db.BeginRo(t.Context())
@@ -211,9 +211,9 @@ func TestStateChangeSetFramingShortDomainCount(t *testing.T) {
 }
 
 func TestStateChangeSetFramingLegacy(t *testing.T) {
-	db := newChangesetTestDB(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blockHash := common.Hash{3}
-	domains := make([][]byte, int(kv.DomainLen))
+	domains := make([][]byte, 6)
 	for i := range domains {
 		domains[i] = changeset.SerializeDiffSet(nil, nil)
 	}
@@ -229,28 +229,21 @@ func TestStateChangeSetFramingLegacy(t *testing.T) {
 	require.True(t, found)
 	require.Len(t, diffs[kv.CommitmentDomain], 1)
 	require.Equal(t, []byte("root"), diffs[kv.CommitmentDomain][0].Value)
+	require.Nil(t, diffs[kv.CommitmentBinDomain])
 }
 
 func TestStateChangeSetFramingTruncated(t *testing.T) {
-	db := newChangesetTestDB(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blockHash := common.Hash{4}
-	writeRawDiffSet(t, db, 4, blockHash, []byte{1, byte(kv.DomainLen), 0, 0, 0, 4})
+	writeRawDiffSet(t, db, 4, blockHash, []byte{0xff, 1, byte(kv.DomainLen), 0, 0, 0, 4})
 
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	_, found, err := changeset.ReadDiffSet(tx, 4, blockHash)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "truncated changeset domain 0: need 4 bytes")
 	require.False(t, found)
-}
-
-func newChangesetTestDB(tb testing.TB) kv.RwDB {
-	tb.Helper()
-	dirs := datadir.New(tb.TempDir())
-	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	tb.Cleanup(db.Close)
-	return db
 }
 
 func writeRawDiffSet(tb testing.TB, db kv.RwDB, blockNumber uint64, blockHash common.Hash, payload []byte) {
@@ -421,4 +414,28 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 	}
 
 	return diffSet
+}
+
+func TestStateChangeSetFramingLegacyAccountsLengthLooksVersioned(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blockHash := common.Hash{5}
+	domains := make([][]byte, 6)
+	for i := range domains {
+		domains[i] = changeset.SerializeDiffSet(nil, nil)
+	}
+	value := make([]byte, 1<<24+64)
+	domains[kv.AccountsDomain] = changeset.SerializeDiffSet([]kv.DomainEntryDiff{{Key: "account", Value: value}}, nil)
+	payload := frameDiffDomains(domains...)
+	require.Equal(t, []byte{1, 0}, payload[:2])
+	writeRawDiffSet(t, db, 5, blockHash, payload)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	diffs, found, err := changeset.ReadDiffSet(tx, 5, blockHash)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, diffs[kv.AccountsDomain], 1)
+	require.Len(t, diffs[kv.AccountsDomain][0].Value, len(value))
 }

@@ -29,3 +29,20 @@ func ReadShadowStateRoot(db kv.Getter, hash common.Hash, number uint64) ([]byte,
 func WriteShadowStateRoot(db kv.Putter, hash common.Hash, number uint64, root []byte) error {
 	return db.Put(kv.ShadowStateRoot, dbutils.BlockBodyKey(number, hash), root)
 }
+
+func commitmentDomainStoppedKey(domain kv.Domain) []byte {
+	return []byte("CommitmentDomainStopped." + domain.String())
+}
+
+func WriteCommitmentDomainStopped(db kv.Putter, domain kv.Domain) error {
+	return db.Put(kv.DatabaseInfo, commitmentDomainStoppedKey(domain), []byte{1})
+}
+
+func ReadCommitmentDomainStopped(db kv.Getter, domain kv.Domain) (bool, error) {
+	v, err := db.GetOne(kv.DatabaseInfo, commitmentDomainStoppedKey(domain))
+	return len(v) > 0, err
+}
+
+func DeleteCommitmentDomainStopped(db kv.RwTx, domain kv.Domain) error {
+	return db.Delete(kv.DatabaseInfo, commitmentDomainStoppedKey(domain))
+}

@@ -48,7 +48,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
 		return err
 	}
-	if ExperimentalBinCommitment {
+	if ExperimentalHexBinCommitment {
 		if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentBinDomain), salt, dirs, logger); err != nil {
 			return err
 		}
@@ -204,10 +204,6 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-func commitmentBinKVWriteVersion(*DomainCfg) version.Version {
-	return version.V2_2
-}
-
 // ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
 // (commitment.ModeParallel + VariantParallelHexPatricia). Default false; the
 // COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
@@ -329,7 +325,6 @@ var Schema = SchemaGen{
 
 		Accessors:                      AccessorHashMap,
 		ReferencesInCommitmentBranches: false,
-		KVWriteVersion:                 commitmentBinKVWriteVersion,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentBinHistoryVals,

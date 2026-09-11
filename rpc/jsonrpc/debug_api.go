@@ -158,12 +158,16 @@ func (api *DebugAPIImpl) MigrationProgress(ctx context.Context) (*MigrationProgr
 	if head != nil {
 		progress.Flipped = config.IsBinaryTrie(head.Time)
 	}
-	if mode == dbstate.TrieVariantHexBin && latest > 0 && head != nil {
-		root, err := rawdb.ReadShadowStateRoot(tx, head.Hash(), latest)
+	if mode == dbstate.TrieVariantHexBin {
+		shadowDomain := kv.CommitmentBinDomain
+		if progress.Flipped {
+			shadowDomain = kv.CommitmentDomain
+		}
+		stopped, err := rawdb.ReadCommitmentDomainStopped(tx, shadowDomain)
 		if err != nil {
 			return nil, err
 		}
-		progress.ShadowStopped = len(root) == 0
+		progress.ShadowStopped = stopped
 	}
 	return progress, nil
 }

@@ -40,6 +40,14 @@ func withBinCommitmentFlag(t *testing.T, on bool) {
 	statecfg.ExperimentalBinCommitment = on
 }
 
+func withDualCommitmentFlags(t *testing.T) {
+	t.Helper()
+	withBinCommitmentFlag(t, true)
+	orig := statecfg.ExperimentalHexBinCommitment
+	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = orig })
+	statecfg.ExperimentalHexBinCommitment = true
+}
+
 // Bin is a persisted datadir property, so WithSequentialCommitment demotes only the
 // experimental parallel/streaming tries: demoting bin would give a hex block-0 root.
 func TestPBinWithSequentialCommitmentKeepsBin(t *testing.T) {
@@ -110,28 +118,24 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name      string
-		bin       bool
-		hexBin    bool
-		canonical kv.Domain
-		variants  map[kv.Domain]commitment.TrieVariant
+		name     string
+		bin      bool
+		hexBin   bool
+		variants map[kv.Domain]commitment.TrieVariant
 	}{
 		{
-			name:      "hex",
-			canonical: kv.CommitmentDomain,
-			variants:  map[kv.Domain]commitment.TrieVariant{kv.CommitmentDomain: commitment.VariantHexPatriciaTrie},
+			name:     "hex",
+			variants: map[kv.Domain]commitment.TrieVariant{kv.CommitmentDomain: commitment.VariantHexPatriciaTrie},
 		},
 		{
-			name:      "bin",
-			bin:       true,
-			canonical: kv.CommitmentDomain,
-			variants:  map[kv.Domain]commitment.TrieVariant{kv.CommitmentDomain: commitment.VariantBinPatriciaTrie},
+			name:     "bin",
+			bin:      true,
+			variants: map[kv.Domain]commitment.TrieVariant{kv.CommitmentDomain: commitment.VariantBinPatriciaTrie},
 		},
 		{
-			name:      "hex+bin",
-			bin:       true,
-			hexBin:    true,
-			canonical: kv.CommitmentDomain,
+			name:   "hex+bin",
+			bin:    true,
+			hexBin: true,
 			variants: map[kv.Domain]commitment.TrieVariant{
 				kv.CommitmentDomain:    commitment.VariantHexPatriciaTrie,
 				kv.CommitmentBinDomain: commitment.VariantBinPatriciaTrie,
@@ -151,30 +155,19 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 			require.NoError(t, err)
 			defer sd.Close()
 
-			require.Equal(t, tc.canonical, sd.GetCommitmentCtx().CommitmentDomain())
+			require.Equal(t, kv.CommitmentDomain, sd.GetCommitmentCtx().CommitmentDomain())
 			for domain, variant := range tc.variants {
 				ctx := sd.GetCommitmentCtxForDomain(domain)
 				require.NotNil(t, ctx, "domain %s", domain)
 				require.Equal(t, variant, ctx.Trie().Variant(), "domain %s", domain)
 			}
-			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-				if _, expected := tc.variants[domain]; !expected {
-					require.Nil(t, sd.GetCommitmentCtxForDomain(domain), "unexpected domain %s", domain)
-				}
-			}
+			require.Len(t, sd.CommitmentDomains(), len(tc.variants))
 		})
 	}
 }
 
 func TestSharedDomainsHexOnlyOptionSelectsHexArmInDualMode(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-	})
+	withDualCommitmentFlags(t)
 
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -191,14 +184,7 @@ func TestSharedDomainsHexOnlyOptionSelectsHexArmInDualMode(t *testing.T) {
 }
 
 func TestSharedDomainsExplicitCommitmentDomainSelectsBinArm(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-	})
+	withDualCommitmentFlags(t)
 
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -214,14 +200,7 @@ func TestSharedDomainsExplicitCommitmentDomainSelectsBinArm(t *testing.T) {
 }
 
 func TestSharedDomainsDualDefaultKeepsHexAfterActivation(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-	})
+	withDualCommitmentFlags(t)
 
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())

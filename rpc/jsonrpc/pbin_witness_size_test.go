@@ -102,7 +102,7 @@ func measureWitnessSizes(t *testing.T, binTrie bool) []witnessSizes {
 	if selectionConfig == nil {
 		selectionConfig = c.m.ChainConfig
 	}
-	require.Equal(t, binTrie, binCommitmentTrie(selectionConfig, c.m.Genesis.HeaderNoCopy()))
+	require.Equal(t, binTrie, selectionConfig.IsBinaryTrie(c.m.Genesis.Time()))
 	require.False(t, witnessVerifySkipped(binTrie), "a measured witness must be a verified one")
 	api := NewPrivateDebugAPI(base, c.m.DB, nil, &rpccfg.DebugApiConfig{})
 

@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"runtime"
 	"slices"
 	"strings"
@@ -48,6 +49,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -419,8 +421,13 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
-	// The genesis selects the trie: a chain that schedules EIP-8297 records the bin variant
-	// on a datadir being created, so `erigon init` needs no flag and no environment.
+	if g.Config != nil && g.Config.BinaryTrieTime != nil && *g.Config.BinaryTrieTime > g.Timestamp && !statecfg.ExperimentalHexBinCommitment {
+		if _, err := dbstate.ReadErigonDBSettings(dirs); errors.Is(err, fs.ErrNotExist) {
+			if err := checkBinaryTrieSchedule(g, &dbstate.ErigonDBSettings{}); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettingsForGenesis(dirs, logger, false,
 		g.Config != nil && g.Config.BinaryTrieTime != nil)
 	if err != nil {
@@ -481,14 +488,14 @@ func checkBinaryTrieSchedule(g *types.Genesis, settings *dbstate.ErigonDBSetting
 			*g.Config.BinaryTrieTime)
 	}
 	if *g.Config.BinaryTrieTime > g.Timestamp && settings.TrieVariantName() != dbstate.TrieVariantHexBin {
-		return fmt.Errorf("binaryTrieTime %d is after the genesis timestamp %d: this node can only commit through the binary tree from block 0, so a tree scheduled later cannot be honoured",
+		return fmt.Errorf("binaryTrieTime %d is after the genesis timestamp %d: a post-genesis binary trie needs a hex+bin datadir, initialized fresh with COMMITMENT_HEX_BIN=true",
 			*g.Config.BinaryTrieTime, g.Timestamp)
 	}
 	return nil
 }
 
 func checkBinaryTrieCommitment(g *types.Genesis, settings *dbstate.ErigonDBSettings) error {
-	if g.Config == nil || g.Config.BinaryTrieTime == nil || settings.HasTrieVariant(dbstate.TrieVariantBin) {
+	if g.Config == nil || g.Config.BinaryTrieTime == nil || settings.TrieVariantName() != dbstate.TrieVariantHex {
 		return nil
 	}
 	return errors.New("genesis schedules EIP-8297 (binaryTrieTime) but this merkle-patricia datadir does not carry a binary commitment domain")
@@ -618,16 +625,12 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		head.Root = common.BytesToHash(roots[commitmentDomains[0]])
 		return roots[commitmentDomains[0]], statedb, nil
 	}
-	canonicalDomain := kv.CommitmentDomain
+	canonicalDomain, shadowDomain := kv.CommitmentDomain, kv.CommitmentBinDomain
 	if g.Config != nil && g.Config.IsBinaryTrie(head.Time) {
-		canonicalDomain = kv.CommitmentBinDomain
+		canonicalDomain, shadowDomain = shadowDomain, canonicalDomain
 	}
 	canonicalRoot := roots[canonicalDomain]
 	head.Root = common.BytesToHash(canonicalRoot)
-	shadowDomain := kv.CommitmentDomain
-	if canonicalDomain == kv.CommitmentDomain {
-		shadowDomain = kv.CommitmentBinDomain
-	}
 	dbPutter, ok := any(tx).(kv.Putter)
 	if !ok {
 		return nil, nil, errors.New("genesis shadow root requires a writable transaction")

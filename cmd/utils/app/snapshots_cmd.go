@@ -794,10 +794,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
-	commitmentFilesWithState := make([]struct {
-		file  snaptype.FileInfo
-		label string
-	}, 0)
+	commitmentFilesWithState := make([]commitmentStateFile, 0)
 
 	// Step 1: Collect and parse all candidate state files
 	candidateFiles := make([]struct {
@@ -850,7 +847,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	var snapDir string
 	for i := range candidateFiles {
 		candidate := &candidateFiles[i]
@@ -858,7 +854,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if doesRmCommitment && res.TypeString == kv.CommitmentDomain.String() && res.Ext == ".kv" {
+		isCommitment := res.TypeString == kv.CommitmentDomain.String() || res.TypeString == kv.CommitmentBinDomain.String()
+		if isCommitment && res.Ext == ".kv" && (len(domainNames) == 0 || slices.Contains(domainNames, res.TypeString)) {
 			if snapDir == "" {
 				snapDir = dirs.DataDir
 			}
@@ -867,10 +864,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 				return err
 			}
 			if hasState || broken {
-				commitmentFilesWithState = append(commitmentFilesWithState, struct {
-					file  snaptype.FileInfo
-					label string
-				}{res, label})
+				commitmentFilesWithState = append(commitmentFilesWithState, commitmentStateFile{res, label})
 			}
 		}
 
@@ -1020,7 +1014,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 
 			// Display commitment files with KEEP/REMOVE markers, sizes, and labels
-			hasStateTrie := 0
 			fmt.Println()
 			for i := range commitmentFilesWithState {
 				cf := &commitmentFilesWithState[i]
@@ -1035,8 +1028,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 				action := "KEEP  "
 				if isRemoved {
 					action = "REMOVE"
-				} else {
-					hasStateTrie++
 				}
 				labelStr := ""
 				if cf.label != "" {
@@ -1044,8 +1035,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 				}
 				fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
 			}
-			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
-				fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
+			for _, typ := range commitmentStateTypesFullyRemoved(commitmentFilesWithState, toRemove) {
+				fmt.Printf("\nthis will remove ALL %s files with state trie\n", typ)
 				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 				if promptExit(q) {
 					os.Exit(0)
@@ -2399,7 +2390,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			return fmt.Errorf("%w: failed to replace version in %s: %w", ErrSnapParseFilename, res.Name(), err)
 		}
 		for snapType := range kv.DomainLen {
-			if snapType == kv.CommitmentBinDomain && !statecfg.ExperimentalBinCommitment {
+			if snapType == kv.CommitmentBinDomain && !statecfg.ExperimentalHexBinCommitment {
 				continue
 			}
 			// skip rcache check if this datadir doesn't produce it
@@ -2518,7 +2509,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 	if commitmentHistory {
 		viTypes = append(viTypes, "commitment")
 		iiTypes = append(iiTypes, "commitment")
-		if statecfg.ExperimentalBinCommitment {
+		if statecfg.ExperimentalHexBinCommitment {
 			viTypes = append(viTypes, "commitment-bin")
 			iiTypes = append(iiTypes, "commitment-bin")
 		}
@@ -4370,4 +4361,25 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	}
 	duFormatHuman(os.Stdout, result, verbose)
 	return nil
+}
+
+type commitmentStateFile struct {
+	file  snaptype.FileInfo
+	label string
+}
+
+func commitmentStateTypesFullyRemoved(files []commitmentStateFile, toRemove map[string]snaptype.FileInfo) []string {
+	kept := make(map[string]bool)
+	var types []string
+	for i := range files {
+		cf := &files[i]
+		if _, seen := kept[cf.file.TypeString]; !seen {
+			kept[cf.file.TypeString] = false
+			types = append(types, cf.file.TypeString)
+		}
+		if _, removed := toRemove[cf.file.Path]; !removed {
+			kept[cf.file.TypeString] = true
+		}
+	}
+	return slices.DeleteFunc(types, func(typ string) bool { return kept[typ] })
 }

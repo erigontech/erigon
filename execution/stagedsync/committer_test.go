@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -341,19 +340,7 @@ func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
 }
 
 func TestCommitmentCalculatorDualFold(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalParallelCommitment = originalParallel
-	})
-
-	db, tx, doms := setupStepTest(t)
+	db, tx, doms := dualCalculatorTest(t)
 	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain))
 	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 
@@ -386,9 +373,9 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	}
 
 	target := commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1}
-	dualRoot, err := cc.computeDualFromUpdates(t.Context(), target, updates, &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	dual, err := cc.computeDualFromUpdatesWithRole(t.Context(), target, updates, &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 	require.NoError(t, err)
-	require.NotNil(t, dualRoot)
+	require.NotNil(t, dual.canonicalRoot)
 	require.True(t, binWritesBeforeReplay, "binary branch writes must remain buffered until both folds join")
 	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
 	require.True(t, ok, "binary commitment state must be replayed after the join")
@@ -407,7 +394,7 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	t.Cleanup(singleRoTx.Rollback)
 	singleRoot, err := single.GetCommitmentContext().ComputeCommitmentWithDiffAndReader(t.Context(), singleRoTx, false, 1, 1, "test", nil, nil, &asOfStateReader{sd: single, roTx: singleRoTx, commitmentDomain: kv.CommitmentDomain}, nil)
 	require.NoError(t, err)
-	require.Equal(t, singleRoot, dualRoot, "the hex arm must match the single-arm root")
+	require.Equal(t, singleRoot, dual.canonicalRoot, "the hex arm must match the single-arm root")
 }
 
 func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
@@ -424,19 +411,7 @@ func TestCommitmentCalculatorBALDualFoldWithStorage(t *testing.T) {
 
 func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage bool) {
 	t.Helper()
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalParallelCommitment = originalParallel
-	})
-
-	db, tx, doms := setupStepTest(t)
+	db, tx, doms := dualCalculatorTest(t)
 	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain))
 	require.NotNil(t, doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -462,7 +437,7 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 		logger:      log.New(),
 	}
 	t.Cleanup(cc.updates.Close)
-	result, err := cc.computeRootFromBALResult(t.Context(), &blockRequest{
+	result, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
 		blockNum:   1,
 		blockHash:  common.Hash{2},
 		lastTxNum:  1,
@@ -498,19 +473,7 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 }
 
 func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalParallelCommitment = originalParallel
-	})
-
-	db, _, doms := setupStepTest(t)
+	db, _, doms := dualCalculatorTest(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(roTx.Rollback)
@@ -551,34 +514,14 @@ func TestCommitmentCalculatorCanonicalArmFollowsBlockTime(t *testing.T) {
 }
 
 func TestCommitmentCalculatorFrozenShadowAndWrites(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-	})
-
-	db, tx, doms := setupStepTest(t)
+	db, tx, doms := dualCalculatorTest(t)
+	refs, variant, hash := true, dbstate.TrieVariantHexBin, commitment.PBinHashBlake3
 	settings := &dbstate.ErigonDBSettings{
-		StepSize:          16,
-		StepsInFrozenFile: 8,
-		ReferencesInCommitmentBranches: func() *bool {
-			v := true
-			return &v
-		}(),
-		TrieVariant: func() *string {
-			v := dbstate.TrieVariantHexBin
-			return &v
-		}(),
-		TrieHash: func() *string {
-			v := commitment.PBinHashBlake3
-			return &v
-		}(),
+		StepSize:                       16,
+		StepsInFrozenFile:              8,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+		TrieHash:                       &hash,
 	}
 	require.NoError(t, dbstate.WriteErigonDBSettings(tx.Debug().Dirs(), settings))
 	aggProvider, ok := tx.AggTx().(interface{ Agg() *dbstate.Aggregator })
@@ -602,23 +545,19 @@ func TestCommitmentCalculatorFrozenShadowAndWrites(t *testing.T) {
 	t.Cleanup(updates.Close)
 	updates.TouchPlainKey(key, accountBytes, updates.TouchAccount)
 
+	activation := uint64(1)
 	cc := &commitmentCalculator{
-		doms:   doms,
-		db:     db,
-		roTx:   roTx,
-		logger: log.New(),
-		chainConfig: &chain.Config{
-			BinaryTrieTime: func() *uint64 {
-				v := uint64(1)
-				return &v
-			}(),
-		},
+		doms:        doms,
+		db:          db,
+		roTx:        roTx,
+		logger:      log.New(),
+		chainConfig: &chain.Config{BinaryTrieTime: &activation},
 	}
-	root, err := cc.computeDualFromUpdates(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 11, blockTime: 1}, updates,
+	result, err := cc.computeDualFromUpdatesWithRole(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 11, blockTime: 1}, updates,
 		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain},
 		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 	require.NoError(t, err)
-	require.NotEmpty(t, root)
+	require.NotEmpty(t, result.canonicalRoot)
 	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
 	require.False(t, ok)
 	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
@@ -641,32 +580,24 @@ func TestCommitmentCalculatorCanonicalRootMismatch(t *testing.T) {
 }
 
 func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
-	activation := uint64(10)
-	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activation},
-		shadowStopped: make(map[kv.Domain]bool),
-	}
-	preTarget := commitTarget{blockHash: common.Hash{1}, blockTime: 9}
-	pre, err := cc.finishDualFolds(preTarget, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+	cc := &commitmentCalculator{}
+	pre, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
 		{domain: kv.CommitmentDomain, root: []byte{0x11}},
 		{domain: kv.CommitmentBinDomain, root: []byte{0x22}},
 	}, &commitmentFoldArm{})
 	require.NoError(t, err)
-	require.Equal(t, kv.CommitmentDomain, pre.canonicalDomain)
 	require.Equal(t, []byte{0x11}, pre.canonicalRoot)
 	require.Equal(t, []byte{0x22}, pre.shadowRoot)
 
-	postTarget := commitTarget{blockHash: common.Hash{2}, blockTime: 10}
-	post, err := cc.finishDualFolds(postTarget, kv.CommitmentBinDomain, kv.CommitmentDomain, []dualFoldResult{
+	post, err := cc.finishDualFolds(kv.CommitmentBinDomain, kv.CommitmentDomain, []dualFoldResult{
 		{domain: kv.CommitmentBinDomain, root: []byte{0x33}},
 		{domain: kv.CommitmentDomain, root: []byte{0x44}},
 	}, &commitmentFoldArm{})
 	require.NoError(t, err)
-	require.Equal(t, kv.CommitmentBinDomain, post.canonicalDomain)
 	require.Equal(t, []byte{0x33}, post.canonicalRoot)
 	require.Equal(t, []byte{0x44}, post.shadowRoot)
 
-	shadowFailure, err := cc.finishDualFolds(commitTarget{blockHash: common.Hash{3}, blockTime: 9}, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+	shadowFailure, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
 		{domain: kv.CommitmentDomain, root: []byte{0x55}},
 		{domain: kv.CommitmentBinDomain, err: errors.New("shadow fold")},
 	}, &commitmentFoldArm{})
@@ -675,7 +606,7 @@ func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
 	require.Nil(t, shadowFailure.shadowRoot)
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
 
-	canonicalFailure, err := cc.finishDualFolds(commitTarget{blockHash: common.Hash{4}, blockTime: 9}, kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+	canonicalFailure, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
 		{domain: kv.CommitmentDomain, err: ErrWrongTrieRoot},
 		{domain: kv.CommitmentBinDomain, root: []byte{0x66}},
 	}, &commitmentFoldArm{})
@@ -685,7 +616,7 @@ func TestCommitmentCalculatorDualRoleAndShadowFailure(t *testing.T) {
 
 func TestCommitmentCalculatorUpdatesAggregatorCanonicalDomain(t *testing.T) {
 	activation := uint64(10)
-	db, tx, doms := dualCalculatorTest(t)
+	_, tx, doms := dualCalculatorTest(t)
 	cc := &commitmentCalculator{chainConfig: &chain.Config{BinaryTrieTime: &activation}, roTx: tx, doms: doms}
 
 	cc.setCanonicalCommitmentDomain(11)
@@ -695,7 +626,6 @@ func TestCommitmentCalculatorUpdatesAggregatorCanonicalDomain(t *testing.T) {
 
 	cc.setCanonicalCommitmentDomain(9)
 	require.Equal(t, kv.CommitmentDomain, canonical.CanonicalCommitmentDomain())
-	_ = db
 }
 
 // TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the
@@ -755,4 +685,46 @@ func TestHandleMessage_MarksProcessedUnderFlag(t *testing.T) {
 			require.NoError(t, <-waiting)
 		})
 	}
+}
+
+func TestCommitmentCalculatorDualFoldBuffersHexShadowAfterFlip(t *testing.T) {
+	db, tx, doms := dualCalculatorTest(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	key := string(bytes.Repeat([]byte{0x11}, 20))
+	account := accounts.Account{Nonce: 1}
+	accountBytes := accounts.SerialiseV3(&account)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, []byte(key), accountBytes, 1, nil))
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	t.Cleanup(updates.Close)
+	updates.TouchPlainKey(key, accountBytes, updates.TouchAccount)
+
+	activation := uint64(0)
+	var hexWritesBuffered bool
+	cc := &commitmentCalculator{
+		doms:        doms,
+		db:          db,
+		roTx:        roTx,
+		logger:      log.New(),
+		chainConfig: &chain.Config{BinaryTrieTime: &activation},
+		onDualArmComplete: func(domain kv.Domain) {
+			if domain != kv.CommitmentDomain {
+				return
+			}
+			_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+			hexWritesBuffered = !ok
+		},
+	}
+	target := commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1, blockTime: 1}
+	result, err := cc.computeDualFromUpdatesWithRole(t.Context(), target, updates,
+		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain},
+		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	require.NoError(t, err)
+	require.NotNil(t, result.canonicalRoot)
+	require.NotNil(t, result.shadowRoot)
+	require.True(t, hexWritesBuffered, "the hex shadow's branch writes must stay buffered until both folds join")
+	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	require.True(t, ok, "the hex shadow's commitment state must be replayed after the join")
 }

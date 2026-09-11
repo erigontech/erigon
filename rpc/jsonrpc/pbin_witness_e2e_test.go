@@ -223,7 +223,7 @@ func pbinWitnessAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *DebugAP
 	t.Helper()
 	enableCommitmentHistoryFlag(t, m.DB)
 	base := newBaseApiForTest(m)
-	require.True(t, binCommitmentTrie(base._chainConfig.Load(), m.Genesis.HeaderNoCopy()), "the chain is committed with the binary trie")
+	require.True(t, base._chainConfig.Load().IsBinaryTrie(m.Genesis.Time()), "the chain is committed with the binary trie")
 	return NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 }
 

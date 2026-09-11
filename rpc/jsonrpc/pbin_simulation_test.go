@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"testing"
 
@@ -29,16 +28,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestPBinDualSimulation(t *testing.T) {
 	_, m := pbinDualWitnessFixture(t)
-	api := newEthApiForTest(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	call := func(n uint64) SimulatedBlock {
@@ -85,7 +82,7 @@ func TestPBinDualSimulation(t *testing.T) {
 		t.Cleanup(func() {
 			require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, true) }))
 		})
-		replayAPI := newEthApiForTest(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
+		replayAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 		result, err := replayAPI.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: []SimulatedBlock{call(4)}}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(3)))
 		require.NoError(t, err)
 		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
@@ -116,12 +113,7 @@ func TestPBinDualSimulation(t *testing.T) {
 			before[i], err = api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: tc.blocks}, rpc.BlockNumberOrHashWithNumber(tc.base))
 			require.NoError(t, err)
 		}
-		tx, err := m.DB.BeginTemporalRo(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-		require.NoError(t, err)
-		state = bytes.Clone(state)
+		_, state := readCommittedCommitmentState(t, t.Context(), m.DB)
 		txNum, _ := commitmentdb.DecodeTxBlockNums(state)
 		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
@@ -132,8 +124,7 @@ func TestPBinDualSimulation(t *testing.T) {
 				require.Equal(t, before[i], after)
 			})
 		}
-		current, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-		require.NoError(t, err)
+		_, current := readCommittedCommitmentState(t, t.Context(), m.DB)
 		require.Equal(t, state, current)
 		frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
 		require.True(t, frozen)

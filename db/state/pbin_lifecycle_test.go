@@ -101,21 +101,6 @@ func TestPBinCanonicalRoleDoesNotChangeHexReferences(t *testing.T) {
 	require.False(t, at.commitmentVisibleFilesReferenced())
 }
 
-func TestPBinStoppedDomainSharedAcrossViews(t *testing.T) {
-	agg := &Aggregator{}
-	type stopper interface {
-		StopCommitmentDomain(kv.Domain)
-		CommitmentDomainStopped(kv.Domain) bool
-	}
-	owner, ok := any(agg).(stopper)
-	require.True(t, ok, "aggregator must retain shadow failure state across calculator batches")
-	owner.StopCommitmentDomain(kv.CommitmentBinDomain)
-	view, ok := any(&AggregatorRoTx{a: agg}).(stopper)
-	require.True(t, ok)
-	require.True(t, view.CommitmentDomainStopped(kv.CommitmentBinDomain))
-	require.False(t, view.CommitmentDomainStopped(kv.CommitmentDomain))
-}
-
 func TestPBinLaggingHexShadowDoesNotClampVisibleFiles(t *testing.T) {
 	agg := pbinDualAggregator(t)
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -412,4 +397,27 @@ func TestPBinOnlyDomainDisablesHexReferences(t *testing.T) {
 	agg.applyReferencesInCommitmentBranches(true)
 	require.False(t, agg.referencesInCommitmentBranches())
 	require.Equal(t, version.V2_2, agg.d[kv.CommitmentDomain].kvWriteVersion())
+}
+
+func TestPBinAggregatorRestoresStoppedShadow(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantHexBin
+	require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{TrieVariant: &variant}))
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	activation := uint64(10)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		genesis := common.Hash{1}
+		if err := rawdb.WriteCanonicalHash(tx, genesis, 0); err != nil {
+			return err
+		}
+		if err := rawdb.WriteChainConfig(tx, genesis, &chain.Config{BinaryTrieTime: &activation}); err != nil {
+			return err
+		}
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	agg, err := newAggregator(t.Context(), dirs, db, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
 }

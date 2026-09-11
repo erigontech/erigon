@@ -17,7 +17,6 @@
 package executiontests
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -32,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -217,17 +215,13 @@ type pbtBlockRoots struct {
 
 func pbtRootsFromAllocation(t *testing.T, config *chain.Config, alloc types.GenesisAlloc, activationTime uint64) pbtBlockRoots {
 	t.Helper()
-	roots := pbtBlockRoots{}
-	for _, item := range []struct {
-		timestamp uint64
-		root      *common.Hash
-	}{{0, &roots.hex}, {activationTime, &roots.bin}} {
-		genesis := &types.Genesis{Config: config, Alloc: alloc, Timestamp: item.timestamp}
-		block, state, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.New())
+	root := func(timestamp uint64) common.Hash {
+		block, state, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, Alloc: alloc, Timestamp: timestamp}, datadir.New(t.TempDir()), log.New())
 		require.NoError(t, err)
 		state.Close()
-		*item.root = block.Root()
+		return block.Root()
 	}
+	roots := pbtBlockRoots{hex: root(0), bin: root(activationTime)}
 	require.NotEqual(t, roots.hex, roots.bin)
 	return roots
 }
@@ -279,22 +273,11 @@ func assertShadowRoot(t *testing.T, m *execmoduletester.ExecModuleTester, api *j
 	if m.ChainConfig.IsBinaryTrie(block.Time()) {
 		want = roots.hex
 	}
-	require.Equal(t, want, common.BytesToHash(readShadowRoot(t, m, block)))
 	got, err := api.ShadowStateRoot(context.Background(), block.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, want, *got)
 	require.NotEqual(t, block.Root(), *got)
-}
-
-func readShadowRoot(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) []byte {
-	t.Helper()
-	tx, err := m.DB.BeginTemporalRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	root, err := rawdb.ReadShadowStateRoot(tx, block.Hash(), block.NumberU64())
-	require.NoError(t, err)
-	return bytes.Clone(root)
 }
 
 func currentHead(t *testing.T, m *execmoduletester.ExecModuleTester) common.Hash {

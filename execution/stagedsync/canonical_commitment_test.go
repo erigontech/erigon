@@ -31,10 +31,9 @@ import (
 )
 
 type canonicalDomainTx struct {
-	kv.Tx
-	domain    kv.Domain
-	frontiers map[kv.Domain]kv.Step
-	selector  bool
+	domainStepFrontierTx
+	domain   kv.Domain
+	selector bool
 }
 
 func (tx *canonicalDomainTx) AggTx() any {
@@ -42,13 +41,6 @@ func (tx *canonicalDomainTx) AggTx() any {
 		return nil
 	}
 	return canonicalDomainSelector{domain: tx.domain}
-}
-
-func (tx *canonicalDomainTx) StepsInFiles(domains ...kv.Domain) kv.Step {
-	if len(domains) == 0 {
-		return 0
-	}
-	return tx.frontiers[domains[0]]
 }
 
 type canonicalDomainSelector struct {
@@ -63,13 +55,13 @@ func TestSnapshotStepAlignmentUsesCanonicalDomain(t *testing.T) {
 	tx := &canonicalDomainTx{
 		domain:   kv.CommitmentBinDomain,
 		selector: true,
-		frontiers: map[kv.Domain]kv.Step{
+		domainStepFrontierTx: domainStepFrontierTx{frontiers: map[kv.Domain]kv.Step{
 			kv.CommitmentDomain:    2,
 			kv.CommitmentBinDomain: 1,
 			kv.AccountsDomain:      1,
 			kv.StorageDomain:       1,
 			kv.CodeDomain:          1,
-		},
+		}},
 	}
 
 	step, err := snapshotStepAlignment(tx)

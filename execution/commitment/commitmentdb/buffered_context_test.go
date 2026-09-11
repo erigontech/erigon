@@ -26,13 +26,11 @@ import (
 )
 
 type bufferedContextBackend struct {
-	branch      []byte
-	branchStep  kv.Step
-	account     *commitment.Update
-	storage     *commitment.Update
-	received    []bufferedBranchWrite
-	putErr      error
-	putErrAfter int
+	branch     []byte
+	branchStep kv.Step
+	account    *commitment.Update
+	storage    *commitment.Update
+	received   []bufferedBranchWrite
 }
 
 func (b *bufferedContextBackend) Branch([]byte) ([]byte, kv.Step, error) {
@@ -48,9 +46,6 @@ func (b *bufferedContextBackend) Storage([]byte) (*commitment.Update, error) {
 }
 
 func (b *bufferedContextBackend) PutBranch(prefix, data, prevData []byte) error {
-	if b.putErr != nil && len(b.received) >= b.putErrAfter {
-		return b.putErr
-	}
 	b.received = append(b.received, bufferedBranchWrite{
 		prefix:   bytes.Clone(prefix),
 		data:     bytes.Clone(data),
@@ -95,24 +90,16 @@ func TestBufferedPatriciaContextForwardsReadsAndDelaysWrites(t *testing.T) {
 }
 
 func TestBufferedPatriciaContextReplayPreservesOrderAndPrevData(t *testing.T) {
-	directBackend := &bufferedContextBackend{}
-	directWrites := []struct {
-		prefix, data, prevData []byte
-	}{
+	writes := []bufferedBranchWrite{
 		{prefix: []byte{1}, data: []byte{2}, prevData: []byte{3}},
-		{prefix: []byte{4}, data: []byte{5}, prevData: nil},
+		{prefix: []byte{4}, data: []byte{5}},
 		{prefix: []byte{6}, data: []byte{}, prevData: []byte{7}},
 	}
-	for _, write := range directWrites {
-		require.NoError(t, directBackend.PutBranch(write.prefix, write.data, write.prevData))
-	}
-
-	bufferedBackend := &bufferedContextBackend{}
-	ctx := NewBufferedPatriciaContext(bufferedBackend)
-	for _, write := range directWrites {
+	backend := &bufferedContextBackend{}
+	ctx := NewBufferedPatriciaContext(backend)
+	for _, write := range writes {
 		require.NoError(t, ctx.PutBranch(write.prefix, write.data, write.prevData))
 	}
 	require.NoError(t, ctx.Replay())
-
-	require.Equal(t, directBackend.received, bufferedBackend.received)
+	require.Equal(t, writes, backend.received)
 }

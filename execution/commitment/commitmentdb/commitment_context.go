@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -296,25 +297,17 @@ func (sdc *SharedDomainsCommitmentContext) CommitmentDomain() kv.Domain {
 	return kv.CommitmentDomain
 }
 
-func (sdc *SharedDomainsCommitmentContext) commitmentDomainValue() kv.Domain {
-	return sdc.CommitmentDomain()
-}
-
 // trieContext builds the main (root-fold) trie read context. readCtx carries
 // the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
 // metrics); the main fold is single-goroutine so it owns that accumulator
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, putter kv.TemporalPutDel) *TrieContext {
-	return sdc.trieContextWithReader(tx, blockNum, txNum, readCtx, putter, nil)
-}
-
-func (sdc *SharedDomainsCommitmentContext) trieContextWithReader(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, putter kv.TemporalPutDel, stateReader StateReader) *TrieContext {
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, putter kv.TemporalPutDel, stateReader StateReader) *TrieContext {
 	if putter == nil {
 		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
 		putter:           putter,
-		commitmentDomain: sdc.commitmentDomainValue(),
+		commitmentDomain: sdc.CommitmentDomain(),
 		stepSize:         sdc.sharedDomains.StepSize(),
 		txNum:            txNum,
 		blockNum:         blockNum,
@@ -531,7 +524,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 	}
 
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(sdc.commitmentDomainValue(), key)
+	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(sdc.CommitmentDomain(), key)
 	if ok {
 		return commitment.BranchData(enc).ChildCount(), nil
 	}
@@ -539,7 +532,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
 
-	enc, _, err := stateReader.Read(sdc.commitmentDomainValue(), key, sdc.sharedDomains.StepSize())
+	enc, _, err := stateReader.Read(sdc.CommitmentDomain(), key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
@@ -619,7 +612,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	if updateCount == 0 {
 		// The binary trie reads its stored root record here, so the trie has to be
 		// bound to this tx even on the path that touches nothing.
-		sdc.trieContext(tx, blockNum, txNum, ctx, nil)
+		sdc.trieContext(tx, blockNum, txNum, ctx, nil, nil)
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
@@ -634,7 +627,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
 	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
-	trieContext := sdc.trieContextWithReader(tx, blockNum, txNum, readCtx, putter, stateReader)
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter, stateReader)
 	var activeContext commitment.PatriciaContext = trieContext
 	if decorate != nil {
 		activeContext = decorate(activeContext)
@@ -767,7 +760,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		}()
 		for _, c := range collectors {
 			if loadErr := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-				return trieContext.PutBranch(k, v, nil)
+				return activeContext.PutBranch(k, v, nil)
 			}, etl.TransformArgs{}); loadErr != nil {
 				return nil, loadErr
 			}
@@ -847,7 +840,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			putter:           sdc.sharedDomains.AsPutDel(roTx),
-			commitmentDomain: sdc.commitmentDomainValue(),
+			commitmentDomain: sdc.CommitmentDomain(),
 			stepSize:         stepSize,
 			txNum:            txNum,
 			traceW:           sdc.traceW,
@@ -894,7 +887,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			putter:           sdc.sharedDomains.AsPutDel(roTx),
-			commitmentDomain: sdc.commitmentDomainValue(),
+			commitmentDomain: sdc.CommitmentDomain(),
 			stepSize:         stepSize,
 			txNum:            txNum,
 			localCollector:   collector,
@@ -970,7 +963,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if err := trieContext.stateReader.CheckDataAvailable(sdc.commitmentDomainValue(), step); err != nil {
+	if err := trieContext.stateReader.CheckDataAvailable(sdc.CommitmentDomain(), step); err != nil {
 		return 0, 0, nil, err
 	}
 
@@ -1022,7 +1015,7 @@ func SeekCommitments(ctx context.Context, tx kv.TemporalTx, contexts ...*SharedD
 		if !frozen {
 			activeContexts = append(activeContexts, sdc)
 		}
-		trieContext := sdc.trieContext(tx, 0, 0, ctx, nil)
+		trieContext := sdc.trieContext(tx, 0, 0, ctx, nil, nil)
 		candidateBlock, candidateTx, state, candidateErr := sdc.LatestCommitmentState(trieContext)
 		if candidateErr != nil {
 			return 0, 0, candidateErr
@@ -1054,9 +1047,7 @@ func SeekCommitments(ctx context.Context, tx kv.TemporalTx, contexts ...*SharedD
 		if len(candidates) != len(activeContexts) {
 			return 0, 0, fmt.Errorf("%w: commitment state is missing for one or more domains", ErrTornCommitmentDatadir)
 		}
-		allCandidates := make([]commitmentStateCandidate, 0, len(candidates)+len(frozenCandidates))
-		allCandidates = append(allCandidates, candidates...)
-		allCandidates = append(allCandidates, frozenCandidates...)
+		allCandidates := slices.Concat(candidates, frozenCandidates)
 		first := allCandidates[0]
 		for _, candidate := range candidates {
 			if candidate.txNum != first.txNum || candidate.blockNum != first.blockNum {
@@ -1200,11 +1191,7 @@ func (sdc *TrieContext) SetReadCodeSize(v bool) { sdc.readCodeSize = v }
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
 func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
-	return NewTrieContextRoForDomain(reader, stepSize, kv.CommitmentDomain)
-}
-
-func NewTrieContextRoForDomain(reader StateReader, stepSize uint64, commitmentDomain kv.Domain) *TrieContext {
-	return &TrieContext{stateReader: reader, stepSize: stepSize, commitmentDomain: commitmentDomain}
+	return &TrieContext{stateReader: reader, stepSize: stepSize, commitmentDomain: kv.CommitmentDomain}
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {

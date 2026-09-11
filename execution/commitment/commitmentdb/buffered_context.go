@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -31,30 +30,18 @@ type bufferedBranchWrite struct {
 }
 
 type BufferedPatriciaContext struct {
-	inner  commitment.PatriciaContext
+	commitment.PatriciaContext
 	writes []bufferedBranchWrite
 }
 
 func NewBufferedPatriciaContext(inner commitment.PatriciaContext) *BufferedPatriciaContext {
-	return &BufferedPatriciaContext{inner: inner}
-}
-
-func (c *BufferedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	return c.inner.Branch(prefix)
-}
-
-func (c *BufferedPatriciaContext) Account(plainKey []byte) (*commitment.Update, error) {
-	return c.inner.Account(plainKey)
-}
-
-func (c *BufferedPatriciaContext) Storage(plainKey []byte) (*commitment.Update, error) {
-	return c.inner.Storage(plainKey)
+	return &BufferedPatriciaContext{PatriciaContext: inner}
 }
 
 func (c *BufferedPatriciaContext) Code(plainKey []byte) ([]byte, error) {
-	provider, ok := c.inner.(interface{ Code([]byte) ([]byte, error) })
+	provider, ok := c.PatriciaContext.(interface{ Code([]byte) ([]byte, error) })
 	if !ok {
-		return nil, fmt.Errorf("%T serves no code", c.inner)
+		return nil, fmt.Errorf("%T serves no code", c.PatriciaContext)
 	}
 	return provider.Code(plainKey)
 }
@@ -71,7 +58,7 @@ func (c *BufferedPatriciaContext) PutBranch(prefix []byte, data []byte, prevData
 func (c *BufferedPatriciaContext) Replay() error {
 	for i := range c.writes {
 		write := &c.writes[i]
-		if err := c.inner.PutBranch(write.prefix, write.data, write.prevData); err != nil {
+		if err := c.PatriciaContext.PutBranch(write.prefix, write.data, write.prevData); err != nil {
 			return err
 		}
 	}

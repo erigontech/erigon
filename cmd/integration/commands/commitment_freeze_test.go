@@ -86,19 +86,10 @@ func TestFreezeHexCommitmentRejectsUnalignedBinary(t *testing.T) {
 
 func newCommitmentFreezeTest(t *testing.T, blockTime uint64) (kv.TemporalRwTx, *dbstate.Aggregator) {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
+	withBinCommitmentProcess(t, "")
 	previousDual := statecfg.ExperimentalHexBinCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousDual
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
-	statecfg.ExperimentalBinCommitment = true
+	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
 	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.BinCommitmentHash = ""
 	dirs := datadir.New(t.TempDir())
 	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)

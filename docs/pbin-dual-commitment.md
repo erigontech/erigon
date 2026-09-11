@@ -39,6 +39,8 @@ RPC paths.
 | `hex+bin` | `binaryTrieTime` is after genesis time | Hex in `kv.CommitmentDomain`; binary in `kv.CommitmentBinDomain` |
 
 To initialize a new migration datadir, set `COMMITMENT_HEX_BIN=true` on the first invocation.
+Without it, initialization refuses the post-genesis schedule and, unless `COMMITMENT_BIN` is set,
+records no `trie_variant`, so a retry with the variable succeeds on the same datadir.
 The genesis must schedule `amsterdamTime` no later than `binaryTrieTime`, and `binaryTrieTime`
 must be after the genesis timestamp. For example, with a migration genesis at `./pbt-genesis.json`:
 
@@ -101,7 +103,7 @@ files replace the ranges used by ordinary state reads, including after the hex d
 
 The binary domain has no hex branch-cache trunk and no inter-domain dependency. Its files use names
 such as `v1.0-commitment-bin.0-1024.kv`; `ParseFileName` and the snapshot command name tables handle
-the hyphenated type through `db/snaptype/files.go` and `db/snaptype/type.go`.
+the hyphenated type through `db/snaptype/files.go`.
 
 ## Freezing the hex domain
 
@@ -126,9 +128,16 @@ The private debug API in `rpc/jsonrpc/debug_api.go` exposes two migration observ
   `null` when no shadow root is available.
 - `debug_migrationProgress` returns `mode`, `activationTime`, `flipped`, and `shadowStopped`.
   `flipped` is derived from the current head timestamp and `binaryTrieTime`; it is not persisted.
+  `shadowStopped` reads the stop marker of the current shadow domain, so a frozen hex domain or a
+  head that execution has not reached yet does not report a stopped shadow.
 
 These methods make it possible to compare the shadow window with another client and to distinguish a
 stopped shadow fold from a canonical execution failure.
+
+A shadow fold error stops that domain. Execution records the stop with
+`WriteCommitmentDomainStopped` (`db/rawdb/accessors_shadow_root.go`) in the transaction that commits
+the block; the aggregator restores it when it opens, so a restart skips the stopped domain instead of
+refusing a torn datadir. `ResetExec` (`execution/stagedsync/rawdbreset/reset_stages.go`) clears it.
 
 `debug_executionWitness` seeks only the selected trie's parent state. At the activation block, its
 binary parent root comes from the parent's shadow-root record because the parent header still carries
@@ -142,6 +151,9 @@ state root by the simulated timestamp. Frozen hex is excluded from post-activati
 Historical replay uses the selected domain in temporary storage with independent freeze settings;
 `ComputeCustomCommitmentFromStateHistory` (`rpc/rpchelper/commitment.go`) leaves the source freeze
 marker unchanged.
+
+`eth_getProof` and `eth_getWitness` fold only the hex trie. On a `hex+bin` datadir they return
+`ErrBinCommitmentUnsupported` for a block at or after `binaryTrieTime`.
 
 ## Compatibility
 

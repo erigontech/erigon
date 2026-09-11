@@ -37,6 +37,7 @@ type StateChangeSet struct {
 }
 
 const (
+	diffSetMagic         = byte(0xff)
 	diffSetFormatVersion = byte(1)
 	legacyDomainCount    = 6
 )
@@ -249,7 +250,7 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 }
 
 func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
-	out = append(out, diffSetFormatVersion, byte(len(d.Diffs)))
+	out = append(out, diffSetMagic, diffSetFormatVersion, byte(len(d.Diffs)))
 	ret := out
 	tmp := make([]byte, 4)
 	for i := range d.Diffs {
@@ -312,19 +313,21 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 }
 
 func deserializeKeys(in []byte) ([kv.DomainLen][]kv.DomainEntryDiff, error) {
+	if len(in) == 0 || in[0] != diffSetMagic {
+		return deserializeDomains(in, legacyDomainCount)
+	}
+	if len(in) < 3 || in[1] != diffSetFormatVersion {
+		return [kv.DomainLen][]kv.DomainEntryDiff{}, fmt.Errorf("unsupported changeset framing %x", in[:min(len(in), 3)])
+	}
+	return deserializeDomains(in[3:], int(in[2]))
+}
+
+func deserializeDomains(in []byte, domainCount int) ([kv.DomainLen][]kv.DomainEntryDiff, error) {
 	var ret [kv.DomainLen][]kv.DomainEntryDiff
-	domainCount := legacyDomainCount
-	if len(in) >= 2 && in[0] == diffSetFormatVersion {
-		domainCount = int(in[1])
-		in = in[2:]
-		if domainCount > len(ret) {
-			return ret, fmt.Errorf("changeset domain count %d exceeds supported count %d", domainCount, len(ret))
-		}
-	}
 	if domainCount > len(ret) {
-		return ret, fmt.Errorf("legacy changeset domain count %d exceeds supported count %d", domainCount, len(ret))
+		return ret, fmt.Errorf("changeset domain count %d exceeds supported count %d", domainCount, len(ret))
 	}
-	for i := 0; i < domainCount; i++ {
+	for i := range domainCount {
 		if len(in) < 4 {
 			return ret, fmt.Errorf("truncated changeset domain %d length", i)
 		}
@@ -335,6 +338,9 @@ func deserializeKeys(in []byte) ([kv.DomainLen][]kv.DomainEntryDiff, error) {
 		}
 		ret[i] = DeserializeDiffSet(in[:diffSetLen])
 		in = in[diffSetLen:]
+	}
+	if len(in) != 0 {
+		return ret, fmt.Errorf("changeset has %d trailing bytes after %d domains", len(in), domainCount)
 	}
 	return ret, nil
 }

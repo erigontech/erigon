@@ -97,7 +97,7 @@ func TestPBinExecutionWitnessRejectsCanonicalRequest(t *testing.T) {
 	base := newBaseApiForTest(m)
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
-	require.True(t, binCommitmentTrie(base._chainConfig.Load(), m.Genesis.HeaderNoCopy()))
+	require.True(t, base._chainConfig.Load().IsBinaryTrie(m.Genesis.Time()))
 
 	canonical := "canonical"
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)

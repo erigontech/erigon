@@ -77,8 +77,6 @@ func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 			got, err := readErigonDBSettings(path)
 			require.NoError(t, err)
 			require.Equal(t, variant, got.TrieVariantName())
-			require.Equal(t, variant != TrieVariantBin, got.HasTrieVariant(TrieVariantHex))
-			require.Equal(t, variant != TrieVariantHex, got.HasTrieVariant(TrieVariantBin))
 		})
 	}
 }

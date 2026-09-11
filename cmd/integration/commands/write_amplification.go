@@ -19,6 +19,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -162,7 +163,12 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 
 	results := make([]domainStats, 0, len(domains))
 
+	commitmentDomains := aggTx.CommitmentDomains()
 	for _, domain := range domains {
+		if domain == kv.CommitmentBinDomain && !slices.Contains(commitmentDomains, domain) {
+			logger.Warn("Skipping domain not present in this datadir", "domain", domain.String())
+			continue
+		}
 		logger.Info("Processing domain", "domain", domain.String())
 
 		stats, err := calculateDomainWriteAmplification(ctx, tx, aggTx, domain, logger)

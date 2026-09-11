@@ -113,10 +113,10 @@ func TestConfigureHexRegistersSixDomains(t *testing.T) {
 	require.NotContains(t, capture.domains, kv.CommitmentBinDomain)
 }
 
-func TestConfigureBinRegistersCommitmentBinWithoutDependency(t *testing.T) {
-	original := ExperimentalBinCommitment
-	t.Cleanup(func() { ExperimentalBinCommitment = original })
-	ExperimentalBinCommitment = true
+func TestConfigureHexBinRegistersCommitmentBinWithoutDependency(t *testing.T) {
+	bin, hexBin := ExperimentalBinCommitment, ExperimentalHexBinCommitment
+	t.Cleanup(func() { ExperimentalBinCommitment, ExperimentalHexBinCommitment = bin, hexBin })
+	ExperimentalBinCommitment, ExperimentalHexBinCommitment = true, true
 
 	capture := new(schemaCapture)
 	require.NoError(t, Configure(Schema, capture, datadir.New(t.TempDir()), nil, log.New()))
@@ -141,4 +141,15 @@ func TestCommitmentBinSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cfg.Name, versioned.(DomainCfg).Name)
 	require.Equal(t, cfg.ValuesTable, versioned.(DomainCfg).ValuesTable)
+}
+
+func TestConfigureBinOnlySkipsCommitmentBin(t *testing.T) {
+	bin, hexBin := ExperimentalBinCommitment, ExperimentalHexBinCommitment
+	t.Cleanup(func() { ExperimentalBinCommitment, ExperimentalHexBinCommitment = bin, hexBin })
+	ExperimentalBinCommitment, ExperimentalHexBinCommitment = true, false
+
+	capture := new(schemaCapture)
+	require.NoError(t, Configure(Schema, capture, datadir.New(t.TempDir()), nil, log.New()))
+	require.Contains(t, capture.domains, kv.CommitmentDomain)
+	require.NotContains(t, capture.domains, kv.CommitmentBinDomain)
 }

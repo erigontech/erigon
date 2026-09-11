@@ -181,6 +181,15 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger lo
 	a.canonicalCommitment.Store(uint32(kv.CommitmentDomain))
 	if a.trieVariant == TrieVariantHexBin && db != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
+			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+				stopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
+				if err != nil {
+					return err
+				}
+				if stopped {
+					a.StopCommitmentDomain(domain)
+				}
+			}
 			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
 				return err
@@ -339,6 +348,12 @@ func (a *Aggregator) CommitmentDomainStopped(domain kv.Domain) bool {
 	return domain < kv.DomainLen && a.stoppedCommitment[domain].Load()
 }
 
+func (a *Aggregator) ClearStoppedCommitmentDomains() {
+	for i := range a.stoppedCommitment {
+		a.stoppedCommitment[i].Store(false)
+	}
+}
+
 func (a *Aggregator) setFrozenAtTxNums(values map[string]uint64) {
 	a.frozenMu.Lock()
 	defer a.frozenMu.Unlock()
@@ -400,9 +415,6 @@ func (a *Aggregator) CommitmentDomains() []kv.Domain {
 	if a.trieVariant == TrieVariantHexBin {
 		return []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
 	}
-	if a.trieVariant == TrieVariantBin {
-		return []kv.Domain{kv.CommitmentDomain}
-	}
 	return []kv.Domain{kv.CommitmentDomain}
 }
 
@@ -425,11 +437,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	domain := kv.CommitmentDomain
-	if a.d[domain] == nil {
-		return false
-	}
-	return a.d[domain].ReferencesInCommitmentBranches
+	cd := a.d[kv.CommitmentDomain]
+	return cd != nil && cd.ReferencesInCommitmentBranches
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -880,11 +889,9 @@ func (a *Aggregator) Close() {
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
 	// BranchCaches size their trunk depth against real concurrency.
-	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if cd := a.d[domain]; cd != nil && cd.branchCache != nil {
-			cd.branchCache.Clear()
-			cd.branchCache.Close()
-		}
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.Clear()
+		cd.branchCache.Close()
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -2153,19 +2160,12 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 
 	r := &Ranges{}
 	// Account/storage must stay range-aligned with commitment whenever referencing is active.
-	commitmentDomain := kv.CommitmentDomain
-	commitmentMergeReferencing := !at.a.isDomainFrozen(commitmentDomain) && !at.a.CommitmentDomainStopped(commitmentDomain) &&
+	commitmentMergeReferencing := !at.a.isDomainFrozen(kv.CommitmentDomain) && !at.a.CommitmentDomainStopped(kv.CommitmentDomain) &&
 		(at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced())
-	var lmrAcc, lmrSto MergeRange
 	if commitmentMergeReferencing {
-		lmrAcc = at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
-		lmrSto = at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
-		if at.d[commitmentDomain] == nil {
-			commitmentMergeReferencing = false
-		}
-	}
-	if commitmentMergeReferencing {
-		lmrCom := at.d[commitmentDomain].files.LatestMergedRange(stepSize)
+		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
+		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
+		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange(stepSize)
 
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal
@@ -2858,7 +2858,7 @@ func (at *AggregatorRoTx) BranchCache(domain kv.Domain) *commitment.BranchCache 
 	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[domain].d.BranchCache(domain)
+	return at.d[domain].d.BranchCache()
 }
 
 // AdaptivePinController attached to the commitment domain (implements
@@ -2867,7 +2867,7 @@ func (at *AggregatorRoTx) AdaptivePinController(domain kv.Domain) *commitment.Ad
 	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[domain].d.AdaptivePinController(domain)
+	return at.d[domain].d.AdaptivePinController()
 }
 
 // MetricsCollector exposes the aggregator-scope KV-read metrics collector,

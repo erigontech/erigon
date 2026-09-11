@@ -149,10 +149,7 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
 	refs := s.RefsInCommitmentBranches()
 	opts.referencesInCommitmentBranches = &refs
-	if s.FrozenAtTxNum != nil {
-		opts.frozenAtTxNum = make(map[string]uint64, len(s.FrozenAtTxNum))
-		maps.Copy(opts.frozenAtTxNum, s.FrozenAtTxNum)
-	}
+	opts.frozenAtTxNum = maps.Clone(s.FrozenAtTxNum)
 	return opts
 }
 

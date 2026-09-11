@@ -242,7 +242,7 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 			}
 			tx := &commitmentBranchLookupTx{data: []byte("database"), step: 9}
 			stats := new(balCommitmentCacheStats)
-			ctx := &balCommitmentContext{tx: tx, cache: cache, cacheStats: stats}
+			ctx := &balCommitmentContext{tx: tx, domain: kv.CommitmentDomain, cache: cache, cacheStats: stats}
 
 			got, step, err := ctx.Branch(key)
 			require.NoError(t, err)

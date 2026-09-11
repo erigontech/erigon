@@ -133,8 +133,6 @@ func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Equal(t, TrieVariantHexBin, settings.TrieVariantName())
-	require.True(t, settings.HasTrieVariant(TrieVariantHex))
-	require.True(t, settings.HasTrieVariant(TrieVariantBin))
 	require.True(t, settings.RefsInCommitmentBranches())
 	require.True(t, statecfg.ExperimentalParallelCommitment)
 	require.True(t, statecfg.ExperimentalBinCommitment)
