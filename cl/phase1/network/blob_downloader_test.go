@@ -1209,4 +1209,3 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *te
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "a partially stored archive slot must stay queued")
 }
-
