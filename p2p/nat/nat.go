@@ -67,20 +67,17 @@ type Interface interface {
 //	"stun"               uses STUN to detect an external IP using a default server
 //	"stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 func Parse(spec string) (Interface, error) {
-	var (
-		parts = strings.SplitN(spec, ":", 2)
-		mech  = strings.ToLower(parts[0])
-	)
-	switch mech {
+	mech, arg, hasArg := strings.Cut(spec, ":")
+	switch strings.ToLower(mech) {
 	case "", "none", "off":
 		return nil, nil
 	case "any", "auto", "on":
 		return Any(), nil
 	case "extip", "ip":
-		if len(parts) < 2 {
+		if !hasArg {
 			return nil, errors.New("missing IP address")
 		}
-		ip := net.ParseIP(parts[1])
+		ip := net.ParseIP(arg)
 		if ip == nil {
 			return nil, errors.New("invalid IP address")
 		}
@@ -89,21 +86,17 @@ func Parse(spec string) (Interface, error) {
 		return UPnP(), nil
 	case "pmp", "natpmp", "nat-pmp":
 		var ip net.IP
-		if len(parts) > 1 {
-			ip = net.ParseIP(parts[1])
+		if hasArg {
+			ip = net.ParseIP(arg)
 			if ip == nil {
 				return nil, errors.New("invalid IP address")
 			}
 		}
 		return PMP(ip), nil
 	case "stun":
-		var addr string
-		if len(parts) > 1 {
-			addr = parts[1]
-		}
-		return NewSTUN(addr), nil
+		return NewSTUN(arg), nil
 	default:
-		return nil, fmt.Errorf("unknown mechanism %q", parts[0])
+		return nil, fmt.Errorf("unknown mechanism %q", mech)
 	}
 }
 
