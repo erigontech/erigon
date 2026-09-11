@@ -1925,7 +1925,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
-			s.t.DeepHash(addrHash[:])
+			if _, _, err := s.t.DeepHash(addrHash[:]); err != nil {
+				return common.Hash{}, err
+			}
 		}
 	}
 
@@ -1949,7 +1951,10 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	for addr := range updatedAccounts {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash := crypto.Keccak256Hash(addr[:])
-			gotRoot, root := s.t.DeepHash(addrHash[:])
+			gotRoot, root, err := s.t.DeepHash(addrHash[:])
+			if err != nil {
+				return common.Hash{}, err
+			}
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root
