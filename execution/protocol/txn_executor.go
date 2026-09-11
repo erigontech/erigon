@@ -619,7 +619,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
+		if err := st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall); err != nil {
+			return nil, err
+		}
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
@@ -680,7 +682,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, vmerr
 		}
 		if contractCreation {
-			st.state.SetNonce(sender, createNonce+1, tracing.NonceChangeContractCreator)
+			if err := st.state.SetNonce(sender, createNonce+1, tracing.NonceChangeContractCreator); err != nil {
+				return nil, err
+			}
 		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 		gasUsed.consumeAllExecutionGas(runtimeGas.Execution)
@@ -726,7 +730,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
-		st.refundGas()
+		if err := st.refundGas(); err != nil {
+			return nil, err
+		}
 	case rules.IsAmsterdam:
 		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
@@ -782,7 +788,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			}
 
 			if !st.noFeeBurnAndTip {
-				st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+				if err := st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -963,13 +971,13 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) refundGas() {
+func (st *TxnExecutor) refundGas() error {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	return st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 }
 
 func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {

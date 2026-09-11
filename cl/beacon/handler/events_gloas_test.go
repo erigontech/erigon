@@ -14,18 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package dbfinality
+package handler
 
 import (
-	"context"
+	"testing"
 
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 )
 
-// Context defines immutable block boundaries for database retention work.
-type Context interface {
-	PruneToBlockNum() uint64
-	RetireToBlockNum() uint64
-	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+func TestGloasEventTopicsAreValid(t *testing.T) {
+	for _, topic := range []beaconevents.EventTopic{
+		beaconevents.StateHeadV2,
+		beaconevents.OpExecutionPayload,
+		beaconevents.OpExecutionPayloadGossip,
+		beaconevents.OpExecutionPayloadAvailable,
+		beaconevents.OpExecutionPayloadBid,
+		beaconevents.OpPayloadAttestationMessage,
+		beaconevents.OpProposerPreferences,
+	} {
+		_, ok := validTopics[topic]
+		require.True(t, ok, topic)
+	}
+}
+
+func TestFastConfirmationTopicIsNotAdvertisedBeforeItHasAProducer(t *testing.T) {
+	_, ok := validTopics[beaconevents.EventTopic("fast_confirmation")]
+	require.False(t, ok)
 }

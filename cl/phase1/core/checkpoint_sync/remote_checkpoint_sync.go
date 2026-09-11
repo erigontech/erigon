@@ -128,8 +128,6 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 }
 
 // FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
-// [New in Gloas:EIP7732] The anchor envelope is needed so that the fork graph knows whether the
-// finalized block was FULL (had its payload executed) or EMPTY.
 func (r *RemoteCheckpointSync) FetchFinalizedEnvelope(ctx context.Context) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	uris := clparams.GetAllCheckpointSyncEndpoints(r.net)
 	for _, uri := range uris {
@@ -146,15 +144,12 @@ func (r *RemoteCheckpointSync) FetchFinalizedEnvelope(ctx context.Context) (*clt
 func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI string) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	stateURI = normalizeCheckpointURL(stateURI)
 
-	// Derive the envelope URL from the state URL.
-	// State:    .../eth/v2/debug/beacon/states/{state_id}
-	// Envelope: .../eth/v1/beacon/execution_payload_envelope/{state_id}
 	before, _, found := strings.Cut(stateURI, "/eth/")
 	if !found {
 		return nil, fmt.Errorf("cannot derive envelope URL from %s", stateURI)
 	}
 	stateId := stateURI[strings.LastIndex(stateURI, "/")+1:]
-	envelopeURI := before + "/eth/v1/beacon/execution_payload_envelope/" + stateId
+	envelopeURI := before + "/eth/v1/beacon/execution_payload_envelopes/" + stateId
 
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
