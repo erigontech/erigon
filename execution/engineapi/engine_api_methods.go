@@ -32,6 +32,8 @@ import (
 
 var errInvalidPayloadID = errors.New("invalid payload id: expected 8 bytes")
 
+var errCurrentHeaderUnavailable = errors.New("current header unavailable")
+
 func decodePayloadID(payloadID hexutil.Bytes) (uint64, error) {
 	if len(payloadID) != 8 {
 		return 0, errInvalidPayloadID
@@ -281,10 +283,12 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	if currentHeader := e.chainRW.CurrentHeader(ctx); currentHeader != nil {
-		if e.config.IsOsaka(currentHeader.Time) {
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
+	currentHeader := e.chainRW.CurrentHeader(ctx)
+	if currentHeader == nil {
+		return nil, errCurrentHeaderUnavailable
+	}
+	if e.config.IsOsaka(currentHeader.Time) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {

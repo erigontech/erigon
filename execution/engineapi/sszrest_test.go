@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
@@ -390,6 +391,7 @@ func TestSSZRESTErrorMapping(t *testing.T) {
 		{&engine_helpers.InvalidForkchoiceStateErr, http.StatusConflict},
 		{&engine_helpers.InvalidPayloadAttributesErr, http.StatusUnprocessableEntity},
 		{&engine_helpers.TooLargeRequestErr, http.StatusRequestEntityTooLarge},
+		{&rpc.UnsupportedForkError{Message: "Unsupported fork"}, http.StatusNotFound},
 		{errors.New("boom"), http.StatusInternalServerError},
 	} {
 		rec := httptest.NewRecorder()

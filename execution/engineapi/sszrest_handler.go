@@ -166,6 +166,9 @@ func writeEngineError(w http.ResponseWriter, err error) {
 		case engine_helpers.TooLargeRequestErr.Code:
 			writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 			return
+		case rpc.UnsupportedForkErrorCode:
+			writeSSZError(w, http.StatusNotFound, err.Error())
+			return
 		}
 	}
 	writeSSZError(w, http.StatusInternalServerError, err.Error())

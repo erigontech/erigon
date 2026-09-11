@@ -102,10 +102,12 @@ func (e *InvalidParamsError) ErrorCode() int { return -32602 }
 
 func (e *InvalidParamsError) Error() string { return e.Message }
 
+const UnsupportedForkErrorCode = -38005
+
 // mismatch between the Engine API method version and the fork
 type UnsupportedForkError struct{ Message string }
 
-func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
+func (e *UnsupportedForkError) ErrorCode() int { return UnsupportedForkErrorCode }
 
 func (e *UnsupportedForkError) Error() string { return e.Message }
 

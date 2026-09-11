@@ -19,6 +19,7 @@ package engineapi
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -403,7 +405,6 @@ func TestGetBlobsV1PostOsakaRejection(t *testing.T) {
 	// Osaka is active (AllProtocolChanges has Osaka enabled from genesis):
 	// GetBlobsV1 must return UnsupportedForkError
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	oneBlockStep(mockSentry, require)
 
 	txPoolClient := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 	executionRpc := mockSentry.ExecModule
@@ -416,5 +417,24 @@ func TestGetBlobsV1PostOsakaRejection(t *testing.T) {
 	_, err := engineServer.GetBlobsV1(ctx, []common.Hash{{}})
 	var rpcErr *rpc.UnsupportedForkError
 	require.ErrorAs(err, &rpcErr)
-	require.Equal("Unsupported fork", rpcErr.Message)
+	require.Equal(-38005, rpcErr.ErrorCode())
+}
+
+// CurrentHeader reports execution module errors as a nil header, which must not
+// let GetBlobsV1 skip the fork gate and serve pre-Osaka proofs.
+func TestGetBlobsV1HeadUnavailable(t *testing.T) {
+	require := require.New(t)
+
+	engineServer := NewEngineServer(log.New(), chain.AllProtocolChanges, headUnavailableExecutionModule{}, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, ethconfig.Defaults.MaxReorgDepth)
+
+	_, err := engineServer.GetBlobsV1(context.Background(), []common.Hash{{}})
+	require.ErrorIs(err, errCurrentHeaderUnavailable)
+}
+
+type headUnavailableExecutionModule struct {
+	execmodule.ExecutionModule
+}
+
+func (headUnavailableExecutionModule) CurrentHeader(context.Context) (*types.Header, error) {
+	return nil, errors.New("execution module unavailable")
 }
