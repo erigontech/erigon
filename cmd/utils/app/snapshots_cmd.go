@@ -430,7 +430,7 @@ var snapshotCommand = cli.Command{
 			Description: "run slow validation of files. use --check to run multiple/single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s, plus %s", integrity.FastChecks, integrity.TorrentPieces)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after the 1st problem, or WARN and keep checking (a torrent piece-hash mismatch still fails the run)"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
@@ -1675,6 +1675,19 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return doPublishable(dirs, chainDB)
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
+		case integrity.CaplinBlobSidecars:
+			if res.CaplinSnaps == nil {
+				if checkStr != "" {
+					return fmt.Errorf("CaplinBlobSidecars: caplin snapshots are unavailable on chain %s", chainConfig.ChainName)
+				}
+				logger.Info("[integrity] CaplinBlobSidecars skipped because caplin snapshots are unavailable on this chain")
+				return nil
+			}
+			_, beaconCfg, _, err := clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+			if err != nil {
+				return err
+			}
+			return integrity.CheckCaplinBlobSidecars(ctx, chainDB, res.CaplinSnaps, beaconCfg, failFast, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
