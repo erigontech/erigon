@@ -280,6 +280,13 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 
 	storableSidecars := []*sidecarsPayload{}
 	currentSidecarsPayload := &sidecarsPayload{blockRoot: identifiers.Get(0).BlockRoot}
+	// Structure first: the slot read below and the loop's hashing both go through the nested header,
+	// which a decoded response can leave absent.
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return 0, 0, errors.New("blob response contains incomplete sidecar")
+		}
+	}
 	lastProcessed := sidecars[0].SignedBlockHeader.Header.Slot
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
