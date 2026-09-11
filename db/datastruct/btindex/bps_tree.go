@@ -196,6 +196,7 @@ type pivots struct {
 	prefixCounts []uint32
 	prefixBits   uint
 	stride       uint64
+	count        int
 }
 
 const nodePreallocCap = 1 << 20
@@ -204,6 +205,7 @@ func newPivots(count uint64) pivots {
 	nd := pivots{
 		nodeOfft:   make([]uint32, 0, min(count, nodePreallocCap)),
 		prefixBits: min(uint(bits.Len64(count)), 16),
+		count:      int(count),
 	}
 	if BtPrefixSeed {
 		nd.prefixCounts = make([]uint32, 1<<nd.prefixBits+1)
@@ -212,15 +214,12 @@ func newPivots(count uint64) pivots {
 }
 
 func (nd *pivots) add(off uint32, key []byte) {
+	if len(nd.nodeOfft) == cap(nd.nodeOfft) {
+		nd.nodeOfft = append(make([]uint32, 0, min(2*cap(nd.nodeOfft), nd.count)), nd.nodeOfft...)
+	}
 	nd.nodeOfft = append(nd.nodeOfft, off)
 	if nd.prefixCounts != nil {
 		nd.prefixCounts[(nodePrefix(key)>>(16-nd.prefixBits))+1]++
-	}
-}
-
-func (nd *pivots) shrink() {
-	if cap(nd.nodeOfft) > len(nd.nodeOfft) {
-		nd.nodeOfft = append(make([]uint32, 0, len(nd.nodeOfft)), nd.nodeOfft...)
 	}
 }
 
@@ -249,7 +248,6 @@ func decodeNodes(data []byte, count uint64) (_ pivots, end int, err error) {
 		nd.add(uint32(pos), data[pos+2:pos+2+l])
 		pos += 2 + l
 	}
-	nd.shrink()
 	return nd, pos, nil
 }
 
@@ -300,7 +298,6 @@ func decodeListNodesV0(data []byte) (_ pivots, end int, err error) {
 		nd.add(uint32(pos+8), data[pos+10:pos+10+l]) // skip on-disk di; offset points at the keyLen prefix
 		pos += 10 + l
 	}
-	nd.shrink()
 	return nd, pos, nil
 }
 
