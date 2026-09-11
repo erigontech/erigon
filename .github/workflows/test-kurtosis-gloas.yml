@@ -400,6 +400,7 @@ jobs:
 
       - name: Verify Gloas genesis and payload attestations through the Beacon API
         if: matrix.suite == 'gloas-caplin-genesis'
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
@@ -413,6 +414,7 @@ jobs:
             --retry 4
             --retry-delay 1
             --retry-connrefused
+            --retry-max-time 30
             --connect-timeout 5
             --max-time 15
           )
@@ -439,6 +441,7 @@ jobs:
           initial_head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json")
           target_head_slot=$((initial_head_slot + 8))
           last_head_slot=$initial_head_slot
+          next_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
           deadline=$((SECONDS + 180))
           payload_attestation_found=false
           while ((SECONDS < deadline)); do
@@ -447,8 +450,10 @@ jobs:
               --output "$api_tmp_dir/head.json"
             head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json")
             last_head_slot=$head_slot
-            first_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
-            for ((slot = first_slot; slot <= head_slot; slot++)); do
+            for ((slot = next_slot; slot <= head_slot; slot++)); do
+              if ((SECONDS >= deadline)); then
+                break 2
+              fi
               if curl "${curl_args[@]}" \
                 "$beacon_url/eth/v2/beacon/blocks/$slot" \
                 --output "$api_tmp_dir/candidate.json"; then
@@ -467,13 +472,17 @@ jobs:
                       test("^0x[0-9a-fA-F]{192}$") and
                       (test("^0x0+$"; "i") | not)
                     )
+                  ) and
+                  any(.data.message.body.payload_attestations[];
+                    .data.payload_present == true
                   )
                 ' "$api_tmp_dir/candidate.json"; then
-                  echo "Found payload attestations in Gloas block at slot $slot"
+                  echo "Found available payload attestations in Gloas block at slot $slot"
                   payload_attestation_found=true
                   break 2
                 fi
               fi
+              next_slot=$((slot + 1))
             done
             if ((head_slot >= target_head_slot)); then
               break
