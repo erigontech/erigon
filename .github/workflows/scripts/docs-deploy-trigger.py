@@ -33,6 +33,7 @@ import sys
 import yaml
 
 STR_TAG = 'tag:yaml.org,2002:str'
+BOOL_TAG = 'tag:yaml.org,2002:bool'
 MAP_TAG = 'tag:yaml.org,2002:map'
 SEQ_TAG = 'tag:yaml.org,2002:seq'
 
@@ -51,8 +52,15 @@ def target_path():
     return os.environ.get('DEPLOY_YML', '.github/workflows/docs-deploy.yml')
 
 
-def _value_of(node, *keys):
+def _value_of(node, *keys, key_tags=(STR_TAG,)):
     """The value node of `keys` in a mapping node, refusing a duplicate.
+
+    `key_tags` are the tags the KEY itself may carry. Checking the value's tag
+    is not enough: `!unknown on:` tags the key, and GitHub's parser rejects the
+    workflow, but a lookup that compares only `key.value` accepts it. The bare
+    `on` key needs BOOL_TAG in that set, because YAML 1.1 resolves `on` to a
+    boolean -- quoting it is what makes it a string -- so both spellings of the
+    same trigger have to pass.
 
     A duplicate key is the one shape where "read it the way GitHub reads it"
     has no answer to give. YAML itself calls it an error; js-yaml raises;
@@ -66,7 +74,8 @@ def _value_of(node, *keys):
     if not isinstance(node, yaml.MappingNode):
         return None
     found = [value for key, value in node.value
-             if isinstance(key, yaml.ScalarNode) and key.value in keys]
+             if isinstance(key, yaml.ScalarNode) and key.value in keys
+             and key.tag in key_tags]
     if len(found) > 1:
         raise Unreadable(f'{keys[0]}: appears {len(found)} times'
                          ' - refusing to guess which one GitHub reads')
@@ -100,17 +109,33 @@ def branch_nodes(src):
     # `On:` and `ON:` are therefore different keys and not triggers at all, so
     # reading a pin out of one would report a pin on a file that has no push
     # trigger and let a repoint "succeed" on a workflow GitHub cannot load.
-    trigger = _value_of(root, 'on')
+    trigger = _value_of(root, 'on', key_tags=(STR_TAG, BOOL_TAG))
     if trigger is None:
         raise Unreadable('no on: block')
     push = _value_of(trigger, 'push')
     if push is None:
         raise Unreadable('no push: trigger - refusing to edit blindly')
 
+    branches_key = None
+    for key, value in push.value if isinstance(push, yaml.MappingNode) else ():
+        if isinstance(key, yaml.ScalarNode) and key.value == 'branches':
+            branches_key = key
+            break
     branches = _value_of(push, 'branches')
     if branches is None or not isinstance(branches, yaml.SequenceNode):
         raise Unreadable('the push: trigger has no branches: list'
                          ' - refusing to edit blindly')
+    # `branches: *b` resolves to the very node the anchor named, so its span is
+    # wherever that anchor was written -- possibly another key. Rewriting by
+    # span would then edit THAT key: with `paths: &b [release/3.6]` above it,
+    # repointing rewrote the path filter, and the pre-write check still passed
+    # because the alias made branches read the new value too. An anchor must be
+    # defined before the alias that uses it, so a value starting before its own
+    # key is exactly this case.
+    if branches_key is not None and \
+            branches.start_mark.index < branches_key.end_mark.index:
+        raise Unreadable('branches: is an alias of a list defined elsewhere'
+                         ' - refusing to rewrite another key by its span')
     # An unresolvable tag anywhere on the path is a workflow GitHub rejects
     # outright, and a custom-tagged mapping still composes to a MappingNode --
     # so without this the pre-write verification would happily bless

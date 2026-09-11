@@ -59,7 +59,13 @@ jobs:
           # for every pull request, to load a single module.
           js_yaml_version="$(python3 -c \
             "import json; print(json.load(open('docs/site/package-lock.json'))['packages']['node_modules/js-yaml']['version'])")"
-          npm install --no-save --no-audit --no-fund \
+          # --ignore-scripts: this job's token carries actions: write, and the
+          # version string is a pin, not a lockfile — it does not carry the
+          # resolved integrity hash or the locked transitive tree. Refusing to
+          # run lifecycle scripts is what keeps a compromised publish from
+          # executing against that token. js-yaml has no install scripts today;
+          # this is about what it could grow, or what a dependency could.
+          npm install --no-save --no-audit --no-fund --ignore-scripts \
             --prefix "${RUNNER_TEMP}/oracle" "js-yaml@${js_yaml_version}"
 
           JS_YAML_FROM="${RUNNER_TEMP}/oracle" \

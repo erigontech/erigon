@@ -971,6 +971,10 @@ jobs:
             # no approval in exactly the misconfiguration this asserts against.
             echo "::error::Could not read protection rules for release-branch-management."
             echo "Refusing to flip the published docs series without confirming the approval gate."
+            echo "Two things look identical from here and both are refused on purpose: an"
+            echo "environment with no protection rules, and an environment this token cannot read."
+            echo "GitHub documents this endpoint as needing only repository read access, so if it"
+            echo "is returning 403, check what the release App is actually installed with."
             exit 1
           elif ! echo "$rules" | grep -q 'required_reviewers'; then
             echo "::error::Environment release-branch-management has no required_reviewers rule (rules: ${rules:-none})."
@@ -987,6 +991,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
           TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
         run: |
           set -euo pipefail
 
@@ -1033,8 +1038,17 @@ jobs:
           # one" deadlocks the case that rule exists for: two series behind,
           # detect prepares 3.7 on every run and this gate rejects 3.7 as
           # superseded by 3.8, so the cutover can never complete.
-          minor_now="${current_series#*.}"
-          major_now="${current_series%%.*}"
+          # Evaluated from the branch this run was PREPARED against, not from
+          # the variable's current value. Someone flipping the variable to
+          # TARGET while this job waits for approval is a supported case, handled
+          # at the end of this step — but deriving the next series from the
+          # flipped value makes TARGET look already-past, so the "nothing to flip
+          # to" refusal below fires and that supported case never reaches its
+          # handler. The question here is "is TARGET still the next step from
+          # where this run started", which is what CURRENT_BRANCH answers.
+          base_series="${CURRENT_BRANCH#release/}"
+          minor_now="${base_series#*.}"
+          major_now="${base_series%%.*}"
           series="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
@@ -1051,8 +1065,9 @@ jobs:
                 '($1 > M) || ($1 == M && $2 > N)' \
             | head -n1 || true)"
           if [ -z "$next_series" ]; then
-            echo "::error::DOCS_DEPLOY_BRANCH (${DEPLOY_BRANCH}) already names the newest stable series."
-            echo "There is nothing to flip to. Refusing."
+            echo "::error::No stable series above ${CURRENT_BRANCH} is visible at approval time."
+            echo "This run was prepared to publish ${TARGET_BRANCH}; there is now nothing above the"
+            echo "branch it started from, so the release it was prepared for has gone. Refusing."
             exit 1
           fi
           next_branch="release/${next_series}"

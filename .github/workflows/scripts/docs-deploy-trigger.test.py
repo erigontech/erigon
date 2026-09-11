@@ -312,6 +312,19 @@ def run():
         ("explicit key ? on", "? on\n:\n  push:\n    branches:\n      - release/3.6\n"),
     ):
         check(f"{label} key", parse(doc + TAIL), ["release/3.6"])
+
+    # ...and a tag on the KEY is not one of them. GitHub's parser rejects an
+    # unresolvable tag, but a lookup comparing only key.value accepts it, so the
+    # key's own tag is checked too. A bare `on` key carries YAML 1.1's BOOLEAN
+    # tag and a quoted one carries the string tag; both are the same trigger, so
+    # the check has to admit both and still refuse anything else.
+    for label, doc in (
+        ("custom tag on the on: key", "!unknown on:\n  push:\n    branches: [release/3.6]\n"),
+        ("custom tag on the push: key", "on:\n  !unknown push:\n    branches: [release/3.6]\n"),
+        ("custom tag on the branches: key",
+         "on:\n  push:\n    !unknown branches: [release/3.6]\n"),
+    ):
+        check(f"{label} refused", parse(doc + TAIL), "NO_LIST")
     # ...but capitalisation is not that difference. GitHub parses workflows
     # with the `yaml` npm package (YAML 1.2, where `on` is a string, not a
     # boolean) and matches the literal lowercase key from its own schema, so
@@ -410,6 +423,29 @@ def run():
               result.endswith(TAIL), True)
         if keeps:
             check(f"repoint {label} keeps its trailing comment", keeps in result, True)
+
+    # `branches: *b` IS the node the anchor named, so its source span sits
+    # wherever that anchor was written. With the anchor on another key, a
+    # span rewrite edits THAT key — repointing rewrote `paths` and the
+    # pre-write check still passed, because the alias made branches read the
+    # new value too. Refused, and the file is left alone.
+    aliased_elsewhere = ("on:\n  push:\n    paths: &b [release/3.6]\n"
+                         "    branches: *b\n" + TAIL)
+    check("branches aliasing another key reads as unreadable",
+          parse(aliased_elsewhere), "NO_LIST")
+    rc, _, result = run_cli(aliased_elsewhere, ["--repoint", "release/3.7"])
+    check("branches aliasing another key refuses", rc != 0, True)
+    check("branches aliasing another key unchanged", result, aliased_elsewhere)
+
+    # The mirror image must still WORK: the anchor on branches itself, aliased
+    # into another key. Those really are one list, so rewriting both is what
+    # the document says.
+    anchor_on_branches = ("on:\n  push:\n    branches: &b\n      - release/3.6\n"
+                          "    tags: *b\n" + TAIL)
+    check("anchor on branches still reads", parse(anchor_on_branches), ["release/3.6"])
+    rc, _, result = run_cli(anchor_on_branches, ["--repoint", "release/3.7"])
+    check("anchor on branches still repoints", rc, 0)
+    check("anchor on branches reads back as one entry", parse(result), ["release/3.7"])
 
     # The one case where dropping the anchor would change meaning: something
     # else aliases it. The rewrite is then unparseable, and the pre-write
