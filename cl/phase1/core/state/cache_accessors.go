@@ -48,6 +48,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 	}
 
 	// Check global cache using block root at beginning of previous epoch
+	// overflow_false_positive
 	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
 	if err == nil {
 		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {

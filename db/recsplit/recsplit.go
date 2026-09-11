@@ -82,9 +82,18 @@ func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (
  * @return a 64-bit integer obtained by mixing the bits of `z`.
  */
 
+// wmul, wadd and wsub are this package's deliberately modular arithmetic. The
+// wraparound is load-bearing, so it is expressed here once rather than at each
+// use — the same operations Rust spells wrapping_mul/wrapping_add/wrapping_sub.
+// Package-level -overflowdetect exemption does not cover these, because they
+// are inlined into instrumented callers.
+
+// overflow_false_positive
+func wmul(a, b uint64) uint64 { return a * b }
+
 func remix(z uint64) uint64 {
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+	z = wmul(z^(z>>30), 0xbf58476d1ce4e5b9)
+	z = wmul(z^(z>>27), 0x94d049bb133111eb)
 	return z ^ (z >> 31)
 }
 

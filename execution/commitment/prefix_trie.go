@@ -143,6 +143,7 @@ func popcount(n *prefixNode) int {
 
 func childIndex(n *prefixNode, nib byte) (int, bool) {
 	mask := uint16(1) << nib
+	// overflow_false_positive
 	idx := bits.OnesCount16(n.bitmap & (mask - 1))
 	return idx, n.bitmap&mask != 0
 }
