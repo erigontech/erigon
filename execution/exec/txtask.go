@@ -34,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -549,6 +551,18 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
+		if det, ok := engine.(systemTxDetector); ok {
+			isSys, sysErr := det.IsSystemTransaction(txTask.Tx(), header)
+			if sysErr != nil {
+				result.Err = sysErr
+				return &result
+			}
+			if isSys {
+				result = *txTask.executeSystemTx(evm, ibs)
+				break
+			}
+		}
+
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
 			if !chainConfig.AllowAA {
 				result.Err = errors.New("account abstraction transactions are not allowed")
@@ -708,6 +722,73 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+
+	return &result
+}
+
+// systemTxDetector is implemented by consensus engines (Parlia) that embed
+// system transactions in the block body. The executor routes such transactions
+// to executeSystemTx instead of the metered user-transaction path.
+type systemTxDetector interface {
+	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
+}
+
+// executeSystemTx runs a Parlia system transaction as a free consensus call:
+// no block gas pool (its sentinel gas limit would exhaust it), no intrinsic gas,
+// sender nonce bumped as a normal EOA call. The block's own calldata drives the
+// state change; correctness is enforced downstream by the state and receipt
+// roots rather than by regenerating the expected call.
+func (txTask *TxTask) executeSystemTx(evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+	var result TxResult
+
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+
+	from := msg.From()
+
+	// Parlia's distributeToSystem/distributeToValidator move the reward from
+	// SystemAddress to the validator, then forward it to the target system
+	// contract as this transaction's value. The fee was accumulated at
+	// SystemAddress during user-tx settlement, so mirror the direct move here
+	// (and materialise/drain SystemAddress the way consensus does).
+	if value := msg.Value(); !value.IsZero() {
+		if err = ibs.SubBalance(protocolparams.SystemAddress, *value, tracing.BalanceChangeUnspecified); err != nil {
+			result.Err = err
+			return &result
+		}
+		if err = ibs.AddBalance(from, *value, tracing.BalanceChangeUnspecified); err != nil {
+			result.Err = err
+			return &result
+		}
+	}
+
+	nonce, err := ibs.GetNonce(from)
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if callErr != nil {
+		// A reverted system call yields a failed receipt but a valid block.
+		result.ExecutionResult.Err = callErr
+	}
+
+	g := gasUsed.Total()
+	result.ExecutionResult.ReceiptGasUsed = g
+	result.ExecutionResult.BlockExecutionGasUsed = g
+
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
+	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	return &result
 }
