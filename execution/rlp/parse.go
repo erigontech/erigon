@@ -101,6 +101,50 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 	return
 }
 
+// countItems returns the number of top-level items in a list payload, stopping
+// at the first that does not fit. It bounds the count, not bytes: anything
+// sizing an allocation from it needs its own byte cap. Only item spans are read,
+// not the canonicality Prefix checks, since the decoder checks that anyway.
+func countItems(payload []byte) int {
+	n := 0
+	for pos := 0; pos < len(payload); n++ {
+		var span int
+		switch b := payload[pos]; {
+		case b < SingleByteThreshold:
+			span = 1
+		case b <= LongStringCode:
+			span = 1 + int(b-EmptyStringCode)
+		case b < EmptyListCode:
+			span = longSpan(payload, pos, int(b-LongStringCode))
+		case b <= LongListCode:
+			span = 1 + int(b-EmptyListCode)
+		default:
+			span = longSpan(payload, pos, int(b-LongListCode))
+		}
+		if span <= 0 || span > len(payload)-pos {
+			return n
+		}
+		pos += span
+	}
+	return n
+}
+
+// longSpan is the total width of a long-form item, or 0 if its length header
+// runs past the payload or is too wide to hold.
+func longSpan(payload []byte, pos, lenOfLen int) int {
+	if lenOfLen > len(payload)-pos-1 {
+		return 0
+	}
+	length := 0
+	for _, b := range payload[pos+1 : pos+1+lenOfLen] {
+		if length > 1<<40 {
+			return 0
+		}
+		length = length<<8 | int(b)
+	}
+	return 1 + lenOfLen + length
+}
+
 func ParseList(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
