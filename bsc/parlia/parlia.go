@@ -37,9 +37,7 @@ import (
 
 var errNotSupported = errors.New("parlia: block production/execution not supported by the download-only stub")
 
-// bscSystemContracts are the addresses BSC treats as consensus system contracts.
-// A gas-price-zero transaction from the block's validator to one of these is a
-// system transaction (see IsSystemTransaction).
+// bscSystemContracts are the addresses a Parlia system transaction may target.
 var bscSystemContracts = map[common.Address]struct{}{
 	common.HexToAddress("0x0000000000000000000000000000000000001000"): {}, // Validator
 	common.HexToAddress("0x0000000000000000000000000000000000001001"): {}, // Slash
@@ -69,10 +67,7 @@ func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
 }
 
 // IsSystemTransaction reports whether tx is a Parlia system transaction: a
-// gas-price-zero call to a system contract, sent by the block's validator
-// (coinbase). Such transactions carry a sentinel gas limit and must bypass the
-// block gas pool, so the executor runs them as free consensus calls rather than
-// metered user transactions.
+// gas-price-zero call to a system contract from the block validator.
 func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
 	to := tx.GetTo()
 	if to == nil {

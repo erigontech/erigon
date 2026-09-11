@@ -726,18 +726,14 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-// systemTxDetector is implemented by consensus engines (Parlia) that embed
-// system transactions in the block body. The executor routes such transactions
-// to executeSystemTx instead of the metered user-transaction path.
+// systemTxDetector is implemented by engines (Parlia) that embed system
+// transactions in the block body.
 type systemTxDetector interface {
 	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
 }
 
-// executeSystemTx runs a Parlia system transaction as a free consensus call:
-// no block gas pool (its sentinel gas limit would exhaust it), no intrinsic gas,
-// sender nonce bumped as a normal EOA call. The block's own calldata drives the
-// state change; correctness is enforced downstream by the state and receipt
-// roots rather than by regenerating the expected call.
+// executeSystemTx runs a Parlia system transaction as a free consensus call
+// (no gas pool, no intrinsic gas), bumping the sender nonce.
 func (txTask *TxTask) executeSystemTx(evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
 	var result TxResult
 
@@ -749,11 +745,8 @@ func (txTask *TxTask) executeSystemTx(evm *vm.EVM, ibs *state.IntraBlockState) *
 
 	from := msg.From()
 
-	// Parlia's distributeToSystem/distributeToValidator move the reward from
-	// SystemAddress to the validator, then forward it to the target system
-	// contract as this transaction's value. The fee was accumulated at
-	// SystemAddress during user-tx settlement, so mirror the direct move here
-	// (and materialise/drain SystemAddress the way consensus does).
+	// Mirror distributeToSystem/distributeToValidator: move the reward from
+	// SystemAddress to the validator before forwarding it on-chain.
 	if value := msg.Value(); !value.IsZero() {
 		if err = ibs.SubBalance(protocolparams.SystemAddress, *value, tracing.BalanceChangeUnspecified); err != nil {
 			result.Err = err
