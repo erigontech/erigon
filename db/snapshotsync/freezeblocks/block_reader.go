@@ -460,21 +460,11 @@ func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {
-		snapshotTypes := []snaptype.Enum{
-			snaptype2.Enums.Headers,
-			snaptype2.Enums.Bodies,
-			snaptype2.Enums.Transactions,
+		// Frozen segments that leave no block complete are not an answer: the database is
+		// what still holds one.
+		if snapshotMin, ok := r.sn.SegmentsMin(); ok {
+			return snapshotMin, nil
 		}
-
-		snapshotMin := uint64(0)
-		for _, snapType := range snapshotTypes {
-			if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
-				if minBlock > snapshotMin {
-					snapshotMin = minBlock
-				}
-			}
-		}
-		return snapshotMin, nil
 	}
 
 	if tx == nil {

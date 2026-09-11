@@ -626,19 +626,22 @@ func (s *BaseRoSnapshots) DownloadReady() bool           { return s.downloadRead
 func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
-func (s *BaseRoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
+
+// SegmentsMin is the lowest block every type covers, and whether they all cover one: a
+// type with no visible segment leaves no block complete, however low the others reach.
+func (s *BaseRoSnapshots) SegmentsMin() (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
 	}
 
-	minStore, exists := s.segmentsMinByType[t]
-	if !exists {
-		return 0, false
-	}
-
-	min = minStore.Load()
-	if min == math.MaxUint64 {
-		return 0, false
+	for _, minStore := range s.segmentsMinByType {
+		typeMin := minStore.Load()
+		if typeMin == math.MaxUint64 {
+			return 0, false
+		}
+		if typeMin > min {
+			min = typeMin
+		}
 	}
 
 	return min, true
