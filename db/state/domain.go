@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -1872,6 +1874,9 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
+		if len(v) > os.Getpagesize() {
+			_ = mmap.MadviseWillNeed(v) // prefetch multi page values
+		}
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
