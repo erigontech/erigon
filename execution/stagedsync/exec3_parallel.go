@@ -949,7 +949,9 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 	for _, worker := range pe.execWorkers {
 		// Parallel workers hold their own transaction.
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		if err := worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1749,7 +1751,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Release()
-		pe.resetWorkers(workersCtx, pe.rs, nil)
+		if err := pe.resetWorkers(workersCtx, pe.rs, nil); err != nil {
+			return err
+		}
 		return pe.execLoop(execLoopCtx)
 	})
 

@@ -37,16 +37,16 @@ func BenchmarkHeaderRLP(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			buf.Reset()
-			header.EncodeRLP(&buf)
+			_ = header.EncodeRLP(&buf)
 		}
 	})
 	b.Run(`Decode`, func(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
-		header.EncodeRLP(&buf)
+		_ = header.EncodeRLP(&buf)
 		var v Header
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &v)
+			_ = rlp.DecodeBytes(buf.Bytes(), &v)
 		}
 	})
 }
@@ -58,7 +58,7 @@ func BenchmarkLegacyTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -69,7 +69,7 @@ func BenchmarkAccessListTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -80,7 +80,7 @@ func BenchmarkDynamicFeeTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -91,7 +91,7 @@ func BenchmarkBlobTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -102,7 +102,7 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		txn.EncodeRLP(&buf)
+		_ = txn.EncodeRLP(&buf)
 	}
 }
 
@@ -171,7 +171,7 @@ func BenchmarkWithdrawalRLP(b *testing.B) {
 
 	for b.Loop() {
 		buf.Reset()
-		w.EncodeRLP(&buf)
+		_ = w.EncodeRLP(&buf)
 	}
 }
 
@@ -185,7 +185,7 @@ func BenchmarkLogRLP(b *testing.B) {
 		for b.Loop() {
 			buf.Reset()
 			logStorage := (*LogForStorage)(log)
-			logStorage.EncodeRLP(&buf)
+			_ = logStorage.EncodeRLP(&buf)
 		}
 	})
 
@@ -193,10 +193,10 @@ func BenchmarkLogRLP(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
 		logStorage := (*LogForStorage)(log)
-		logStorage.EncodeRLP(&buf)
+		_ = logStorage.EncodeRLP(&buf)
 		var decoded LogForStorage
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
+			_ = rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
 }
@@ -230,7 +230,7 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		for b.Loop() {
 			buf.Reset()
 			receiptStorage := (*ReceiptForStorage)(receipt)
-			receiptStorage.EncodeRLP(&buf)
+			_ = receiptStorage.EncodeRLP(&buf)
 		}
 	})
 
@@ -238,10 +238,10 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		b.ReportAllocs()
 		buf.Reset()
 		receiptStorage := (*ReceiptForStorage)(receipt)
-		receiptStorage.EncodeRLP(&buf)
+		_ = receiptStorage.EncodeRLP(&buf)
 		var decoded ReceiptForStorage
 		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
+			_ = rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
 }

@@ -172,11 +172,9 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	if observed {
 		return value, true
 	}
-	timeout := time.NewTimer(r.frozenBlocksTimeout)
-	defer timeout.Stop()
 	select {
 	case <-refreshed:
-	case <-timeout.C:
+	case <-time.After(r.frozenBlocksTimeout):
 	}
 	value, observed, _ = r.frozenBlocks.Load()
 	return value, observed
@@ -904,7 +902,7 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
 
-func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
+func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, error) {
 	bodySeg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
 		hash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
