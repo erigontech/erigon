@@ -294,8 +294,7 @@ func (idx *Index) init() (err error) {
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
-	idx.grData = p[:l]
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
