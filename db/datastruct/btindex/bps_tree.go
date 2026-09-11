@@ -218,6 +218,12 @@ func (nd *pivots) add(off uint32, key []byte) {
 	}
 }
 
+func (nd *pivots) shrink() {
+	if cap(nd.nodeOfft) > len(nd.nodeOfft) {
+		nd.nodeOfft = append(make([]uint32, 0, len(nd.nodeOfft)), nd.nodeOfft...)
+	}
+}
+
 // decodeNodes returns the byte offset of each of the count length-prefixed key
 // records within data (no count prefix on disk — the caller derives count). di
 // is not stored; node i has di = i*M, recomputed on read.
@@ -243,6 +249,7 @@ func decodeNodes(data []byte, count uint64) (_ pivots, end int, err error) {
 		nd.add(uint32(pos), data[pos+2:pos+2+l])
 		pos += 2 + l
 	}
+	nd.shrink()
 	return nd, pos, nil
 }
 
@@ -293,6 +300,7 @@ func decodeListNodesV0(data []byte) (_ pivots, end int, err error) {
 		nd.add(uint32(pos+8), data[pos+10:pos+10+l]) // skip on-disk di; offset points at the keyLen prefix
 		pos += 10 + l
 	}
+	nd.shrink()
 	return nd, pos, nil
 }
 

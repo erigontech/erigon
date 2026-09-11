@@ -87,6 +87,29 @@ func TestDecodeListNodesV0SkipsStoredDi(t *testing.T) {
 	}
 }
 
+func TestDecodedNodeOfftExactCapacity(t *testing.T) {
+	count := nodePreallocCap + 1
+
+	t.Run("footer", func(t *testing.T) {
+		nd, _, err := decodeNodes(make([]byte, 2*count), uint64(count))
+		require.NoError(t, err)
+		require.Len(t, nd.nodeOfft, count)
+		require.Equal(t, count, cap(nd.nodeOfft))
+	})
+
+	t.Run("legacy", func(t *testing.T) {
+		blob := binary.BigEndian.AppendUint64(make([]byte, 0, 8+10*count), uint64(count))
+		for i := range count {
+			blob = binary.BigEndian.AppendUint64(blob, uint64(i))
+			blob = append(blob, 0, 0)
+		}
+		nd, _, err := decodeListNodesV0(blob)
+		require.NoError(t, err)
+		require.Len(t, nd.nodeOfft, count)
+		require.Equal(t, count, cap(nd.nodeOfft))
+	})
+}
+
 func TestResetNoReadBoundsTargetDi(t *testing.T) {
 	ef := eliasfano32.NewEliasFano(2, 128)
 	ef.AddOffset(0)
