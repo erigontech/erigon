@@ -451,8 +451,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	// Parlia system-tx handling relies on serial ordering.
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) || cfg.chainConfig.Parlia != nil {
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
