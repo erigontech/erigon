@@ -39,6 +39,7 @@ build/_vendor/pkg
 /build/_workspace/
 /build/cache/
 /build/bin/
+/mcp
 /geth*.zip
 
 # travis
