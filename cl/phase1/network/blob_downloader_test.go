@@ -79,7 +79,6 @@ func expectSidecarFilesPresent(blobStorage *blobstoragemock.MockBlobStorage) {
 // than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
 // its context is cancelled. Column recovery must be bounded per block so the archive
 // blob backfill cannot hang forever holding the index read tx.
-
 func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
