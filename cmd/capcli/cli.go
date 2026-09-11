@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -1117,7 +1118,24 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantBlobs = c.Len()
 		}
-		if haveBlobs != uint32(wantBlobs) {
+		// PruneBelow drops sidecar files but leaves their count rows, so a matching count is not
+		// evidence the store can still serve the slot. Stat each expected file rather than reading
+		// it back: the scan runs to the Deneb fork, so decoding every blob is not affordable, and
+		// an absent file is the failure this has to catch.
+		missingIndex := -1
+		if haveBlobs == uint32(wantBlobs) {
+			for idx := 0; idx < wantBlobs; idx++ {
+				present, err := blobStorage.BlobSidecarExists(ctx, i, blockRoot, uint64(idx))
+				if err != nil {
+					return mismatched, unresolved, err
+				}
+				if !present {
+					missingIndex = idx
+					break
+				}
+			}
+		}
+		if haveBlobs != uint32(wantBlobs) || missingIndex >= 0 {
 			mismatched++
 			if removeMismatched {
 				if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
@@ -1125,7 +1143,8 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 				}
 			}
 			log.Warn("Slot", "slot", i, "blockRoot", fmt.Sprintf("%x", blockRoot),
-				"have", haveBlobs, "want", wantBlobs, "removed", removeMismatched)
+				"have", haveBlobs, "want", wantBlobs, "missingIndex", missingIndex,
+				"removed", removeMismatched)
 		}
 	}
 	if unresolved > 0 {

@@ -24,15 +24,19 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/mock/gomock"
 
+	"errors"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/spf13/afero"
 )
 
 type storeCheckReader struct {
@@ -78,6 +82,8 @@ func TestBlobArchiveStoreCheckReadsTheCountUnderTheCanonicalRoot(t *testing.T) {
 	storage := blob_mock_services.NewMockBlobStorage(ctrl)
 	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), canonical).Return(uint32(2), nil).AnyTimes()
 	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Not(canonical)).Return(uint32(0), nil).AnyTimes()
+	// A count-equal slot is only complete if its files are still there.
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
@@ -159,4 +165,86 @@ func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {
 	}
 	require.NoError(t, parsed.Run(t.Context(), []string{"capcli", "--datadir", t.TempDir(), "--remove-mismatched"}))
 	require.True(t, b.RemoveMismatched, "parsing --remove-mismatched must set the field")
+}
+
+// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a count can
+// match for a slot whose files are gone. Accepting metadata equality as completeness makes the audit
+// report a clean datadir right before it is published from. The old wrong-root lookup missed every
+// count and flagged these by accident; reading the canonical root removes that accident.
+func TestBlobArchiveStoreCheckFlagsCountEqualSlotsWithNoFiles(t *testing.T) {
+	const slot = uint64(1_000)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fs := afero.NewMemMapFs()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	reader := &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}
+
+	canonical := common.HexToHash("0xc0ffee")
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+	}))
+
+	sidecar := &cltypes.BlobSidecar{
+		Index:                    0,
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+	storage := blob_storage.NewBlobStore(db, fs)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), canonical, []*cltypes.BlobSidecar{sidecar}))
+	require.NoError(t, storage.PruneBelow(10_000))
+
+	// The state: the count row survives, the file does not.
+	count, err := storage.KzgCommitmentsCount(t.Context(), canonical)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), count)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	mismatched, unresolved, err := checkBlobStore(t.Context(), tx, reader,
+		blob_storage.NewBlobStore(db, fs), slot, slot, false)
+	require.NoError(t, err)
+	require.Zero(t, unresolved)
+	require.Equal(t, uint64(1), mismatched, "a count-equal slot with no files must not pass the audit")
+}
+
+// --remove-mismatched has to actually delete, not just be parseable.
+func TestBlobArchiveStoreCheckDeletesWhenAsked(t *testing.T) {
+	const slot = uint64(1_000)
+	ctrl := gomock.NewController(t)
+	db, reader, canonical := storeCheckFixture(t, slot, 2)
+
+	storage := blob_mock_services.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	storage.EXPECT().RemoveBlobSidecars(gomock.Any(), slot, canonical).Return(nil).Times(1)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	mismatched, _, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), mismatched)
+}
+
+// A failed delete must stop the run rather than be counted as a successful audit.
+func TestBlobArchiveStoreCheckPropagatesDeleteFailure(t *testing.T) {
+	const slot = uint64(1_000)
+	ctrl := gomock.NewController(t)
+	db, reader, _ := storeCheckFixture(t, slot, 2)
+	wantErr := errors.New("remove failed")
+
+	storage := blob_mock_services.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	storage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(wantErr).AnyTimes()
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	_, _, err = checkBlobStore(t.Context(), tx, reader, storage, slot, slot, true)
+	require.ErrorIs(t, err, wantErr, "a failed delete must not be swallowed")
 }
