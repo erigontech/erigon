@@ -50,3 +50,8 @@ func TestPBinCommitmentHistChecksRefuseBin(t *testing.T) {
 	err = CheckCommitmentHistAtBlkRange(t.Context(), sc, db, nil, 0, 1, log.New())
 	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 }
+
+func TestE3EfFilesOnHexOnlyDatadir(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, E3EfFiles(t.Context(), db, true, 0))
+}
