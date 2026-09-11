@@ -253,7 +253,8 @@ func clampBeaconSnapshotProgress(progress, available uint64) uint64 {
 }
 
 // rebuildBeaconSnapshotIndex indexes the visible snapshot range, resuming from the persisted
-// cursor, which is the first slot not yet indexed.
+// cursor. It stores the first slot not yet indexed, but the pruning writers store the last indexed
+// slot, so a resumed run may re-index one slot.
 func rebuildBeaconSnapshotIndex(ctx context.Context, db kv.RwDB, blocksAvailable func() uint64, readHeader readBeaconSnapshotHeaderFunc, batchSize uint64, onProgress func(slot uint64), logger log.Logger) (uint64, error) {
 	var from uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {

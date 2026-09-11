@@ -771,7 +771,7 @@ func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
 
 		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
 		require.NoError(t, err)
-		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		require.Equal(t, tip+1, progress, "this helper stores the first slot not yet indexed")
 		return nil
 	}))
 }

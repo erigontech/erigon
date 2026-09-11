@@ -67,18 +67,18 @@ func (s *completingBlobStorage) KzgCommitmentsCount(ctx context.Context, root co
 	return count, errors.Join(err, s.writeErr)
 }
 
-// A historical fulu block whose PeerDAS data columns are served by no peer (older
-// than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
-// its context is cancelled. Column recovery must be bounded per block so the archive
-// blob backfill cannot hang forever holding the index read tx.
 // expectSidecarFilesPresent declares that the store still holds the files its count rows claim.
-// The archive path stats index 0 before accepting a count-equal slot, so a test that reaches that
-// branch has to say which side of it it is on.
+// The archive path stats every sidecar index before accepting a count-equal slot, so a test that
+// reaches that branch has to say which side of it it is on.
 func expectSidecarFilesPresent(blobStorage *blobstoragemock.MockBlobStorage) {
 	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(true, nil).AnyTimes()
 }
 
+// A historical fulu block whose PeerDAS data columns are served by no peer (older
+// than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
+// its context is cancelled. Column recovery must be bounded per block so the archive
+// blob backfill cannot hang forever holding the index read tx.
 func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -971,7 +971,6 @@ func TestBlobHistoryDownloaderPostchecksPersistedDenebGroupAfterRequestCancellat
 	require.NoError(t, err)
 
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-
 	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), rootA, []*cltypes.BlobSidecar{sidecarA}).DoAndReturn(
 		func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
 			cancel()
@@ -1012,7 +1011,6 @@ func TestBlobHistoryDownloaderMixedDenebBatchIgnoresZeroCommitmentStorage(t *tes
 			require.NoError(t, err)
 
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-
 			blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), nonzeroRoot, []*cltypes.BlobSidecar{sidecar}).Return(nil)
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), nonzeroRoot).Return(uint32(1), nil)
 			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), nonzero.Block.Slot, nonzeroRoot).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
@@ -1035,23 +1033,8 @@ func TestBlobHistoryDownloaderMixedDenebBatchIgnoresZeroCommitmentStorage(t *tes
 
 func validDenebRecoverySidecar(t *testing.T, slot uint64) (*cltypes.SignedBeaconBlock, *cltypes.BlobSidecar) {
 	t.Helper()
-	blob := goethkzg.Blob{}
-	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
-	require.NoError(t, err)
-	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
-	require.NoError(t, err)
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	block.Block.Slot = slot
-	block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
-	_, err = block.Block.HashSSZ()
-	require.NoError(t, err)
-	branch, err := block.Block.Body.KzgCommitmentMerkleProof(0)
-	require.NoError(t, err)
-	inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
-	for i := range branch {
-		inclusionProof.Set(i, common.Hash(branch[i]))
-	}
-	return block, cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusionProof)
+	block, sidecars := validDenebRecoverySidecars(t, slot, 1)
+	return block, sidecars[0]
 }
 
 func validDenebRecoverySidecars(t *testing.T, slot uint64, count int) (*cltypes.SignedBeaconBlock, []*cltypes.BlobSidecar) {
@@ -1128,13 +1111,16 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
 
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	expectSidecarFilesPresent(blobStorage)
-
-	// Complete under the canonical root, absent under anything else.
+	// Complete under the canonical root, absent under anything else. The file probe is pinned to the
+	// same root and slot, so looking either up under the block's own hash fails the test.
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), canonical).
 		Return(uint32(block.GetBlobKzgCommitments().Len()), nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Not(gomock.Eq(canonical))).
 		Return(uint32(0), nil).AnyTimes()
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), uint64(slot), canonical, uint64(0)).
+		Return(true, nil).AnyTimes()
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(false, nil).AnyTimes()
 
 	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
