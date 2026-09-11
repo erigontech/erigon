@@ -167,8 +167,8 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 }
 
 // checkFinalizedHorizon applies the two spec on_block finality assertions: the block is
-// above the finalized horizon, and it descends from the finalized checkpoint. Callers that
-// released f.mu must redo it before committing, since finality can advance meanwhile.
+// above the finalized horizon and descends from the finalized checkpoint. It must be
+// redone after any yield of f.mu, since finality can advance while the lock is not held.
 func (f *ForkChoiceStore) checkFinalizedHorizon(block *cltypes.BeaconBlock) error {
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
@@ -185,15 +185,15 @@ func (f *ForkChoiceStore) checkFinalizedHorizon(block *cltypes.BeaconBlock) erro
 	return nil
 }
 
-// invalidateCachedHead forces the next GetHead to recompute. Call after reacquiring f.mu:
-// a GetHead during the released window caches a head that predates this block.
+// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
+// was released caches a head that predates this block.
 func (f *ForkChoiceStore) invalidateCachedHead() {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 }
 
-// getBlobsWhileYieldingForkChoiceLock asks the EL for the block's blobs on behalf of a
-// caller holding f.mu, releasing the lock for the duration of the call.
+// getBlobsWhileYieldingForkChoiceLock asks the EL for the block's blobs, releasing the
+// caller-held f.mu for the duration of the call.
 func (f *ForkChoiceStore) getBlobsWhileYieldingForkChoiceLock(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte, error) {
 	f.mu.Unlock()
 	defer f.mu.Lock()
@@ -371,6 +371,8 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
 				return f.verifiedExecutionPayload.Contains(blockRoot)
+			}, func() {
+				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 			f.invalidateCachedHead()

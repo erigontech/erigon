@@ -22,75 +22,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
-	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 const lockScopeTimeout = 5 * time.Second
 
-// buildOnBlockLockScopeStore returns a store holding the first two ex-ante blocks and
-// the third block, still unprocessed, so a test can drive one OnBlock through the EL.
-func buildOnBlockLockScopeStore(tb testing.TB, engine execution_client.ExecutionEngine) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
-	tb.Helper()
-	ctx := context.Background()
-	cfg := &clparams.MainnetBeaconConfig
-	sd := synced_data.NewSyncedDataManager(cfg, true)
-	b3a := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
-	bc2 := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
-	bd4 := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
-	require.NoError(tb, utils.DecodeSSZSnappy(b3a, diffBlock3aEnc, int(clparams.AltairVersion)))
-	require.NoError(tb, utils.DecodeSSZSnappy(bc2, diffBlockc2Enc, int(clparams.AltairVersion)))
-	require.NoError(tb, utils.DecodeSSZSnappy(bd4, diffBlockd4Enc, int(clparams.AltairVersion)))
-	anchor := state2.New(cfg)
-	require.NoError(tb, utils.DecodeSSZSnappy(anchor, diffAnchorEnc, int(clparams.AltairVersion)))
-	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
-	require.NoError(tb, err)
-	clk := eth_clock.NewEthereumClock(gs.GenesisTime(), gs.GenesisValidatorsRoot(), cfg)
-	bs := blob_storage.NewBlobStore(mdbxtest.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs())
-	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(tb, err)
-	store, err := NewForkChoiceStore(clk, anchor, engine, pool.NewOperationsPool(cfg),
-		forkGraphDisk, beaconevents.NewEventEmitter(), sd, bs,
-		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
-	require.NoError(tb, err)
-	store.OnTick(0)
-	store.OnTick(12)
-	require.NoError(tb, store.OnBlock(ctx, b3a, false, true, false))
-	store.OnTick(36)
-	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
-	return store, bd4
-}
-
 // blockingEngine returns a mock whose NewPayload signals entry and then blocks until
 // the returned release channel is closed, so a test can hold OnBlock inside the EL call.
-func blockingEngine(tb testing.TB, times int) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
-	tb.Helper()
-	return blockingEngineReturning(tb, times, execution_client.PayloadStatusValidated, nil)
-}
-
 func blockingEngineReturning(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
 	tb.Helper()
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(tb))
@@ -119,8 +66,8 @@ func awaitSignal(t *testing.T, ch <-chan struct{}, what string) {
 // OnBlock must not hold f.mu across the EL NewPayload call: an unrelated fork-choice
 // writer has to be able to make progress while the EL is still working.
 func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngine(t, 1)
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
 
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, true, true, false) }()
@@ -151,8 +98,8 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 // A GetHead that runs while f.mu is released caches a head computed without the
 // incoming block, so OnBlock has to drop that cache again after it resumes.
 func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngine(t, 1)
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
 
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, true, true, false) }()
@@ -184,7 +131,7 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 // gated entry into OnBlock have to be redone before the block is committed.
 func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 	t.Run("finalized past the block", func(t *testing.T) {
-		store, block, run := startOnBlockInsideEL(t)
+		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
 		// Epoch 1 starts at slot 32, above the block's slot.
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
 		require.NoError(t, run())
@@ -192,7 +139,7 @@ func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 	})
 
 	t.Run("finalized onto another branch", func(t *testing.T) {
-		store, block, run := startOnBlockInsideEL(t)
+		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
 		require.ErrorIs(t, run(), ErrNotFinalizedDescendant)
 		requireBlockNotAdded(t, store, block)
@@ -201,15 +148,10 @@ func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 
 // startOnBlockInsideEL parks an OnBlock call inside the EL NewPayload call with f.mu
 // released. run releases the EL and returns OnBlock's error.
-func startOnBlockInsideEL(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
-	t.Helper()
-	return startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
-}
-
 func startOnBlockInsideELReturning(t *testing.T, status execution_client.PayloadStatus, retErr error) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
 	t.Helper()
 	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, status, retErr)
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	store, block := buildExAnteStorePendingLast(t, engine)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, true, true, false) }()
 	awaitSignal(t, elEntered, "NewPayload to start")
@@ -268,7 +210,7 @@ func blockingBlobEngine(t *testing.T) (*execution_client.MockExecutionEngine, ch
 // f.mu across it either.
 func TestOnBlockYieldsForkChoiceLockDuringGetBlobs(t *testing.T) {
 	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	store, block := buildExAnteStorePendingLast(t, engine)
 	block = blockWithBlobCommitment(t, store, block)
 
 	onBlockDone := make(chan error, 1)
@@ -311,7 +253,7 @@ func TestOnBlockRechecksFinalityAfterGetBlobs(t *testing.T) {
 func startOnBlockInsideGetBlobs(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
 	t.Helper()
 	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	store, block := buildExAnteStorePendingLast(t, engine)
 	block = blockWithBlobCommitment(t, store, block)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, false, true, true) }()
@@ -367,6 +309,50 @@ func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *tes
 	require.True(t, store.IsRootOptimistic(blockRoot), "an unvalidated payload stays optimistic")
 }
 
+// A caller that finishes the EL while another writer holds f.mu cannot publish its result
+// through OnBlock. Callers already queued on the admission token for the same payload must
+// still reuse that result instead of resending it to the EL.
+func TestOnBlockValidatesSamePayloadOnceWhileLockIsPinned(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+
+	results := make(chan error, 4)
+	run := func() { results <- store.OnBlock(context.Background(), block, true, true, false) }
+	go run()
+	awaitSignal(t, elEntered, "the first NewPayload to start")
+
+	// f.mu is free while the first caller sits in the EL, so these reach the admission
+	// token and queue behind it.
+	for range 3 {
+		go run()
+	}
+
+	// Pin f.mu so the first caller cannot reacquire it to publish its result.
+	pinned, unpin := make(chan struct{}), make(chan struct{})
+	go func() {
+		store.mu.Lock()
+		close(pinned)
+		<-unpin
+		store.mu.Unlock()
+	}()
+	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+
+	close(releaseEL)
+	close(unpin)
+
+	for range 4 {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+		case <-time.After(lockScopeTimeout):
+			t.Fatal("a queued OnBlock did not finish")
+		}
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
@@ -375,7 +361,7 @@ func TestNewPayloadWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
 
 	f.mu.Lock()
 	status, err := f.newPayloadWhileYieldingForkChoiceLock(context.Background(),
-		func() bool { return true }, nil, nil, nil, nil)
+		func() bool { return true }, nil, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
@@ -396,7 +382,7 @@ func TestOnBlockCancelledNewPayloadLeavesStoreConsistent(t *testing.T) {
 			<-ctx.Done()
 			return execution_client.PayloadStatusNone, ctx.Err()
 		})
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	store, block := buildExAnteStorePendingLast(t, engine)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	onBlockDone := make(chan error, 1)
@@ -427,11 +413,11 @@ func TestConcurrentOnBlockForSameBlockStaysConsistent(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().
 		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		MinTimes(1).
+		Times(1).
 		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 			return execution_client.PayloadStatusValidated, nil
 		})
-	store, block := buildOnBlockLockScopeStore(t, engine)
+	store, block := buildExAnteStorePendingLast(t, engine)
 
 	done := make(chan error, 2)
 	for range 2 {

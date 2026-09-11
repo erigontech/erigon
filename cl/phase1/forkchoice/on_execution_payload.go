@@ -280,7 +280,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	parentBlockRoot := block.Block.ParentRoot
 	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
 		return f.forkGraph.HasEnvelope(beaconBlockRoot)
-	}, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
+	}, nil, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
 }
@@ -291,9 +291,19 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 // short-circuits the EL call when a concurrent caller validated the same payload while
 // this one waited for admission. Any invariant the caller checked before this call can
 // go stale and must be revalidated after it returns.
+// newPayloadWhileYieldingForkChoiceLock validates a payload with the EL, releasing the
+// caller-held f.mu for the duration of the call. Anything checked before the call can go
+// stale and must be revalidated after it returns.
+//
+// publishValidated records a VALID result while the admission token is still held, so
+// queued callers for the same payload short-circuit instead of resending it. Publishing
+// after the token is released is too late: the finishing caller must reacquire f.mu first,
+// and the queue drains before that. Nil when the caller has no marker it can set without
+// f.mu.
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	alreadyValidated func() bool,
+	publishValidated func(),
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -305,7 +315,11 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 		if alreadyValidated() {
 			return execution_client.PayloadStatusValidated, nil
 		}
-		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+		if err == nil && status == execution_client.PayloadStatusValidated && publishValidated != nil {
+			publishValidated()
+		}
+		return status, err
 	})
 }
 
