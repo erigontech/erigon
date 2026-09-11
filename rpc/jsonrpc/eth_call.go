@@ -422,14 +422,6 @@ func (s StorageKeysInfo) EncodeKey() string {
 }
 
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
-func toHexBytes(in [][]byte) []hexutil.Bytes {
-	out := make([]hexutil.Bytes, len(in))
-	for i, b := range in {
-		out[i] = b
-	}
-	return out
-}
-
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -636,6 +628,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	return proof, nil
+}
+
+func toHexBytes(in [][]byte) []hexutil.Bytes {
+	out := make([]hexutil.Bytes, len(in))
+	for i, b := range in {
+		out[i] = b
+	}
+	return out
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {

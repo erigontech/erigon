@@ -267,7 +267,7 @@ func hashPair(left, right [32]byte) [32]byte {
 	return sha256.Sum256(pair[:])
 }
 
-// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header conversion
+// HashByteSlice is gohashtree HashByteSlice over []byte instead of [][32]byte.
 func HashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
 		return errors.New("zero leaves provided")
@@ -279,17 +279,13 @@ func HashByteSlice(out, in []byte) error {
 	if len(in)%64 != 0 {
 		return errors.New("input must be multple of 64")
 	}
-	c_in := convertHeader(in)
-	c_out := convertHeader(out)
+	c_in := unsafe.Slice((*[32]byte)(unsafe.Pointer(unsafe.SliceData(in))), len(in)/32)
+	c_out := unsafe.Slice((*[32]byte)(unsafe.Pointer(unsafe.SliceData(out))), len(out)/32)
 	err := gohashtree.Hash(c_out, c_in)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func convertHeader(xs []byte) [][32]byte {
-	return unsafe.Slice((*[32]byte)(unsafe.Pointer(unsafe.SliceData(xs))), len(xs)/32)
 }
 
 func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
