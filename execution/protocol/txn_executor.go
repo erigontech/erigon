@@ -763,8 +763,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		// Parlia (BSC) routes the tip to SystemAddress, not the validator/coinbase;
-		// Finalize later splits it between the SystemReward and Validator contracts.
+		// Parlia routes the tip to SystemAddress, not the coinbase.
 		feeRecipient := coinbase
 		if st.evm.ChainConfig().Parlia != nil {
 			feeRecipient = params.SystemAddress
