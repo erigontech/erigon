@@ -348,7 +348,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		if err := rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}
@@ -1430,7 +1432,7 @@ func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By
 // HistoryDump walks every value in the visible files and hands each to dumpTo.
 // val is only valid until dumpTo returns: it points into a page buffer the next
 // value decodes over.
-func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte) error) error {
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
@@ -1496,7 +1498,9 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 					val, pageBuf = seg.GetFromPage(histKeyBuf, val, pageBuf, true)
 				}
 
-				dumpTo(key, txNum, val)
+				if err := dumpTo(key, txNum, val); err != nil {
+					return err
+				}
 			}
 		}
 	}

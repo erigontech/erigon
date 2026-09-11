@@ -28,7 +28,9 @@ import (
 	"time"
 )
 
-var defaultParallelCommitmentWorkers = runtime.NumCPU()
+// Must track the same quantity as maxFoldConcurrency: parallelMountConcurrency mins
+// the two, so sourcing this from anything else silently caps mounting below folding.
+var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed

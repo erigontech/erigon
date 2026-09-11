@@ -202,6 +202,17 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	if err != nil {
 		return nil, err
 	}
+	var saltBytes []byte
+	if fexists {
+		if saltBytes, err = os.ReadFile(fpath); err != nil {
+			return nil, err
+		}
+		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
+		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
+		if fexists = len(saltBytes) == 4; !fexists {
+			logger.Warn("discarding malformed state-salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
+	}
 
 	// Initialize salt if it doesn't exist
 	if !fexists {
@@ -214,18 +225,14 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 
 		saltV := rand.Uint32()
 		salt = &saltV
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, *salt)
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+		newSalt := make([]byte, 4)
+		binary.BigEndian.PutUint32(newSalt, *salt)
+		if err := dir.WriteFileWithFsync(fpath, newSalt, os.ModePerm); err != nil {
 			return nil, err
 		}
 		return salt, nil // Return the newly created salt directly
 	}
 
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
 	saltV := binary.BigEndian.Uint32(saltBytes)
 	salt = &saltV
 	return salt, nil
@@ -2751,7 +2758,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	}
 	var found bool
 	var fileStartTxNum, fileEndTxNum uint64
-	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxStep)
+	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, nil, maxStep)
 	if !found {
 		return nil, 0, false, err
 	}

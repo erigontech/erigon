@@ -23,8 +23,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -440,5 +443,36 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 			}
 			require.True(t, ran, "precompile %s produced no non-empty output, so it was never checked", p.Name())
 		}
+	}
+}
+
+func TestForkSetsCoverEveryTier(t *testing.T) {
+	for i := range int(forkTierCount) {
+		tier := forkTier(i)
+		require.NotEmpty(t, forkSets[tier].contracts, "forkSets[%d] has no contracts", tier)
+		require.NotEmpty(t, forkSets[tier].addresses, "forkSets[%d] has no addresses", tier)
+		require.Len(t, forkSets[tier].addresses, len(forkSets[tier].contracts),
+			"forkSets[%d] address list and contract map disagree", tier)
+	}
+}
+
+// TestDeprecatedForkAddressExportsTrackTheirSets pins the exported per-fork
+// address slices to the sets they name. Chains outside this repo compile
+// against them, so an empty or drifted slice is a break no in-repo grep sees.
+func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
+	for name, tc := range map[string]struct {
+		addrs     []accounts.Address
+		contracts PrecompiledContracts
+	}{
+		"homestead": {PrecompiledAddressesHomestead, PrecompiledContractsHomestead},
+		"byzantium": {PrecompiledAddressesByzantium, PrecompiledContractsByzantium},
+		"istanbul":  {PrecompiledAddressesIstanbul, PrecompiledContractsIstanbul},
+		"berlin":    {PrecompiledAddressesBerlin, PrecompiledContractsBerlin},
+		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
+		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
+		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
+	} {
+		require.NotEmpty(t, tc.addrs, name)
+		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
 	}
 }

@@ -34,10 +34,6 @@ func (f *fakeTemporalGetter) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOpti
 	return f.vals[string(k)], 0, f.err
 }
 
-func (f *fakeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
-
 func (f *fakeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 // TestPinBranchResolver_ReturnsAuthoritativeLatest pins the trunk-preload resolver
