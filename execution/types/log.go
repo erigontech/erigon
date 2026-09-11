@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -407,25 +408,32 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeHashList(s *rlp.Stream) (list []common.Hash, err error) {
+// maxDecodePreAlloc caps how many elements a declared payload length may
+// pre-allocate, so a crafted length prefix cannot size the allocation.
+const maxDecodePreAlloc = 128
+
+// decodeHashListTo appends an RLP list of 32-byte values to dst, so one buffer
+// can back several lists. Pass nil for a fresh slice.
+func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
 	}
-	if l == 0 {
-		return []common.Hash{}, s.ListEnd()
+	// An encoded value is 33 bytes (rlpLenPrefix+32), so l/33 is the count.
+	n := int(min(l/33, maxDecodePreAlloc))
+	if dst == nil {
+		dst = make([]common.Hash, 0, n) // non-nil even for an empty list, and cheaper than Grow
+	} else {
+		dst = slices.Grow(dst, n)
 	}
-	listLen := l / (1 + 32)            // rlpLenPrefix+32bytes
-	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
-	list = make([]common.Hash, 0, preAlloc)
 	for s.MoreDataInList() {
 		h, err := s.ReadHash()
 		if err != nil {
 			return nil, err
 		}
-		list = append(list, h)
+		dst = append(dst, h)
 	}
-	return list, s.ListEnd()
+	return dst, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -439,7 +447,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeHashList(s)
+	l.Topics, err = decodeHashListTo(s, nil)
 	if err != nil {
 		return err
 	}

@@ -187,8 +187,6 @@ func (g *GolombRice) Data() []uint64 {
 	return g.data
 }
 
-const maxDataSize = 0xFFFFFFFFFFFF
-
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
 func (g *GolombRice) Write(w io.Writer) error {
 	var numBuf [8]byte
@@ -196,9 +194,8 @@ func (g *GolombRice) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&g.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(g.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&g.data[0])), len(g.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
