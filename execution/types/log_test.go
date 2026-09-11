@@ -395,7 +395,7 @@ func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
-func TestToRPCLogs(t *testing.T) {
+func TestAppendFilteredRPCLogs(t *testing.T) {
 	t.Parallel()
 
 	logs := Logs{
@@ -423,7 +423,7 @@ func TestToRPCLogs(t *testing.T) {
 		},
 	}
 
-	rpcLogs := logs.ToRPCLogs(1900000000)
+	rpcLogs := logs.AppendFilteredRPCLogs(nil, nil, nil, 1900000000, 0)
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
@@ -432,26 +432,100 @@ func TestToRPCLogs(t *testing.T) {
 	}
 }
 
-func TestToRPCLogsEmpty(t *testing.T) {
+func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
 	t.Parallel()
 
-	// Non-nil empty, so eth_getLogs/erigon_getLogs serialise `[]` and not `null`.
+	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
+	// stays non-nil and serialises `[]` and not `null`.
 	for _, logs := range []Logs{{}, nil} {
-		rpcLogs := logs.ToRPCLogs(1)
+		rpcLogs := logs.AppendFilteredRPCLogs(RPCLogs{}, nil, nil, 1, 0)
 		require.NotNil(t, rpcLogs)
 		require.Len(t, rpcLogs, 0)
 	}
 }
 
 // decodeLogsForStorage hands out pointers into one shared block, which is only
-// safe because nothing retains a single *Log past its receipt. ToRPCLogs is the
-// path that outlives it, so it must copy the value out rather than alias.
-func TestToRPCLogsCopiesTheLog(t *testing.T) {
+// safe because nothing retains a single *Log past its receipt. The RPC
+// conversion is the path that outlives it, so it must copy the value out
+// rather than alias.
+func TestAppendFilteredRPCLogsCopiesTheLog(t *testing.T) {
 	t.Parallel()
 	src := Logs{{Address: common.Address{1}, Index: 7}}
-	out := src.ToRPCLogs(99)
+	out := src.AppendFilteredRPCLogs(nil, nil, nil, 99, 0)
 	src[0].Address = common.Address{2}
 	src[0].Index = 8
 	require.Equal(t, common.Address{1}, out[0].Address)
 	require.Equal(t, hexutil.Uint(7), out[0].Index)
+}
+
+// AppendFilteredRPCLogs must select exactly what FilterWithTopicMap selects.
+func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
+	t.Parallel()
+
+	addrA := common.HexToAddress("0xaa")
+	addrB := common.HexToAddress("0xbb")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addrA, Topics: []common.Hash{topicX, topicY}},
+		{Address: addrA, Topics: []common.Hash{topicY, topicX}},
+		{Address: addrB, Topics: []common.Hash{topicX}},
+		{Address: addrB},
+	}
+
+	for name, tc := range map[string]struct {
+		addrs  []common.Address
+		topics [][]common.Hash
+	}{
+		"no filter":        {},
+		"address":          {addrs: []common.Address{addrB}},
+		"topic position 0": {topics: [][]common.Hash{{topicX}}},
+		"topic position 1": {topics: [][]common.Hash{nil, {topicX}}},
+		"topic union":      {topics: [][]common.Hash{{topicX, topicY}}},
+		"address + topic":  {addrs: []common.Address{addrA}, topics: [][]common.Hash{{topicX}}},
+		"no match":         {addrs: []common.Address{common.HexToAddress("0xcc")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			addrMap := make(map[common.Address]struct{}, len(tc.addrs))
+			for _, a := range tc.addrs {
+				addrMap[a] = struct{}{}
+			}
+			topicMap := BuildTopicMap(tc.topics)
+
+			var want RPCLogs
+			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
+				want = append(want, &RPCLog{Log: *l, BlockTimestamp: 7})
+			}
+			require.Equal(t, want, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 0))
+
+			if len(want) > 1 {
+				// limit stops the walk, so an over-cap receipt is not fully converted.
+				require.Len(t, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 1), 1)
+			}
+		})
+	}
+}
+
+// Pins the maxLogs accounting matchFilter's two return values exist to preserve: the
+// budget is spent on every log the filter considers, matching or not, and never on one
+// it skips outright.
+func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xaa")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addr, Topics: []common.Hash{topicY}},
+		{Address: addr, Topics: []common.Hash{topicX}},
+	}
+	addrMap := map[common.Address]struct{}{addr: {}}
+	topicMap := BuildTopicMap([][]common.Hash{{topicX}})
+
+	require.Empty(t, logs.FilterWithTopicMap(addrMap, topicMap, 1))
+	require.Len(t, logs.FilterWithTopicMap(addrMap, topicMap, 2), 1)
+
+	// A skipped log does not spend the budget.
+	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
+	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }

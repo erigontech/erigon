@@ -1422,7 +1422,10 @@ func TestSliceHintDoesNotChangeDecoding(t *testing.T) {
 		hinted := reflect.New(reflect.TypeOf(tc))
 		require.NoError(t, DecodeBytes(enc, hinted.Interface()))
 
-		// pre-seed capacity so decodeListSlice skips the hint entirely
+		// Pre-seeded capacity makes the top-level slice skip the hint. Nested
+		// slices are still allocated during the decode and take it, so the arms
+		// contrast a hinted outer slice against an unhinted one, not hint
+		// against no hint.
 		control := reflect.New(reflect.TypeOf(tc))
 		control.Elem().Set(reflect.MakeSlice(reflect.TypeOf(tc), 0, 1))
 		require.NoError(t, DecodeBytes(enc, control.Interface()))
@@ -1443,7 +1446,7 @@ func TestSliceHintOnCorruptInput(t *testing.T) {
 			var hinted [][]uint
 			errHint := DecodeBytes(corrupt, &hinted)
 
-			control := make([][]uint, 0, 1) // has capacity, so the hint is skipped
+			control := make([][]uint, 0, 1) // has capacity, so the outer hint is skipped
 			errCtl := DecodeBytes(corrupt, &control)
 
 			require.Equal(t, errCtl == nil, errHint == nil,

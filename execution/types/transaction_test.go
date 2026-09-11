@@ -1085,3 +1085,46 @@ func TestDecodeAccessListReplacesExisting(t *testing.T) {
 	require.Equal(t, viaSlice, viaReader)
 	require.Len(t, viaSlice, 1)
 }
+
+// Decoding a whole typed txn goes through the typed decoder's
+// tx.AccessList = AccessList{}, so an absent access list lands non-nil and
+// marshals as []. TestDecodeAccessListEmptyStaysNil starts from a nil slice
+// and pins the other branch; both shapes reach RPC, so both are pinned.
+func TestDecodeAccessListEmptyThroughTypedTxn(t *testing.T) {
+	t.Parallel()
+	to := common.Address{0x01}
+	txn := &AccessListTx{
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(1),
+				V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3),
+			},
+			GasPrice: *uint256.NewInt(1),
+		},
+		ChainID: *uint256.NewInt(1),
+	}
+	var buf bytes.Buffer
+	require.NoError(t, txn.EncodeRLP(&buf))
+
+	decoded, err := DecodeTransaction(buf.Bytes())
+	require.NoError(t, err)
+
+	al := decoded.GetAccessList()
+	require.NotNil(t, al, "the typed decoder preinitializes, so an absent list is empty, not nil")
+	require.Empty(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "[]", string(encoded))
+}
+
+// A typed txn with no access list decodes to a nil slice, which rpc/ethapi
+// marshals as null. A non-nil empty slice would silently move that to [].
+func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
+	t.Parallel()
+	al, err := decodeALFrom(encodeAL(t, AccessList{}))
+	require.NoError(t, err)
+	require.Nil(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "null", string(encoded))
+}
