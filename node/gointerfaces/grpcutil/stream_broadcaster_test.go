@@ -280,7 +280,9 @@ func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 
 // A subscriber that fills its queue is unregistered at once, but its Subscribe
 // only returns when the Send it is wedged in does - and whatever ended that
-// Send decides the error. Its queued messages are released, not delivered.
+// Send decides the error. Its queued messages are released rather than
+// delivered; here the wedged Send makes that exact, since it cannot dequeue
+// anything more while the drop runs.
 func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("boom")
