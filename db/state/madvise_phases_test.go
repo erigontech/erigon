@@ -68,10 +68,10 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 	keys := mkAddrs(0x10, 12)
 
 	writeStepsKeys(t, db, agg, keys, 0, 32)
-	require.NoError(t, agg.BuildFiles(32*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 32*stepSize, unboundedFinalityCtx))
 	requireAllRandom(t, snapDir, "build")
 
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	requireAllRandom(t, snapDir, "indexing")
 
 	require.NoError(t, agg.MergeLoop(t.Context()))
