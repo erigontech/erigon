@@ -388,6 +388,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
 
+	// BSC/Parlia has no execution engine yet: run the pipeline blocks-only so the
+	// download driver can persist and advance the head without executing. Reuses
+	// the StagesOnlyBlocks mode; remove once Parlia execution is plugged in.
+	if chainConfig.Parlia != nil {
+		dbg.StagesOnlyBlocks = true
+	}
+
 	setDefaultMinerGasLimit(config, chainConfig)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -1379,12 +1386,19 @@ func (s *Ethereum) Start() error {
 		go s.execModule.Start(s.sentryCtx, hook)
 	case s.chainConfig.Parlia != nil:
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[bsc] block printer goroutine terminated")
-			err := bscsync.RunBlockPrinter(s.sentryCtx, s.logger, s.bscP2PService)
+			defer s.logger.Info("[bsc] block downloader goroutine terminated")
+			s.execModule.Start(s.sentryCtx, hook) // startup snapshot catch-up; returns
+			chainRW := chainreader.NewChainReaderEth1(s.chainConfig, s.execModule, s.config.FcuTimeout)
+			err := bscsync.RunBlockDownloader(s.sentryCtx, s.logger, bscsync.Config{
+				ChainRW:     chainRW,
+				Svc:         s.bscP2PService,
+				TargetBlock: s.config.Sync.TargetBlock,
+				FcuInterval: uint64(s.config.Sync.LoopBlockLimit),
+			})
 			if err == nil || errors.Is(err, context.Canceled) {
 				return err
 			}
-			s.logger.Error("[bsc] block printer crashed", "err", err)
+			s.logger.Error("[bsc] block downloader crashed", "err", err)
 			return err
 		})
 	}

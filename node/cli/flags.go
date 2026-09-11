@@ -292,6 +292,9 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	if ctx.IsSet(utils.SnapDownloadToBlockFlag.Name) {
 		cfg.Sync.SnapshotDownloadToBlock = ctx.Uint64(utils.SnapDownloadToBlockFlag.Name)
 	}
+	if ctx.IsSet(utils.SyncTargetBlockFlag.Name) {
+		cfg.Sync.TargetBlock = ctx.Uint64(utils.SyncTargetBlockFlag.Name)
+	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage

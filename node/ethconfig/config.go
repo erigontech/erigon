@@ -313,4 +313,8 @@ type Sync struct {
 	ExperimentalParallelCommitment bool
 	PersistReceiptsCacheV2         bool
 	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
+
+	// TargetBlock bounds the block-download driver: sync stops once the head
+	// reaches it. 0 = no bound.
+	TargetBlock uint64
 }
