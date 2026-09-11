@@ -512,7 +512,6 @@ func (c *Codec) decodeWhoareyou(head *Header, headerData []byte) (Packet, error)
 	if len(head.AuthData) != sizeofWhoareyouAuthData {
 		return nil, fmt.Errorf("invalid auth size %d for WHOAREYOU", len(head.AuthData))
 	}
-	// The length check above guarantees head.AuthData is exactly sizeofWhoareyouAuthData bytes, so this read cannot fail.
 	var auth whoareyouAuthData
 	c.reader.Reset(head.AuthData)
 	binary.Read(&c.reader, binary.BigEndian, &auth) //nolint:errcheck
@@ -585,7 +584,6 @@ func (c *Codec) decodeHandshakeAuthData(head *Header) (auth handshakeAuthData, e
 	if len(head.AuthData) < sizeofHandshakeAuthData {
 		return auth, fmt.Errorf("header authsize %d too low for handshake", head.AuthSize)
 	}
-	// The length check above guarantees at least sizeofHandshakeAuthData bytes are available, so this read cannot fail.
 	c.reader.Reset(head.AuthData)
 	binary.Read(&c.reader, binary.BigEndian, &auth.h) //nolint:errcheck
 	head.src = auth.h.SrcID
@@ -638,7 +636,6 @@ func (c *Codec) decodeMessage(fromAddr netip.AddrPort, head *Header, headerData,
 	if len(head.AuthData) != sizeofMessageAuthData {
 		return nil, fmt.Errorf("invalid auth size %d for message packet", len(head.AuthData))
 	}
-	// The length check above guarantees head.AuthData is exactly sizeofMessageAuthData bytes, so this read cannot fail.
 	var auth messageAuthData
 	c.reader.Reset(head.AuthData)
 	binary.Read(&c.reader, binary.BigEndian, &auth) //nolint:errcheck

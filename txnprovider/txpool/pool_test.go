@@ -373,6 +373,25 @@ func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
 	}))
 }
 
+func TestGetCachedBlobTxnLockedSkipsTruncatedCachedRow(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	hash := common.Hash{0xAB, 0xCD}
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		// shorter than the 20-byte sender prefix v[20:] expects
+		return tx.Put(kv.PoolTransaction, hash[:], []byte{0x01, 0x02, 0x03})
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		mt, err := pool.getCachedBlobTxnLocked(tx, hash[:])
+		require.NoError(t, err)
+		require.Nil(t, mt)
+		return nil
+	}))
+}
+
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

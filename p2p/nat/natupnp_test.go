@@ -20,7 +20,6 @@
 package nat
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -208,12 +207,12 @@ func (dev *fakeIGD) ServeMessage(r *http.Request) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(r.Context(), "udp4", r.RemoteAddr)
 	if err != nil {
-		fmt.Printf("reply Dial error: %v", err)
+		dev.t.Logf("reply Dial error: %v", err)
 		return
 	}
 	defer conn.Close()
 	if _, err := io.WriteString(conn, dev.replaceListenAddr(dev.ssdpResp)); err != nil {
-		fmt.Printf("reply Write error: %v", err)
+		dev.t.Logf("reply Write error: %v", err)
 	}
 }
 

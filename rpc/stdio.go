@@ -64,8 +64,8 @@ func (io stdioConn) RemoteAddr() string {
 	return "/dev/stdin"
 }
 
-// SetWriteDeadline does nothing and always returns nil: stdin/stdout pipes have
-// no deadline support, matching httpServerConn and wsConnAdapter's no-op behavior.
+// SetWriteDeadline does nothing and always returns nil because stdin/stdout pipes
+// do not support deadlines.
 func (io stdioConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
