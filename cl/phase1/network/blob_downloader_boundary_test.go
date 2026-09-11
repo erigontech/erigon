@@ -116,7 +116,6 @@ func TestBlobHistoryDownloaderWaitsWithoutPeers(t *testing.T) {
 func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 20
@@ -140,7 +139,6 @@ func TestBlobHistoryDownloaderNewRetryRevokesPriorCompletionBeforeCancellationRe
 	ctrl := gomock.NewController(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -194,7 +192,6 @@ func TestBlobHistoryDownloaderCompletionCallbackCanReplaceItself(t *testing.T) {
 func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 20
@@ -216,7 +213,6 @@ func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T)
 func TestBlobHistoryDownloaderRechecksPeersBeforeFuluRecovery(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
@@ -350,7 +346,6 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanWithoutNotifying(t *tes
 	)
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	failedRecovery := errors.New("recovery failed")
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	peerDas := mock_services.NewMockPeerDas(ctrl)
@@ -413,7 +408,6 @@ func TestBlobHistoryDownloaderRetryRangesRemainFairAcrossSparseFailures(t *testi
 	}
 	downloader := newBoundaryDownloader(t, 1_000_000, 0, 1_000_000, reader)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 	downloader.addRetrySlot(1)
@@ -435,7 +429,6 @@ func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T)
 	reader := &boundaryBlockReader{blocks: blocks}
 	downloader := newBoundaryDownloader(t, blocksBatchSize*2+1, 0, blocksBatchSize*2+1, reader)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 	downloader.retryRanges = []blobRetryRange{{start: 1, end: blocksBatchSize * 2, cursor: blocksBatchSize * 2}}
@@ -463,7 +456,6 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 		downloader.addRetrySlot(slot)
 	}
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
@@ -516,7 +508,6 @@ func TestBlobHistoryDownloaderRetryRangeOverflowVisitsOnlySparseFailures(t *test
 		downloader.addRetrySlot(slot)
 	}
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
@@ -554,7 +545,6 @@ func TestBlobHistoryDownloaderRetryVisitsMixedDenseAndSparseFailuresWithinOneCyc
 		addFailure(uint64(i+1) * 1_000_000)
 	}
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
@@ -836,7 +826,7 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 
 	downloader := newBoundaryDownloader(t, head, 0, head, reader)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	expectSidecarFilesPresent(blobStorage)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 	downloader.blobStorage = blobStorage
 
