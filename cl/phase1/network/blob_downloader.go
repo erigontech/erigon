@@ -342,11 +342,38 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			continue
 		}
 		if commitments.Len() == int(blobsCount) {
-			continue
+			available, err := b.storedSidecarsAvailable(blockRoot, currentSlot-visited, commitments.Len())
+			if err != nil {
+				return nil, 0, err
+			}
+			if available {
+				continue
+			}
 		}
 		batch = append(batch, block)
 	}
 	return batch, visited, nil
+}
+
+// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. Pruning
+// removes sidecar files but leaves their count rows, and a rewrite can fail partway, so on an
+// archive node a matching count alone is not evidence the store can serve the slot.
+//
+// Non-archive nodes prune on purpose, so a missing file there is expected and must not be re-queued.
+func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, slot uint64, commitments int) (bool, error) {
+	if !b.archiveBlobs {
+		return true, nil
+	}
+	for idx := range commitments {
+		exists, err := b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, uint64(idx))
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // processBatch best-effort recovers each block's blobs: Deneb by-root, Fulu from
