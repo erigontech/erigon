@@ -3,6 +3,7 @@ package devvalidator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,25 @@ type beaconResponse struct {
 	Data json.RawMessage `json:"data"`
 }
 
+// StatusError is a non-OK beacon API response, carrying the code so a caller can tell "this does
+// not exist" apart from "the beacon is not up yet". The difference decides whether waiting helps:
+// a 503 while Caplin starts is transient, a 404 for the head means there is no head to have.
+type StatusError struct {
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("beacon GET %s: status %d: %s", e.Path, e.Status, e.Body)
+}
+
+// IsNotFound reports whether err is a beacon 404.
+func IsNotFound(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Status == http.StatusNotFound
+}
+
 // get performs a GET request and unmarshals the `data` field into dst.
 func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) error {
 	url := c.baseURL + path
@@ -49,7 +69,7 @@ func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) er
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("beacon GET %s: status %d: %s", path, resp.StatusCode, string(body))
+		return &StatusError{Path: path, Status: resp.StatusCode, Body: string(body)}
 	}
 
 	var wrapper beaconResponse

@@ -136,8 +136,22 @@ func (s *Service) anchorClockToHead(ctx context.Context) {
 	}
 	headSlot, err := s.headSlot(ctx)
 	if err != nil {
-		s.logger.Warn("[dev-validator] head slot unavailable; using config genesis clock", "err", err)
-		return
+		// ⚠ A HEAD THE BEACON CANNOT NAME IS A CHAIN AT GENESIS — not a reason to give up, which is
+		// what leaving the clock on wall-clock amounts to. Booting from a CUSTOM genesis STATE gives
+		// Caplin a head root with no head BLOCK behind it, so /headers/head answers 404; this
+		// function then returned, the clock stayed slots ahead of a chain at genesis, and proposer
+		// duties 404ed on a dependent root that will never exist. That is precisely the deadlock
+		// this function was written to prevent, reached through its own error path.
+		//
+		// So a 404 is treated as head slot 0 and the clock is anchored there. Any other error (the
+		// beacon still starting, a 503, a refused connection) is transient and must NOT re-anchor —
+		// a chain that really is at slot 500 would be dragged back to 1 and propose over itself.
+		if !IsNotFound(err) {
+			s.logger.Warn("[dev-validator] head slot unavailable; leaving the clock alone", "err", err)
+			return
+		}
+		s.logger.Info("[dev-validator] beacon has no head block; anchoring the clock to genesis", "err", err)
+		headSlot = 0
 	}
 	now := uint64(time.Now().Unix())
 	if now < s.genesisTime {
