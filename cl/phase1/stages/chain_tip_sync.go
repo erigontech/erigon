@@ -727,19 +727,24 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if !validPendingGloasPayload(p) {
 			continue
 		}
+		beaconRoot := p.Envelope.Message.BeaconBlockRoot
+		if cfg.forkChoice.IsPayloadVerified(beaconRoot) {
+			continue
+		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		beaconRoot := p.Envelope.Message.BeaconBlockRoot
 		execHash := p.Envelope.Message.Payload.BlockHash
+		var retained bool
+		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(beaconRoot, execHash, status)
+		if !retained {
+			continue
+		}
 		switch status {
-		case execution_client.PayloadStatusValidated:
-			cfg.forkChoice.MarkPayloadVerified(beaconRoot, execHash)
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(p)
 		case execution_client.PayloadStatusInvalidated:
-			cfg.forkChoice.MarkPayloadInvalid(beaconRoot, execHash)
 			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
 		}
 	}
@@ -874,20 +879,22 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
 		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash)
+			cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated)
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
+		var retained bool
+		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, status)
+		if !retained {
+			return true
+		}
 		switch status {
-		case execution_client.PayloadStatusValidated:
-			cfg.forkChoice.MarkPayloadVerified(item.root, execHash)
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
 		case execution_client.PayloadStatusInvalidated:
-			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash)
 			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		}
 		swept++
@@ -951,11 +958,12 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
 	execHash := envelope.Message.Payload.BlockHash
-	switch status {
-	case execution_client.PayloadStatusValidated:
-		cfg.forkChoice.MarkPayloadVerified(anchorRoot, execHash)
-	case execution_client.PayloadStatusInvalidated:
-		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, execHash)
+	var retained bool
+	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, execHash, status)
+	if !retained {
+		return
+	}
+	if status == execution_client.PayloadStatusInvalidated {
 		log.Warn("[chainTipSync] anchor payload invalidated by EL", "anchorRoot", anchorRoot)
 	}
 }

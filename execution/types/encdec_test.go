@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -91,10 +92,10 @@ func (tr *TRand) RandBloom() Bloom {
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
 	return &Withdrawal{
-		Index:     tr.rnd.Uint64(),
-		Validator: tr.rnd.Uint64(),
+		Index:     hexutil.Uint64(tr.rnd.Uint64()),
+		Validator: hexutil.Uint64(tr.rnd.Uint64()),
 		Address:   tr.RandAddress(),
-		Amount:    tr.rnd.Uint64(),
+		Amount:    hexutil.Uint64(tr.rnd.Uint64()),
 	}
 }
 

@@ -2800,6 +2800,20 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.sdProbeEpoch++
 }
 
+// ResumeLogIndexAt continues a block's log numbering at idx, for a caller that
+// starts execution in the middle of a block and has to hand in the count the
+// transactions it skipped left behind. Called mid-block it renumbers everything
+// after it, so it belongs before the first log of the first transaction.
+func (sdb *IntraBlockState) ResumeLogIndexAt(idx uint32) {
+	sdb.logs.indexInBlock = uint(idx)
+}
+
+// ResetLogs empties the block's logs and takes the numbering back to zero,
+// keeping the state changes Reset would drop.
+func (sdb *IntraBlockState) ResetLogs() {
+	sdb.logs.reset()
+}
+
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
