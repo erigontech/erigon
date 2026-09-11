@@ -75,6 +75,21 @@ func (c FileCompression) Has(flag FileCompression) bool {
 	return c&flag != 0
 }
 
+type ReaderI interface {
+	Next(buf []byte) ([]byte, uint64)
+	Size() int
+	Count() int
+	Reset(offset uint64)
+	HasNext() bool
+	Skip() (uint64, int)
+	FileName() string
+	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
+	GetMetadata() []byte
+	MadvNormal() MadvDisabler
+	DisableReadAhead()
+	CompressedPageValuesCount() int
+}
+
 type MadvDisabler interface {
 	DisableReadAhead()
 }
