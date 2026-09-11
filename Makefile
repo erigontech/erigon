@@ -341,19 +341,11 @@ check-generated:
 
 ## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
 check-large-files:
-	@base="${BASE:-main}"; \
-	found=0; \
-	while IFS= read -r file; do \
-		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
-		if [ "$$size" -gt 1048576 ]; then \
-			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
-			found=1; \
-		fi; \
-	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
-	if [ "$$found" -eq 1 ]; then \
-		echo "ERROR: Files exceeding 1 MB found."; \
-		exit 1; \
-	fi
+	@bash .github/workflows/scripts/check-large-files.sh "$(or $(BASE),main)"
+
+## test-check-large-files:          test the large-file checker itself
+test-check-large-files:
+	@bash .github/workflows/scripts/check-large-files.test.sh
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
