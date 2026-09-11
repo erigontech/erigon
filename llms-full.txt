@@ -2104,6 +2104,124 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 ---
 
+## Commitment Snapshot Format *(New in v3.6)*
+
+A commitment snapshot file stores Merkle-Patricia trie branches. Each branch has to refer to the account and storage keys underneath it, and Erigon can encode those references in one of two ways:
+
+| Encoding | What a branch stores | When a file uses it |
+|----------|----------------------|---------------------|
+| **Referenced** | *Shortened keys* — offsets into the accounts and storage files, which must be dereferenced on read | Stamped below `v2.2` **and** spanning at least 2 steps |
+| **Plain** | The keys themselves, inline | `v2.2` and later, or a sub-`v2.2` file spanning fewer than 2 steps |
+
+The version stamp alone does not decide the encoding. `CommitmentBranchReferenced`
+(in `db/state/domain_committed.go`) requires both a version below `v2.2` *and* a range of at least
+`commitment.DefaultKeyReferencingMinSteps` (2) steps, so a small `v2.1` file — a single unmerged step — is plain
+despite its stamp.
+
+Plain files are **larger on disk**, but state reads and snapshot merges are **faster**, because nothing has to be looked up in the accounts and storage files first.
+
+v3.6 makes **plain the default** for newly written commitment files. In v3.5 and earlier the default was referenced.
+
+The choice is recorded per datadir as `references_in_commitment_branches` in `snapshots/erigondb.toml`. When that file omits the field, the compiled default applies — `false` (plain) from v3.6, `true` (referenced) before it. On a normal fresh sync the downloader delivers `erigondb.toml` along with the snapshot set, so the published set decides the regime.
+
+### What happens to an existing datadir
+
+Nothing breaks, and nothing is rewritten eagerly:
+
+- **Existing referenced files stay readable.** Whether a commitment file carries shortened references is a property of *that file* — its version stamp and step range — not of the current setting. The commitment domain reads `v2.1` and `v2.2` alike.
+- **Conversion happens lazily, during merges.** When a merge has any referenced input, Erigon attaches a value transformer that expands the references; because new files are now written plain, the merged output lands as `v2.2`. Ordinary background merging therefore migrates the datadir on its own, with no operator action and no downtime.
+
+For most operators upgrading from v3.5 the correct action is **none**. The commands below exist for operators who want the plain format sooner than merging will deliver it, and who are prepared to pay for it.
+
+:::warning
+Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported** — the new snapshot and accessor formats are incompatible with v3.5. Back up your `--datadir` before taking either migration path below.
+:::
+
+### Path 1 — re-download the snapshot set (`erigon seg reset`)
+
+Discards the local snapshot set and lets the next start pull the published v3.6 set, which is already plain.
+
+```bash
+erigon seg reset --datadir /your/datadir
+```
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory. |
+| `--local`, `-l` | A single switch over two behaviours: remove snapshot files that are not described in the preverified set (locally generated ones), **and** remove `chaindata/` together with the Heimdall / Polygon-bridge DBs. **Default: `true`.** `--local=false` keeps all of them. |
+| `--dry-run`, `-n` | Print the files that would be removed and exit without removing anything. Default: `false`. |
+| `--preverified <remote\|local>` | Which preverified snapshot list to reset against. Default: `remote`. |
+
+`seg reset` is **destructive and not reversible**: at the default `--local=true` it deletes `chaindata/`, the Heimdall / Polygon-bridge DBs, and any locally generated snapshot files. Independently of `--local` — that is, even with `--local=false` — it also deletes any `.torrent` file whose infohash does not match the preverified list, **together with the snapshot data file that torrent vouched for** (a stale local build is unverifiable, so the downloader must re-fetch the canonical copy). All other preverified snapshots already on disk are kept and corrected by the downloader on the next start. The node must be **stopped** — the command takes an exclusive lock on the datadir.
+
+Cost: whatever the downloader has to re-fetch, plus rebuilding state on the next start. Run `--dry-run` first, and back up the datadir.
+
+Size that cost by how far the node is past the published preverified manifest, not by download time. The manifest can
+lag the live tip considerably, and only the range it covers can be restored by fetching a torrent. Blocks past it are
+held either in `chaindata/` or in locally built segments — and at `--local=true` `seg reset` removes both (the reset
+path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment
+fetch, which is orders of magnitude slower, and a node far enough behind it may need more than one restart before
+execution resumes.
+
+`seg reset` has no `--chain` flag of its own; it reads the chain name from `chaindata/`. If `chaindata/` is missing or unreadable, pass `--chain` — it is a root-level flag and resolves in either position: `erigon --chain mainnet seg reset --datadir /your/datadir` and `erigon seg reset --chain mainnet --datadir /your/datadir` behave the same.
+
+:::note
+`erigon seg reset` is not new in v3.6 (`seg` is an alias for `snapshots`, so `erigon snapshots reset` is the same command). What is new is its role as a shortcut to the plain commitment format. See also [Snapshots Upgrade Options](../get-started/installation/upgrading#snapshots-upgrade-options).
+:::
+
+### Path 2 — offline conversion (`integration commitment convert`) *(New in v3.6)*
+
+Re-encodes the commitment files already on disk instead of re-downloading them. Built from source as `build/bin/integration` (`make integration`).
+
+```bash
+integration commitment convert --datadir /your/datadir --chain mainnet
+```
+
+Both encoding flags default to `false`, and `false` is the target state that matches what v3.6 writes — so the command above, with no encoding flags, targets plain values **and** V1 keys. Conversion is driven by both axes at once, not only the value axis: a file that is already plain but carries V2 keys is still rewritten, because its key encoding does not match the target.
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory. |
+| `--chain <name>` | Chain name. |
+| `--squeeze` | Target state of the value axis: `true` = referenced (offsets), `false` = plain. Default: `false`. |
+| `--nibbles.v2` | Target state of the key axis: `true` = V2, `false` = V1 (compact bytes, what Erigon writes). Default: `false`. |
+| `--restore` | Move the originals back from `snapshots/backup/domains/` and remove the converted files. Mutually exclusive with `--squeeze` / `--nibbles.v2` and with `--continue`. |
+| `--continue` | Resume an interrupted run, reusing complete shards left in `snapshots/rebuild/domain/`. Mutually exclusive with `--restore`. |
+
+The flag value is the **target** state, not a direction: the tool detects each file's current encoding and converts only what needs it. A file is skipped only when **both** axes already match the target — `st.keysV2 == TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze` — so a mismatch on either axis rewrites the file.
+
+**Is it reversible?** Yes — this is the one path with a real undo. The originals are moved to `snapshots/backup/domains/`, and `--restore` puts them back. Restore is filesystem-only and runs even when the datadir is too broken for Erigon to open it. Because a leftover backup blocks a second conversion, restore or clear `snapshots/backup/domains/` before converting again.
+
+**Is the node stopped?** Yes. The command opens the chaindata DB read-write and applies migrations.
+
+**What does it cost?** Every commitment `.kv` file that is not already plain is rewritten and its accessors (`.kvi` / `.bt` / `.kvei`) rebuilt. Converted output is written into `snapshots/rebuild/domain/` while the originals are still in place, so at peak you need free space for a second copy of the commitment domain — use the `commitment` row of `erigon seg du --datadir <path> -v` to size it. Plain output is larger than the referenced input.
+
+:::warning
+If a run is interrupted and you resume with `--continue`, you **must** pass the same `--squeeze` and `--nibbles.v2` values as the original run. A mismatch silently produces mixed-encoding output. Without `--continue`, a restart simply discards `snapshots/rebuild/domain/` and redoes the conversion from scratch.
+:::
+
+### Prerequisite for pre-3.4 step sizes (`erigon seg step-rebase`)
+
+Erigon groups state files into *steps*. Up to v3.3 a step was 1,562,500 transactions; from v3.4 the default is **390,625** — a quarter of the old size, and still the default in v3.6. v3.4 and v3.5 offered the smaller step as an optional gain (about 4× smaller `chaindata/`) rather than forcing it, so a datadir first created by v3.3 or earlier can still be recorded at the legacy size. The v3.6 release notes require those datadirs to rebase, or to take the `seg reset` path above, before their first normal v3.6 start.
+
+Check `step_size` in `snapshots/erigondb.toml`. If it reads `1562500`:
+
+```bash
+erigon seg step-rebase --datadir /your/datadir --new-step-size=390625
+```
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory. |
+| `--new-step-size <n>` | **Required.** Target step size. `390625` is the current default. Must be a whole multiple or a whole divisor of the datadir's present step size. |
+| `--keep-blocks` | Keep `chaindata/` and reset only the execution-state tables inside it, so already-downloaded blocks can be re-executed instead of re-downloaded. Default: delete `chaindata/` entirely. |
+
+What it does: renames every state snapshot file under `snapshots/domain`, `history`, `accessor`, and `idx` so its step numbers are rescaled by the factor; deletes the `.torrent` files in those directories and `snapshots/erigondb.toml.torrent`, which the rebase invalidates; deletes `chaindata/` (or, with `--keep-blocks`, resets its execution-state tables); and rewrites `snapshots/erigondb.toml` with the new `step_size` and a correspondingly rescaled `steps_in_frozen_file`.
+
+The command prints the full rename and delete plan and asks for confirmation (`Proceed with these changes? [y/N]`) before touching anything, and exits as a no-op if the datadir is already at the requested step size. It is **destructive and has no built-in undo**, and an interrupted run must not simply be re-run: the new step size is written only after every rename has completed, so a crash partway through leaves the old size recorded next to partly renamed files. A second run reads that old size and rescales the already-renamed files again, corrupting their ranges. Recover the datadir from a backup instead. The node must be **stopped** — it locks the datadir (and, with `--keep-blocks`, additionally opens `chaindata/` exclusively). The v3.4.0 release notes put the rebase itself at roughly ten seconds; the cost that follows is re-acquiring whatever was in `chaindata/`.
+
+---
+
 ## Upgrading Snapshots in v3.5
 
 ### EIP-8252 retention window change
@@ -2295,8 +2413,8 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
   * Default: unset (uses the value from `erigondb.toml`)
   * Use with care — an incorrect value may affect database structure.
-* `--commitment.plainValues` *(New in v3.6)*: On the first start of a fresh datadir, write commitment values in plain form (no shortened key references). This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists.
-  * Default: `false`
+* `--commitment.plainValues` *(New in v3.6)*: Chooses the commitment branch encoding recorded in `snapshots/erigondb.toml` at the moment Erigon creates that file. `true` writes commitment values in plain form (keys inline); `false` writes shortened key references. This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists, and an `erigondb.toml` delivered by the downloader wins over it. See [Commitment Snapshot Format](/fundamentals/snapshots-management#commitment-snapshot-format).
+  * Default: plain. Leaving the flag out selects plain, which is v3.6's compiled default; passing `--commitment.plainValues=false` explicitly selects the older *referenced* encoding. Before v3.6 the compiled default was referenced.
 
 ### Pruning and Snapshots
 
