@@ -141,6 +141,12 @@ func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
 func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	// A faulted opcode (e.g. out-of-gas at the opcode itself) never performs its
+	// account/storage access in consensus terms, so it must not contribute to the
+	// prestate. Mirrors go-ethereum (PR #26848).
+	if err != nil {
+		return
+	}
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
