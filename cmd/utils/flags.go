@@ -831,6 +831,12 @@ var (
 		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
+
+	DisableTCP = cli.BoolFlag{
+		Name:  "downloader.disable.tcp",
+		Usage: "Turns off TCP for the downloader, leaving uTP as the only BitTorrent transport",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -1165,6 +1171,11 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
+	}
+	SlowBlockThresholdFlag = cli.DurationFlag{
+		Name:  "debug.slow-block-threshold",
+		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables). Enabling it also times every state domain read process-wide, RPC included",
+		Value: -1,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -2153,6 +2164,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
 				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				DisableTCP:               boolFlagOpt(ctx, &DisableTCP),
 				Verify:                   ctx.Bool(DownloaderVerifyFlag.Name),
 				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
 				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
