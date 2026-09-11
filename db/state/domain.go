@@ -2009,6 +2009,8 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 		mxPrunableDCode.Set(delta)
 	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
+	case kv.CommitmentBinDomain:
+		mxPrunableDCommBin.Set(delta)
 	}
 	return !done, maxStepToPrune
 }

@@ -1957,6 +1957,7 @@ func (a *Aggregator) MaxPrunableStepsBacklog() uint64 {
 		mxPrunableDSto.GetValueUint64(),
 		mxPrunableDCode.GetValueUint64(),
 		mxPrunableDComm.GetValueUint64(),
+		mxPrunableDCommBin.GetValueUint64(),
 	)
 }
 
