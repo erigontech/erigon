@@ -725,8 +725,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-// asSystemTxEngine keeps the rules-package reference out of Execute, where a
-// local variable shadows the package name.
 func asSystemTxEngine(e rules.Engine) (rules.SystemTxEngine, bool) {
 	s, ok := e.(rules.SystemTxEngine)
 	return s, ok
