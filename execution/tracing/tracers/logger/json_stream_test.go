@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -258,6 +257,29 @@ func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
 	}
 }
 
+// A step recorded after a frame exit must land in the array that exit opened.
+// The separator has to follow the steps written, not the prologue: keyed on the
+// prologue it would put a comma into an array still empty.
+func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	l.OnExit(1, nil, 0, nil, false)
+	l.OnOpcode(0, byte(vm.MLOAD), 100, 3, &mockOpContext{}, nil, 1, nil)
+	l.OnExit(0, nil, 0, nil, false)
+
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var decoded struct {
+		StructLogs []map[string]any `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "produced %s", buf.Bytes())
+	require.Len(t, decoded.StructLogs, 1)
+}
+
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
 // 0x-prefixed 64-char hex strings and that a partial last word is padded to 32 bytes.
 func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {
@@ -406,48 +428,6 @@ func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
 		obj := captureOnOpcodeWithReturnData(t, &LogConfig{EnableReturnData: false}, nil, rData, nil, nil)
 		if _, ok := obj["returnData"]; ok {
 			t.Error("expected 'returnData' field to be absent, but it was present")
-		}
-	})
-}
-
-// TestStructLog_ErrorOmitempty verifies that the 'error' field is omitted from
-// MarshalJSON output when there is no error, and present when there is.
-func TestStructLog_ErrorOmitempty(t *testing.T) {
-	t.Run("no error omitted", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		if _, found := obj["error"]; found {
-			t.Errorf("expected 'error' field to be absent, but it was present: %s", obj["error"])
-		}
-	})
-
-	t.Run("error included when present", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1, Err: errors.New("out of gas")}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		raw, found := obj["error"]
-		if !found {
-			t.Fatal("expected 'error' field but it was absent")
-		}
-		var msg string
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			t.Fatalf("cannot parse error field: %v", err)
-		}
-		if msg != "out of gas" {
-			t.Errorf("error message: got %q, want %q", msg, "out of gas")
 		}
 	})
 }

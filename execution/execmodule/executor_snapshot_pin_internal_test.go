@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -43,6 +44,8 @@ type pinTestBlockReader struct {
 }
 
 func (pinTestBlockReader) FrozenBlocks() uint64 { return 0 }
+
+func (pinTestBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
 
 // newPinTestExecutor wires a PipelineExecutor around a single-stage Sync whose
 // Snapshots-stage Forward func is controlled by the test, so ProcessFrozenBlocks'

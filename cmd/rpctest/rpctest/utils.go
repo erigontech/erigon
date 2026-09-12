@@ -483,13 +483,13 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	// block in which the transaction was included
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
 	// hash of the transaction
-	TxHash common.Hash    `json:"transactionHash" gencodec:"required"`
+	TxHash common.Hash    `json:"transactionHash"`
 	// index of the transaction in the block
-	TxIndex hexutil.Uint  `json:"transactionIndex" gencodec:"required"`
+	TxIndex hexutil.Uint  `json:"transactionIndex"`
 	// hash of the block in which the transaction was included
 	BlockHash common.Hash `json:"blockHash"`
 	// index of the log in the receipt
-	Index hexutil.Uint    `json:"logIndex" gencodec:"required"`
+	Index hexutil.Uint    `json:"logIndex"`
 
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.

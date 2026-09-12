@@ -5,6 +5,8 @@
 - rpc: `eth_getFilterLogs` now runs a historical query from the criteria stored by `eth_newFilter`; it neither drains the live-log queue read by `eth_getFilterChanges` nor refreshes the filter expiry deadline. Historical queries enforce `rpc.blockrange.limit`, `rpc.logs.maxresults`, and `rpc.logs.querylimit`; a filter can return `-32602` when one of these limits is exceeded, and queries may surface initialization, pruned-history, or not-yet-executed errors. This can be a breaking change (#23296) — by @taratorio
 - rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria exceeding the per-filter `rpc.subscription.filters.maxaddresses` or `rpc.subscription.filters.maxtopics` limit with `-32602` instead of silently capping them. This can be a breaking change for nodes that configure either limit above `0`; both limits default to `0` (unlimited) (#23296) — by @taratorio
 - rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria with more than four topic positions with `-32602` instead of accepting a filter that cannot match any Ethereum log. This can be a breaking change (#23296) — by @taratorio
+- rpc: the `callTracer` `withLog` option of `debug_traceTransaction` and `debug_traceBlock*` now numbers a log's `index` over the whole block instead of restarting at `0x0` on every transaction, matching geth's `callTracer` and the index the same log carries in `eth_getLogs` and in its receipt. In `debug_traceCallMany` the calls of one bundle now share that count instead of each restarting, while every bundle still starts at zero, since a bundle is a simulated block of its own; `debug_traceCall` is unchanged. On a node whose receipt domain has no record for a transaction, `eth_getTransactionReceipt` and `eth_getLogs` now return an error instead of a receipt whose log `index` had underflowed. This can be a breaking change for clients that join trace logs to `eth_getLogs` indices (#23797) — by @lupin012
+- rpc: `eth_call`, `eth_estimateGas`, `eth_simulateV1`, `trace_call`, `debug_traceCall`, and `eth_createAccessList` now reject a request carrying an `accessList` before Berlin or `blobVersionedHashes` before Cancun, matching go-ethereum's own validation and the cross-client survey in [execution-apis#884](https://github.com/ethereum/execution-apis/issues/884). This includes `eth_createAccessList` itself on a pre-Berlin block: it previously computed and returned an access list there, but now rejects the request, since EIP-2930 access lists have no meaningful answer before the fork that introduces them. This can be a breaking change for callers of `eth_createAccessList` against a pre-Berlin block (#23700) — by @Sahil-4555
 
 ### Added
 
@@ -15,6 +17,33 @@
 - rpc: live logs returned by `eth_getFilterChanges` and `eth_subscribe("logs")` now include `blockTimestamp`, matching `eth_getLogs` and `eth_getFilterLogs` (#23296) — by @taratorio
 - node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
 - rpc: `erigon_getLogs` and `erigon_getLatestLogs` renamed the log field `timestamp` to `blockTimestamp`, matching the name `eth_getLogs` and the other log-returning methods already use. Clients that read the `timestamp` key must be updated (#23337) - by @Sahil-4555
+
+---
+
+# Erigon v3.6.1 — Upstream Underbelly — 2026-09-09
+
+v3.6.1 is a bugfix and security release recommended for all users. It fixes a downloader regression that could silently replace a valid local snapshot (#23859), a peer-ban bypass that let a banned Caplin peer reconnect immediately (#23866), an index-build defect that could leave stale bits in a `recsplit` index after a salt-collision retry (#23858), and bumps `google.golang.org/grpc` for two HIGH-severity CVEs (#23888). It is a drop-in upgrade from 3.6.0 — no re-sync required.
+
+**Bugfixes**
+
+- db/downloader: keep local snapshot data once the initial download is complete (#23859) by @AskAlexSharov — a locally-differing `.seg` that no longer matched its `.torrent` was silently replaced even after `preverified.toml` existed; it is now kept and registered for seeding, with a warn-level log when a mismatched file is still replaced. Fixes #21522.
+- cl/sentinel: honour the peer ban on inbound connections (#23866) by @lystopad — `BanStatus` was only consulted on outbound dials, so a peer already three-strike banned still received a fresh handshake on every inbound reconnect; one Gnosis archive node logged 13,827 failed handshakes against 1,638 banned peers in ninety minutes. Fixes #23605.
+- db/recsplit: reset the Golomb-Rice encoder, Elias-Fano structure, and existence filter on `ResetNextSalt` (#23858) by @AskAlexSharov — retrying an index build after a salt collision left the failed attempt's encoded bits and existence-filter data in place, corrupting the rebuilt index.
+- sd: lock `changesetMu` on every `DomainPut`, not only on field reads (#23680) by @AskAlexSharov — the mutex guarded reads of change-set state but not the writes that mutate it, leaving a data race under concurrent commits.
+- rpc/jsonrpc: report base-fee sub-pool transactions as pending (#23647) by @lupin012 — transactions parked in the base-fee sub-pool were reported as queued instead of pending, understating the pending count seen by clients and tooling.
+- cl/beacon: report a syncing node as 503, not 500 (#23608) by @lystopad — the committee-subscription and duties endpoints answered `500 Internal Server Error` while starting up or catching up, where beacon-APIs specifies `503 CurrentlySyncing`; alerting on 500s no longer fires on ordinary startup or resync.
+- cl: seed the ENR custody group count instead of an empty entry (#23591) by @lystopad — nodes advertised an empty PeerDAS custody-group-count ENR entry, making them unselectable as custody peers by counterparties that filter on it.
+
+**Security**
+
+- p2p/discover: require a proven bond before accepting a PING endpoint statement (#23639) by @yperbasis — an unbonded PING could feed an arbitrary claimed address into a node's local endpoint predictor; a statement is now only accepted once a recent PONG has proven return reachability.
+- build: bump `google.golang.org/grpc` to v1.83.2 (#23888) by @lystopad — CVE-2026-84304: fragmented HTTP/2 DATA frames were each stored as a separate `recvMsg`, letting an unauthenticated peer exhaust heap memory with many one-byte frames across concurrent streams. CVE-2026-84445: an xDS gRPC server panicked on a request missing both `:authority` and `Host`; not reachable in Erigon, which never calls `xds.NewGRPCServer()`. `main` already carries v1.83.2 (#23267) and needs no code change, only this note.
+
+**Improvements**
+
+- cl, cmd/utils: derive the data-column retention window from the chain config instead of a hardcoded constant, guarding the derivation against zero and overflow inputs (#23851, #23863) by @lystopad — mainnet retention grows from 131072 to 131104 slots (one extra epoch of alignment slack); Gnosis and Chiado drop from 131072 to 65552.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.6.0...v3.6.1
 
 ---
 

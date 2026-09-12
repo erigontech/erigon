@@ -17,9 +17,7 @@
 package stagedsync
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -85,9 +83,12 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 	be.recordFeeMerge(version, first, second, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
-	require.Same(t, second, be.feeMergeTemp[0].writes)
-	require.True(t, first.Released(), "the superseded fee-merge temp must be released")
-	require.Equal(t, 1, second.Count())
+	require.Same(t, first, be.feeMergeTemp[0].writes, "the recorded product is rewritten in place")
+	require.True(t, second.Released(), "the credit the rewrite consumed must be released")
+	require.Equal(t, 1, first.Count())
+	vw, ok := first.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), vw.Val.Uint64(), "the recorded product must carry the newest credit")
 }
 
 func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
@@ -336,52 +337,28 @@ func TestBlockResult_HandsSupersededToApplyLoop(t *testing.T) {
 	})
 }
 
-func benchFeeDropSets(n int, coinbase accounts.Address) (prev, next *state.WriteSet) {
-	base := &state.WriteSet{}
-	for i := range n {
-		var a common.Address
-		binary.BigEndian.PutUint64(a[12:], uint64(i+1))
-		addr := accounts.InternAddress(a)
-		base.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}})
-		base.SetNonce(addr, &state.VersionedWrite[uint64]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}})
-		var h common.Hash
-		binary.BigEndian.PutUint64(h[24:], uint64(i+1))
-		key := accounts.InternKey(h)
-		base.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key}})
-	}
-	for _, tip := range []**state.WriteSet{&prev, &next} {
-		ws := &state.WriteSet{}
-		ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath}})
-		ws.SetAddress(coinbase, &state.VersionedWrite[*accounts.Account]{
-			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{}})
-		*tip = base.MergeInto(ws)
-	}
-	// The half of the credit this round stopped emitting.
-	prev.SetSelfDestruct(coinbase, &state.VersionedWrite[bool]{
-		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true})
-	return prev, next
-}
+// A re-credit at the same headers only moves the fee values, so the round must
+// rewrite them in the recorded set rather than rebuild it from the tx's whole
+// write set and pool the one it replaces.
+func TestRecordFeeMerge_ReCreditRewritesTheRecordedSet(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
 
-// BenchmarkDropStaleVersionedWrites sizes the retraction scan against the tx's
-// own write set: the credit it retracts is the same two addresses either way.
-func BenchmarkDropStaleVersionedWrites(b *testing.B) {
-	coinbase := feeMergeTestAddr("0x7777777777777777777777777777777777777777")
-	burnt := feeMergeTestAddr("0x8888888888888888888888888888888888888888")
-	version := state.Version{TxIndex: 0}
+	require.NotNil(t, r.run(t), "the first round must credit the tip")
+	merged := r.recorded()
 
-	for _, n := range []int{4, 32, 256} {
-		b.Run(fmt.Sprintf("writes=%d", n*3), func(b *testing.B) {
-			be := feeMergeTestExecutor(b)
-			prev, next := benchFeeDropSets(n, coinbase)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				be.dropStaleVersionedWrites(version, prev, next, [2]accounts.Address{coinbase, burnt})
-			}
-		})
-	}
+	r.setPreCreditBalance(s.coinbase, 9_000)
+	credit := r.run(t)
+	require.NotNil(t, credit, "a moved coinbase makes the credit differ")
+
+	require.Same(t, merged, r.recorded(), "the same headers must be rewritten, not rebuilt")
+	require.Same(t, merged, r.credited(), "the rewritten set is still this version's credit")
+	require.Equal(t, findBalance(credit, s.coinbase).Val, findBalance(merged, s.coinbase).Val,
+		"the recorded set must carry the round's credit")
+	require.Equal(t, findAddress(credit, s.coinbase).Val, findAddress(merged, s.coinbase).Val,
+		"the account sibling must carry it too")
+
+	r.be.superseded.release()
+	require.False(t, merged.Released(), "the recorded set must not be released")
 }

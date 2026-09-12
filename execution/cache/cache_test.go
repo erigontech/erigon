@@ -272,7 +272,7 @@ func TestCodeCache_NewDefaultCodeCache(t *testing.T) {
 }
 
 func TestCodeCache_GetPut(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -292,7 +292,7 @@ func TestCodeCache_GetPut(t *testing.T) {
 }
 
 func TestCodeCache_PutEmptyCode(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	c.Put(addr, []byte{}, 0)
@@ -303,7 +303,7 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 }
 
 func TestCodeCache_CodeDeduplication(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	code := makeCode(1)
 	addr1 := makeAddr(1)
@@ -362,10 +362,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
-	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
-	// rather than growing unbounded.
-	assert.Less(t, c.CodeLen(), 1100)
+	// hashToCode is bounded by bytes and gets half the configured figure, which
+	// 1100 small codes are nowhere near — they all stay resident.
+	assert.Equal(t, 1100, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024)/2)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -375,29 +375,35 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
-	// LRU-evict the coldest rather than freezing the layer.
-	c := closeOnCleanup(t, NewCodeCache(25, 1024*1024)) // 25 bytes code, 1MB addr
+	// A budget with room for one entry. Successive distinct codes evict rather
+	// than freezing the layer, and residency never exceeds the budget.
+	// The budget is split across the two content layers, so size it for one entry each.
+	const codeCap = 2 * (codeEntryBytes + 8)
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeCap), 1024*1024))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
 	c.Put(makeAddr(3), makeCode(3), 0)
 
-	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
-	// most-recent code(s) after eviction.
+	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
-	assert.LessOrEqual(t, c.CodeLen(), 1)
+	assert.Equal(t, 1, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap)/2)
 
-	// Newest code is retrievable; the coldest was evicted from the code layer.
-	v, ok := c.Get(makeAddr(3))
-	assert.True(t, ok)
-	assert.Equal(t, makeCode(3), v)
-	_, ok = c.Get(makeAddr(1))
-	assert.False(t, ok, "coldest code should have been evicted")
+	// Exactly one of the three addrs still resolves to its code — which one is
+	// the eviction policy's call, not the test's.
+	var live int
+	for i := 1; i <= 3; i++ {
+		if v, ok := c.Get(makeAddr(i)); ok {
+			assert.Equal(t, makeCode(i), v)
+			live++
+		}
+	}
+	assert.Equal(t, 1, live)
 }
 
 func TestCodeCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -413,7 +419,7 @@ func TestCodeCache_Delete(t *testing.T) {
 }
 
 func TestCodeCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -426,7 +432,7 @@ func TestCodeCache_Clear(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Get(makeAddr(1)) // hit
@@ -437,7 +443,7 @@ func TestCodeCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset()
 }
@@ -653,7 +659,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCodeCache_ConcurrentAccess(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(1000, 1000))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	done := make(chan bool)
 
@@ -1579,4 +1585,108 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	c2 := NewStateCache(b, b, b, b)
 	t.Cleanup(c2.Close)
 	require.True(t, c2.FillsEnabled())
+}
+
+func TestPublishUsesProducerCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(7)
+	code := bytes.Repeat([]byte{0xab}, 96)
+	var sentinel [32]byte
+	sentinel[0] = 0xc0
+	sentinel[31] = 0xde
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: sentinel[:],
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
+	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.False(t, ok, "the cache must not re-derive a hash of its own")
+
+	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}
+
+// A malformed producer hash must be re-derived, not used: it would file the entry
+// under a content address no reader queries, since lookups pass a 32-byte keccak.
+func TestPublishDerivesMalformedCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(9)
+	code := bytes.Repeat([]byte{0xcd}, 64)
+	short := []byte{0x01, 0x02, 0x03}
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: short,
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok, "a short producer hash must be replaced by the derived one")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(short)
+	require.False(t, ok, "the short hash must not key the entry")
+}
+
+// byteLRU bounds by the bytes it holds rather than an entry count: mixed-size
+// values evict until the newcomer fits, every removal reports through onEvict,
+// and a value larger than the whole budget is rejected without disturbing the
+// resident set.
+func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
+	const maxBytes = 256 * datasize.KB
+	evicted := map[uint64]int{}
+	b := closeOnCleanup(t, newByteLRU(maxBytes,
+		func(_ uint64, v []byte) int64 { return int64(len(v)) },
+		func(k uint64, _ []byte) { evicted[k]++ }))
+
+	sizes := map[uint64]int{}
+	for i := range 40 {
+		n := 1 * int(datasize.KB)
+		if i%4 == 0 {
+			n = 64 * int(datasize.KB)
+		}
+		sizes[uint64(i)] = n
+		b.Add(uint64(i), make([]byte, n))
+	}
+
+	var resident int64
+	survivors := map[uint64]bool{}
+	for k, n := range sizes {
+		_, ok := b.Get(k)
+		survivors[k] = ok
+		if ok {
+			resident += int64(n)
+		}
+		require.Equal(t, ok, evicted[k] == 0, "key %d: onEvict must fire exactly for the evicted keys", k)
+	}
+	require.NotZero(t, resident, "the layer must not freeze empty")
+	require.LessOrEqual(t, resident, int64(maxBytes), "resident bytes must stay within the budget")
+
+	b.Add(999, make([]byte, int(maxBytes)+1))
+	_, ok := b.Get(999)
+	require.False(t, ok, "a value larger than the budget must not be admitted")
+	require.Zero(t, evicted[999], "onEvict must not fire for a value that was never admitted")
+	for k, wasResident := range survivors {
+		_, ok := b.Get(k)
+		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
+	}
 }

@@ -180,7 +180,7 @@ func (m *UnionUno[T]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionUno[T]) Next() (res T, err error) {
+func (m *UnionUno[T]) Next() (res T, _ error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -646,7 +646,7 @@ func (m *UnionDuo[K, V]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
+func (m *UnionDuo[K, V]) Next() (res K, resV V, _ error) {
 	if m.err != nil {
 		return res, resV, m.err
 	}

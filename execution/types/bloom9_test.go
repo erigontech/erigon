@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 )
@@ -159,5 +161,22 @@ func TestIsEmpty(t *testing.T) {
 	b[len(b)-1] = 1
 	if b.IsEmpty() {
 		t.Error("expected not empty")
+	}
+}
+
+// AppendText must be byte-identical to MarshalText (only the destination differs).
+func TestBloomAppendTextByteIdentical(t *testing.T) {
+	for name, b := range map[string]Bloom{
+		"zero": {},
+		"set":  BytesToBloom(crypto.Keccak256(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			mt, err := b.MarshalText()
+			require.NoError(t, err)
+			const pfx = "PFX"
+			at, err := b.AppendText([]byte(pfx))
+			require.NoError(t, err)
+			require.Equal(t, append([]byte(pfx), mt...), at)
+		})
 	}
 }

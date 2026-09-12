@@ -18,11 +18,17 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -42,10 +48,37 @@ func TestGetAccountStorage_InvalidSlot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := api.GetAccountStorage(context.Background(), common.Address{}, tt.slot, rpc.BlockNumber(0))
-			var paramErr *rpc.InvalidParamsError
-			if !errors.As(err, &paramErr) {
+			if _, ok := errors.AsType[*rpc.InvalidParamsError](err); !ok {
 				t.Errorf("expected *rpc.InvalidParamsError, got %T: %v", err, err)
 			}
 		})
 	}
+}
+
+// The graphql_ block responses hand back a map[string]any, so each value carries
+// its own encoding rather than the one a struct tag would impose. This pins all
+// four to what a direct JSON-RPC caller sees.
+func TestMarshalWithdrawalsEncoding(t *testing.T) {
+	t.Parallel()
+	got, err := json.Marshal(marshalWithdrawals(types.Withdrawals{{
+		Index:     19_000_042,
+		Validator: 881_234,
+		Address:   common.HexToAddress("0xb9d7934878b5fb9610b3fe8a5e441e8fad7e293f"),
+		Amount:    63_012_345,
+	}}))
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"index":"0x121eaea","validator":"0xd7252",`+
+		`"address":"0xb9d7934878b5fb9610b3fe8a5e441e8fad7e293f","amount":"0x3c17df9"}]`, string(got))
+
+	// A withdrawal amount above 2^63 stays a plain quantity.
+	got, err = json.Marshal(marshalWithdrawals(types.Withdrawals{{Amount: hexutil.Uint64(1) << 63}}))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"amount":"0x8000000000000000"`)
+}
+
+func TestMarshalWithdrawalsEmpty(t *testing.T) {
+	t.Parallel()
+	got, err := json.Marshal(marshalWithdrawals(nil))
+	require.NoError(t, err)
+	assert.Equal(t, "[]", string(got))
 }
