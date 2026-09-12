@@ -11,6 +11,7 @@ package epbs
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,12 +21,16 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
+	clutils "github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type resolverHeadSource struct {
@@ -57,6 +62,20 @@ type resolverForkchoice struct {
 	gasLimits      map[common.Hash]uint64
 	recentStatuses map[common.Hash]execution_client.PayloadStatus
 	readEnvelope   func() (*cltypes.SignedExecutionPayloadEnvelope, error)
+}
+
+type resolverBuilderSigner struct {
+	pubkey common.Bytes48
+}
+
+func (s resolverBuilderSigner) Pubkey() common.Bytes48 { return s.pubkey }
+
+func (resolverBuilderSigner) SignBid(context.Context, common.Hash) (common.Bytes96, error) {
+	return common.Bytes96{}, nil
+}
+
+func (resolverBuilderSigner) SignEnvelope(context.Context, common.Hash) (common.Bytes96, error) {
+	return common.Bytes96{}, nil
 }
 
 func (f *resolverForkchoice) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
@@ -192,6 +211,7 @@ func TestLiveSlotInputResolverResolvesEmptyHeadWithOwnedInput(t *testing.T) {
 	require.Equal(t, randao, input.PrevRandao)
 	require.Equal(t, uint64(1_000)+input.Slot*cfg.SecondsPerSlot, input.Timestamp)
 	require.Equal(t, uint64(0), input.BuilderIndex)
+	require.Equal(t, headState.GetBuilders().Get(0).ExecutionAddress, input.BuilderExecutionAddress)
 	require.Equal(t, uint64(2_000), input.AvailableBidValueGwei)
 	require.True(t, input.BuilderActive)
 	require.Len(t, input.Withdrawals, 1)
@@ -234,6 +254,85 @@ func TestLiveSlotInputResolverResolvesFullHeadFromEnvelope(t *testing.T) {
 	require.Equal(t, parentBid.BlockHash, input.ParentBlockHash)
 	require.NotNil(t, input.Withdrawals)
 	require.Equal(t, uint64(2_000), input.AvailableBidValueGwei)
+}
+
+func TestLiveSlotInputResolverResolvesFirstGloasSlotFromPreGloasParent(t *testing.T) {
+	cfg, headState, preferences, headRoot, _, randao := liveResolverFixture(t)
+	targetSlot := preferences.Message.ProposalSlot
+	forkEpoch := targetSlot / cfg.SlotsPerEpoch
+	cfg.GloasForkEpoch = forkEpoch
+	headState.BeaconConfig().GloasForkEpoch = forkEpoch
+	validatorCount := headState.ValidatorLength()
+	headState.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
+	headState.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
+	headState.SetInactivityScores(make([]uint64, validatorCount))
+	require.NoError(t, headState.SetSlot(targetSlot-1))
+	headState.SetVersion(clparams.FuluVersion)
+	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: targetSlot - 1, ParentRoot: common.HexToHash("0x31")})
+	parentPayload := cltypes.NewEth1Header(clparams.FuluVersion)
+	parentPayload.ParentHash = common.HexToHash("0x40")
+	parentPayload.BlockHash = common.HexToHash("0x41")
+	parentPayload.PrevRandao = randao
+	parentPayload.GasLimit = 30_000_000
+	headState.SetLatestExecutionPayloadHeader(parentPayload)
+	headState.SetLatestExecutionPayloadBid(nil)
+	headState.SetBuilders(nil)
+	builderAddress := common.HexToAddress("0x21")
+	builderDeposit, signer := validForkOnboardingBuilderDeposit(t, headState.BeaconConfig(), builderAddress)
+	pendingDeposits := solid.NewPendingDepositList(headState.BeaconConfig())
+	pendingDeposits.Append(&solid.PendingDeposit{
+		PubKey: common.Bytes48{0: 0xff}, WithdrawalCredentials: common.Hash{0: byte(cfg.ETH1AddressWithdrawalPrefixByte)},
+		Amount: math.MaxUint64, Slot: cfg.SlotsPerEpoch,
+	})
+	pendingDeposits.Append(builderDeposit)
+	headState.SetPendingDeposits(pendingDeposits)
+	withdrawalAddress := common.HexToAddress("0x99")
+	withdrawalCredentials := common.Hash{0: byte(cfg.ETH1AddressWithdrawalPrefixByte)}
+	copy(withdrawalCredentials[12:], withdrawalAddress[:])
+	headState.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(0, withdrawalCredentials)
+	headState.ValidatorSet().SetWithdrawableEpochForValidatorAtIndex(0, 0)
+	headState.SetNextWithdrawalValidatorIndex(0)
+	headState.SetNextWithdrawalIndex(0)
+
+	advanced, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, targetSlot))
+	require.Equal(t, clparams.GloasVersion, advanced.Version())
+	require.Equal(t, 1, advanced.GetBuilders().Len())
+	withdrawalBalance, err := advanced.ValidatorBalance(0)
+	require.NoError(t, err)
+	preferences.Message.ValidatorIndex, err = advanced.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	preferences.Message.DependentRoot, err = state.GetProposerDependentRoot(advanced, forkEpoch)
+	require.NoError(t, err)
+	parentBid := advanced.GetLatestExecutionPayloadBid()
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
+	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
+	fc := &resolverForkchoice{
+		headNode:  forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty},
+		gasLimits: map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
+		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
+			parentBid.BlockHash: execution_client.PayloadStatusValidated,
+		},
+	}
+	resolver := NewLiveSlotInputResolver(
+		&cfg,
+		signer,
+		clock,
+		&resolverHeadSource{state: headState, root: headRoot, identitySlot: targetSlot - 1},
+		fc,
+	)
+
+	input, err := resolver.Resolve(t.Context(), preferences)
+	require.NoError(t, err)
+	require.Equal(t, parentPayload.BlockHash, input.ParentBlockHash)
+	require.Equal(t, builderAddress, input.BuilderExecutionAddress)
+	require.Len(t, input.Withdrawals, 1)
+	require.Equal(t, uint64(0), uint64(input.Withdrawals[0].Index))
+	require.Equal(t, uint64(0), uint64(input.Withdrawals[0].Validator))
+	require.Equal(t, withdrawalAddress, input.Withdrawals[0].Address)
+	require.Equal(t, withdrawalBalance, uint64(input.Withdrawals[0].Amount))
 }
 
 func TestLiveSlotInputResolverRejectsBuilderExitedByFullParent(t *testing.T) {
@@ -380,6 +479,7 @@ func liveResolverFixture(t *testing.T) (
 	builders.Append(&cltypes.Builder{
 		Pubkey:            common.Bytes48{0: 1},
 		Version:           cfg.PayloadBuilderVersion,
+		ExecutionAddress:  common.HexToAddress("0x21"),
 		Balance:           cfg.MinDepositAmount + 2_000,
 		DepositEpoch:      0,
 		WithdrawableEpoch: cfg.FarFutureEpoch,
@@ -408,4 +508,34 @@ func liveResolverFixture(t *testing.T) (
 		Signature: common.Bytes96{0: 1},
 	}
 	return cfg, headState, preferences, headRoot, parentHash, randao
+}
+
+func validForkOnboardingBuilderDeposit(
+	t *testing.T,
+	cfg *clparams.BeaconChainConfig,
+	executionAddress common.Address,
+) (*solid.PendingDeposit, resolverBuilderSigner) {
+	t.Helper()
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var pubkey common.Bytes48
+	copy(pubkey[:], bls.CompressPublicKey(privateKey.PublicKey()))
+	withdrawalCredentials := common.Hash{0: byte(cfg.BuilderWithdrawalPrefix)}
+	copy(withdrawalCredentials[12:], executionAddress[:])
+	amount := cfg.MinDepositAmount + 2_000
+	depositData := &cltypes.DepositData{
+		PubKey: pubkey, WithdrawalCredentials: withdrawalCredentials, Amount: amount,
+	}
+	messageRoot, err := depositData.MessageHash()
+	require.NoError(t, err)
+	domain, err := fork.ComputeDomain(
+		cfg.DomainDeposit[:], clutils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)), common.Hash{},
+	)
+	require.NoError(t, err)
+	signingRoot := crypto.Sha256(messageRoot[:], domain)
+	var signature common.Bytes96
+	copy(signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+	return &solid.PendingDeposit{
+		PubKey: pubkey, WithdrawalCredentials: withdrawalCredentials, Amount: amount, Signature: signature, Slot: cfg.SlotsPerEpoch,
+	}, resolverBuilderSigner{pubkey: pubkey}
 }

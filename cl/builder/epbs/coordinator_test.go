@@ -223,7 +223,7 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	require.Equal(t, input.ParentBlockHash, assembler.parameters.ParentHash)
 	require.Equal(t, input.Timestamp, assembler.parameters.Timestamp)
 	require.Equal(t, input.PrevRandao, assembler.parameters.PrevRandao)
-	require.Equal(t, input.ValidatedPreferences.Message.FeeRecipient, assembler.parameters.SuggestedFeeRecipient)
+	require.Equal(t, input.BuilderExecutionAddress, assembler.parameters.SuggestedFeeRecipient)
 	require.Equal(t, input.ParentBlockRoot, *assembler.parameters.ParentBeaconBlockRoot)
 	require.Equal(t, input.Slot, *assembler.parameters.SlotNumber)
 	require.Equal(t, input.ValidatedPreferences.Message.TargetGasLimit, *assembler.parameters.TargetGasLimit)
@@ -251,6 +251,33 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	_, ok, err = coordinator.Payload(identity)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestCoordinatorRoutesPayloadFeesToBuilderAndBidPaymentToProposer(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	builderExecutionAddress := common.HexToAddress("0x21")
+	input.BuilderExecutionAddress = builderExecutionAddress
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	assembled.Eth1Block.FeeRecipient = builderExecutionAddress
+	assembler := &coordinatorAssembler{payload: assembled}
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1,
+	)
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, builderExecutionAddress, assembler.parameters.SuggestedFeeRecipient)
+	require.Equal(t, input.ValidatedPreferences.Message.FeeRecipient, bid.Message.FeeRecipient)
+
+	wrongPayload := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	wrongPayload.Eth1Block.FeeRecipient = input.ValidatedPreferences.Message.FeeRecipient
+	wrongCoordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: wrongPayload}, new(coordinatorPublisher), 1,
+	)
+	_, err = wrongCoordinator.RunSlot(t.Context(), input)
+	require.ErrorContains(t, err, "execution payload fee recipient mismatch")
 }
 
 func TestCoordinatorExposesPayloadBeforeBidPublication(t *testing.T) {
@@ -948,6 +975,7 @@ func validCoordinatorSlotInput(config clparams.BeaconChainConfig) SlotInput { //
 		BuilderStatusSlot:       slot,
 		BuilderStatusParentRoot: common.HexToHash("0x30"),
 		BuilderPubkey:           common.Bytes48{0: 1},
+		BuilderExecutionAddress: common.HexToAddress("0x21"),
 		GenesisValidatorsRoot:   common.HexToHash("0x60"),
 		BuilderActive:           true,
 		AvailableBidValueGwei:   2_000,
@@ -988,7 +1016,7 @@ func validCoordinatorPayload(config *clparams.BeaconChainConfig, input SlotInput
 	payload.ParentHash = input.ParentBlockHash
 	payload.BlockHash = common.HexToHash("0x70")
 	payload.PrevRandao = input.PrevRandao
-	payload.FeeRecipient = input.ValidatedPreferences.Message.FeeRecipient
+	payload.FeeRecipient = input.BuilderExecutionAddress
 	payload.GasLimit = input.ValidatedPreferences.Message.TargetGasLimit
 	payload.Time = input.Timestamp
 	payload.SlotNumber = input.Slot

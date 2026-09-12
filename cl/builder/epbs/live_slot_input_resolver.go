@@ -125,7 +125,10 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 	preferenceRoot, err := input.ValidatedPreferences.HashSSZ()
 	if err != nil || common.Hash(preferenceRoot) != input.freshness.preferenceRoot ||
 		input.ValidatedPreferences.Message.ProposalSlot != input.Slot ||
-		input.ValidatedPreferences.Message.DependentRoot != input.DependentRoot {
+		input.ValidatedPreferences.Message.DependentRoot != input.DependentRoot ||
+		input.BuilderIndex != input.freshness.builderIndex ||
+		input.BuilderPubkey != input.freshness.builderPubkey ||
+		input.BuilderExecutionAddress != input.freshness.builderExecutionAddress {
 		return ErrSlotInputStale
 	}
 
@@ -141,11 +144,28 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 		if header.Slot != input.freshness.headBlockSlot || input.Slot <= header.Slot || input.Slot < current.Slot() {
 			return ErrSlotInputStale
 		}
-		bid := current.GetLatestExecutionPayloadBid()
-		if bid == nil {
-			return ErrSlotInputStale
+		if current.Version() < clparams.GloasVersion {
+			payloadHeader := current.LatestExecutionPayloadHeader()
+			if payloadHeader == nil {
+				return ErrSlotInputStale
+			}
+			parentBid.ParentBlockHash = payloadHeader.ParentHash
+			parentBid.BlockHash = payloadHeader.BlockHash
+		} else {
+			bid := current.GetLatestExecutionPayloadBid()
+			if bid == nil {
+				return ErrSlotInputStale
+			}
+			parentBid = *bid
+			builders := current.GetBuilders()
+			if builders == nil || input.BuilderIndex >= uint64(builders.Len()) {
+				return ErrSlotInputStale
+			}
+			builder := builders.Get(int(input.BuilderIndex))
+			if builder == nil || builder.Pubkey != input.BuilderPubkey || builder.ExecutionAddress != input.BuilderExecutionAddress {
+				return ErrSlotInputStale
+			}
 		}
-		parentBid = *bid
 		return nil
 	}); err != nil {
 		return fmt.Errorf("%w: head state: %w", ErrSlotInputStale, err)
@@ -310,7 +330,7 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 		if err != nil {
 			return SlotInput{}, fmt.Errorf("%w: builder invalid after full parent: %w", ErrSlotInputUnavailable, err)
 		}
-		if postIndex != builderIndex || postBuilder.Pubkey != builder.Pubkey {
+		if postIndex != builderIndex || postBuilder.Pubkey != builder.Pubkey || postBuilder.ExecutionAddress != builder.ExecutionAddress {
 			return SlotInput{}, fmt.Errorf("%w: builder identity changed after full parent", ErrSlotInputUnavailable)
 		}
 		available = min(available, postAvailable)
@@ -329,13 +349,16 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 		ParentBlockHash: parentHash, ParentGasLimit: parentGasLimit, PrevRandao: parentRandao,
 		Timestamp: timestamp, Withdrawals: withdrawals,
 		BuilderIndex: builderIndex, BuilderStatusIndex: builderIndex, BuilderStatusSlot: targetSlot,
-		BuilderStatusParentRoot: headRoot, BuilderPubkey: builder.Pubkey,
+		BuilderStatusParentRoot: headRoot, BuilderPubkey: builder.Pubkey, BuilderExecutionAddress: builder.ExecutionAddress,
 		GenesisValidatorsRoot: genesisRoot, BuilderActive: true, AvailableBidValueGwei: available,
 		freshness: slotInputFreshnessToken{
-			preferenceRoot: common.Hash(preferenceRoot),
-			headStateSlot:  headStateSlot,
-			headBlockSlot:  header.Slot,
-			buildOnFull:    buildOnFull,
+			preferenceRoot:          common.Hash(preferenceRoot),
+			headStateSlot:           headStateSlot,
+			headBlockSlot:           header.Slot,
+			buildOnFull:             buildOnFull,
+			builderIndex:            builderIndex,
+			builderPubkey:           builder.Pubkey,
+			builderExecutionAddress: builder.ExecutionAddress,
 		},
 	}, nil
 }

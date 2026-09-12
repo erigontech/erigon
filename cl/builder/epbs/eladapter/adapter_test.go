@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -96,6 +97,11 @@ func TestAdapterPayloadRoundTripsStrictSSZ(t *testing.T) {
 	payload, err := NewAdapter(assembledBlockModule{assembled: validAssembledResult()}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
 	require.NoError(t, err)
 	require.NotNil(t, payload.RequestsBundle)
+	withdrawal := payload.Eth1Block.Withdrawals.Get(0)
+	require.Equal(t, uint64(17), withdrawal.Index)
+	require.Equal(t, uint64(math.MaxUint64), withdrawal.Validator)
+	require.Equal(t, common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"), withdrawal.Address)
+	require.Equal(t, uint64(23), withdrawal.Amount)
 
 	encoded, err := payload.Eth1Block.EncodeSSZ(nil)
 	require.NoError(t, err)
@@ -304,7 +310,12 @@ func validAssembledResult() execmodule.AssembledBlockResult {
 		ExcessBlobGas:         &zero,
 	}
 	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil)
-	block := types.NewBlock(header, []types.Transaction{tx}, nil, nil, []*types.Withdrawal{{}}, nil)
+	block := types.NewBlock(header, []types.Transaction{tx}, nil, nil, []*types.Withdrawal{{
+		Index:     17,
+		Validator: math.MaxUint64,
+		Address:   common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
+		Amount:    23,
+	}}, nil)
 	return execmodule.AssembledBlockResult{
 		Block:      &types.BlockWithReceipts{Block: block, Requests: requests},
 		BlockValue: uint256.NewInt(1),

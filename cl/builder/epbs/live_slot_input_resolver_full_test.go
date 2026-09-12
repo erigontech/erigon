@@ -165,6 +165,33 @@ func TestLiveSlotInputResolverRejectsSameRootFreshnessChanges(t *testing.T) {
 	}
 }
 
+func TestLiveSlotInputResolverRejectsChangedBuilderExecutionAddress(t *testing.T) {
+	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
+	fc := &resolverForkchoice{
+		headNode:  forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty},
+		gasLimits: map[common.Hash]uint64{parentHash: 30_000_000},
+		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
+			parentHash: execution_client.PayloadStatusValidated,
+		},
+	}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).AnyTimes()
+	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
+	resolver := NewLiveSlotInputResolver(
+		&cfg,
+		new(coordinatorSigner),
+		clock,
+		&resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()},
+		fc,
+	)
+	input, err := resolver.Resolve(t.Context(), preferences)
+	require.NoError(t, err)
+
+	headState.GetBuilders().Get(0).ExecutionAddress[0] ^= 1
+
+	require.ErrorIs(t, resolver.ValidateCurrent(t.Context(), input), ErrSlotInputStale)
+}
+
 func TestLiveSlotInputResolverKeepsFreshParentAcrossEquivalentPayloadStatusTransition(t *testing.T) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
 	fc := &resolverForkchoice{

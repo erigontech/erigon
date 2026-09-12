@@ -75,6 +75,7 @@ type SlotInput struct {
 	BuilderStatusSlot       uint64
 	BuilderStatusParentRoot common.Hash
 	BuilderPubkey           common.Bytes48
+	BuilderExecutionAddress common.Address
 	GenesisValidatorsRoot   common.Hash
 	BuilderActive           bool
 	AvailableBidValueGwei   uint64
@@ -82,10 +83,13 @@ type SlotInput struct {
 }
 
 type slotInputFreshnessToken struct {
-	preferenceRoot common.Hash
-	headStateSlot  uint64
-	headBlockSlot  uint64
-	buildOnFull    bool
+	preferenceRoot          common.Hash
+	headStateSlot           uint64
+	headBlockSlot           uint64
+	buildOnFull             bool
+	builderIndex            uint64
+	builderPubkey           common.Bytes48
+	builderExecutionAddress common.Address
 }
 
 type PayloadIdentity struct {
@@ -472,7 +476,7 @@ func buildParameters(input SlotInput, preferences *cltypes.ProposerPreferences) 
 	}
 	return &builder.Parameters{
 		ParentHash: input.ParentBlockHash, Timestamp: input.Timestamp, PrevRandao: input.PrevRandao,
-		SuggestedFeeRecipient: preferences.FeeRecipient, Withdrawals: withdrawals,
+		SuggestedFeeRecipient: input.BuilderExecutionAddress, Withdrawals: withdrawals,
 		ParentBeaconBlockRoot: &parentRoot, SlotNumber: &slot, TargetGasLimit: &targetGasLimit,
 	}
 }
@@ -508,7 +512,7 @@ func validateBuiltPayload(
 	if payload.SlotNumber != input.Slot {
 		return errors.New("execution payload slot number mismatch")
 	}
-	if payload.FeeRecipient != preferences.FeeRecipient {
+	if payload.FeeRecipient != input.BuilderExecutionAddress {
 		return errors.New("execution payload fee recipient mismatch")
 	}
 	if !clservices.IsGasLimitTargetCompatible(input.ParentGasLimit, payload.GasLimit, preferences.TargetGasLimit) {
