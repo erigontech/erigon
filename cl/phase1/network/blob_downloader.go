@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
@@ -803,9 +804,19 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if block.Version() < clparams.DenebVersion {
 			break
 		}
-		blockRoot, err := block.Block.HashSSZ()
+		// The canonical root from the index, never block.Block.HashSSZ():
+		// ReadBeaconBlockBodyBySlot strips the execution payload, so hashing the block yields a
+		// root that never existed on chain and the blob-store lookup below always misses.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-visited)
 		if err != nil {
 			return nil, 0, err
+		}
+		if blockRoot == (common.Hash{}) {
+			// Below BlocksAvailable the reader goes straight to the segment without consulting the
+			// canonical index, so a zero root means indexing has not caught up rather than an empty
+			// slot. Failing the pass leaves the target and completion state intact; skipping would
+			// count the slot as visited and let the pass report success with its blobs unfetched.
+			return nil, 0, fmt.Errorf("no canonical block root for slot %d: snapshot indexing has not caught up", currentSlot-visited)
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {
@@ -819,11 +830,38 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			return nil, 0, err
 		}
 		if commitments.Len() == int(blobsCount) {
-			continue
+			available, err := b.storedSidecarsAvailable(blockRoot, currentSlot-visited, commitments.Len())
+			if err != nil {
+				return nil, 0, err
+			}
+			if available {
+				continue
+			}
 		}
 		batch = append(batch, block)
 	}
 	return batch, visited, nil
+}
+
+// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. Pruning
+// drops sidecar files but leaves their count rows, and a rewrite can fail partway, so on an archive
+// node a matching count alone is not evidence the store can serve the slot.
+//
+// Non-archive nodes prune on purpose, so a missing file there is expected and must not be re-queued.
+func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, slot uint64, commitments int) (bool, error) {
+	if !b.archiveBlobs {
+		return true, nil
+	}
+	for idx := range commitments {
+		exists, err := b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, uint64(idx))
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) bool {

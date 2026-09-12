@@ -1154,14 +1154,14 @@ func (t *Trie) getHasher() *hasher {
 // node, it will return the hash of a modified leaf node or extension node, where the
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
-func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash, error) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
-		return false, common.Hash{}
+		return false, common.Hash{}, nil
 	}
 	if accNode.RootCorrect {
-		return true, accNode.Root
+		return true, accNode.Root, nil
 	}
 	if accNode.Storage == nil {
 		accNode.Root = EmptyRoot
@@ -1169,9 +1169,11 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	} else {
 		h := t.getHasher()
 		defer returnHasherToPool(h)
-		h.hash(accNode.Storage, true, accNode.Root[:])
+		if _, err := h.hash(accNode.Storage, true, accNode.Root[:]); err != nil {
+			return false, common.Hash{}, err
+		}
 	}
-	return true, accNode.Root
+	return true, accNode.Root, nil
 }
 
 func (t *Trie) EvictNode(hex []byte) {

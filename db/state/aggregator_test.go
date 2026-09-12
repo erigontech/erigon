@@ -173,9 +173,9 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -265,14 +265,14 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	defer aggTx.Close()
@@ -309,7 +309,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 
 	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 	aggTx = agg.BeginFilesRo()
 	defer aggTx.Close()
 
@@ -327,7 +327,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	// 	stepSize:                         10,
 	// 	disableCommitmentBranchTransform: false,
 	// })
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
 	require.NotNil(t, agg.d[kv.StorageDomain].checker)
@@ -339,7 +339,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	defer aggTx.Close()
@@ -387,7 +387,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.0-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -413,7 +413,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.1-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -439,7 +439,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v2.0-receipt.2048-2049.kv")
 
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -461,7 +461,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
-		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
@@ -592,7 +592,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
 	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
 	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	// Establish the "MDBX only has step 10" side of the gap.
 	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 100, []byte("k"))
@@ -600,7 +600,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	// Ask the aggregator to build up through step 11.
 	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
 	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(11*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
 
 	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
@@ -629,7 +629,7 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
-	require.NoError(t, agg.BuildFiles(2*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
@@ -650,7 +650,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// MergeRange, causing "failed to create commitment value transformer: file
 	// v2.0-storage.0-0.kv was not found".
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	dirs := agg.Dirs()
 
@@ -663,7 +663,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Commitment history+index: unmerged {0,1},{1,2} — history.needMerge will be true.
 	generateCommitmentHistoryAndIndexFiles(t, dirs, []testFileRange{{0, 1}, {1, 2}})
 
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	aggTx := agg.BeginFilesRo()
 	r := aggTx.findMergeRange(2*stepSize, stepSize, 32)
@@ -754,7 +754,7 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 	check := func(t *testing.T, ver version.Version, want bool) {
 		t.Helper()
 		stepSize := uint64(10)
-		_, agg := testDbAndAggregatorv3(t, stepSize)
+		db, agg := testDbAndAggregatorv3(t, stepSize)
 		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 		dirs := agg.Dirs()
 		ranges := []testFileRange{{0, 2}}
@@ -762,7 +762,7 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 		generateStorageFile(t, dirs, ranges)
 		generateCodeFile(t, dirs, ranges)
 		generateCommitmentFile(t, dirs, ranges)
-		require.NoError(t, agg.OpenFolder())
+		require.NoError(t, agg.OpenFolder(db))
 
 		// Drive the verdict by version+range: set the version directly on the dirty FilesItem
 		// (visibleFile.Version reads it live through src), independent of the generated file name.
@@ -829,4 +829,49 @@ func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
 	require.NoError(t, agg.MergeLoop(t.Context()))
 	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
 	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
+}
+
+func TestGetStateIndicesSaltRewritesMalformedFile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		rewrite bool
+	}{
+		{name: "empty", content: []byte{}, rewrite: true},
+		{name: "too short", content: []byte("bad"), rewrite: true},
+		{name: "too long", content: []byte("toolong"), rewrite: true},
+		{name: "valid", content: []byte{1, 2, 3, 4}, rewrite: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+			require.NoError(t, os.WriteFile(fpath, tc.content, os.ModePerm))
+
+			salt, err := GetStateIndicesSalt(dirs, true, log.New())
+			require.NoError(t, err)
+
+			saltBytes, err := os.ReadFile(fpath)
+			require.NoError(t, err)
+			require.Len(t, saltBytes, 4)
+			require.Equal(t, binary.BigEndian.Uint32(saltBytes), *salt)
+			if !tc.rewrite {
+				require.Equal(t, tc.content, saltBytes, "a valid salt file must not be rewritten")
+			}
+		})
+	}
+}
+
+func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+	content := []byte("bad")
+	require.NoError(t, os.WriteFile(fpath, content, os.ModePerm))
+
+	salt, err := GetStateIndicesSalt(dirs, false, log.New())
+	require.NoError(t, err)
+	require.Nil(t, salt, "genNew=false must not invent a salt")
+
+	saltBytes, err := os.ReadFile(fpath)
+	require.NoError(t, err)
+	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
 }

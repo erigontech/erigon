@@ -1272,6 +1272,9 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 // the self-destruct-vs-field priority iterate these in explicit order (e.g.
 // SelfDestructs before the reviving field writes) rather than relying on a flat
 // stream's element order.
+func (s *WriteSet) Addresses() iter.Seq2[accounts.Address, *VersionedWrite[*accounts.Account]] {
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[*accounts.Account] { return s.address })
+}
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }
@@ -1314,6 +1317,9 @@ func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+	if len(m) == 0 {
+		return true
+	}
 	for _, vw := range m {
 		if !yield(vw.WriteHeader) {
 			return false
@@ -1729,30 +1735,6 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	}
 
 	return uint256.Int{}, false, nil
-}
-
-func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
-	// recordWipedRead stores the zero a destruct left behind, so only a non-zero
-	// recorded read proves storage.
-	for _, r := range vr.reads.storage[address] {
-		if !r.Val.IsZero() {
-			return true, nil
-		}
-	}
-
-	// Ask the domain before walking the map: a contract with pre-block storage
-	// answers here, and only an account the domain does not answer for — which is
-	// the CREATE case this serves — pays for the per-slot scan.
-	wipedAt, wiped := vr.versionMap.storageWipedAt(address, vr.txIndex)
-	if !wiped && vr.stateReader != nil {
-		has, err := vr.stateReader.HasStorage(address)
-		if has || err != nil {
-			return has, err
-		}
-	}
-	// Either the destruct erased whatever the domain holds, or the domain holds
-	// nothing and only an in-block write can still make this true.
-	return vr.versionMap.hasLiveSlot(address, wipedAt, wiped, vr.txIndex), nil
 }
 
 // versionedCode resolves code from the read set and the version map, reporting

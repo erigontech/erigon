@@ -50,9 +50,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -426,7 +423,6 @@ func ApplyDeferredBranchUpdates(
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
 		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
@@ -471,7 +467,6 @@ func ApplyDeferredBranchUpdates(
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
 	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
@@ -521,7 +516,6 @@ func (be *BranchEncoder) CollectUpdate(
 		return err
 	}
 	publishBranchWrites(1, len(updateCopy), be.metrics)
-	mxTrieBranchesUpdated.Inc()
 	return nil
 }
 
@@ -1554,13 +1548,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
 	default:
 	}

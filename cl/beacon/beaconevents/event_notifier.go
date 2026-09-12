@@ -1,8 +1,17 @@
 package beaconevents
 
+import "sync"
+
 type EventEmitter struct {
 	stateFeed     *stateFeed     // block state feed
 	operationFeed *operationFeed // block operation feed
+	headEventMu   sync.Mutex
+}
+
+func (e *EventEmitter) WithHeadEventLock(fn func()) {
+	e.headEventMu.Lock()
+	defer e.headEventMu.Unlock()
+	fn()
 }
 
 func NewEventEmitter() *EventEmitter {
