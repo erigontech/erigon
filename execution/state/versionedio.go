@@ -670,14 +670,9 @@ func (w *VersionedWrite[T]) String() string {
 	return fmt.Sprintf("%s: %v", w.WriteHeader, w.Val)
 }
 
-// Per-path *VersionedWrite[T] pools.  Each pool sources fresh cleared
-// instances; callers fill the WriteHeader + Val before inserting into the
-// typed map on WriteSet.  Lifetime is per-tx — WriteSet.ReleaseAndReset
-// walks the maps at tx-finalize and returns every VW to its pool.
-//
-// Slice-valued payloads (CodePath) have their Val cleared on release to
-// avoid pinning external memory; same pattern as versionmap.go's WriteCell
-// pool (releaseCellCode).
+// Per-path *VersionedWrite[T] pools. Lifetime is per-tx — WriteSet.ReleaseAndReset
+// returns every VW to its pool at tx-finalize. Slice-valued payloads (CodePath)
+// have their Val cleared on release to avoid pinning external memory.
 var (
 	vwPoolAddress        = sync.Pool{New: func() any { return &VersionedWrite[*accounts.Account]{} }}
 	vwPoolBalance        = sync.Pool{New: func() any { return &VersionedWrite[uint256.Int]{} }}
@@ -950,10 +945,8 @@ func (s *WriteSet) Finalize() *WriteSet {
 
 // zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
 // contract is created and self-destructed in the same tx, its storage is wiped
-// at end-of-tx, so the BAL must record the dirty slots as reads (net-zero), not
-// changes. Zero the storage write values so AsBlockAccessList folds them away.
-// The create+destruct pair is detectable from the write-set itself
-// (createContract survives SELFDESTRUCT), so no stateObject is needed.
+// at end-of-tx, so the BAL records dirty slots as reads (net-zero). Zero the
+// storage write values so AsBlockAccessList folds them away.
 func (s *WriteSet) zeroSameTxCreateDestructStorage() {
 	for addr, cc := range s.createContract {
 		if !cc.Val {
@@ -970,13 +963,10 @@ func (s *WriteSet) zeroSameTxCreateDestructStorage() {
 	}
 }
 
-// Snapshot returns a frozen typed copy of the recorded writes. The journal keeps
-// the write-set in step with reverts, so every address present is a surviving
-// write — no dirty reconciliation is needed. Under self-destruct only
-// SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL needs
-// residual balance, resurrection needs the prior incarnation, the calculator
-// needs per-slot deletes, and fee finalization needs the creation marker);
-// Nonce/Code/CodeHash/CodeSize/Address drop.
+// Snapshot returns a frozen typed copy of the recorded writes. Under self-destruct
+// only SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL
+// needs residual balance, resurrection the prior incarnation, the calculator the
+// per-slot deletes, and fee finalization the creation marker); the rest drop.
 func (s *WriteSet) Snapshot() *WriteSet {
 	out := &WriteSet{}
 
@@ -1003,8 +993,7 @@ func (s *WriteSet) Snapshot() *WriteSet {
 			}
 		}
 		// CreateContract survives self-destruct: fee finalization and the BAL need
-		// the creation marker, and zeroSameTxCreateDestructStorage detects the
-		// create+destruct pair from it. ApplyVersionedWrites skips applying it under
+		// the creation marker. ApplyVersionedWrites skips applying it under
 		// self-destruct, so keeping it here does not resurrect the account.
 		if vw, ok := s.createContract[addr]; ok {
 			out.SetCreateContract(addr, cloneVW(vw))
@@ -1044,10 +1033,8 @@ func (s *WriteSet) deleteAddr(addr accounts.Address) {
 }
 
 // createWriteSnapshot holds a deep copy of the account-record writes that
-// createObject/createAccount overwrite when (re)creating an account. It lets a
-// reverted recreation restore the prior writes rather than leave them
-// overwritten — the record-level create journal entry maintaining its own
-// field-level writes.
+// createObject/createAccount overwrite when (re)creating an account, so a
+// reverted recreation can restore the prior writes.
 type createWriteSnapshot struct {
 	address        *VersionedWrite[*accounts.Account]
 	balance        *VersionedWrite[uint256.Int]
@@ -1060,10 +1047,8 @@ type createWriteSnapshot struct {
 
 // snapshotCreateFields clones the account-record writes that a subsequent
 // createObject/createAccount will overwrite, so a reverted recreation can
-// restore them. createObject stamps NoncePath and CodeHashPath (to zero the
-// prior incarnation), so both are captured alongside the account-record cells.
-// code/codeSize/storage are not: they carry their own field-level journal
-// entries that self-revert.
+// restore them. code/codeSize/storage are excluded: they carry their own
+// field-level journal entries that self-revert.
 func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
 	snap := &createWriteSnapshot{}
 	if vw, ok := s.address[addr]; ok {
@@ -1619,9 +1604,8 @@ type versionedStateReader struct {
 	versionMap  *VersionMap
 	stateReader StateReader
 	// eip8246 makes this whole-account reader honor an EIP-8246 balance-preserve:
-	// a self-destruct that keeps a non-zero balance/nonce reads as present (its
-	// preserved value), not absent. Set from the block's rules; the fork-agnostic
-	// IsNetAbsent verdict alone would drop the preserved balance.
+	// a self-destruct keeping a non-zero balance/nonce reads as present, not
+	// absent. Set from the block's rules.
 	eip8246 bool
 }
 
@@ -1651,26 +1635,17 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// Check version map for AddressPath — handles accounts created by
 	// prior transactions in the same block that aren't in the read set.
 	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. Honor the
-		// destruct ONLY if no subsequent write at a strictly higher
-		// TxIndex re-creates the account. EIP-161 emits a SelfDestruct
-		// for the coinbase when a TX touches it without tipping (Balance
-		// stays 0 → empty-account prune); a later TX that tips the same
-		// coinbase re-creates it, and we must surface the re-created
-		// account so finalize accumulates the prior cumulative value.
+		// A prior tx may have self-destructed this account. Honor the destruct
+		// only if no subsequent write at a strictly higher TxIndex re-creates it,
+		// so a later tip to a pruned coinbase surfaces the re-created account.
 		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
-			// EIP-8246: a self-destruct may preserve a non-zero balance/nonce, which
-			// the fork-agnostic IsNetAbsent reports as absent. On an Amsterdam+ block
-			// a fork-aware reader must reconstruct the preserved value from the
-			// versionMap cells; dropping it burns the balance on the state-root
-			// composition path (calcFees crediting the coinbase/burnt fee recipient).
-			// The base stateReader is stale here (it predates the in-block destruct),
-			// so reconstruct from the versionMap only.
+			// EIP-8246: a self-destruct may preserve a non-zero balance/nonce that
+			// IsNetAbsent reports as absent. On Amsterdam+ reconstruct it from the
+			// versionMap cells (the base stateReader predates the in-block destruct),
+			// else the balance is burned on the state-root composition path.
 			if vr.eip8246 {
-				// Mirror IBS.eip8246PreservedAccount: an EIP-8246 preserve only survives
-				// with a non-zero balance (an empty account is EIP-161-removed), so
-				// reconstruct only then — keeping this reader's verdict identical to the
-				// IBS reference.
+				// An EIP-8246 preserve only survives with a non-zero balance (an empty
+				// account is EIP-161-removed), so reconstruct only then.
 				var synth accounts.Account
 				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
 					return &updated, nil
@@ -1697,21 +1672,16 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
-	// Account doesn't exist in state reader and no AddressPath entry in
-	// versionMap. The BAL pre-population writes only BalancePath/NoncePath/
-	// CodePath/StoragePath entries (NOT AddressPath, by design — see
-	// validateRead invariant). For an account that is created mid-block
-	// purely by tip credits (e.g. fee_recipient with no pre-state and no
-	// transfers to it), the BAL has the post-tx balance at each TxIndex,
-	// but ReadAccountData would return nil because it only checks
-	// AddressPath / stateReader. Synthesize an empty account and let
+	// No stateReader account and no AddressPath entry. The BAL pre-population
+	// writes only field paths (not AddressPath), so an account created mid-block
+	// purely by tip credits has post-tx balances in the versionMap that
+	// ReadAccountData would otherwise miss. Synthesize an empty account and let
 	// applyVersionedUpdates apply the BAL-preloaded fields.
 	if vr.versionMap != nil {
 		var synth accounts.Account
 		updated := vr.applyVersionedUpdates(address, synth)
-		// Only return the synthesized account if applyVersionedUpdates
-		// actually applied at least one field — otherwise we'd return a
-		// zero account for addresses that have no versionMap entries.
+		// Only return it if at least one field was applied; else this address has
+		// no versionMap entries and must stay absent.
 		if updated != synth {
 			return &updated, nil
 		}
@@ -1720,13 +1690,10 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	return nil, nil
 }
 
-// Per-path versionedUpdate helpers replace the legacy generic
-// versionedUpdate[T] — they consume the typed VersionMap Read primitives
-// directly so neither the call site nor the read path crosses an any
-// boundary. Each returns the cell value if a Done OR Dependency (Estimate)
-// write exists at txIndex (a Dependency cell holds the same latest in-block
-// write a Done cell does; finalize reconstruction must consume it, not fall
-// back to the pre-block DB value), otherwise zero value and ok=false.
+// Per-path versionedUpdate helpers return the cell value if a Done or Dependency
+// (Estimate) write exists at txIndex — a Dependency cell holds the same latest
+// in-block write a Done cell does, and finalize reconstruction must consume it
+// rather than fall back to the pre-block DB value — else zero value and ok=false.
 
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
@@ -1830,11 +1797,10 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
 		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
-			// Self-destructed in-block (revival-aware, so a later SelfDestruct=false
-			// does not hide the wipe): a slot cell at or below the destruct is wiped
-			// to zero; only a write above it survives.
+			// Self-destructed in-block: a slot cell at or below the destruct is
+			// wiped to zero; only a write above it survives.
 			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
-				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				res.resolved() && res.DepIdx() > destroyedAt {
 				return val, true, nil
 			}
 			return uint256.Int{}, false, nil
@@ -1861,7 +1827,7 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	if vr.versionMap != nil {
 		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
 			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
-				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				res.resolved() && res.DepIdx() > destroyedAt {
 				return code.Bytes, nil
 			}
 			return nil, nil
@@ -1886,7 +1852,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	if vr.versionMap != nil {
 		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
 			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
-				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				res.resolved() && res.DepIdx() > destroyedAt {
 				return len(code.Bytes), nil
 			}
 			return 0, nil
@@ -1921,25 +1887,25 @@ func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address
 	switch path {
 	case BalancePath:
 		v, rr, found := vm.ReadBalance(addr, txIdx)
-		if found && rr.Status() == MVReadResultDone {
+		if found && rr.resolved() {
 			out.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: v})
 			return true
 		}
 	case NoncePath:
 		v, rr, found := vm.ReadNonce(addr, txIdx)
-		if found && rr.Status() == MVReadResultDone {
+		if found && rr.resolved() {
 			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
 			return true
 		}
 	case IncarnationPath:
 		v, rr, found := vm.ReadIncarnation(addr, txIdx)
-		if found && rr.Status() == MVReadResultDone {
+		if found && rr.resolved() {
 			out.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver}, Val: v})
 			return true
 		}
 	case CodeHashPath:
 		v, rr, found := vm.ReadCodeHash(addr, txIdx)
-		if found && rr.Status() == MVReadResultDone {
+		if found && rr.resolved() {
 			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
 			return true
 		}
@@ -2186,18 +2152,11 @@ func (writes *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 	return false
 }
 
-// StripBalanceWrite removes the BalancePath write for addr from the write set
-// and computes the TX's net balance delta by comparing the stale write with
-// the stale read from readSet. This is used in finalize to prevent stale
-// speculative coinbase/burnt-contract balance writes from being applied via
-// ApplyVersionedWrites. The delta is returned so it can be applied separately
-// on top of the correct base balance from the VersionedStateReader.
-//
-// Returns:
-//   - stripped: the write set with the balance write removed
-//   - delta: the absolute difference between stale write and stale read
-//   - increase: true if the TX increased the balance, false if decreased
-//   - found: true if both a stale read and write were found and a non-zero delta computed
+// StripBalanceWrite removes the BalancePath write for addr and returns the tx's
+// net balance delta (write minus read). Finalize applies the delta on top of the
+// correct base balance from the VersionedStateReader instead of applying the
+// stale speculative write directly. increase reports the delta's sign; found is
+// true only when a stale read and write yielded a non-zero delta.
 func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped *WriteSet, delta uint256.Int, increase bool, found bool) {
 	stripped = writes
 	if writes == nil || addr.IsNil() {
@@ -2363,12 +2322,11 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet)
 	}
 	// Fold the read set when it carries typed reads OR access-only marks: an
 	// access-only phase has Len()==0 but must still reach io.inputs for the
-	// EIP-7928 BAL. Len() itself stays access-free so the parallel executor's
-	// HasReads/ReadSetIncarnation/ReadCount keep their read-presence semantics.
+	// EIP-7928 BAL.
 	if reads.Len() > 0 || len(reads.access) > 0 {
 		if io.inputs[idx].readSet.Len() == 0 && len(io.inputs[idx].readSet.access) == 0 {
-			// Production call sites merge each tx once into an empty slot; hand the
-			// read set over directly (like RecordReads) instead of deep-copying.
+			// First merge into an empty slot: hand the read set over directly
+			// instead of deep-copying.
 			io.inputs[idx] = versionedReadSet{version.Incarnation, reads}
 		} else {
 			io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
@@ -2458,10 +2416,9 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
-			// A pre-block-empty code hash marks the baseline empty so applyToCode drops a
-			// net-zero same-tx set-then-clear. Only an empty read seen before any code
-			// change is the pre-block value — a later read of an already-cleared delegation
-			// also reads empty and must not poison the baseline into dropping that clear.
+			// A pre-block-empty code hash marks the baseline empty so applyToCode
+			// drops a net-zero same-tx set-then-clear. Only an empty read seen
+			// before any code change is the pre-block value.
 			if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
 				account.initialCodeEmpty = true
 			}
@@ -2475,8 +2432,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 
 		if writes := io.WriteSet(txIndex); writes != nil {
 			// Self-destruct is applied before the balance writes so the EIP-7928
-			// burn (zeroing a non-zero balance written by the destroying tx) fires
-			// — the priority is explicit in loop order.
+			// burn (zeroing a non-zero balance written by the destroying tx) fires.
 			for addr, w := range writes.SelfDestructs() {
 				if addr.IsNil() || !w.Val {
 					continue
@@ -2510,18 +2466,16 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 					account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 				}
 			}
-			// EIP-7928 requires every touched address to appear. The value-carrying
-			// paths above register via ensureAccountState; a single sweep over the
-			// full address union covers the rest (incarnation/codeHash/create/
-			// codeSize/address) and can't silently miss a future path — the repeat
-			// ensureAccountState is a harmless get-or-create.
+			// EIP-7928 requires every touched address to appear; a sweep over the
+			// full address union covers the paths the value-carrying loops above
+			// didn't already register.
 			for addr := range writes.addrs() {
 				if addr.IsNil() {
 					continue
 				}
 				account := ensureAccountState(ac, addr)
-				// A contract created this block did not exist pre-block, so its pre-block
-				// code is empty; applyToCode uses this to drop a net-zero empty code change.
+				// A contract created this block has empty pre-block code; applyToCode
+				// uses this to drop a net-zero empty code change.
 				if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
 					account.initialCodeEmpty = true
 				}
@@ -2535,12 +2489,9 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 
 			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of
-			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
-			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
-			// a gas-calculation read. This is used to distinguish real state
-			// access from incidental reads (e.g. Empty() in gas calc) for
-			// the system address filter.
+			// A non-revertable access means the address was the target of an actual
+			// EVM operation, not just a gas-calculation read — used by the system
+			// address filter to tell real access from incidental reads.
 			if isUserTx && !opts.revertable {
 				account.nonRevertableUserAccess = true
 			}
@@ -2551,14 +2502,10 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during every block's system
-		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
-		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
-		// itself." We use the non-revertable access flag from MarkAddressAccess
-		// to distinguish real state access (evm.Call target, SELFDESTRUCT
-		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
-		// reads (Empty() in statefulGasCall). Keep it when it has actual state
-		// changes or when a user tx performed a non-revertable access to it.
+		// Per EIP-7928 the system address MUST NOT be included unless it
+		// experiences state access itself, so drop it unless it has actual state
+		// changes or a user tx performed a non-revertable access to it (it is
+		// touched every block as the beacon-root syscall's msg.sender).
 		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
@@ -2741,16 +2688,9 @@ func (account *accountState) applyWriteCode(val accounts.Code, accessIndex uint3
 
 func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32) {
 	{
-		// If we haven't seen a balance and the first write is zero, treat it
-		// as a touch only when the pre-block balance is (or is implicitly) zero:
-		//   - No prior read: the account wasn't accessed before, so its
-		//     pre-block balance is implicitly zero (e.g. a newly CREATE'd
-		//     contract or a receiver observed only via the post-write finalize
-		//     path). Writing zero is a no-op.
-		//   - Prior read showed zero: write matches initial state, no-op.
-		// If a prior read showed a non-zero pre-block balance, the zero write
-		// is a genuine depletion (e.g. a sender whose funds were consumed by
-		// gas) and must be recorded as a real balance change.
+		// A first zero write is a no-op touch only when the pre-block balance is
+		// (or is implicitly) zero. A zero write over a non-zero pre-block balance
+		// is a genuine depletion and must be recorded.
 		if account.balanceValue == nil && val.IsZero() &&
 			(account.initialBalanceValue == nil || account.initialBalanceValue.IsZero()) {
 			if account.initialBalanceValue == nil {
@@ -2794,21 +2734,15 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 }
 
 func (account *accountState) updateReadBalance(val uint256.Int) {
-	// Record the initial (pre-block) balance for net-zero detection.
-	// Only set from the first read AND only before any writes have
-	// been recorded. A read that arrives after a write (e.g. the
-	// block-end finalize in the parallel executor reading from a
-	// fresh IBS, or a BAL-prepopulated read of a tx's predicted
-	// write) reflects post-write state, not the pre-block balance,
-	// and must not be used for net-zero filtering.
+	// Record the pre-block balance for net-zero detection from the first read
+	// only, and only before any write: a read arriving after a write reflects
+	// post-write state, not the pre-block balance.
 	if account.initialBalanceValue == nil && account.balanceValue == nil {
 		v := val
 		account.initialBalanceValue = &v
 	}
-	// Only update balanceValue from reads when no writes have been
-	// recorded yet. After a write, balanceValue tracks the written
-	// state; a stale read from the DB must not override it, or the
-	// no-op check in updateWrite will incorrectly skip a real write.
+	// After a write, balanceValue tracks the written state; a stale DB read must
+	// not override it or the no-op check would skip a real write.
 	if len(account.balance.changes.entries) == 0 {
 		account.setBalanceValue(val)
 	}

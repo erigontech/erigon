@@ -19,6 +19,11 @@ type statusFlag uint
 
 const FlagDone statusFlag = 0
 const FlagEstimate statusFlag = 1
+
+// FlagValidated: a pre-seal write whose tx validated its read-set out-of-order. A
+// reader continues on it (early break) like Done rather than pausing like an Estimate,
+// but it stays revertible until the in-order seal promotes it to Done.
+const FlagValidated statusFlag = 2
 const UnknownDep = -3
 
 type AccountPath int8
@@ -64,10 +69,8 @@ const (
 	CreateContractPath
 )
 
-// AccountKey is a (Path, Key) pair used as a selector for the field within
-// an AddressEntry and as a debug-printable identifier. It is no longer used
-// as an internal map key — VersionMap dispatches on Path via a switch on
-// the AddressEntry struct so the inner map's composite-key hash is gone.
+// AccountKey is a (Path, Key) pair used as a field selector within an AddressEntry
+// and as a debug-printable identifier.
 type AccountKey struct {
 	Path AccountPath
 	Key  accounts.StorageKey
@@ -81,13 +84,10 @@ func (k AccountKey) String() string {
 	return k.Path.String()
 }
 
-// AddressEntry holds the multi-version cells for one address, organised
-// per AccountPath. Each field is typed by the AccountPath's value-type
-// contract so adding the wrong type to a cell is a compile-time error
-// rather than a runtime panic — and the storage layer carries the typed
-// value end-to-end (no interface box on writes).
-//
-// Per-field granular: every operation is (Path,Key)-scoped; no consumer treats the entry as a transactional whole.
+// AddressEntry holds the multi-version cells for one address, organised per AccountPath.
+// Each field is typed by the path's value-type contract, so a wrong-type write is a
+// compile-time error. Every operation is (Path,Key)-scoped; the entry is never treated
+// as a transactional whole.
 type AddressEntry struct {
 	Address        *btree.Map[int, *WriteCell[*accounts.Account]]
 	SelfDestruct   *btree.Map[int, *WriteCell[bool]]
@@ -130,11 +130,9 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 	return cells
 }
 
-// markCellFlag sets the flag on an existing typed cell. Panics with msg if no
-// cell is present at txIdx — used by MarkEstimate/MarkComplete which require a
-// prior write. When incarnation >= 0 the cell must be at that incarnation: a
-// newer one means the flip targets a stale version, which the value-writing path
-// would reject, so panic rather than mark the wrong incarnation.
+// markCellFlag sets the flag on an existing typed cell, panicking with msg if none is
+// present at txIdx. When incarnation >= 0 the cell must be at that incarnation — a newer
+// one means the flip targets a stale version, so panic rather than mark the wrong one.
 func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx, incarnation int, flag statusFlag, msg string) {
 	if cells == nil {
 		panic(msg)
@@ -149,12 +147,10 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx, incarnatio
 	ci.flag = flag
 }
 
-// markCellComplete advances an existing cell to Done as a consistency check, not
-// a write. The cell must already hold value at incarnation — the value published
-// speculatively when the tx's result arrived is final, so committing only
-// advances the status. A missing cell, a newer incarnation, or a changed value
-// is a one-value-per-version violation and panics rather than being silently
-// overwritten. This is the commit-boundary enforcement point.
+// markCellComplete advances an existing cell to Done as a consistency check, not a
+// write: the cell must already hold value at incarnation (published speculatively when
+// the tx's result arrived). A missing cell, newer incarnation, or changed value is a
+// one-value-per-version violation and panics. This is the commit-boundary enforcement point.
 func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, value T) {
 	msg := fmt.Sprintf("markComplete: missing cell addr=%x path=%s key=%x txIdx=%d", addr.Value(), path, key.Value(), txIdx)
 	if cells == nil {
@@ -185,10 +181,9 @@ type VersionMap struct {
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 
-	// MapReadValueInvalidations counts how often the value-aware MapRead check
-	// invalidates a version-consistent read. With write-side one-value-per-version
-	// enforced (MarkWritesComplete), this should stay zero — a non-zero count is a
-	// diagnostic that a write path mutated a value at a fixed version.
+	// MapReadValueInvalidations counts value-aware MapRead invalidations of a
+	// version-consistent read. With one-value-per-version enforced it should stay zero;
+	// a non-zero count means a write path mutated a value at a fixed version.
 	MapReadValueInvalidations atomic.Int64
 }
 
@@ -202,13 +197,10 @@ func (vm *VersionMap) SealUpTo(txIndex int) {
 	vm.sealedArmed.Store(true)
 }
 
-// assertUnsealed panics if a mutation targets a cell whose tx is already sealed.
-// A cheap always-on invariant (armed-load short-circuits on the pre-seal path);
-// never fires on correct code.
+// assertUnsealed panics if a mutation targets an already-sealed cell. Negative TxIndex
+// is the pre-block system-call / block-init domain, written outside the OCC-validated
+// regular-tx prefix the seal frontier tracks, so the invariant applies to regular txs only.
 func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path AccountPath, key accounts.StorageKey) {
-	// Negative TxIndex is the pre-block system-call / block-init domain (EIP-4788,
-	// EIP-2935), written during setup and outside the OCC-validated regular-tx
-	// prefix the seal frontier tracks. The invariant applies to regular txs only.
 	if txIdx >= 0 && vm.sealedArmed.Load() && int64(txIdx) <= vm.sealed.Load() {
 		panic(fmt.Sprintf("versionMap: write to sealed cell tx=%d sealedUpTo=%d addr=%x path=%s key=%x",
 			txIdx, vm.sealed.Load(), addr.Value(), path, key.Value()))
@@ -235,10 +227,8 @@ func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
 }
 
-// StorageKeys returns every storage slot key recorded for addr. Used by
-// Normalize to emit synthetic delete entries for every slot of a
-// selfdestructed contract, matching DomainDelPrefix behaviour from the
-// sequential path.
+// StorageKeys returns every storage slot key recorded for addr. Used by Normalize to
+// emit synthetic delete entries for every slot of a selfdestructed contract.
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	e := vm.load(addr)
 	if e == nil {
@@ -256,11 +246,9 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	return keys
 }
 
-// WriteChanges pre-populates the version map from a BAL (EIP-7928). Each
-// per-path change is routed through the typed Write primitive so the value
-// type is enforced at compile time — a future BAL field-type change that
-// breaks the contract surfaces as a build error here rather than a runtime
-// panic on the first read of the cell.
+// WriteChanges pre-populates the version map from a BAL (EIP-7928), routing each
+// per-path change through the typed Write primitive so the value type is enforced at
+// compile time.
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
@@ -276,9 +264,8 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			// Seed the whole code trio so pre-population matches what tx execution
-			// flushes together; a CodePath cell without its CodeHashPath/CodeSizePath
-			// siblings lets a concurrent reader see code but no code hash.
+			// Seed the whole code trio together: a CodePath cell without its
+			// CodeHashPath/CodeSizePath siblings lets a reader see code but no code hash.
 			code := accounts.NewCode(codeChange.Bytecode)
 			v := Version{TxIndex: int(codeChange.Index) - 1}
 			vm.WriteCode(accountChanges.Address, v, code, true)
@@ -288,9 +275,8 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	}
 }
 
-// Typed Write primitives. Each takes the AccountPath-contracted value type
-// directly so wrong-type writes are caught at compile time — there is no
-// runtime data.(T) assertion path through these.
+// Typed Write primitives. Each takes the AccountPath-contracted value type directly so
+// wrong-type writes are caught at compile time.
 
 func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *accounts.Account, complete bool) {
 	e := vm.entryOrCreate(addr)
@@ -299,12 +285,10 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
 }
 
-// WriteOriginAddressOnce seeds addr's committed pre-block account at originIndex
-// only if no origin cell exists yet. Origin is the immutable pre-block base for
-// the life of the block; re-seeding it corrupts every fall-through read (calcFees
-// obtains the coinbase via a floor-composed reader, so a re-seed would publish a
-// mid-block, tip-inflated balance as the base). Mirrors the seed-once discipline
-// seedStorageOrigin already applies to storage slots.
+// WriteOriginAddressOnce seeds addr's committed pre-block account at originIndex only
+// if no origin cell exists. Origin is the immutable pre-block base for the block's life;
+// re-seeding it would publish a mid-block value (e.g. a tip-inflated coinbase balance)
+// as the base and corrupt every fall-through read.
 func (vm *VersionMap) WriteOriginAddressOnce(addr accounts.Address, value *accounts.Account) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
@@ -383,9 +367,8 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 	e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage)
 }
 
-// entryOrCreate returns the AddressEntry for addr, creating it if absent. The
-// returned pointer is stable for the map's lifetime; the caller locks e.mu for
-// the cell mutation. Self-synchronised via sync.Map — no caller lock required.
+// entryOrCreate returns the AddressEntry for addr, creating it if absent. The returned
+// pointer is stable for the map's lifetime; the caller locks e.mu for the cell mutation.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
@@ -401,15 +384,12 @@ func flagFor(complete bool) statusFlag {
 	return FlagEstimate
 }
 
-// Typed Read primitives. Each returns the typed value, a ReadResult holding
-// the conflict-detection metadata (depIdx, incarnation), and ok=true when a
-// cell exists.
+// Typed Read primitives. Each returns the typed value, a ReadResult holding the
+// conflict-detection metadata (depIdx, incarnation), and ok=true when a cell exists.
 
-// readFloor performs the floor read shared by every typed ReadX primitive:
-// it descends sel(e)'s btree for the highest write strictly below txIdx and
-// returns its value plus the conflict-detection metadata (depIdx and, when the
-// floor cell is Done, its incarnation). sel extracts the per-path cell map from
-// the address entry, returning nil when the path is unset.
+// readFloor is the floor read shared by every typed ReadX: it descends sel(e)'s btree
+// for the highest write strictly below txIdx and returns its value plus the depIdx and
+// (for a Done/Validated floor) incarnation. sel returns nil when the path is unset.
 func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, res ReadResult, ok bool) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1
@@ -439,6 +419,9 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	switch fv.flag {
 	case FlagDone:
 		res.incarnation = fv.incarnation
+	case FlagValidated:
+		res.incarnation = fv.incarnation
+		res.validated = true
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -491,9 +474,8 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 	})
 }
 
-// ReadStatus returns a path's read outcome (Status/Version/DepIdx/Incarnation)
-// for callers that need only version/status (the validator's common path,
-// revival checks). It dispatches to the typed ReadX and discards the value.
+// ReadStatus returns a path's read outcome for callers that need only version/status
+// (the validator, revival checks), dispatching to the typed ReadX and discarding the value.
 func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
 	var res ReadResult
 	switch path {
@@ -523,11 +505,8 @@ func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key ac
 	return res
 }
 
-// LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) at which a write
-// exists for the given (addr, path, key). Returns ok=false when no entry
-// exists at or below the limit. Used to detect account revival after a
-// SelfDestruct: any newer non-SelfDestruct write at a strictly higher
-// TxIndex re-creates the account.
+// LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) with a write for (addr, path,
+// key), ok=false when none. Used to detect account revival after a SelfDestruct.
 func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int) (int, bool) {
 	if vm == nil {
 		return 0, false
@@ -590,16 +569,18 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	return fk, true
 }
 
-// AccountLifecycleState enumerates an account's existence at a given txIdx, resolved once so readers, validation and the create decision branch on the same verdict.
+// AccountLifecycleState enumerates an account's existence at a txIdx, resolved once so
+// readers, validation and the create decision branch on the same verdict.
 type AccountLifecycleState uint8
 
 const (
 	// LifecycleLive: no Done SelfDestruct=true in effect at txIdx.
 	LifecycleLive AccountLifecycleState = iota
-	// LifecycleAbsent: destroyed with no revival above it; the account reads as gone and a pre-block base read of it is not stale.
+	// LifecycleAbsent: destroyed with no revival above it; a pre-block base read is not stale.
 	LifecycleAbsent
-	// LifecycleRevived: destroyed but re-created above the destruct; storage on/before the destruct is wiped and stale base reads are invalidated.
-	// EIP-8246 balance-preserve is not resolved here: only a fork-aware caller can decide whether the account still exists.
+	// LifecycleRevived: destroyed but re-created above the destruct; storage on/before the
+	// destruct is wiped and stale base reads are invalidated. EIP-8246 balance-preserve is
+	// not resolved here — only a fork-aware caller can decide whether the account still exists.
 	LifecycleRevived
 )
 
@@ -612,7 +593,7 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	if e == nil {
 		return LifecycleLive, Version{}, 0
 	}
-	// The whole verdict must be resolved under a single RLock so it cannot observe the account mid-flush and return an internally inconsistent lifecycle.
+	// One RLock for the whole verdict so it cannot observe the account mid-flush.
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.SelfDestruct == nil {
@@ -694,11 +675,9 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 			return false
 		}
 	}
-	// EIP-8246: a self-destruct may preserve a non-zero balance (or leave a
-	// non-zero nonce), keeping the account alive as balance-only. That preserve is
-	// written in the destruct tx itself, so the strictly-above revival checks above
-	// miss it — the account is not net-absent, and a base read of it as absent is
-	// stale and must be invalidated.
+	// EIP-8246: a self-destruct may preserve a non-zero balance/nonce, keeping the account
+	// alive as balance-only. That preserve is written in the destruct tx itself, so the
+	// strictly-above revival checks miss it — the account is not net-absent.
 	if bal, _, ok := vm.ReadBalance(addr, txIndex); ok && !bal.IsZero() {
 		return false
 	}
@@ -708,21 +687,18 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 	return true
 }
 
-// FlushVersionedWrites routes a tx's typed write collections into the version
-// map. Each cell is positioned by the write's (txIndex, incarnation), so the
-// per-path loop order does not affect the result.
+// FlushVersionedWrites routes a tx's typed write collections into the version map. Each
+// cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
 func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
 	vm.flushVersionedWrites(writes, complete, tracePrefix, nil)
 }
 
-// FlushVersionedWritesFeeEstimate flushes writes, but for any address where
-// feeEstimate returns true the Address and Balance cells are published as
-// ESTIMATE regardless of `complete`. A fee recipient (coinbase / burnt) has no
-// final balance until the postponed fee calc, so its balance must stay an
-// in-flight dependency — even when the tx itself validates — so a downstream
-// reader hits MVReadResultDependency (Dep) and pauses/re-executes rather than
-// reading a committed-looking pre-tip value. calcFees is the sole writer that
-// turns it Done (Estimate -> Done, the one transition allowed to change a value).
+// FlushVersionedWritesFeeEstimate flushes writes, but publishes the Address and Balance
+// cells as Estimate (regardless of complete) for any address where feeEstimate is true.
+// A fee recipient has no final balance until the postponed fee calc, so its balance must
+// stay an in-flight dependency (readers hit Dep and pause) rather than a committed-looking
+// pre-tip value. calcFees is the sole writer that turns it Done — the one transition
+// allowed to change a value.
 func (vm *VersionMap) FlushVersionedWritesFeeEstimate(writes *WriteSet, complete bool, tracePrefix string, feeEstimate func(accounts.Address) bool) {
 	vm.flushVersionedWrites(writes, complete, tracePrefix, feeEstimate)
 }
@@ -732,19 +708,15 @@ func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, trac
 		return
 	}
 	flag := flagFor(complete)
-	// Flush per account under that account's lock so all of a tx's writes to one
-	// account (e.g. AddressPath + CodePath) become visible atomically — the
-	// property the former global lock guaranteed, now scoped to the account. A
-	// reader of a different account never contends. Cross-account partial
-	// visibility is resolved by commit-time ValidateVersion.
+	// Flush per account under that account's lock so all of a tx's writes to one account
+	// become visible atomically. Cross-account partial visibility is resolved by
+	// commit-time ValidateVersion.
 	seen := make(map[accounts.Address]struct{})
 	writes.forEachAddr(func(addr accounts.Address) {
 		if _, dup := seen[addr]; dup {
 			return
 		}
 		seen[addr] = struct{}{}
-		// A fee recipient's Address/Balance is provisional until calcFees — keep it
-		// an Estimate so readers depend on the finalized (tip-inclusive) value.
 		feeBalFlag := flag
 		if feeEstimate != nil && feeEstimate(addr) {
 			feeBalFlag = FlagEstimate
@@ -801,11 +773,9 @@ func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key 
 	markFlag(e, addr, path, key, txIdx, -1, FlagEstimate)
 }
 
-// MarkWritesComplete advances every cell named by writes from its speculative
-// Estimate to Done. It writes no values: each cell must already hold the write's
-// value at the write's incarnation (the flush when the tx's result arrived). It
-// is the commit-boundary consistency check that enforces one-value-per-version —
-// a mismatch panics rather than silently overwriting.
+// MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
+// no values (each cell must already hold the write's value at its incarnation). It is the
+// commit-boundary check enforcing one-value-per-version — a mismatch panics.
 func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 	if writes == nil {
 		return
@@ -852,6 +822,66 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if inner, ok := writes.storage[addr]; ok {
 			for key, vw := range inner {
 				markCellComplete(e.Storage[key], addr, StoragePath, key, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+			}
+		}
+	})
+}
+
+// MarkWritesValidated flips every cell named by writes Estimate->Validated: the tx
+// validated its read-set out-of-order but is not yet sealed, so a reader continues on it
+// (early break) while it stays revertible until the in-order seal. A fee-recipient's
+// Address and Balance cells are left Estimate so readers keep pausing until calcFees
+// finalizes the tip.
+func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(accounts.Address) bool) {
+	if writes == nil {
+		return
+	}
+	seen := make(map[accounts.Address]struct{})
+	writes.forEachAddr(func(addr accounts.Address) {
+		if _, dup := seen[addr]; dup {
+			return
+		}
+		seen[addr] = struct{}{}
+		e := vm.load(addr)
+		if e == nil {
+			panic(fmt.Sprintf("markValidated: no entry addr=%x", addr.Value()))
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
+			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
+		}
+		feeAddr := feeEstimate != nil && feeEstimate(addr)
+		if vw, ok := writes.address[addr]; ok && !feeAddr {
+			mark(AddressPath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.selfDestruct[addr]; ok {
+			mark(SelfDestructPath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.balance[addr]; ok && !feeAddr {
+			mark(BalancePath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.nonce[addr]; ok {
+			mark(NoncePath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.incarnation[addr]; ok {
+			mark(IncarnationPath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.code[addr]; ok {
+			mark(CodePath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.codeHash[addr]; ok {
+			mark(CodeHashPath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.codeSize[addr]; ok {
+			mark(CodeSizePath, accounts.NilKey, vw.Version)
+		}
+		if vw, ok := writes.createContract[addr]; ok {
+			mark(CreateContractPath, accounts.NilKey, vw.Version)
+		}
+		if inner, ok := writes.storage[addr]; ok {
+			for key, vw := range inner {
+				mark(StoragePath, key, vw.Version)
 			}
 		}
 	})
@@ -1060,21 +1090,18 @@ const (
 	VersionTooEarly
 )
 
-// validateRead validates one typed read. The recorded value stays typed T and is
-// never boxed into `any`: readLive fetches the live version-map value for the
-// same path and eq compares them for the rare value tiebreaker. The recursive
-// cross-path core (validateReadImpl) is value-less — it probes other paths of
-// other types, so it cannot itself be generic over T.
+// validateRead validates one typed read. The recorded value stays typed T (never boxed):
+// readLive fetches the live version-map value for the same path and eq compares them for
+// the rare value tiebreaker. The recursive cross-path core is value-less, so it can't be
+// generic over T.
 func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	readVal T,
 	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
 	eq func(a, b T) bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
-	// One typed read supplies BOTH the status (for the version check) and the
-	// live value (for the rare tiebreaker) — no second lookup, no boxing. The
-	// tiebreaker branch in validateReadImpl only fires when rr is Done, so eq
-	// compares against the value that came with rr.
+	// One typed read supplies both the status (version check) and the live value
+	// (tiebreaker) — no second lookup, no boxing.
 	live, rr, ok := readLive(vm, addr, key, txIndex)
 	matchesLive := func() bool { return ok && eq(readVal, live) }
 	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
@@ -1098,12 +1125,11 @@ func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx i
 	return vm.ReadAddress(a, tx)
 }
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
-	// Wipe-aware: a slot of a destructed (non-live) account reads zero unless a
-	// post-destruct write revived it. Anchor the wiped read on the destruct
-	// (canonicalVer) so a recorded wiped read validates against the destruct
-	// dependency rather than the stale, wipe-blind pre-destruct floor value.
+	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
+	// revived it, anchored on the destruct (canonicalVer) so it validates against the
+	// destruct dependency, not the stale wipe-blind pre-destruct floor.
 	if state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(a, tx); state != LifecycleLive {
-		if val, res, ok := vm.ReadStorage(a, k, tx); ok && res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+		if val, res, ok := vm.ReadStorage(a, k, tx); ok && res.resolved() && res.DepIdx() > destroyedAt {
 			return val, res, ok
 		}
 		return uint256.Int{}, ReadResult{depIdx: canonicalVer.TxIndex, incarnation: canonicalVer.Incarnation}, true
@@ -1120,10 +1146,9 @@ func eqAccount(a, b *accounts.Account) bool {
 	return a != nil && b != nil && a.Equals(b)
 }
 
-// validateReadImpl is validateRead with a recursive flag: the cross-validate
-// probes (AddressPath / SelfDestructPath / IncarnationPath) pass recursive=true
-// so they can be distinguished from a top-level read — a synthetic probe carries
-// no recorded value of its own and must not invalidate on a bare Done entry.
+// validateReadImpl is the recursive validation core. Cross-validate probes pass
+// recursive=true: a synthetic probe carries no recorded value of its own and must not
+// invalidate on a bare Done entry.
 func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	rr ReadResult,
 	matchesLive func() bool,
@@ -1132,44 +1157,38 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 
 	valid := VersionValid
 	switch rr.Status() {
-	case MVReadResultDone:
+	case MVReadResultDone, MVReadResultValidated:
 		if source != MapRead {
-			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry where the read saw storage is a BAL no-op and stays valid; other paths mean a real concurrent change and must invalidate.
+			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry a
+			// storage read saw is a BAL no-op and stays valid; other paths mean a real
+			// concurrent change and must invalidate.
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
 				switch {
 				case recursive && matchesLive == nil:
-					// Synthetic cross-validate probe (no recorded value of its
-					// own) — the outer entry's validation covers it. Without this
-					// guard a recursive AddressPath/SelfDestructPath probe that
-					// lands on a Done cell would over-invalidate.
+					// Synthetic cross-validate probe with no recorded value of its own —
+					// the outer entry's validation covers it; invalidating here would over-fire.
 				case matchesLive != nil && matchesLive():
-					// Value tiebreaker: the read was served cold from committed
-					// state and a concurrent worker's Done cell now shadows it, but
-					// the cell holds the same value — so the recorded read is still
-					// accurate and the tx need not re-execute. Evaluated typed by
-					// the caller (no boxing). Only value paths supply matchesLive;
-					// noValue paths (Code/CodeSize/CreateContract) fall through to
-					// the conservative version-check invalidation below.
+					// Value tiebreaker: the read was served cold and a concurrent Done cell
+					// now shadows it, but holds the same value, so the read is still accurate.
+					// Only value paths supply matchesLive; noValue paths fall through to the
+					// conservative version-check invalidation below.
 				default:
 					valid = VersionInvalid
 				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			// Value-aware MapRead: the version-only check can accept a read whose
-			// cell value has since changed at the same (TxIndex,Incarnation) — the
-			// one-final-value-per-version violation. Also compare the recorded value
-			// against the live cell value and invalidate on mismatch so the reader
-			// re-executes rather than committing stale.
+			// Value-aware MapRead: the version-only check can accept a read whose cell value
+			// has since changed at the same version (one-value-per-version violation), so also
+			// compare against the live value and invalidate on mismatch.
 			if valid == VersionValid && matchesLive != nil && !matchesLive() {
 				valid = VersionInvalid
 				vm.MapReadValueInvalidations.Add(1)
 			}
-			// An origin AddressPath read is the committed baseline; re-run the
-			// create/destruct cross-checks so a concurrent lower-tx create or
-			// SELFDESTRUCT still invalidates it.
+			// An origin AddressPath read is the committed baseline; re-run the create/
+			// destruct cross-checks so a concurrent lower-tx create or SELFDESTRUCT invalidates it.
 			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {
 				valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, StorageRead,
 					version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
@@ -1180,9 +1199,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				}
 			}
 		}
-		// A later tx self-destructed the account (no revival), so a read predating
-		// the destruct is stale; checkVersion alone misses it because the SD doesn't
-		// write the read's own path.
+		// A later tx self-destructed the account (no revival), so a read predating the
+		// destruct is stale; checkVersion misses it because the SD doesn't write the read's path.
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
@@ -1208,9 +1226,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		switch {
 		case source == MapRead && !recursive &&
 			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath):
-			// A sub-field read with no dedicated cell is recorded folded onto
-			// AddressPath (its source/version), so validate it against AddressPath
-			// at that version.
+			// A sub-field read with no dedicated cell is recorded folded onto AddressPath,
+			// so validate it against AddressPath at that version.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 		case source != StorageRead:
@@ -1218,13 +1235,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		default:
 			if valid = checkVersion(version, version); valid == VersionValid &&
 				path != SelfDestructPath && !vm.netAbsentDestruct(addr, txIndex) {
-				// Cross-validate any account property read against AddressPath
-				// and SelfDestructPath.  A prior tx may have created or
-				// self-destructed the account, invalidating storage reads of
-				// any property (code, storage slots, balance, nonce, etc.).
-				// Skipped for a net-absent create+self-destruct (netAbsentDestruct):
-				// the account was absent/empty both at base and after, so the base
-				// read is not stale — invalidating it livelocked a same-block reader.
+				// Cross-validate any account-property read against AddressPath and
+				// SelfDestructPath: a prior tx may have created or self-destructed the account.
+				// Skipped for a net-absent create+self-destruct (the account was absent both
+				// at base and after, so the base read is not stale — invalidating it livelocked).
 				if path != AddressPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
@@ -1238,10 +1252,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 
-					// A prior tx re-creating this account makes a nil AddressPath
-					// storage read stale; IncarnationPath is the specific signal
-					// (written only by CreateAccount and SelfDestruct), unlike
-					// BalancePath which overfires for every gas payer.
+					// A prior tx re-creating this account makes a nil AddressPath read stale;
+					// IncarnationPath is the specific signal (written only by CreateAccount and
+					// SelfDestruct), unlike BalancePath which overfires for every gas payer.
 					if valid == VersionValid {
 						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
@@ -1265,6 +1278,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				switch rr.Status() {
 				case MVReadResultDone:
 					return "done"
+				case MVReadResultValidated:
+					return "validated"
 				case MVReadResultDependency:
 					return "dependency"
 				case MVReadResultNone:
@@ -1284,24 +1299,22 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
-// ValidateReadSet validates rs (a tx's read-set) against the current versionMap
-// at txIdx. Split out of ValidateVersion so a worker can validate its own
-// freshly-produced read-set in parallel, before the exec loop commits.
+// ValidateReadSet validates rs (a tx's read-set) against the current versionMap at
+// txIdx. Split out of ValidateVersion so a worker can validate its own freshly-produced
+// read-set in parallel, before the exec loop commits.
 func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	valid = VersionValid
-	// ok checks one validity result, latching valid; ok==false stops the scan.
+	// ok latches valid and stops the scan on the first invalid result.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
 	// noValueRead validates a path whose recorded value carries no tiebreaker
-	// (self-destruct / create-contract / code / code-size): the version/status
-	// check is authoritative. One ReadStatus, no value comparison.
+	// (self-destruct / create-contract / code / code-size): the version/status check is
+	// authoritative.
 	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
 		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
 			vm.ReadStatus(addr, path, key, txIdx), nil, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
-	// Value paths go through the generic validateRead so the recorded value stays
-	// typed (never boxed) and the single typed read supplies both status and the
-	// tiebreaker value.
+	// Value paths go through generic validateRead so the recorded value stays typed.
 	for a, tr := range rs.address {
 		var rv *accounts.Account
 		if tr.Val != nil {
@@ -1361,31 +1374,19 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	return
 }
 
-// WriteCell holds one version of a typed value on a (path, key) cell. The
-// type parameter T matches the AccountPath's value-type contract: writing
-// the wrong T to a cell is a compile-time error, not a runtime panic.
-//
-// Typed Read primitives (ReadBalance / ReadStorage / etc.) consume Value
-// directly without crossing the any boundary.
+// WriteCell holds one version of a typed value on a (path, key) cell. T matches the
+// AccountPath's value-type contract, so a wrong-T write is a compile-time error, and
+// typed Read primitives consume Value directly without crossing the any boundary.
 type WriteCell[T any] struct {
 	flag        statusFlag
 	incarnation int
 	Value       T
 }
 
-// Per-T pools for *WriteCell[T]. Each VersionMap write goes through
-// putCellFromPool which retrieves a zeroed cell from the path-corresponding
-// pool; Delete/DeleteAll return cells to the same pool. The pools span
-// VersionMap lifetimes — a freed cell from block N is recycled into
-// block N+1's first write.
-//
-// Invariants:
-//   - Get returns a zeroed cell (we overwrite all fields immediately, so the
-//     prior contents are irrelevant; pool's New func returns a zero struct).
-//   - Put on slice-valued types (ValBytes / []byte for CodePath) must clear
-//     the slice header to avoid pinning bytecode in the pool entry —
-//     handled in releaseCellCode below. Other types are value-shaped and
-//     don't pin external memory.
+// Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
+// Delete/DeleteAll in block N is recycled into block N+1's first write. Slice-valued
+// types (CodePath) must clear the payload on release to avoid pinning bytecode in the
+// pool entry — see releaseCellCode.
 var (
 	cellPoolAccount        = sync.Pool{New: func() any { return &WriteCell[*accounts.Account]{} }}
 	cellPoolSelfDestruct   = sync.Pool{New: func() any { return &WriteCell[bool]{} }}
@@ -1461,11 +1462,15 @@ const (
 	MVReadResultDone       = 0
 	MVReadResultDependency = 1
 	MVReadResultNone       = 2
+	MVReadResultValidated  = 3
 )
 
 type ReadResult struct {
 	depIdx      int
 	incarnation int
+	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	// continues on it like Done but the dep is not yet final.
+	validated bool
 }
 
 func (res *ReadResult) DepString() string {
@@ -1492,6 +1497,9 @@ func (res *ReadResult) Version() Version {
 
 func (mvr ReadResult) Status() int {
 	if mvr.depIdx != UnknownDep {
+		if mvr.validated {
+			return MVReadResultValidated
+		}
 		if mvr.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
@@ -1500,4 +1508,12 @@ func (mvr ReadResult) Status() int {
 	}
 
 	return MVReadResultNone
+}
+
+// resolved reports whether the floor holds a value at a known version: Done (sealed) or
+// Validated (pre-seal early-break). Consumers of the value treat both alike; only sealing
+// logic requires Done specifically.
+func (mvr ReadResult) resolved() bool {
+	s := mvr.Status()
+	return s == MVReadResultDone || s == MVReadResultValidated
 }

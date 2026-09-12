@@ -6,15 +6,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// VersionedAccountView is an accounts.AccountView that composes each account
-// field on demand from the versionMap at a fixed txIndex, falling back to a
-// lazily-loaded base (versionMap AddressPath record, then the committed
-// stateReader). It is the read-path dual of the per-tx versionMap slice: a
-// view over the cells rather than a materialized copy.
-//
-// It mirrors versionedStateReader.ReadAccountData's composition
-// (applyVersionedUpdates) but resolves per field lazily, so a consumer reading
-// only one field pays for only that cell. The base is loaded at most once.
+// VersionedAccountView is an accounts.AccountView composing each account field on
+// demand from the versionMap at a fixed txIndex, falling back to a lazily-loaded
+// base. A consumer reading only one field pays for only that cell; the base is
+// loaded at most once.
 type VersionedAccountView struct {
 	addr  accounts.Address
 	txIdx int
@@ -101,8 +96,8 @@ func (v *VersionedAccountView) GetCodeHash() accounts.CodeHash {
 	if v.baseAcc != nil {
 		return v.baseAcc.CodeHash
 	}
-	// No base account: mirror the synth path (accounts.Account{}), whose
-	// CodeHash is the zero value — not EmptyCodeHash.
+	// No base account: mirror accounts.Account{}, whose CodeHash zero value is
+	// not EmptyCodeHash.
 	return accounts.CodeHash{}
 }
 
@@ -177,9 +172,8 @@ func (v *VersionedAccountView) Empty() bool {
 }
 
 // Account composes the whole account at txIdx from the versionMap (seeded origin
-// base plus field cells below txIdx), or nil if it does not exist there. Used as
-// the apply base — stateObject-free. Correct only when every account written this
-// block has its origin seeded.
+// base plus field cells below txIdx), or nil if it does not exist there. Correct
+// only when every account written this block has its origin seeded.
 func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil

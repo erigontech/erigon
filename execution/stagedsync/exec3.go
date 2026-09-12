@@ -180,11 +180,8 @@ func ExecV3(ctx context.Context,
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
+	// Deferred commitment updates batch commitment to block boundaries rather than
+	// per-transaction, cutting re-org validation overhead.
 	if isForkValidation || isApplyingBlocks {
 		doms.SetDeferCommitmentUpdates(true)
 	}
@@ -561,6 +558,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				return err
 			}); err != nil {
 				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
+				return
 			}
 			te.hooks.OnGenesisBlock(b, te.cfg.genesis.Alloc)
 		}
@@ -583,6 +581,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				return nil
 			}); err != nil {
 				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
+				return
 			}
 
 			te.hooks.OnBlockStart(tracing.BlockEvent{
@@ -810,7 +809,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	if !ok {
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	logger.Warn("Unwinding due to incorrect root hash", "to", allowedUnwindTo)
 	if u != nil {
 		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
 			return err
@@ -871,27 +870,12 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-// shouldMarkExhaustedAtBlock decides whether the per-cycle block-limit
-// has been crossed at the current block — which causes executeBlocks to
-// stamp the dispatched blockResult with `Exhausted` and break out of
-// its loop. The exec loop sees the Exhausted flag, fires its
-// partial-batch flush, and the apply loop returns ErrLoopExhausted so
-// the stage loop resumes from the next block.
-//
-// Two gates protect the initial cycle:
-//  1. !initialCycle — later cycles enforce blockLimit unconditionally.
-//  2. On initialCycle, only enforce when we have at least one frozen
-//     step worth of work AND we're not in DiscardCommitment debug mode
-//     (otherwise the partial-batch flush would lose the commitment
-//     that's still pending in sd.mem). See exec3.go's call site for
-//     the historical reasoning.
-//
-// blockNum != maxBlockNum guards against marking the goal block as
-// exhausted — the goal block already triggers a clean stopReachedMax
-// exit and shouldn't be relabeled as "more work pending".
-//
-// Pure function so the precedence is unit-testable. See
-// TestShouldMarkExhaustedAtBlock.
+// shouldMarkExhaustedAtBlock reports whether the per-cycle block-limit has been
+// crossed, marking the batch exhausted so the stage loop resumes from the next
+// block. On the initial cycle it holds off until at least one frozen step of
+// work exists and DiscardCommitment is off, else the partial-batch flush would
+// lose the commitment still pending in sd.mem. The goal block is never marked
+// exhausted — it already exits cleanly via stopReachedMax.
 func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenStep kv.Step, discardCommitment bool, blockLimit, blockNum, startBlockNum, maxBlockNum uint64) bool {
 	if initialCycle {
 		if !(lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !discardCommitment) {

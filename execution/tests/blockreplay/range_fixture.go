@@ -6,19 +6,16 @@ import (
 	"os"
 )
 
-// RangeFixture is the exec-witness for a CONTIGUOUS range of blocks streamed
-// through one accumulating SharedDomains — the vehicle for reproducing
-// cross-block / intra-block parallel-execution hazards that a single-block
-// replay cannot exercise (per-block state resets hide them).
+// RangeFixture is the exec-witness for a contiguous range of blocks streamed
+// through one accumulating SharedDomains, for reproducing cross-block /
+// intra-block parallel-execution hazards a single-block replay cannot exercise.
 //
 // Blocks holds one single-block Fixture per block, in ascending order. The
-// merged pre-range witness is derived at load time by keeping the EARLIEST
-// block's pre-value for each key: a key a later block reads was either written
-// by an earlier in-range block (served from the accumulated domains at replay,
-// not the witness) or unchanged since the range start (so the earliest read's
-// value is the range-start value). Outputs is the range-FINAL post-state,
-// captured directly from canonical history at the last block's post-txNum — a
-// correct oracle independent of the executor under test.
+// merged pre-range witness keeps the earliest block's pre-value for each key:
+// a key a later block reads was either written by an earlier in-range block
+// (served from the accumulated domains) or unchanged since the range start.
+// Outputs is the range-final post-state from canonical history at the last
+// block's post-txNum.
 type RangeFixture struct {
 	Blocks  []*Fixture
 	Outputs *Outputs
@@ -49,19 +46,16 @@ func LoadRange(path string) (*RangeFixture, error) {
 	return rf, nil
 }
 
-// SingleBlockRange wraps one single-block Fixture as a degenerate one-block
-// RangeFixture (range-final outputs are the block's own), so a committed
-// single-block fixture can drive the range replay with no external artifact.
+// SingleBlockRange wraps one Fixture as a one-block RangeFixture so a
+// single-block fixture can drive the range replay.
 func SingleBlockRange(fx *Fixture) *RangeFixture {
 	return &RangeFixture{Blocks: []*Fixture{fx}, Outputs: fx.Outputs}
 }
 
 // MergedWitness collapses the per-block witnesses into a single Fixture whose
-// pre-state maps are the keep-earliest union, suitable for seeding a witness
-// SharedDomains via NewWitnessDomains unchanged. Its Outputs is the range-final
-// merged post-state; its BlockRLP/ParentHeaderRLP/Ancestors describe the first
-// block (parent of the range) for reader convenience — block streaming uses the
-// per-block list, not this single BlockRLP.
+// pre-state maps are the keep-earliest union, for seeding a witness
+// SharedDomains. Its BlockRLP/ParentHeaderRLP/Ancestors describe the first
+// block; block streaming uses the per-block list, not this single BlockRLP.
 func (rf *RangeFixture) MergedWitness() *Fixture {
 	m := newFixture()
 	m.BlockRLP = rf.Blocks[0].BlockRLP

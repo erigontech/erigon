@@ -105,10 +105,9 @@ type WorkerContext struct {
 	logger  log.Logger
 	chainDb kv.TemporalRoDB
 	// chainTx is the overlay-aware read view (the dispatch goroutine's roTx
-	// wrapped with the SharedDomains BlockOverlay if one is active). All reads go
-	// through it so any consumer is overlay-aware by construction. The context
-	// only borrows the tx and never rolls it back — the dispatch goroutine owns
-	// the tx for its whole lifetime and rolls it back on exit.
+	// wrapped with the SharedDomains BlockOverlay if one is active). The context
+	// only borrows the tx; the dispatch goroutine owns its lifetime and rolls it
+	// back on exit.
 	chainTx     kv.TemporalTx
 	background  bool
 	blockReader dbservices.FullBlockReader
@@ -133,11 +132,9 @@ type WorkerContext struct {
 	readMetrics *kvmetrics.DomainMetrics
 }
 
-// installWorkerGetHash replaces the EVM's GetHash function with one that
-// uses the worker's own chainTx for BLOCKHASH lookups, avoiding any share
-// of the executeBlocks goroutine's roTx across worker goroutines (data
-// race). chainTx is already overlay-aware (see bindTx) so headers staged
-// in the BlockOverlay but not yet flushed to MDBX are visible.
+// installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
+// chainTx, avoiding sharing the executeBlocks goroutine's roTx across workers.
+// chainTx is overlay-aware, so headers staged in the BlockOverlay are visible.
 func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	header := txTask.BlockHeader()
 	if header == nil {
@@ -233,10 +230,8 @@ func (rw *WorkerContext) resetTxNum(txNum uint64) {
 }
 
 // bindTx points this worker's reader, writer, and chain reader at chainTx,
-// overlay-wrapped so block metadata staged in the SharedDomains BlockOverlay
-// (headers/bodies/td from InsertBlocks at chaintip) is visible. The worker only
-// borrows the tx — the dispatch goroutine owns its lifetime and rolls it back on
-// exit. A nil tx detaches (teardown); readers/writer keep their type and are
+// overlay-wrapped so block metadata staged in the SharedDomains BlockOverlay is
+// visible. A nil tx detaches (teardown); readers/writer keep their type and are
 // re-pointed on the next bind.
 func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	if chainTx == nil {
@@ -342,10 +337,9 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 }
 
 // EnablePrevBlockReads makes the worker's IBS read its committed base through a
-// per-task reader over the finished-but-not-yet-committed prior blocks
-// (PREV_BLOCK_READS). The raw reader stays as rw.stateReader so the getter
-// plumbing keeps targeting it; the per-task reader wraps it by reference, so
-// those in-place updates are seen. Call once after ResetState. Per task the
+// per-task reader over the finished-but-not-yet-committed prior blocks. The raw
+// reader stays as rw.stateReader (the getter plumbing keeps targeting it) and the
+// per-task reader wraps it by reference. Call once after ResetState; per task the
 // block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
@@ -357,8 +351,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
 		// Chain sd.mem → chainTx so historic-mode reads see prior-tx writes
-		// from the current batch (same class as the record-vs-field fix in
-		// the coinbase race investigation).
+		// from the current batch.
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
 		rw.SetReader(state.NewReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics)))
@@ -388,8 +381,6 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		}
 	}
 
-	// Override GetHash with a per-worker function that uses the worker's
-	// own chainTx. The shared blockTx from executeBlocks is not thread-safe.
 	if rw.background && rw.chainTx != nil && rw.blockReader != nil {
 		rw.installWorkerGetHash(txTask)
 	}
@@ -405,9 +396,8 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		result.TraceTos = callTracer.Tos()
 	}
 
-	// Capture collector-format writes from LightCollector (parallel workers).
-	// MakeWriteSet already wrote to rw.stateWriter; extract the accumulated
-	// writes so finalize can use them directly without IBS reconstruction.
+	// Extract LightCollector's accumulated writes so finalize can use them
+	// directly without IBS reconstruction.
 	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
 		result.CollectorWrites = lc.TakeWrites()
 	}
@@ -421,6 +411,23 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	reconWorkers = make([]*WorkerContext, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
+
+	// Assigned before the fallible ResetState loop so every early return hands
+	// back a callable closure — the teardown path invokes it unconditionally.
+	var clearDone bool
+	clear = func() {
+		if clearDone {
+			return
+		}
+		clearDone = true
+		_ = g.Wait()
+		for _, w := range reconWorkers {
+			if w != nil {
+				_ = w.ResetTx(nil)
+			}
+		}
+	}
+
 	for i := range workerCount {
 		reconWorkers[i] = NewWorkerContext(gctx, background, metrics, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
 
@@ -442,19 +449,6 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		wait = func() { _ = g.Wait() }
 	}
 
-	var clearDone bool
-	clear = func() {
-		if clearDone {
-			return
-		}
-		clearDone = true
-		_ = g.Wait()
-		for _, w := range reconWorkers {
-			if err = w.ResetTx(nil); err != nil {
-				return
-			}
-		}
-	}
 	applyWorker = NewWorkerContext(ctx, false, nil, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
 
 	return reconWorkers, applyWorker, clear, wait, err

@@ -9,11 +9,9 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-// witnessReadNanos busy-spins a modelled cold-domain/file read latency on every
-// GetLatest that falls through to the flat witness (i.e. a versionMap/mem miss —
-// the reads that cost ~90µs in production). Zero = pure-compute (default). Set
-// WITNESS_READ_NANOS to model read-bound parallelism (the production case, where
-// workers overlap IO). Env-gated so default behaviour is unchanged.
+// witnessReadNanos busy-spins a modelled read latency on every GetLatest that
+// falls through to the flat witness. Zero (default) = pure-compute; set
+// WITNESS_READ_NANOS to model read-bound parallelism.
 var witnessReadNanos = func() int64 {
 	if v := os.Getenv("WITNESS_READ_NANOS"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -24,15 +22,13 @@ var witnessReadNanos = func() int64 {
 }()
 
 // witnessMemBatch is the kv.TemporalMemBatch seam SharedDomains reads through,
-// backed by a flat witness instead of a temporal source. Before Seal, DomainPut
-// loads the witness (the fixture's pre-state, encoded by the production Writer);
-// after Seal, writes and every other operation forward to an embedded real mem
-// batch. GetLatest serves exec writes first, then the read-only witness — so a
-// complete witness never falls through to the underlying tx.
+// backed by a flat witness. Before Seal, DomainPut loads the witness (the
+// fixture's pre-state); after Seal, writes forward to the embedded real mem
+// batch. GetLatest serves exec writes first, then the read-only witness.
 type witnessMemBatch struct {
-	kv.TemporalMemBatch // delegate: exec writes + all non-overridden methods
-	witness             map[kv.Domain]map[string][]byte
-	sealed              bool
+	kv.TemporalMemBatch
+	witness map[kv.Domain]map[string][]byte
+	sealed  bool
 }
 
 func newWitnessMemBatch(delegate kv.TemporalMemBatch) *witnessMemBatch {
@@ -42,7 +38,6 @@ func newWitnessMemBatch(delegate kv.TemporalMemBatch) *witnessMemBatch {
 	}
 }
 
-// Seal ends witness loading; subsequent writes go to the delegate.
 func (w *witnessMemBatch) Seal() { w.sealed = true }
 
 func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
@@ -81,10 +76,9 @@ func (w *witnessMemBatch) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.St
 	return nil, 0, false
 }
 
-// changesetHolder is the structural view of the concrete mem batch's changeset
-// API. SharedDomains does unguarded sd.mem.(accHolder) assertions for changeset
-// bookkeeping; embedding the interface does not promote these (they are not part
-// of kv.TemporalMemBatch), so forward them explicitly to the delegate.
+// changesetHolder forwards the concrete mem batch's changeset API: SharedDomains
+// type-asserts for these methods, and embedding kv.TemporalMemBatch does not
+// promote them.
 type changesetHolder interface {
 	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
 	GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet

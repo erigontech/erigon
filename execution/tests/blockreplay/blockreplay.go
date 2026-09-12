@@ -1,14 +1,9 @@
 // Package blockreplay provides a lightweight, exec-only block-replay harness.
 //
-// A Fixture is the minimal "exec witness" for one block: the pre-state VALUES
-// the block's execution reads (accounts, storage, code), plus the block payload
-// RLP and the ancestor data execution needs (parent header, BLOCKHASH hashes).
-// It carries no merkle proofs and no commitment state — replay runs
+// A Fixture is the minimal exec witness for one block: the pre-state values the
+// block reads (accounts, storage, code), the block RLP, and the ancestor data
+// execution needs (parent header, BLOCKHASH hashes). Replay runs
 // ExecuteBlockEphemerally against an in-memory reader and never computes a trie.
-//
-// Capture: wrap a real StateReader in a recordingReader and run the block once;
-// every first read records the pre-block value. Replay: serve those values from
-// an inMemReader. Same block + same reads => deterministic, portable, tiny.
 package blockreplay
 
 import (
@@ -24,8 +19,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Save/Load serialize a Fixture (gob) so a captured block becomes a drop-in
-// testdata file.
 func (fx *Fixture) Save(path string) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -48,8 +41,7 @@ func Load(path string) (*Fixture, error) {
 	return fx, nil
 }
 
-// acctData is a captured pre-state account. Present=false means the account did
-// not exist at capture time (ReadAccountData returned nil).
+// acctData is a captured account. Present=false means the account did not exist.
 type acctData struct {
 	Present     bool
 	Nonce       uint64
@@ -59,8 +51,8 @@ type acctData struct {
 }
 
 // Fixture is the serializable exec-witness for a single block: the pre-state
-// the block reads (inputs) plus the post-state it writes (Outputs), so a replay
-// can be checked against known-correct data — not just profiled.
+// the block reads plus the post-state it writes (Outputs), so a replay can be
+// checked against known-correct data.
 type Fixture struct {
 	BlockRLP        []byte
 	ParentHeaderRLP []byte
@@ -72,9 +64,8 @@ type Fixture struct {
 	Outputs         *Outputs // post-state the block wrote; nil until captured/backfilled
 }
 
-// Outputs is the post-state a block's execution produced: the accounts it
-// updated (with final values), deleted, and the storage/code it wrote. It is
-// the reference the replay's post-state is checked against (data, not root).
+// Outputs is the post-state a block's execution produced, checked against the
+// replay's post-state (data, not root).
 type Outputs struct {
 	Accounts map[[20]byte]acctData
 	Deleted  map[[20]byte]bool
@@ -134,7 +125,6 @@ type recordingReader struct {
 	tracePrefix string
 }
 
-// NewRecordingReader wraps inner; capture the accumulated Fixture with Fixture().
 func NewRecordingReader(inner state.StateReader) *recordingReader {
 	return &recordingReader{inner: inner, fx: newFixture()}
 }
@@ -200,9 +190,8 @@ func (r *recordingReader) Trace() bool               { return r.trace }
 func (r *recordingReader) TracePrefix() string       { return r.tracePrefix }
 
 // inMemReader serves reads from a Fixture with no DB behind it. Reads are
-// ~free, so it models the COMPUTE path, not read cost — set StorageReadNanos to
-// busy-spin a modelled per-storage-read latency (measured cold-file cost) when
-// reproducing read-bound blocks matters.
+// ~free, so set StorageReadNanos to busy-spin a modelled per-storage-read
+// latency when reproducing read-bound blocks matters.
 type inMemReader struct {
 	fx               *Fixture
 	trace            bool
@@ -210,7 +199,6 @@ type inMemReader struct {
 	StorageReadNanos int64 // >0: model per-storage-read latency
 }
 
-// NewInMemReader serves StateReader reads from fx.
 func NewInMemReader(fx *Fixture) *inMemReader { return &inMemReader{fx: fx} }
 
 func spin(ns int64) {

@@ -275,8 +275,8 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 
 		// Probe the flag only when the refund can apply: the probe records a
-		// SelfDestructPath read, which under parallel execution races another
-		// tx's SELFDESTRUCT of the same contract for no observable effect.
+		// SelfDestructPath read that would otherwise race another tx's SELFDESTRUCT
+		// under parallel execution for no observable effect.
 		if refundsEnabled {
 			hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
 			if err != nil {
@@ -342,13 +342,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			return mdgas.MdGas{}, err
 		}
 
-		// EIP-8037: Match the reference execution spec charge order:
-		//   execution base gas → state gas → 63/64 rule.
-		//
-		// Temporarily deduct the execution base from callContext so that the
-		// state gas charge (which may spill into gas_left) sees the correct
-		// reduced balance.  After computing the 63/64 rule we restore the
-		// base so the interpreter can deduct (and trace) the full amount.
+		// EIP-8037: match the reference charge order (execution base → state gas →
+		// 63/64 rule). Temporarily deduct the execution base so the state gas
+		// charge sees the correct reduced balance, then restore it so the
+		// interpreter deducts (and traces) the full amount.
 		executionBase := accessGas + statefulBaseGas.Execution
 		if callContext.gas < executionBase {
 			return mdgas.MdGas{}, ErrOutOfGas

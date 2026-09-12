@@ -74,18 +74,10 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 }
 
-// Apply writes this (already-Normalized) write-set directly to the shared
-// domains, no intermediate BTree — the single write-set commit path shared by
-// the parallel executor and block production. trace gates the dbg.TraceApply
-// logging StateV3 used to read from its own flag.
-//
-// Writes carry complete account state (all fields emitted by UpdateAccountData),
-// so no domain reads are needed to reconstruct the full serialised account.
-// SelfDestructPath=true signals either:
-//   - pure account deletion (no account fields follow) — from DeleteAccount
-//   - code+storage cleanup before recreation — from UpdateAccountData when
-//     original.Incarnation > account.Incarnation (followed by account fields)
-
+// ApplyWrites writes an already-Normalized write-set directly to the shared
+// domains — the single write-set commit path shared by the parallel executor and
+// block production. Writes carry complete account state, so no domain reads are
+// needed to reconstruct the serialised account.
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
@@ -109,8 +101,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 			return d
 		}
-		// Range the typed collections directly rather than AllHeaders()+GetX —
-		// the header walk plus a second per-value map probe is strictly more work.
 		for a, vw := range writes.Balances() {
 			v := vw.Val
 			ensure(a).balance = &v
@@ -147,12 +137,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 		}
 
-		// A self-destructed address (final state destroyed) must reach the
-		// pure-delete branch below, which fires only when no nonce/incarnation/
-		// codeHash and no storage writes accompany the SD. A raw versionMap view
-		// still carries the SD tx's own field/storage writes (Normalize dropped
-		// them upstream), so drop them here. Balance is kept: its zero-ness drives
-		// the EIP-8246 preserved-balance vs pure-delete decision.
+		// Drop a self-destructed address's own field/storage writes so it reaches
+		// the pure-delete branch below (a raw versionMap view still carries them).
+		// Balance is kept: its zero-ness drives the EIP-8246 preserved-balance vs
+		// pure-delete decision.
 		for _, d := range perAddr {
 			if d.selfDestruct {
 				d.nonce = nil
@@ -164,9 +152,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 		}
 
-		// Sort addresses before iterating so that trace output is deterministic.
-		// Domain writes are buffered into a sorted BTree by key, so order of
-		// iteration does not affect correctness — only debug reproducibility.
+		// Sort addresses only for deterministic trace output; domain writes are
+		// buffered into a sorted BTree, so iteration order is not load-bearing.
 		addrs := make([]accounts.Address, 0, len(perAddr))
 		for addr := range perAddr {
 			addrs = append(addrs, addr)
@@ -234,12 +221,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
 					if vw, ok := writes.(*versionMapWriteView); ok {
-						// Execution-store base: the pre-tx account composed from the
-						// versionMap (seeded origin + prior txs' field cells). One-way
-						// fold — no app-store read, no block cache, no stateObject. Every
-						// account written this block has a seeded origin (seedOrigin on
-						// read; the calcFees seed for the coinbase/burnt tip written
-						// without a read), so the compose is complete.
+						// Compose the pre-tx account from the versionMap (seeded origin
+						// plus prior txs' field cells); every account written this block
+						// has a seeded origin, so the compose is complete.
 						if base := NewVersionedAccountView(addr, vw.txIdx, vw.vm, nil).Account(); base != nil {
 							acc = *base
 						}
@@ -261,15 +245,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
-				// EIP-161: an account left Balance=0, Nonce=0, empty-code is
-				// removed rather than written as a zero leaf — matching serial's
-				// updateAccount and the balance-increase loop below. A raw
-				// versionMap view still carries the touched-empty account's field
-				// writes (Normalize converted them to a delete upstream).
-				// Incarnation>0 with empty fields is a storage-bearing contract
-				// account (only produced by genesis allocs — a normal CREATE always
-				// sets code/nonce): it holds state and must not be removed. Serial
-				// avoids this because genesis commits under empty (EIP-161-off) rules.
+				// EIP-161: an account left Balance=0, Nonce=0, empty-code is removed
+				// rather than written as a zero leaf. The Incarnation==0 guard spares
+				// a storage-bearing genesis account (empty fields but real state),
+				// which genesis commits under EIP-161-off rules.
 				if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del empty account: %x\n", blockNum, addr)
@@ -344,8 +323,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		// See the incarnation==0 rationale at the account-write EIP-161 site above:
-		// a storage-bearing genesis account (incarnation>0, empty fields) must survive.
+		// Incarnation==0 guard: see the account-write EIP-161 site above.
 		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
 				return err
@@ -376,16 +354,13 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
-	// Step-boundary commitment is computed by the explicit CommitStepBoundary
-	// call (serial) or the commitment calculator (parallel), not here.
 	return nil
 }
 
-// ApplyTxIndexes writes trace indices, log indices, and receipts.
-// When skipReceiptCache is true, the receipt-cache domain write is skipped.
-// This is needed for the parallel executor's block-finalize txResult which
-// shares the system-tx-end txNum; a second DomainPut at the same txNum would
-// overwrite the history entry that preserves the last regular tx's receipt.
+// ApplyTxIndexes writes trace indices, log indices, and receipts. skipReceiptCache
+// skips the receipt-cache domain write for the parallel executor's block-finalize
+// txResult, which shares the system-tx-end txNum: a second DomainPut there would
+// overwrite the last regular tx's receipt history entry.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -519,13 +494,10 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
-// ClearAccountsCache drops all entries from the cross-block account cache.
-// Must be called after a block's state writes are fully applied to SharedDomains
-// (sd.mem) and before the next block's workers start reading. Without this,
-// stale entries from the previous block's versionedWriteCollector (populated
-// during engine.Finalize → MakeWriteSet) leak into subsequent blocks, causing
-// workers to read outdated nonces/balances from the BufferedReader cache
-// instead of the correct values in sd.mem.
+// ClearAccountsCache drops all entries from the cross-block account cache. Must
+// be called after a block's writes are fully applied to SharedDomains and before
+// the next block's workers read, or stale entries leak forward and workers read
+// outdated values from the cache instead of sd.mem.
 func (s *StateV3Buffered) ClearAccountsCache() {
 	s.accountsMutex.Lock()
 	clear(s.accounts)
@@ -540,15 +512,10 @@ func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Bu
 	}
 }
 
-// versionedWriteCollector implements StateWriter and collects writes as a
-// flat VersionedWrites slice for direct domain apply via applyVersionedWrites.
-//
-// When FinalizeTx calls UpdateAccountData, complete account state (all fields)
-// is emitted so that applyVersionedWrites can reconstruct the full serialised
-// account without domain reads. Code and storage writes are collected similarly.
-//
-// It also maintains rs.accounts synchronously for the cross-block timing hole
-// bridge: block N+1 workers may read block N state before the async applyResults
+// versionedWriteCollector implements StateWriter, collecting writes as a WriteSet
+// for direct domain apply. It emits complete account state so apply needs no
+// domain reads, and maintains rs.accounts synchronously to bridge the cross-block
+// timing hole: block N+1 workers may read block N state before the async apply
 // goroutine has flushed it to SharedDomains.
 type versionedWriteCollector struct {
 	rs     *StateV3Buffered
@@ -571,18 +538,14 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	accountCopy.Copy(account)
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	// When the original incarnation was higher than the new incarnation
-	// (pre-existing contract destroyed then recreated at a lower incarnation),
-	// emit a SelfDestructPath write first to signal code+storage cleanup before
-	// the new account state is written. applyVersionedWrites detects the presence
-	// of account fields after SelfDestructPath to distinguish cleanup+recreate
-	// from a pure account deletion.
+	// A down-rev incarnation (contract destroyed then recreated) emits a
+	// SelfDestructPath write first to signal code+storage cleanup before the new
+	// account state; apply distinguishes cleanup+recreate from a pure delete by
+	// the account fields that follow.
 	needsCleanup := original.Incarnation > accountCopy.Incarnation
-	// Cross-block reincarnation: in the parallel executor, versionedReadCore
-	// returns a nil account (Incarnation=0) for addresses self-destructed
-	// in a prior block, so the check above misses the cleanup. Blocks are
-	// processed sequentially, so rs.accounts already has the deleted marker
-	// from the prior block's DeleteAccount by the time this runs.
+	// Cross-block reincarnation: a prior-block self-destruct reads back as a nil
+	// account (Incarnation=0), so the check above misses it; rs.accounts still
+	// holds the deleted marker since blocks run sequentially.
 	if !needsCleanup && accountCopy.Incarnation > 0 {
 		c.rs.accountsMutex.RLock()
 		if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
@@ -594,14 +557,11 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 	}
 
-	// Emit complete account state so applyVersionedWrites can reconstruct the
-	// full serialised account.
 	c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
 	c.writes.SetNonce(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
 	c.writes.SetIncarnation(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
 	c.writes.SetCodeHash(address, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
 
-	// Maintain rs.accounts for the cross-block timing hole bridge.
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
@@ -779,11 +739,9 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 }
 
 // hasCommittedAccount probes the account domain for addr. An address with no
-// committed account holds no committed storage: storage is only written for an
-// account that exists, and deleting an account wipes its storage prefix. The
-// probe is served by the per-file existence filters, while a storage-prefix walk
-// has to seek the .bt index of every storage .kv file — the same price whether
-// the address owns a thousand slots or none.
+// committed account holds no committed storage (storage is only written for an
+// existing account, and deleting one wipes its storage prefix), so this cheap
+// existence probe stands in for a full storage-prefix walk.
 func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
 	if err != nil {
@@ -793,20 +751,17 @@ func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, add
 }
 
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, so a violation of the hasCommittedAccount invariant
-// surfaces instead of silently skipping a storage wipe. The what argument names
-// the caller so a trip points at the right path. No-op unless asserts are
-// enabled.
+// committed account, surfacing a violation of the hasCommittedAccount invariant.
+// No-op unless asserts are enabled.
 func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
 		return nil
 	}
-	// IteratePrefix does not resolve through sd.parent, while the account probe
-	// does, so a row this walk returns may already be tombstoned there. Re-read
-	// each hit the way the probe reads, or a parent-deleted address trips the
-	// assert on a state that is valid. The re-reads happen after the walk:
-	// IteratePrefix holds the domain's RLock across the callback, and GetLatest
-	// takes it again, which a writer queued between the two turns into a deadlock.
+	// IteratePrefix does not resolve through sd.parent (the account probe does),
+	// so re-read each hit the way the probe reads or a parent-deleted address
+	// trips the assert. The re-reads must follow the walk: IteratePrefix holds the
+	// domain RLock across its callback and GetLatest retakes it, deadlocking
+	// against a writer queued between them.
 	var candidates [][]byte
 	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
 		candidates = append(candidates, bytes.Clone(k))
@@ -927,11 +882,10 @@ type ReaderV3 struct {
 	tracePrefix string
 	getter      execctxapi.StateGetter
 
-	// addr and composite are reused key buffers: as non-pointer fields of the
-	// heap-allocated reader, the key slices they back reach the interface getter
-	// with no per-call heap allocation.
-	addr      common.Address                  // reused account/code lookup key
-	composite [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
+	// Reused key buffers: as fields of the heap-allocated reader, the key slices
+	// they back reach the interface getter with no per-call heap allocation.
+	addr      common.Address                  // account/code lookup key
+	composite [length.Addr + length.Hash]byte // storage lookup key (addr||slot)
 }
 
 func NewReaderV3(getter execctxapi.StateGetter) *ReaderV3 {
@@ -1302,12 +1256,9 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 	}
 
-	// Only emit fields that changed vs `original`. In the parallel executor
-	// `original` comes from the worker's block-origin snapshot (pre-block
-	// values), so emitting an unchanged field would carry a stale block-
-	// origin value that overwrites a later TX's update on apply (e.g. a
-	// balance-only transfer overwriting an earlier TX's nonce increment).
-	// See TestLightCollectorNoncePreservation* for the exact scenario.
+	// Only emit fields that changed vs original. original is the worker's
+	// block-origin snapshot, so emitting an unchanged field would overwrite a
+	// later tx's update on apply with a stale pre-block value.
 	if !accountCopy.Balance.Eq(&original.Balance) {
 		c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
 	}

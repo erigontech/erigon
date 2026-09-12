@@ -10,10 +10,9 @@ import (
 
 // versionMapWriteView is a read-only WriteSetView over a tx's versionMap slice.
 // The key-set (which cells the tx wrote) comes from keys; the values are read
-// from the versionMap floor at the tx's txIndex — the validated single source
-// of truth — rather than from a copied WriteSet. Yielded VersionedWrite values
-// are fresh, never pointers into the map, so a consumer cannot mutate the map
-// through the view, and it exposes no Set*/Write*/Flush*.
+// from the versionMap floor at the tx's txIndex rather than from a copied
+// WriteSet. Yielded VersionedWrite values are fresh, never pointers into the
+// map, so a consumer cannot mutate the map through the view.
 type versionMapWriteView struct {
 	keys  WriteSetView
 	vm    *VersionMap
@@ -21,11 +20,9 @@ type versionMapWriteView struct {
 }
 
 // NewVersionMapWriteView wraps the tx's key-set + versionMap as a read-only
-// WriteSetView whose values come from the map. Reads use floor at txIdx+1 so
-// they include the tx's OWN write at txIdx (readFloor descends from txIdx-1, so
-// the reader convention at txIdx yields the pre-tx state; the writer/publication
-// convention here wants the tx's produced values — matching normalize's
-// SetAccountFieldFromMap(..., txIndex+1)).
+// WriteSetView whose values come from the map. Reads use floor at txIdx+1 so they
+// include the tx's OWN write at txIdx (the reader convention at txIdx would yield
+// the pre-tx state; this publication view wants the tx's produced values).
 func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteSetView {
 	return &versionMapWriteView{keys: keys, vm: vm, txIdx: txIdx}
 }
@@ -104,7 +101,7 @@ func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *Versi
 	return func(yield func(accounts.Address, *VersionedWrite[bool]) bool) {
 		for addr := range v.keys.SelfDestructs() {
 			val := false
-			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.Status() == MVReadResultDone {
+			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.resolved() {
 				val = sd
 			}
 			if !yield(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: val}) {

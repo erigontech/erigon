@@ -15,11 +15,9 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// memBlockReader is a DB-free dbservices.FullBlockReader backed entirely by a
-// captured fixture: the parallel executor's only block-data reads at replay time
-// are BlockWithSenders (the block under validation), Header (BLOCKHASH), and
-// FrozenBlocks. Everything else is a zero-value stub — nothing on the
-// single-block replay path calls it.
+// memBlockReader is a DB-free dbservices.FullBlockReader backed by a captured
+// fixture. Only BlockWithSenders, Header, and FrozenBlocks are exercised at
+// replay time; everything else is a zero-value stub.
 type memBlockReader struct {
 	blocks    map[uint64]*types.Block
 	senders   map[uint64][]common.Address
@@ -30,8 +28,6 @@ type memBlockReader struct {
 	ancestors map[uint64]common.Hash // block number -> hash (BLOCKHASH range)
 }
 
-// NewMemBlockReader builds an in-memory block reader from the fixture's decoded
-// block, parent header, and captured ancestor hashes.
 func NewMemBlockReader(fx *Fixture) (dbservices.FullBlockReader, error) {
 	block, err := fx.Block()
 	if err != nil {
@@ -48,8 +44,7 @@ func NewMemBlockReader(fx *Fixture) (dbservices.FullBlockReader, error) {
 	return newMemBlockReader([]*types.Block{block}, [][]common.Address{fx.SendersList()}, parent, ancestors)
 }
 
-// NewMemBlockReaderRange serves a contiguous ascending run of blocks (the
-// multi-block replay path). parent is the parent header of blocks[0].
+// NewMemBlockReaderRange serves a contiguous ascending run of blocks.
 func NewMemBlockReaderRange(fx *RangeFixture) (dbservices.FullBlockReader, error) {
 	blocks := make([]*types.Block, len(fx.Blocks))
 	senders := make([][]common.Address, len(fx.Blocks))
@@ -93,13 +88,11 @@ func newMemBlockReader(blocks []*types.Block, senders [][]common.Address, parent
 	return r, nil
 }
 
-// headerAt serves headers the BLOCKHASH walk (GetHashFn) needs. It must NOT
-// return nil for a number in the walk range: GetHashFn's caller turns a nil
-// header into an empty one (Number 0), and Number-1 then underflows to
-// MaxUint64, wedging the walk in an infinite loop. So for any ancestor at or
-// below the parent it returns a synthetic header carrying the right Number and
-// the captured parent-hash link, which both terminates the walk and yields the
-// fixture's real ancestor hash.
+// headerAt serves headers the BLOCKHASH walk needs. It must not return nil for
+// a number in the walk range: a nil header becomes Number 0, and Number-1 then
+// underflows to MaxUint64, wedging the walk in an infinite loop. For ancestors
+// at or below the parent it returns a synthetic header carrying the right Number
+// and the captured parent-hash link.
 func (r *memBlockReader) headerAt(number uint64) *types.Header {
 	switch {
 	case number >= r.lo && number <= r.hi:

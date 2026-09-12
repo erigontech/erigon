@@ -9,29 +9,23 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// LayeredDomainReader composes the multi-block versionMap window (the finished-
-// but-not-yet-committed prior blocks) over the shared domain (sd.mem) and the
-// domain files. It is the single place the executor and the commitment
-// calculator share the "map layered over sd" read model: a value written by a
-// prior block that the apply goroutine has not yet flushed to sd.mem is served
-// from that block's versionMap instead of a stale domain read.
+// LayeredDomainReader composes the finished-but-not-yet-committed prior blocks'
+// versionMap window over the shared domain (sd.mem) and domain files, so a value
+// written by a prior block not yet flushed to sd.mem is served from its
+// versionMap instead of a stale domain read. The window is selected by txNum
+// (matching the per-tx apply). Only account/storage are layered; the commitment /
+// code domains and history read the base directly.
 //
-// The window is selected by txNum (matching the per-tx apply): a read at ts sees
-// every prior block whose block-end txNum is < ts. Account/Storage value reads
-// are layered over sd.mem + files; the commitment / code domains and history
-// read the base directly (the map holds account/storage state only).
-//
-// roTx is the per-user files-fallback tx: clone the reader (CloneWithTx) for each
-// concurrent user rather than sharing one.
+// roTx is the per-user files-fallback tx: clone with CloneWithTx per concurrent
+// user rather than sharing one.
 type LayeredDomainReader struct {
 	sd         execctx.DomainReader
 	roTx       kv.TemporalTx
 	prevBlocks *PrevBlockList
 }
 
-// NewLayeredDomainReader composes the window + sd + files. prevBlocks nil layers
-// nothing (byte-identical base reads), so callers get the plain sd+files path
-// when prev-block reads are disabled.
+// NewLayeredDomainReader composes the window + sd + files. A nil prevBlocks
+// layers nothing, giving the plain sd+files path.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
 	return &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
 }
@@ -67,9 +61,8 @@ func (l *LayeredDomainReader) ReadDomain(name kv.Domain, k []byte, ts uint64) ([
 	return l.baseGetAsOf(name, k, ts)
 }
 
-// readLayered composes the versionMap window over the base (sd.mem + files) and
-// re-encodes the decoded result to the domain encoding. Authoritative: a zero /
-// absent layered result IS the answer (a prior block's self-destruct or delete
+// readLayered composes the versionMap window over the base and re-encodes the
+// result. A zero/absent layered result is authoritative (a prior block's delete
 // must shadow a stale committed value), so it does not fall through to the base.
 func (l *LayeredDomainReader) readLayered(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	layered := PrevBlockBaseTxNum(&domainDecodedBase{l: l, ts: ts}, l.prevBlocks, ts)
@@ -92,9 +85,9 @@ func (l *LayeredDomainReader) readLayered(name kv.Domain, k []byte, ts uint64) (
 	return l.baseGetAsOf(name, k, ts)
 }
 
-// domainDecodedBase adapts the base (sd.mem + files) encoded reads into a decoded
-// StateReader so the versionMap layers compose over it. Only account/storage/code
-// are exercised by the fold; the rest return zero values.
+// domainDecodedBase adapts the base's encoded reads into a decoded StateReader so
+// the versionMap layers compose over it. Only account/storage/code are exercised;
+// the rest return zero values.
 type domainDecodedBase struct {
 	l  *LayeredDomainReader
 	ts uint64

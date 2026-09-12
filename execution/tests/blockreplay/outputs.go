@@ -13,9 +13,7 @@ import (
 )
 
 // recordingWriter is a state.StateWriter that records the post-state a block
-// writes (its outputs) instead of persisting anywhere. Paired with the in-mem
-// reader during a serial reference run, it captures the known-correct output
-// set a parallel replay is then checked against.
+// writes instead of persisting anywhere.
 type recordingWriter struct {
 	out *Outputs
 }
@@ -54,11 +52,8 @@ func (w *recordingWriter) WriteAccountStorage(address accounts.Address, incarnat
 
 func (w *recordingWriter) CreateContract(address accounts.Address) error { return nil }
 
-// CollectOutputs reads the post-state a replay produced for exactly the keys in
-// want (the reference output set), through the standard state reader over the
-// post-execution domains. This is the "Flush → outputs" read of the ephemeral
-// model: after Execute, output state is received via the domains. It mirrors
-// want's shape so the two can be compared directly.
+// CollectOutputs reads the post-state through r for exactly the keys in want,
+// mirroring want's shape so the two can be compared directly.
 func CollectOutputs(r state.StateReader, want *Outputs) (*Outputs, error) {
 	got := newOutputs()
 	for a := range want.Accounts {
@@ -109,8 +104,7 @@ func CollectOutputs(r state.StateReader, want *Outputs) (*Outputs, error) {
 }
 
 // Diff returns a human-readable list of the places got departs from want
-// (empty when they match). Account balance/nonce/codehash, deletions, storage
-// slots, and code are all compared — everything except the trie root.
+// (empty when they match), comparing everything except the trie root.
 func (want *Outputs) Diff(got *Outputs) []string {
 	var diffs []string
 	for a, w := range want.Accounts {

@@ -24,7 +24,7 @@ func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, see
 	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
 	wmem := newWitnessMemBatch(tx.Debug().NewMemBatch(metrics))
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithMemBatch(wmem))
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithMemBatch(wmem), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}

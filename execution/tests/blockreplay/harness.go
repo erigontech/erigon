@@ -19,10 +19,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// Capture re-executes block blockNum from tx via a recordingReader and returns a
-// self-contained Fixture: the pre-state values the block reads, its RLP, the
-// parent header, and the BLOCKHASH ancestor hashes. It validates receipts as a
-// side effect (a capture that fails execution is not a usable fixture).
+// Capture re-executes block blockNum via a recordingReader and returns a
+// self-contained Fixture: the pre-state the block reads, its RLP, the parent
+// header, and the BLOCKHASH ancestor hashes.
 func Capture(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -80,11 +79,9 @@ func Capture(
 	}
 
 	fx := rec.Fixture()
-	// Authoritative outputs: the block's exec tells us WHICH cells it wrote
-	// (rw.out keys); the reference VALUES come from the canonical committed
-	// state at end-of-block, read via history — never the executor's own
-	// computed values (that would make the replay's oracle the very code under
-	// test). State after block N is as-of its last txNum + 1.
+	// The block's exec tells us which cells it wrote (rw.out keys); the reference
+	// values come from canonical committed history, not the executor's own
+	// computed values (that would make the oracle the code under test).
 	postTxNum, err := txNums.Max(ctx, tx, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("max txNum %d: %w", blockNum, err)
@@ -106,10 +103,9 @@ func Capture(
 	return fx, nil
 }
 
-// MergeRangeOutputs computes the range-FINAL post-state: the union of every key
+// MergeRangeOutputs computes the range-final post-state: the union of every key
 // written by any block in the range, read at lastBlock's post-txNum from
-// canonical history. This is a correct oracle for the whole range independent of
-// the per-block captured Outputs (which are each as-of their own block's end).
+// canonical history.
 func MergeRangeOutputs(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, blocks []*Fixture, lastBlock uint64) (*Outputs, error) {
 	want := newOutputs()
 	for _, b := range blocks {
@@ -143,8 +139,8 @@ func MergeRangeOutputs(ctx context.Context, tx kv.TemporalTx, blockReader dbserv
 	return CollectOutputs(state.NewHistoryReaderV3(tx, postTxNum+1), want)
 }
 
-// captureAncestors records the last 256 ancestor hashes (BLOCKHASH range) so
-// replay can answer the BLOCKHASH opcode without a DB.
+// captureAncestors records the last 256 ancestor hashes so replay can answer
+// the BLOCKHASH opcode without a DB.
 func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) {
 	n := header.Number.Uint64()
 	lo := uint64(0)
@@ -161,10 +157,8 @@ func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 }
 
 // Replay re-executes the fixture's block against an in-memory reader with no DB.
-// It validates receipts/gas/bloom (ExecuteBlockEphemerally) but computes no
-// commitment. readNanos>0 models a per-storage-read latency (busy-spin) so a
-// read-bound block's shape can be reproduced despite the in-mem reader being
-// otherwise free.
+// It validates receipts/gas/bloom but computes no commitment. readNanos>0 models
+// a per-storage-read latency to reproduce a read-bound block's shape.
 func Replay(
 	fx *Fixture,
 	chainConfig *chain.Config,
@@ -209,8 +203,8 @@ func Replay(
 }
 
 // fixtureChainReader is a DB-free rules.ChainReader backed by the fixture: it
-// serves only the parent header (by hash/number), which is all block execution
-// consults beyond state and BLOCKHASH.
+// serves only the parent header, which is all block execution consults beyond
+// state and BLOCKHASH.
 type fixtureChainReader struct {
 	config *chain.Config
 	parent *types.Header

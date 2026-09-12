@@ -44,8 +44,6 @@ func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFo
 
 var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
 
-// Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
-
 // seedEmptyStorageBase sets up the depth-64 wall rows with no on-disk branch, so
 // the subtree folds from only the touched slots. Used both as the reset prelude
 // of unfoldStorageBase and, on its own, for a self-destructed account whose

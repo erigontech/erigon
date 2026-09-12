@@ -7,12 +7,10 @@ import (
 )
 
 // PrevBlockReader is a per-worker committed-base reader whose prev-block chain is
-// swapped per task via SetBlock, so one long-lived worker reader can serve every
-// block: it holds a stable raw base and, for the block a task belongs to, layers
-// the finalized-but-not-yet-committed prior blocks (PrevBlockList.Before) in
-// front of it. SetBlock is called once per task (window-sized rebuild, cheap);
-// the read methods carry no per-read allocation. The IBS holds one stable
-// PrevBlockReader, so switching blocks never rebuilds the IBS.
+// swapped per task via SetBlock, so one long-lived reader serves every block: it
+// holds a stable raw base and layers the finalized-but-not-yet-committed prior
+// blocks in front of it for the task's block. The IBS holds one stable
+// PrevBlockReader, so switching blocks never rebuilds it.
 type PrevBlockReader struct {
 	base  StateReader
 	reg   *PrevBlockList
@@ -24,9 +22,8 @@ func NewPrevBlockReader(base StateReader, reg *PrevBlockList) *PrevBlockReader {
 }
 
 // PrevBlockBase wraps raw with the prev-block layers for a block known at
-// construction — for the finalize / calcFees readers, which build a fresh reader
-// per block rather than reusing one long-lived per-worker reader. Returns raw
-// unchanged when there are no prior blocks to layer.
+// construction — for readers built fresh per block rather than reused per worker.
+// Returns raw unchanged when there are no prior blocks to layer.
 func PrevBlockBase(raw StateReader, list *PrevBlockList, blockNum uint64) StateReader {
 	if list == nil {
 		return raw

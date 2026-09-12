@@ -9,16 +9,9 @@ import (
 )
 
 // WriteSetView is the read-only view of a tx's writes handed to publication
-// consumers (the commitment calculator, apply, indexing). It constrains the
-// access space to reads — no Set*/Write*/Flush* — so a consumer cannot perturb
-// the backing map's write integrity. The mutable *WriteSet satisfies it today
-// (transition); the eventual backing is a thin read-only wrapper over the
-// tx's versionMap slice.
-//
-// The iterators still hand out *VersionedWrite pointers to match *WriteSet
-// verbatim for the transition; tightening them to value returns (so the
-// backing cells can't be mutated through the view) lands with the versionMap
-// wrapper backing.
+// consumers (the commitment calculator, apply, indexing), constraining access to
+// reads so a consumer cannot perturb the backing map. The mutable *WriteSet
+// satisfies it today.
 type WriteSetView interface {
 	Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]]
 	Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]]

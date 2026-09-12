@@ -2,18 +2,13 @@ package state
 
 import "sync"
 
-// PrevBlockList is an ordered linked list of the previous blocks' versionMaps
-// that have finished executing but whose writes have not yet been committed to
-// the shared domain. A newly finished block is pushed at the HEAD (newest); a
-// block committed to the shared domain is removed from the TAIL (oldest). Both
-// happen in block order, so the list stays sorted head→tail = newest→oldest and
-// its length is the exec-ahead-of-commit window (a handful), never the whole
-// chain. A reader for the current block walks the list for the earlier blocks'
-// writes before falling through to the raw shared-domain read.
+// PrevBlockList is an ordered list of finished-but-not-yet-committed blocks'
+// versionMaps, newest at the head. A finished block is pushed at the head, a
+// committed one removed from the tail, both in block order, so its length is the
+// exec-ahead-of-commit window rather than the whole chain.
 //
-// The maps are read-only once in the list (their block has finished), so reads
-// need no coordination; the mutex guards only the list links against the
-// concurrent PushHead (exec) / RemoveTail (commit).
+// The maps are read-only once listed, so reads need no coordination; the mutex
+// guards only the list links against concurrent PushHead / RemoveTail.
 type PrevBlockList struct {
 	mu   sync.Mutex
 	head *prevBlockNode // newest finished block
@@ -32,9 +27,8 @@ type prevBlockNode struct {
 func NewPrevBlockList() *PrevBlockList { return &PrevBlockList{} }
 
 // TailBlockNum returns the oldest not-yet-committed block's number, or ok=false
-// when the list is empty. Lets the commit path assert it is dropping the block
-// it just committed (see RemoveTail) rather than silently dropping the wrong
-// overlay on any future push/remove desync.
+// when the list is empty, so the commit path can assert it is dropping the block
+// it just committed rather than a wrong overlay on a push/remove desync.
 func (l *PrevBlockList) TailBlockNum() (uint64, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -44,9 +38,8 @@ func (l *PrevBlockList) TailBlockNum() (uint64, bool) {
 	return l.tail.blockNum, true
 }
 
-// PushHead adds a newly finished block at the head (newest). endTxNum is the
-// block's last txNum, so a reader can select the window by txNum (matching the
-// per-tx apply) rather than blockNum.
+// PushHead adds a newly finished block at the head. endTxNum lets a reader select
+// the window by txNum (matching the per-tx apply) rather than blockNum.
 func (l *PrevBlockList) PushHead(blockNum, endTxNum uint64, vm *VersionMap) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
