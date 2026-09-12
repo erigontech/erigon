@@ -196,7 +196,15 @@ func TestGetHeaderByNumber(t *testing.T) {
 		require.NotNil(t, header, "block %d resolves in the test module", blockNum)
 	}
 
-	for _, blockNum := range []rpc.BlockNumber{1_000_000, rpc.PendingBlockNumber} {
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.LastForkchoice, []byte("safeBlockHash")); err != nil {
+			return err
+		}
+		return tx.Delete(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	}))
+
+	unresolvable := []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber}
+	for _, blockNum := range append(unresolvable, 1_000_000, rpc.PendingBlockNumber) {
 		header, err = api.GetHeaderByNumber(ctx, blockNum)
 		require.NoError(t, err, "block %d", blockNum)
 		require.Nil(t, header, "block %d", blockNum)
