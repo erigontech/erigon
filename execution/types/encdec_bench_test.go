@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -375,3 +376,43 @@ var benchTxTypes = []struct {
 var benchJSONSink []byte
 
 var benchLogSink Log
+
+// Both readers, because only the slice-backed one can be pre-walked: a
+// *bytes.Reader leaves Peek empty, which is the path the txn pool takes.
+func BenchmarkDecodeAccessList(b *testing.B) {
+	for _, tuples := range []int{1, 10, 100} {
+		al := sampleAL(tuples, 2)
+		var buf bytes.Buffer
+		if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+			b.Fatal(err)
+		}
+		if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+			b.Fatal(err)
+		}
+		enc := buf.Bytes()
+
+		b.Run(fmt.Sprintf("slice/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				s := rlp.NewBytesStream(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, s); err != nil {
+					b.Fatal(err)
+				}
+				rlp.PutStream(s)
+			}
+		})
+
+		b.Run(fmt.Sprintf("streamed/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			r := bytes.NewReader(nil)
+			for b.Loop() {
+				r.Reset(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, rlp.NewStream(r, 0)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
