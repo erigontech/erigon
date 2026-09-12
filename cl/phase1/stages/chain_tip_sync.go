@@ -178,13 +178,12 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
-			// errCh is UNBUFFERED and the listener has several ways to leave before this send:
-			// its presence check breaks the loop the moment the head reaches the target, and the
-			// stage context times out. A bare send then parks this goroutine for the lifetime of
-			// the process. Measured on a 3-chain dev node: 2,524 goroutines held here after ~100
-			// minutes, one per stage cycle, because with no peers the fetch fails immediately
-			// every time and races the listener's exit. The send below is guarded exactly as the
-			// respCh send further down already is.
+			// errCh is UNBUFFERED and the listener has two ways to leave before this send lands: its
+			// presence check breaks the loop the moment the head reaches the target, and the stage
+			// context times out. A bare send then parks this goroutine for the life of the process.
+			// With no peers the fetch fails immediately every cycle and loses that race almost every
+			// time — measured on a 3-chain dev node: 2,524 goroutines held here after ~100 minutes,
+			// one per cycle, growing without bound. The respCh send below is already guarded this way.
 			select {
 			case errCh <- err:
 			case <-ctx.Done():
@@ -735,28 +734,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		"targetSlot", args.targetSlot,
 		"requestedSlots", totalRequest,
 	)
-	// With no peers there is nothing to fetch FROM: the range requests below cannot be served and
-	// gossip has no source, so every cycle spent here is time the fork choice, attestation
-	// production and state dumps do not get. This stage sits in the ordinary cycle
-	// (SleepForSlot -> ChainTipSync -> ForkChoice), not only on a catch-up path, so on a sole
-	// producer it is pure latency — measured at ~7s per cycle on a 2s-slot chain that was
-	// otherwise proposing every slot, which starved the state dumps the fork graph needs.
-	if args.peers == 0 {
-		return nil
-	}
-
 	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
 	errCh := make(chan error)
 
-	// 25 seconds is a MAINNET-shaped number: two slots there, twelve and a half on a 2s slot. What
-	// it bounds is how far behind its own chain the consensus loop may fall before giving up, so it
-	// belongs in slots, not seconds. Kept at 25s wherever a slot is long enough for that to mean
-	// roughly two slots, which leaves mainnet as it was.
-	timeout := 25 * time.Second
-	if slots := 2 * time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second; slots < timeout {
-		timeout = slots
-	}
-	ctx, cn := context.WithTimeout(ctx, timeout)
+	// 25 seconds is a good timeout for this
+	ctx, cn := context.WithTimeout(ctx, 25*time.Second)
 	defer cn()
 
 	go startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, args, respCh, errCh)
