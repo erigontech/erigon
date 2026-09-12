@@ -10,7 +10,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -232,32 +231,39 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
-// RPCMarshalHeader aliases the header it is given: the U256 quantities and the
-// extraData slice point straight at it. The block marshallers must therefore
-// hand it a copy — the map they return is mutable and exported, and the block
-// keeps its memoized hash, so a caller writing through the map would otherwise
-// leave the block describing itself wrongly.
+// rpcMarshalHeader aliases the header it is given: the U256 quantities, the
+// extraData slice and the fields callers may null out all point straight at it.
+// RPCMarshalBlock must therefore hand it a copy — the result is mutable and
+// exported, and the block keeps its memoized hash, so a caller writing through
+// the result would otherwise leave the block describing itself wrongly.
 func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	header := &types.Header{
 		Number:     *uint256.NewInt(7),
 		Difficulty: *uint256.NewInt(11),
 		BaseFee:    uint256.NewInt(13),
 		Extra:      []byte{1, 2, 3},
+		Coinbase:   common.HexToAddress("0x1234567890123456789012345678901234567890"),
 	}
 	block := types.NewBlock(header, nil, nil, nil, nil, nil)
 	wantHash := block.Hash()
+	wantMiner := block.Coinbase()
 
-	fields, err := RPCMarshalBlockDeprecated(block, false, false)
-	require.NoError(t, err)
+	fields := RPCMarshalBlock(block, false, false)
 
-	(*uint256.Int)(fields["number"].(*hexutil.U256)).SetUint64(99)
-	(*uint256.Int)(fields["difficulty"].(*hexutil.U256)).SetUint64(99)
-	(*uint256.Int)(fields["baseFeePerGas"].(*hexutil.U256)).SetUint64(99)
-	fields["extraData"].(hexutil.Bytes)[0] = 0xff
+	(*uint256.Int)(fields.Number).SetUint64(99)
+	(*uint256.Int)(fields.Difficulty).SetUint64(99)
+	(*uint256.Int)(fields.BaseFeePerGas).SetUint64(99)
+	fields.ExtraData[0] = 0xff
+	fields.Miner[0] = 0xff
+	fields.Nonce[0] = 0xff
+	fields.LogsBloom[0] = 0xff
 
 	require.Equal(t, uint64(7), block.NumberU64())
 	require.Equal(t, uint64(11), block.HeaderNoCopy().Difficulty.Uint64())
 	require.Equal(t, uint64(13), block.BaseFee().Uint64())
 	require.Equal(t, []byte{1, 2, 3}, block.Extra())
+	require.Equal(t, wantMiner, block.Coinbase())
+	require.Equal(t, types.BlockNonce{}, block.HeaderNoCopy().Nonce)
+	require.Equal(t, types.Bloom{}, block.HeaderNoCopy().Bloom)
 	require.Equal(t, wantHash, block.Hash())
 }

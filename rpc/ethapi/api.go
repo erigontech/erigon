@@ -365,105 +365,134 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
-// RPCMarshalHeader converts the given header to the RPC output. The result aliases
-// head: quantities, byte slices and optional hashes go in without a copy, so the
-// caller must pass a header nobody will mutate.
-func RPCMarshalHeader(head *types.Header) map[string]any {
-	result := map[string]any{
-		"number":           (*hexutil.U256)(&head.Number),
-		"hash":             head.Hash(),
-		"parentHash":       head.ParentHash,
-		"nonce":            head.Nonce,
-		"mixHash":          head.MixDigest,
-		"sha3Uncles":       head.UncleHash,
-		"logsBloom":        head.Bloom,
-		"stateRoot":        head.Root,
-		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.U256)(&head.Difficulty),
-		"extraData":        hexutil.Bytes(head.Extra),
-		"size":             hexutil.Uint64(head.Size()),
-		"gasLimit":         hexutil.Uint64(head.GasLimit),
-		"gasUsed":          hexutil.Uint64(head.GasUsed),
-		"timestamp":        hexutil.Uint64(head.Time),
-		"transactionsRoot": head.TxHash,
-		"receiptsRoot":     head.ReceiptHash,
-	}
-	if head.BaseFee != nil {
-		result["baseFeePerGas"] = (*hexutil.U256)(head.BaseFee)
-	}
-	if head.WithdrawalsHash != nil {
-		result["withdrawalsRoot"] = head.WithdrawalsHash
-	}
-	if head.BlobGasUsed != nil {
-		result["blobGasUsed"] = (*hexutil.Uint64)(head.BlobGasUsed)
-	}
-	if head.ExcessBlobGas != nil {
-		result["excessBlobGas"] = (*hexutil.Uint64)(head.ExcessBlobGas)
-	}
-	if head.ParentBeaconBlockRoot != nil {
-		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
-	}
-	if head.RequestsHash != nil {
-		result["requestsHash"] = head.RequestsHash
-	}
-	if head.BlockAccessListHash != nil {
-		result["blockAccessListHash"] = head.BlockAccessListHash
-	}
-	if head.SlotNumber != nil {
-		result["slotNumber"] = (*hexutil.Uint64)(head.SlotNumber)
-	}
+// RPCHeader is the RPC representation of a block header. Quantities, byte slices
+// and optional hashes alias the header they were built from, so the caller must
+// pass a header nobody will mutate and must not write through the fields.
+// Hash, Nonce, Miner and LogsBloom are pointers because some namespaces null them.
+type RPCHeader struct {
+	Number           *hexutil.U256     `json:"number"`
+	Hash             *common.Hash      `json:"hash"`
+	ParentHash       common.Hash       `json:"parentHash"`
+	Nonce            *types.BlockNonce `json:"nonce"`
+	MixHash          common.Hash       `json:"mixHash"`
+	Sha3Uncles       common.Hash       `json:"sha3Uncles"`
+	LogsBloom        *types.Bloom      `json:"logsBloom"`
+	StateRoot        common.Hash       `json:"stateRoot"`
+	Miner            *common.Address   `json:"miner"`
+	Difficulty       *hexutil.U256     `json:"difficulty"`
+	ExtraData        hexutil.Bytes     `json:"extraData"`
+	GasLimit         hexutil.Uint64    `json:"gasLimit"`
+	GasUsed          hexutil.Uint64    `json:"gasUsed"`
+	Timestamp        hexutil.Uint64    `json:"timestamp"`
+	TransactionsRoot common.Hash       `json:"transactionsRoot"`
+	ReceiptsRoot     common.Hash       `json:"receiptsRoot"`
+
+	BaseFeePerGas         *hexutil.U256   `json:"baseFeePerGas,omitempty"`
+	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty"`
+	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty"`
+	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty"`
+	RequestsHash          *common.Hash    `json:"requestsHash,omitempty"`
+	BlockAccessListHash   *common.Hash    `json:"blockAccessListHash,omitempty"`
+	SlotNumber            *hexutil.Uint64 `json:"slotNumber,omitempty"`
 
 	// For Gnosis only
-	if head.AuRaSeal != nil {
-		result["auraSeal"] = hexutil.Bytes(head.AuRaSeal)
-		result["auraStep"] = (hexutil.Uint64)(head.AuRaStep)
-	}
+	AuraSeal *hexutil.Bytes  `json:"auraSeal,omitempty"`
+	AuraStep *hexutil.Uint64 `json:"auraStep,omitempty"`
+}
 
+// RPCBlock is the RPC representation of a block. TransactionCount, TotalDifficulty
+// and Calls are not part of the eth_ block output; the erigon_, ots_, graphql_ and
+// eth_simulateV1 responses fill them in.
+type RPCBlock struct {
+	RPCHeader
+	Size         hexutil.Uint64     `json:"size"`
+	Transactions any                `json:"transactions,omitempty"`
+	Uncles       []common.Hash      `json:"uncles"`
+	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
+
+	TransactionCount any           `json:"transactionCount,omitempty"`
+	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
+	Calls            any           `json:"calls,omitempty"`
+}
+
+// MarkPending nils the fields a pending block does not have yet.
+func (b *RPCBlock) MarkPending() {
+	b.Hash, b.Nonce, b.Miner = nil, nil, nil
+}
+
+// rpcMarshalHeader converts the given header to the RPC output. The hash is passed
+// in because types.Block hands out header copies that drop the memoized hash, and
+// recomputing it costs an RLP encode plus a keccak per call.
+func rpcMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
+	result := &RPCHeader{
+		Number:           (*hexutil.U256)(&head.Number),
+		Hash:             &hash,
+		ParentHash:       head.ParentHash,
+		Nonce:            &head.Nonce,
+		MixHash:          head.MixDigest,
+		Sha3Uncles:       head.UncleHash,
+		LogsBloom:        &head.Bloom,
+		StateRoot:        head.Root,
+		Miner:            &head.Coinbase,
+		Difficulty:       (*hexutil.U256)(&head.Difficulty),
+		ExtraData:        head.Extra,
+		GasLimit:         hexutil.Uint64(head.GasLimit),
+		GasUsed:          hexutil.Uint64(head.GasUsed),
+		Timestamp:        hexutil.Uint64(head.Time),
+		TransactionsRoot: head.TxHash,
+		ReceiptsRoot:     head.ReceiptHash,
+
+		BaseFeePerGas:         (*hexutil.U256)(head.BaseFee),
+		WithdrawalsRoot:       head.WithdrawalsHash,
+		BlobGasUsed:           (*hexutil.Uint64)(head.BlobGasUsed),
+		ExcessBlobGas:         (*hexutil.Uint64)(head.ExcessBlobGas),
+		ParentBeaconBlockRoot: head.ParentBeaconBlockRoot,
+		RequestsHash:          head.RequestsHash,
+		BlockAccessListHash:   head.BlockAccessListHash,
+		SlotNumber:            (*hexutil.Uint64)(head.SlotNumber),
+	}
+	if head.AuRaSeal != nil {
+		seal := hexutil.Bytes(head.AuRaSeal)
+		result.AuraSeal = &seal
+		result.AuraStep = (*hexutil.Uint64)(&head.AuRaStep)
+	}
 	return result
 }
 
-// RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
-// returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
-// transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
-	fields := RPCMarshalHeader(block.Header())
-	fields["size"] = hexutil.Uint64(block.Size())
-	if _, ok := fields["transactions"]; !ok {
-		fields["transactions"] = make([]any, 0)
-	}
-
+// RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
+// result carries the block's transactions, as full objects if fullTx is also true and
+// as hashes otherwise.
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
+	transactions := make([]any, 0)
 	if inclTx {
-		formatTx := func(tx types.Transaction, index int) (any, error) {
-			return tx.Hash(), nil
-		}
-		if fullTx {
-			formatTx = func(tx types.Transaction, index int) (any, error) {
-				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
-			}
-		}
 		txs := block.Transactions()
-		transactions := make([]any, len(txs))
-		var err error
+		transactions = make([]any, len(txs))
 		for i, txn := range txs {
-			if transactions[i], err = formatTx(txn, i); err != nil {
-				return nil, err
+			if fullTx {
+				transactions[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
+			} else {
+				transactions[i] = txn.Hash()
 			}
 		}
-
-		fields["transactions"] = transactions
 	}
+
 	uncles := block.Uncles()
 	uncleHashes := make([]common.Hash, len(uncles))
 	for i, uncle := range uncles {
 		uncleHashes[i] = uncle.Hash()
 	}
-	fields["uncles"] = uncleHashes
 
-	if block.Withdrawals() != nil {
-		fields["withdrawals"] = block.Withdrawals()
+	result := &RPCBlock{
+		RPCHeader:    *rpcMarshalHeader(block.Header(), block.Hash()),
+		Size:         hexutil.Uint64(block.Size()),
+		Transactions: transactions,
+		Uncles:       uncleHashes,
 	}
-
-	return fields, nil
+	if w := block.Withdrawals(); w != nil {
+		result.Withdrawals = &w
+	}
+	return result
 }
 
 // SignTransactionResult represents a RLP-encoded transaction paired with its JSON form.

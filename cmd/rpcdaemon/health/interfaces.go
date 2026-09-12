@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 type NetAPI interface {
@@ -29,6 +30,6 @@ type NetAPI interface {
 }
 
 type EthAPI interface {
-	GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error)
+	GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (*ethapi.RPCBlock, error)
 	Syncing(ctx context.Context) (any, error)
 }
