@@ -1039,6 +1039,26 @@ func TestPrepareGloasPayloadRetriesPropagatesCancellationToCollector(t *testing.
 	require.ErrorIs(t, flushErr, context.Canceled)
 }
 
+func TestPrepareGloasPayloadRetriesAllowsBatchFlushBudget(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	var remaining time.Duration
+	collector := &gloasCollectorTest{flushFn: func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		remaining = time.Until(deadline)
+		cancel()
+		return nil
+	}}
+
+	prepareGloasPayloadRetries(ctx, &Cfg{
+		executionClient: &testExecutionEngine{supportInsertion: true},
+		forkChoice:      &forkchoice.ForkChoiceStore{},
+		blockCollector:  collector,
+	})
+
+	require.Greater(t, remaining, 20*time.Second)
+}
+
 func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {
 	calls := [3]int{}
 	for offset := range uint32(3) {

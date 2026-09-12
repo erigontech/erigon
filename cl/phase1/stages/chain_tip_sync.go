@@ -29,7 +29,7 @@ const (
 	maxGloasAncestorVisitsPerCycle    = 32
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
-	gloasCollectorFlushBudget         = 2 * time.Second
+	gloasCollectorFlushBudget         = 30 * time.Second
 	chainTipHTTPBlockBudget           = 3 * time.Second
 	chainTipHTTPEnvelopeBudget        = 3 * time.Second
 	chainTipBlockP2PReserve           = 3 * time.Second
