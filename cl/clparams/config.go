@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -69,6 +70,20 @@ type CaplinConfig struct {
 	// Dev validator (embedded VC for --chain=dev)
 	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
 	DevValidatorCount int    // number of validators (default 64)
+
+	// WaitForChainStart, when set, is awaited before the consensus layer is started.
+	//
+	// A dev chain's genesis TIME decides when slot 0 is, and it was being stamped while the node was
+	// still being built — the 64-validator state, the encode, the disk write, and then ~4.8s of
+	// backend and Caplin startup all counted as elapsed chain time. The chain was therefore already
+	// three slots old before anything could answer a query, which forced the dev validator to
+	// re-anchor its own clock to the head on every boot; that compensation is one-way, so a ~6s skew
+	// between the validator's clock and the beacon's became permanent and every block was produced
+	// 6.7s after its own slot.
+	//
+	// This hook lets the embedder hold the CL until the node is actually up, stamp genesis at that
+	// moment, and only then start it. Nil means start immediately, which is every non-dev path.
+	WaitForChainStart func(context.Context) error `json:"-"`
 
 	// SuggestedFeeRecipient is the coinbase every client opens a block under. It has to be a
 	// CHAIN-LEVEL value, not a proposer-local one: coinbase is execution-affecting (fee credit and
