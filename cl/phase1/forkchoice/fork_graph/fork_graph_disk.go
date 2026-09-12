@@ -533,12 +533,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					log.Warn("[forkgraph] state walk-back: disk read failed", "root", currentIteratorRoot, "slot", bHeader.Slot, "wanted", blockRoot, "err", err)
 					return nil, nil
 				}
 				continue
 			}
-			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			// ⚠ RETURNING (nil, nil) HERE IS WHY "baseState not found in graph" says nothing. The walk
+			// back to a dumped state ran off the end of what the graph still holds, and the caller is
+			// told only that the state is absent — not that the search reached an unknown root, nor
+			// how far it got. Name it, or the next person measures the symptom instead of the cause.
+			log.Warn("[forkgraph] state walk-back ran out of blocks", "unknownRoot", currentIteratorRoot,
+				"wanted", blockRoot, "replayed", len(blocksInTheWay))
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
