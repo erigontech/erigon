@@ -27,6 +27,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/felixge/fgprof"
@@ -132,6 +133,25 @@ var Flags = []cli.Flag{
 	&pyroscopeFlag, &pyroscopeServerFlag, &pyroscopeTagsFlag, &pyroscopeAuthUsernameFlag, &pyroscopeAuthPasswordFlag,
 }
 
+// raiseGomaxprocsForIO adds a couple of Ps beyond the scheduler's default. A
+// goroutine that faults on an mmap'd state file holds its P for the whole device
+// round-trip, so at GOMAXPROCS == CPU count those faults cannot overlap with
+// runnable work. Call it after package init: the extra Ps are there to absorb
+// fault latency, and must not size the worker counts derived from GOMAXPROCS.
+// An explicit GOMAXPROCS is the operator's number and is left alone.
+func raiseGomaxprocsForIO(logger log.Logger) {
+	if _, ok := os.LookupEnv("GOMAXPROCS"); ok {
+		return
+	}
+	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", 2)
+	if extra <= 0 {
+		return
+	}
+	base := runtime.GOMAXPROCS(0)
+	runtime.GOMAXPROCS(base + extra)
+	logger.Info("[gomaxprocs] raised for io overlap", "from", base, "to", base+extra)
+}
+
 // SetupCobra sets up logging, profiling and tracing for cobra commands
 func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	// ensure we've read in config file details before setting up metrics etc.
@@ -144,6 +164,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 	logger := logging.SetupLoggerCmd(filePrefix, cmd)
 	SetGoMemLimit(logger)
+	raiseGomaxprocsForIO(logger)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -250,6 +271,7 @@ func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix strin
 
 	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
 	SetGoMemLimit(logger)
+	raiseGomaxprocsForIO(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err
