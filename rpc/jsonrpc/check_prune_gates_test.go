@@ -1727,3 +1727,59 @@ func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, oldest, res.OldestBlock.ToInt().Uint64())
 }
+
+// TestReceiptCacheServesBlocksWhoseHistoryIsRetired pins that a keep-all receipt retention
+// is served from the cache and not by re-execution: state history is retired on disk above
+// the block, so an endpoint that still answers can only be reading the cache. The shared
+// fixture cannot show this — it keeps every history and stores the prune mode afterwards.
+func TestReceiptCacheServesBlocksWhoseHistoryIsRetired(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prunedHistoryDistance,
+			Blocks:      prune.KeepAllBlocksPruneMode,
+			Receipts:    prune.KeepAllReceiptsPruneMode,
+		},
+		receiptCache: true,
+	})
+	ctx := t.Context()
+
+	bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
+	_, err := apis.eth.GetBalance(ctx, testAddr, &bnh)
+	require.ErrorIs(t, err, state.PrunedError, "the history window must already refuse state for this block")
+
+	for _, ep := range receiptGatedEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			res, err := ep.call(ctx, apis, chainInfo.old)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+		})
+	}
+}
+
+// TestReceiptsWithoutCacheStopAtRetiredHistory is the control for the test above: the
+// same fixture with the cache off refuses the block, which is what attributes the answers
+// there to the cache. The refusal here is the history-window comparison, not a read of
+// the retired files.
+func TestReceiptsWithoutCacheStopAtRetiredHistory(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prunedHistoryDistance,
+			Blocks:      prune.KeepAllBlocksPruneMode,
+			Receipts:    prune.KeepAllReceiptsPruneMode,
+		},
+	})
+	ctx := t.Context()
+
+	for _, ep := range receiptGatedEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			_, err := ep.call(ctx, apis, chainInfo.old)
+			require.ErrorIs(t, err, state.PrunedError)
+		})
+	}
+}

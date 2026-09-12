@@ -827,7 +827,7 @@ func (api *TraceAPIImpl) callBlock(
 			}
 		}
 		var amountWei uint256.Int
-		amountWei.Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+		amountWei.Mul(uint256.NewInt(uint64(w.Amount)), uint256.NewInt(common.GWei))
 		wdiffs = append(wdiffs, withdrawalBalanceDiff{
 			address: w.Address,
 			prev:    prev,

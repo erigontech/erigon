@@ -314,4 +314,6 @@ type Sync struct {
 	ExperimentalParallelCommitment bool
 	PersistReceiptsCacheV2         bool
 	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
+
+	SlowBlockThreshold *time.Duration
 }

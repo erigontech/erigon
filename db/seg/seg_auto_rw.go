@@ -268,8 +268,8 @@ func Decompressor2bufio(d *Decompressor) (*bufio.Reader, func()) {
 func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFunc func(word []byte) ([]byte, error)) error {
 	word := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
-	var err error
-	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
+	var readErr error
+	for l, readErr = binary.ReadUvarint(src); readErr == nil; l, readErr = binary.ReadUvarint(src) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -281,10 +281,11 @@ func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFun
 		} else {
 			word = word[:l]
 		}
-		if _, err = io.ReadFull(src, word); err != nil {
+		if _, err := io.ReadFull(src, word); err != nil {
 			return err
 		}
 		if wordFunc != nil {
+			var err error
 			word, err = wordFunc(word)
 			if err != nil {
 				return err
@@ -297,8 +298,8 @@ func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFun
 			return err
 		}
 	}
-	if !errors.Is(err, io.EOF) {
-		return err
+	if !errors.Is(readErr, io.EOF) {
+		return readErr
 	}
 	return nil
 }

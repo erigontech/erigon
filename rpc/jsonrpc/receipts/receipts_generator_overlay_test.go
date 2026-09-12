@@ -35,17 +35,19 @@ import (
 
 // TestGetReceiptLogIndexThroughOverlay pins the wiring that lets GetReceipt see a
 // block whose commit is in flight: the log index must be resolved through
-// Filters.WithTemporalOverlay, not read from the committed tx. The overlay is
-// seeded with a value the committed tx does not hold, so only a routed read can
-// produce it.
+// Filters.WithTemporalOverlay, not read from the committed tx. The record the
+// second transaction reads is seeded in the overlay with a value the committed
+// tx does not hold, so only a routed read can produce it.
 func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(
-			types.NewTransaction(block.TxNonce(testAddr), testAddr, uint256.NewInt(1), params.TxGas, nil, nil),
-			*signer, testKey)
-		require.NoError(t, err)
-		block.AddTx(txn)
+		for range 2 {
+			txn, err := types.SignTx(
+				types.NewTransaction(block.TxNonce(testAddr), testAddr, uint256.NewInt(1), params.TxGas, nil, nil),
+				*signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
 	})
 
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -55,11 +57,12 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	const blockNum = uint64(2)
 	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
-	require.Len(t, block.Transactions(), 1)
+	require.Len(t, block.Transactions(), 2)
 
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
-	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
+	firstTxNum := minTxNum + 1 // txIndex 0, past the block's system tx
+	txNum := firstTxNum + 1    // txIndex 1, the transaction under test
 
 	const overlayLogIdx = uint32(41)
 
@@ -67,14 +70,14 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
-	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), overlayLogIdx, 0, 0, txNum))
+	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), overlayLogIdx, 0, 0, firstTxNum))
 
 	events := shards.NewEvents()
 	events.PublishOverlay(sd)
 	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
 
 	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute, ff)
-	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
+	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, block.HeaderNoCopy(), block.Transactions()[1], 1, txNum, nil)
 	require.NoError(t, err)
 	require.Equal(t, overlayLogIdx, receipt.FirstLogIndexWithinBlock,
 		"GetReceipt must resolve the log index through the block overlay")

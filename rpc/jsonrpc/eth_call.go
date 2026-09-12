@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
@@ -527,7 +526,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if err != nil {
 		return nil, err
 	}
-	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
+	proof.AccountProof = toHexBytes(accountProof)
 
 	// get account data from the trie
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
@@ -610,7 +609,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
-			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
+			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
 
@@ -629,6 +628,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	return proof, nil
+}
+
+func toHexBytes(in [][]byte) []hexutil.Bytes {
+	out := make([]hexutil.Bytes, len(in))
+	for i, b := range in {
+		out[i] = b
+	}
+	return out
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {

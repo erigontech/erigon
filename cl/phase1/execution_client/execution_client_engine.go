@@ -480,10 +480,10 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
 		for _, w := range ep.Withdrawals {
 			block.Withdrawals.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
+				Index:     uint64(w.Index),
+				Validator: uint64(w.Validator),
 				Address:   w.Address,
-				Amount:    w.Amount,
+				Amount:    uint64(w.Amount),
 			})
 		}
 	}

@@ -253,9 +253,16 @@ type SharedDomains struct {
 	// disableInlineTouchKey skips the inline TouchKey in DomainPut/DomainDel when
 	// the commitment calculator owns the Updates buffer and feeds touches itself.
 	disableInlineTouchKey bool
-	discardCommitment     bool
-	mem                   kv.TemporalMemBatch
-	metrics               kvmetrics.DomainMetrics
+	// discardCommitment mirrors ExecuteBlockCfg.discardCommitment (exec-only mode):
+	// the single source of truth is the cfg, threaded here via SetDiscardCommitment
+	// at exec start, so IsUnfrozenStepEdge does not read dbg.DiscardCommitment()
+	// independently.
+	discardCommitment bool
+	mem               kv.TemporalMemBatch
+	metrics           kvmetrics.DomainMetrics
+	nonExecMetrics    kvmetrics.DomainMetrics
+
+	commitmentNanos atomic.Int64
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes,
 	// flushed atomically alongside domain state via Flush(), letting execution
@@ -351,6 +358,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd := &SharedDomains{
 		logger:           logger,
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		nonExecMetrics:   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
 		baseTxWritable:   baseTxWritable,
@@ -657,12 +665,15 @@ func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMe
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(m))
 }
 
-// MergeMetrics folds wm into both the per-batch sd.metrics and the process-level
-// collector. For low-frequency boundary producers only: the collector send may
-// block briefly on a full buffer. Ownership of wm transfers to the collector.
-// The exec hot path uses LogMergeMetrics instead, which never blocks.
+// MergeMetrics hands a boundary producer's accumulator to the per-batch sd.metrics,
+// the process-level collector, and (unless the source is exec) sd.nonExecMetrics.
+// For low-frequency boundary producers only: the collector send may block briefly
+// on a full buffer. Ownership of wm transfers to the collector.
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
+	if dbg.KVReadLevelledMetrics && source != kvmetrics.SourceExec {
+		sd.nonExecMetrics.Merge(wm)
+	}
 	sd.collector.Send(source, wm)
 }
 
@@ -1354,7 +1365,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		if wm != nil {
 			if ok {
-				wm.UpdateStateCacheHit(domain)
+				wm.UpdateStateCacheHit(domain, start)
 			} else {
 				wm.UpdateStateCacheMiss(domain)
 			}
@@ -1639,6 +1650,18 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
 	return &sd.metrics
+}
+
+func (sd *SharedDomains) NonExecMetrics() *kvmetrics.DomainMetrics {
+	return &sd.nonExecMetrics
+}
+
+func (sd *SharedDomains) AddCommitmentTime(d time.Duration) {
+	sd.commitmentNanos.Add(int64(d))
+}
+
+func (sd *SharedDomains) TakeCommitmentTime() time.Duration {
+	return time.Duration(sd.commitmentNanos.Swap(0))
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
