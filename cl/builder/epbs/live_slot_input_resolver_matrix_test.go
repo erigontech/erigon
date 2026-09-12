@@ -53,10 +53,10 @@ func TestLiveSlotInputResolverNonBuildingHeadsUseCachedParent(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, parentHash, input.ParentBlockHash)
 			require.Len(t, input.Withdrawals, 1)
-			require.Equal(t, uint64(11), input.Withdrawals[0].Amount)
+			require.Equal(t, uint64(11), uint64(input.Withdrawals[0].Amount))
 
 			headState.GetPayloadExpectedWithdrawals().Get(0).Amount++
-			require.Equal(t, uint64(11), input.Withdrawals[0].Amount)
+			require.Equal(t, uint64(11), uint64(input.Withdrawals[0].Amount))
 		})
 	}
 }
