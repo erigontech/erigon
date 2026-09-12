@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -58,6 +60,10 @@ type jsonrpcMessage struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
+
+	// resultBuf is the pooled buffer Result aliases. Unexported, so it stays out
+	// of the encoding; releaseResult hands it back once the message is written.
+	resultBuf *[]byte
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -108,21 +114,49 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
-	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
+// maxPooledResult bounds what the pool retains: eth_getLogs answers run to
+// megabytes and one of those would otherwise pin that much per pool entry. Same
+// bound jsonstream.Put applies to the stream buffers these responses land in.
+const maxPooledResult = 16 * jsonstream.FlushThreshold
+
+var resultBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 2048); return &b }}
+
+func putResultBuf(bufp *[]byte) {
+	if cap(*bufp) > maxPooledResult {
+		return
 	}
+	*bufp = (*bufp)[:0]
+	resultBufPool.Put(bufp)
+}
+
+// releaseResult returns the marshal buffer to the pool. Result aliases it, so
+// the message must not be read after this.
+func (msg *jsonrpcMessage) releaseResult() {
+	if msg.resultBuf == nil {
+		return
+	}
+	putResultBuf(msg.resultBuf)
+	msg.resultBuf, msg.Result = nil, nil
+}
+
+func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
+	if fm, ok := result.(fastJSONResult); ok {
+		enc, err := fm.MarshalFastJSON()
+		if err != nil {
+			// TODO: wrap with 'internal server error'
+			return msg.errorResponse(err)
+		}
+		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	}
+	bufp := resultBufPool.Get().(*[]byte)
+	enc, err := marshalAppend((*bufp)[:0], result)
+	*bufp = enc
 	if err != nil {
+		putResultBuf(bufp)
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc, resultBuf: bufp}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
