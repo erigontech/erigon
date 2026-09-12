@@ -80,6 +80,7 @@ type Cfg struct {
 	gloasHeadEnvelopeRequestHead common.Hash
 	gloasHeadEnvelopeAttempted   bool
 	gloasHeadEnvelopeRetryUsed   bool
+	chainTipHTTPBlockScan        chainTipHTTPBlockScan
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash

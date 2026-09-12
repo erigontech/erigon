@@ -432,8 +432,9 @@ func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Sign
 }
 
 type gloasCollectorTest struct {
-	calls int
-	err   error
+	calls   int
+	err     error
+	flushFn func(context.Context) error
 }
 
 func (c *gloasCollectorTest) AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -446,7 +447,10 @@ func (c *gloasCollectorTest) AddBlock(*cltypes.BeaconBlock) error {
 	return c.err
 }
 
-func (c *gloasCollectorTest) Flush(context.Context) error {
+func (c *gloasCollectorTest) Flush(ctx context.Context) error {
+	if c.flushFn != nil {
+		return c.flushFn(ctx)
+	}
 	return nil
 }
 
@@ -976,6 +980,63 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
+}
+
+func TestPrepareGloasPayloadRetriesFlushesCollectorBeforeValidation(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	ctx, cancel := context.WithCancel(t.Context())
+	flushed := false
+	collector := &gloasCollectorTest{flushFn: func(context.Context) error {
+		flushed = true
+		return nil
+	}}
+	engine := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}
+	engine.newPayloadFn = func(context.Context) (execution_client.PayloadStatus, error) {
+		require.True(t, flushed)
+		cancel()
+		return execution_client.PayloadStatusValidated, nil
+	}
+	fc := &forkchoice.ForkChoiceStore{}
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+	}}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	envelope.Message.BeaconBlockRoot = common.Hash{1}
+	envelope.Message.Payload.BlockHash = common.Hash{2}
+	fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+		Block:    &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}},
+		Envelope: envelope,
+	})
+
+	prepareGloasPayloadRetries(ctx, &Cfg{
+		beaconCfg:             cfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            fc,
+		blockCollector:        collector,
+	})
+
+	require.True(t, flushed)
+	require.Equal(t, 1, engine.newPayloadCalls)
+}
+
+func TestPrepareGloasPayloadRetriesPropagatesCancellationToCollector(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var flushErr error
+	collector := &gloasCollectorTest{flushFn: func(ctx context.Context) error {
+		flushErr = ctx.Err()
+		return flushErr
+	}}
+
+	prepareGloasPayloadRetries(ctx, &Cfg{
+		executionClient: &testExecutionEngine{supportInsertion: true},
+		forkChoice:      &forkchoice.ForkChoiceStore{},
+		blockCollector:  collector,
+	})
+
+	require.ErrorIs(t, flushErr, context.Canceled)
 }
 
 func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {

@@ -240,8 +240,9 @@ type executionPayloadArrival struct {
 	slot       uint64
 }
 
-// PendingELPayload holds a block+envelope pair that needs to be fed to the EL.
+// PendingELPayload identifies an execution payload that still needs EL validation.
 type PendingELPayload struct {
+	Root     common.Hash
 	Block    *cltypes.SignedBeaconBlock
 	Envelope *cltypes.SignedExecutionPayloadEnvelope
 }
@@ -1189,9 +1190,17 @@ func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorS
 // addPendingELPayload queues an execution block whose CL transition succeeded
 // but whose EL newPayload failed (EL behind).  Thread-safe.
 func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	pending := PendingELPayload{Block: block, Envelope: envelope}
+	if root, ok := pendingELPayloadRoot(pending); ok && f.forkGraph != nil && f.forkGraph.HasEnvelope(root) {
+		pending = PendingELPayload{Root: root}
+	}
+	f.queuePendingELPayload(pending)
+}
+
+func (f *ForkChoiceStore) queuePendingELPayload(pending PendingELPayload) {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
-	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
+	root, ok := pendingELPayloadRoot(pending)
 	if ok {
 		for _, p := range f.pendingELPayloads {
 			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
@@ -1205,13 +1214,13 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 		f.pendingELPayloads[len(f.pendingELPayloads)-1] = PendingELPayload{}
 		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
 	}
-	f.pendingELPayloads = append(f.pendingELPayloads, PendingELPayload{
-		Block:    block,
-		Envelope: envelope,
-	})
+	f.pendingELPayloads = append(f.pendingELPayloads, pending)
 }
 
 func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
+	if p.Root != (common.Hash{}) {
+		return p.Root, true
+	}
 	if p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.BeaconBlockRoot != (common.Hash{}) {
 		return p.Envelope.Message.BeaconBlockRoot, true
 	}
@@ -1226,14 +1235,35 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 		return
 	}
 	if guard, guarded := f.forkGraph.(retainedBlockGuard); guarded {
-		guard.WithRetainedBlock(root, func() { f.addPendingELPayload(p.Block, p.Envelope) })
+		guard.WithRetainedBlock(root, func() { f.queuePendingELPayload(PendingELPayload{Root: root}) })
 		return
 	}
-	f.addPendingELPayload(p.Block, p.Envelope)
+	if p.Root != (common.Hash{}) {
+		p = PendingELPayload{Root: root}
+	}
+	f.queuePendingELPayload(p)
+}
+
+func (f *ForkChoiceStore) ResolvePendingELPayload(p PendingELPayload) (PendingELPayload, bool) {
+	if p.Block != nil && p.Envelope != nil {
+		return p, true
+	}
+	root, ok := pendingELPayloadRoot(p)
+	if !ok || f.forkGraph == nil {
+		return PendingELPayload{}, false
+	}
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil {
+		return PendingELPayload{}, false
+	}
+	envelope, err := f.forkGraph.ReadEnvelopeFromDisk(root)
+	if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
+		return PendingELPayload{}, false
+	}
+	return PendingELPayload{Root: root, Block: block, Envelope: envelope}, true
 }
 
 // DrainPendingELPayloads returns and clears all queued EL payloads.
-// The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	return f.DrainPendingELPayloadsLimit(maxPendingELPayloads)
 }
