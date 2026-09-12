@@ -189,9 +189,6 @@ func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, bloc
 	if payload.PrevRandao != bid.PrevRandao {
 		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
 	}
-	if payload.FeeRecipient != bid.FeeRecipient {
-		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
-	}
 	if payload.GasLimit != bid.GasLimit {
 		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
 	}

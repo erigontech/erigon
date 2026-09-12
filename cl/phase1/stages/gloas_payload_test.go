@@ -731,13 +731,6 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 			wantErr: "prev randao mismatch",
 		},
 		{
-			name: "fee recipient mismatch",
-			mutate: func(_ *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) {
-				env.Message.Payload.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
-			},
-			wantErr: "fee recipient mismatch",
-		},
-		{
 			name: "gas limit mismatch",
 			mutate: func(_ *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) {
 				env.Message.Payload.GasLimit++
@@ -774,6 +767,13 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 			require.ErrorContains(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env), tt.wantErr)
 		})
 	}
+}
+
+func TestValidateAnchorEnvelopeAllowsDifferentPayloadFeeRecipient(t *testing.T) {
+	cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	bid.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
+
+	require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
 }
 
 func TestValidateDownloadedGloasEnvelopeRejectsBidMismatch(t *testing.T) {
