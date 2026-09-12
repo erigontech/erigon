@@ -627,24 +627,27 @@ func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsRead
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
 
-// SegmentsMin is the lowest block every type covers, and whether they all cover one: a
-// type with no visible segment leaves no block complete, however low the others reach.
-func (s *BaseRoSnapshots) SegmentsMin() (min uint64, ok bool) {
+// SegmentsMin is the lowest block the visible segments reach, and whether every type
+// covers it: a type with no visible segment leaves no block complete, however low the
+// others reach, but the blocks the others do hold still start where min says.
+func (s *BaseRoSnapshots) SegmentsMin() (min uint64, complete bool) {
 	if s == nil {
 		return 0, false
 	}
 
+	complete = true
 	for _, minStore := range s.segmentsMinByType {
 		typeMin := minStore.Load()
 		if typeMin == math.MaxUint64 {
-			return 0, false
+			complete = false
+			continue
 		}
 		if typeMin > min {
 			min = typeMin
 		}
 	}
 
-	return min, true
+	return min, complete
 }
 func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {

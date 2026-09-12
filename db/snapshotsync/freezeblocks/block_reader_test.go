@@ -972,6 +972,33 @@ func TestMinimumBlockAvailableWithoutVisibleTransactionSegments(t *testing.T) {
 	require.Equal(t, uint64(1000), minimum, "no transaction is readable below the first database block")
 }
 
+// TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody pins that a database
+// with nothing beyond genesis does not overrule the segments on disk: it has no answer to
+// give, and reporting genesis for a datadir frozen mid-chain contradicts the blocks the
+// node advertises.
+func TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	ver := version.V1_0
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 6000, 7000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.NotZero(t, snapshots.BlocksAvailable(), "headers and bodies are frozen")
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5000), minimum, "the empty database answers nothing, so the segments stand")
+}
+
 // TestMinimumBlockAvailableTakesTheHighestTypeMinimum pins the shape chain-history expiry
 // produces: headers and bodies reach genesis, transactions do not, and the block the node
 // can serve in full is the first one every type covers.

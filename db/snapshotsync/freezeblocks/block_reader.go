@@ -459,40 +459,47 @@ func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.Blocks
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	var snapshotMin uint64
 	if r.FrozenBlocks() > 0 {
-		// Frozen segments that leave no block complete are not an answer: the database is
-		// what still holds one.
-		if snapshotMin, ok := r.sn.SegmentsMin(); ok {
-			return snapshotMin, nil
+		// Frozen segments that leave no block complete are not an answer on their own: the
+		// database is what still holds one, where it holds anything at all.
+		segmentsMin, complete := r.sn.SegmentsMin()
+		if complete {
+			return segmentsMin, nil
 		}
+		snapshotMin = segmentsMin
 	}
 
 	if tx == nil {
 		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
-	dbMinBlock, err := r.findFirstCompleteBlock(tx)
+	dbMinBlock, found, err := r.findFirstCompleteBlock(tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
+	}
+	if !found {
+		return snapshotMin, nil
 	}
 
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is available.
-// When no block bodies exist beyond genesis, it returns 0.
-func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
+// findFirstCompleteBlock finds the first block (after genesis) where block body is
+// available, and whether there is one: a database holding nothing beyond genesis gives no
+// answer, which is not the same as answering genesis.
+func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
+		return 0, false, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}
 
 	if len(secondKey) < 8 { // incomplete key, no block found
-		return 0, nil
+		return 0, false, nil
 	}
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
-	return result, nil
+	return result, true, nil
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
