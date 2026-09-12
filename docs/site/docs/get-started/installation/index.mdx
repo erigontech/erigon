@@ -343,16 +343,8 @@ git checkout v{ERIGON_VERSION}
 
 Compile the Erigon binary using the `make` command.
 
-Standard Compilation:
-
 ```sh
 make erigon
-```
-
-Fast Compilation (Recommended): to significantly speed up the process, specify the number of processors you want to use with the `-j<n>` option, where `<n>` is the number of processor you want to use (we recommend using a number slightly less than your total core count):
-
-```sh
-make -j<n> erigon
 ```
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
