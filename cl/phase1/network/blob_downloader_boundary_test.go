@@ -811,6 +811,7 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 
 	downloader := newBoundaryDownloader(t, head, 0, head, reader)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	expectSidecarFilesPresent(blobStorage)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
 	downloader.blobStorage = blobStorage
 
