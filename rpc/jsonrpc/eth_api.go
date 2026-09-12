@@ -676,6 +676,12 @@ func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, low uint64
 			bounds = bounds[:len(bounds)-1]
 		}
 		high := bounds[len(bounds)-1]
+		if high.txns <= excludedTxns {
+			// The bound has to be one the search has not excluded yet, which pruning
+			// above keeps true: an excluded one is walked again for as long as the
+			// read transaction is held open.
+			return 0, earlyTxnUnread, nil
+		}
 		for low < high.num {
 			if budget <= 0 {
 				return 0, earlyTxnSpent, nil
