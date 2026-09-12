@@ -31,6 +31,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -114,12 +116,13 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// maxPooledResult bounds what the pool retains: eth_getLogs answers run to
-// megabytes and one of those would otherwise pin that much per pool entry. Same
-// bound jsonstream.Put applies to the stream buffers these responses land in.
-const maxPooledResult = 16 * jsonstream.FlushThreshold
+// maxPooledResult bounds what the pool retains. It has to sit above the
+// responses worth pooling, not below them: a multi-megabyte eth_getLogs answer
+// that misses the bound is rebuilt from a small buffer every time, which costs
+// more than not pooling at all. Traces run to gigabytes and are left out.
+const maxPooledResult = int(8 * datasize.MB)
 
-var resultBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 2048); return &b }}
+var resultBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4*jsonstream.FlushThreshold); return &b }}
 
 func putResultBuf(bufp *[]byte) {
 	if cap(*bufp) > maxPooledResult {
