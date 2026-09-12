@@ -17,6 +17,7 @@
 package stagedsync_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,6 +38,50 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+type seekErrorTx struct {
+	kv.RwTx
+	cursor kv.Cursor
+}
+
+func (tx seekErrorTx) Cursor(string) (kv.Cursor, error) {
+	return tx.cursor, nil
+}
+
+type seekErrorCursor struct {
+	err error
+}
+
+func (c seekErrorCursor) First() ([]byte, []byte, error) { return nil, nil, nil }
+func (c seekErrorCursor) Seek([]byte) ([]byte, []byte, error) {
+	return nil, nil, c.err
+}
+func (c seekErrorCursor) SeekExact([]byte) ([]byte, []byte, error) { return nil, nil, nil }
+func (c seekErrorCursor) Next() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c seekErrorCursor) Prev() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c seekErrorCursor) Last() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c seekErrorCursor) Current() ([]byte, []byte, error)         { return nil, nil, nil }
+func (c seekErrorCursor) Close()                                   {}
+
+func TestSendersReturnsInitialSeekError(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, 1))
+
+	sentinelErr := errors.New("initial seek failed")
+	err = stagedsync.SpawnRecoverSendersStage(
+		stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, m.BlockReader, exec.NewBlockReadAheader()),
+		&stagedsync.StageState{ID: stages.Senders},
+		nil,
+		seekErrorTx{RwTx: tx, cursor: seekErrorCursor{err: sentinelErr}},
+		1,
+		m.Ctx,
+		log.New(),
+	)
+	require.ErrorIs(t, err, sentinelErr)
+}
 
 func TestSenders(t *testing.T) {
 	require := require.New(t)

@@ -201,8 +201,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 	defer bodiesC.Close()
 
+	k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom))
+	if err != nil {
+		return err
+	}
+
 Loop:
-	for k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
+	for ; k != nil; k, v, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
