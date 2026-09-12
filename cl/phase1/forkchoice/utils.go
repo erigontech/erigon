@@ -130,9 +130,13 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	}
 
 	// Guard against uint64 underflow during the first 3 epochs after genesis.
+	//
+	// The 3-epoch window is a DURATION dressed as a count: ~19 minutes on mainnet, ~48 seconds on an
+	// 8-slot 2s epoch. Prune is therefore told the justified slot as well, and keeps whatever is
+	// needed to still rebuild that checkpoint however short the window turns out to be.
 	if newFinalized.Epoch > 3 {
 		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-		f.forkGraph.Prune(slotToPrune)
+		f.forkGraph.Prune(slotToPrune, f.JustifiedSlot())
 	}
 }
 

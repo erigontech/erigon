@@ -46,7 +46,7 @@ type ForkGraph interface {
 	MarkHeaderAsInvalid(blockRoot common.Hash)
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
-	Prune(uint64) error
+	Prune(pruneSlot uint64, rebuildSlot uint64) error
 	GetBlockRewards(blockRoot common.Hash) (*eth2.BlockRewardsCollector, bool)
 	LowestAvailableSlot() uint64
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)

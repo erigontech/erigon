@@ -549,7 +549,11 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		if block.Block.Slot%dumpSlotFrequency == 0 {
 			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 			if err != nil {
-				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+				// Every one of these is a reconnection point the walk hoped for and did not get. At
+				// Trace they are invisible, and the walk then blames "ran out of blocks" — naming
+				// the end of the search instead of the eight silent misses that caused it.
+				log.Warn("[forkgraph] state walk-back: no dumped state at a dump slot",
+					"root", currentIteratorRoot, "slot", block.Block.Slot, "wanted", blockRoot, "err", err)
 			}
 			if copyReferencedState != nil {
 				break
@@ -605,19 +609,61 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
-func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
+// Prune drops everything below pruneSlot, but never so much that the state at rebuildSlot — the
+// justified checkpoint — can no longer be rebuilt.
+//
+// Rebuilding a state means replaying blocks forward from the nearest dumped state AT OR BELOW it, so
+// the graph has to keep that dump and every block between it and the checkpoint. Pruning by slot
+// alone does not know that, and the gap it leaves is unrecoverable rather than merely expensive:
+// the checkpoint state can never be computed, so justification can never advance, so pruning never
+// advances either, and the chain proposes into the same failure until it is restarted.
+//
+// That is not hypothetical. On a 2s-slot 8-slot-epoch dev chain no state is dumped while the node is
+// still catching up, so the first dump landed at slot 268 — four slots ABOVE a justified checkpoint
+// at 264, with pruning already cut to 231. The walk back from 264 crossed all 34 surviving blocks,
+// reached the pruned parent at 230, and gave up; both L2s then failed ~75% of proposals for five
+// hours. Mainnet hides this because 3 epochs is ~19 minutes there and ~48 seconds here — but the
+// invariant was always wrong, and a slow boot is enough to break it at any slot time.
+//
+// Holding history until a usable dump exists is the safe direction: it costs memory for a while and
+// self-heals the moment one lands, whereas pruning past it costs the chain.
+func (f *forkGraphDisk) Prune(pruneSlot uint64, rebuildSlot uint64) (err error) {
 	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
+	// The newest dumped state at or below the checkpoint — the one a walk back from it would land
+	// on. Everything from here up has to survive.
+	replayAnchorSlot := uint64(0)
+	haveReplayAnchor := false
 	f.blocks.Range(func(key, value any) bool {
 		hash := key.(common.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
-			highestStoredBeaconStateSlot = signedBlock.Block.Slot
+		if f.hasBeaconState(hash) {
+			if highestStoredBeaconStateSlot < signedBlock.Block.Slot {
+				highestStoredBeaconStateSlot = signedBlock.Block.Slot
+			}
+			if signedBlock.Block.Slot <= rebuildSlot && (!haveReplayAnchor || signedBlock.Block.Slot > replayAnchorSlot) {
+				replayAnchorSlot, haveReplayAnchor = signedBlock.Block.Slot, true
+			}
 		}
+		return true
+	})
+
+	if !haveReplayAnchor {
+		// Nothing to replay the checkpoint from yet. Pruning now would make it unreachable forever.
+		log.Warn("[forkgraph] not pruning: no dumped state at or below the justified checkpoint",
+			"checkpointSlot", rebuildSlot, "wouldPruneBelow", pruneSlot)
+		return
+	}
+	if pruneSlot > replayAnchorSlot {
+		pruneSlot = replayAnchorSlot
+	}
+
+	f.blocks.Range(func(key, value any) bool {
+		hash := key.(common.Hash)
+		signedBlock := value.(*cltypes.SignedBeaconBlock)
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
-
 		oldRoots = append(oldRoots, hash)
 		return true
 	})
