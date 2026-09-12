@@ -252,6 +252,50 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return response, err
 }
 
+// GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
+// number. Per ethereum/execution-apis#877, the result is null for an unknown block, for the
+// pending tag, and for a safe or finalized tag that cannot be resolved to a block.
+func (api *APIImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByNumber(ctx, blockNumber, tx)
+	if err != nil {
+		var unresolvedTag *rpc.CustomError
+		if errors.As(err, &rpc.BlockNotFoundErr{}) ||
+			(errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header), nil
+}
+
+// GetHeaderByHash implements eth_getHeaderByHash. Returns a block's header given a block's hash,
+// or null if the block is unknown.
+func (api *APIImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByHash(ctx, hash, tx)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header), nil
+}
+
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
 func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]any, error) {
 	if numberOrHash.BlockHash == nil {

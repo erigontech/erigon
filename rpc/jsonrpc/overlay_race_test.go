@@ -2060,6 +2060,9 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 	detailsHash := func(v any) common.Hash {
 		return blockHash(v.(map[string]any)["block"])
 	}
+	headerMapHash := func(v any) common.Hash {
+		return v.(map[string]any)["hash"].(common.Hash)
+	}
 
 	cases := []struct {
 		name       string
@@ -2106,6 +2109,20 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 				api := NewPrivateDebugAPI(h.base, db, nil, &rpccfg.DebugApiConfig{})
 				return api.GetRawHeader(h.m.Ctx, rpc.BlockNumberOrHashWithNumber(head(h)))
 			},
+		},
+		{
+			name: "eth_getHeaderByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByNumber(h.m.Ctx, head(h))
+			},
+			hashOf: headerMapHash,
+		},
+		{
+			name: "eth_getHeaderByHash",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByHash(h.m.Ctx, h.overlayHeader.Hash())
+			},
+			hashOf: headerMapHash,
 		},
 		{
 			name: "erigon_getHeaderByNumber",
