@@ -466,7 +466,7 @@ jobs:
                      deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN
             install postinst.template deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/postinst
             if [ "${ARCH}" = "amd64" ]; then
-              ARCH_NOTE=" This amd64 package is compiled for x86-64-v2 or newer CPUs (requires SSE4.2, POPCNT). All modern server CPUs qualify: Intel 2nd gen Core+ (2011), AMD Bulldozer+ (2012). It will not run on older hardware."
+              ARCH_NOTE=" This amd64 package is compiled for the x86-64-v2 baseline (requires SSE4.2, POPCNT). Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify. It will not run on older hardware."
             else
               ARCH_NOTE=""
             fi
