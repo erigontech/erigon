@@ -220,11 +220,6 @@ func recomputeAtTxNumWithoutSDInternal(
 	if baselineTxNum > 0 {
 		touchFromTxNum = baselineTxNum + 1
 	}
-	// mode-D residual wrong-root diagnostic (2026-08-19): reset the
-	// per-compute counters so post-compute log reflects THIS compute's
-	// HistorySeek hit/miss/divergence stats only.
-	HistReaderResetCounters()
-
 	// Snapshot the visible-file set at compute start so we can detect
 	// retire/merge flipping it mid-compute. If it changes, log a WARN
 	// at compute exit and dump both snapshots so we can correlate.
@@ -301,17 +296,6 @@ func recomputeAtTxNumWithoutSDInternal(
 	if err != nil {
 		return nil, nil, baselineTxNum, nil, fmt.Errorf("EncodeCurrentState: %w", err)
 	}
-	// mode-D residual wrong-root diagnostic (2026-08-19): log the
-	// hit/miss/divergence stats accumulated by HistoryStateReader.Read
-	// during trie.Process above.
-	logger.Info("[dbg-hist-reader] compute post-fold stats",
-		"toTxN", toTxNum,
-		"stateReads", histReaderCompareCount.Load(),
-		"histSeekHits", histReaderHitCount.Load(),
-		"histSeekMisses", histReaderMissCount.Load(),
-		"fallbackDivergences", histReaderDivergeCount.Load(),
-		"missedHistSeek", histReaderMissedHistSeek.Load())
-
 	// Detect retire/merge flipping the visible file set mid-compute.
 	for _, dom := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
 		exitFiles := summariseFiles(dom)
