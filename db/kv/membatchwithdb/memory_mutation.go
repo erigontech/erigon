@@ -389,6 +389,8 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 
+// Range merges the db side and the overlay by key, so on a DupSort table a db
+// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
