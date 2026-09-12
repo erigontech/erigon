@@ -177,6 +177,18 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	return msg, nil
 }
 
+// ZeroUnpricedBlobBaseFee drops the block's blob fee when the caller named blob
+// fields but put no price on them, the way BaseFee is dropped for a call with no
+// gas price.
+func (args *CallArgs) ZeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
+	blobFeeCap := (*uint256.Int)(args.MaxFeePerBlobGas)
+	namesBlobs := blobFeeCap != nil || args.BlobVersionedHashes != nil
+	cappedAtZero := blobFeeCap == nil || blobFeeCap.IsZero()
+	if namesBlobs && cappedAtZero {
+		blockCtx.BlobBaseFee = uint256.Int{}
+	}
+}
+
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
 	var chainID uint256.Int
