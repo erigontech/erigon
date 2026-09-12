@@ -111,6 +111,16 @@ func (d *LeakDetector) Add() uint64 {
 	return id
 }
 
+// Len is how many resources are registered and not yet released.
+func (d *LeakDetector) Len() int {
+	if d == nil {
+		return 0
+	}
+	d.listLock.Lock()
+	defer d.listLock.Unlock()
+	return len(d.list)
+}
+
 func (d *LeakDetector) Enabled() bool { return d.enabled.Load() }
 func (d *LeakDetector) SetSlowThreshold(t time.Duration) {
 	d.slowThreshold.Store(&t)
