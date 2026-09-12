@@ -134,7 +134,7 @@ func TestFetchBlocksFromSourcesRetriesP2PAfterHTTPBudget(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 1300*time.Millisecond)
 	defer cancel()
 
-	got, err := fetchBlocksFromSources(
+	got, err := fetchBlocksFromSourcesWithRetryWait(
 		ctx, 10, 3, 11, "https://checkpoint.example", &cfg,
 		func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 			p2pCalls++
@@ -148,6 +148,7 @@ func TestFetchBlocksFromSourcesRetriesP2PAfterHTTPBudget(t *testing.T) {
 			return nil, ctx.Err()
 		},
 		nil,
+		func(context.Context) error { return nil },
 	)
 
 	require.NoError(t, err)
@@ -180,6 +181,60 @@ func TestFetchBlocksFromSourcesRejectsHTTPWithoutForwardProgress(t *testing.T) {
 	require.Equal(t, 2, p2pCalls)
 	require.Equal(t, "peer", got.Peer)
 	require.Equal(t, []*cltypes.SignedBeaconBlock{fresh}, got.Data)
+}
+
+func TestFetchBlocksFromSourcesPacesAllNoProgressErrors(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p2pCalls := 0
+	httpCalls := 0
+	retryWaits := 0
+
+	_, err := fetchBlocksFromSourcesWithRetryWait(
+		ctx, 10, 4, 11, "https://checkpoint.example", &cfg,
+		func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			p2pCalls++
+			return nil, "", errors.New("temporary P2P failure")
+		},
+		func(context.Context, string, uint64, uint64, *clparams.BeaconChainConfig) ([]*cltypes.SignedBeaconBlock, error) {
+			httpCalls++
+			return nil, errors.New("temporary HTTP failure")
+		},
+		nil,
+		func(context.Context) error {
+			retryWaits++
+			cancel()
+			return ctx.Err()
+		},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, p2pCalls)
+	require.Equal(t, 1, httpCalls)
+	require.Equal(t, 1, retryWaits)
+}
+
+func TestFetchBlocksFromSourcesPacesEmptyP2PSuccess(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	retryWaits := 0
+
+	got, err := fetchBlocksFromSourcesWithRetryWait(
+		t.Context(), 10, 4, 11, "", &cfg,
+		func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			return nil, "peer", nil
+		},
+		nil,
+		nil,
+		func(context.Context) error {
+			retryWaits++
+			return nil
+		},
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, got)
+	require.Equal(t, 1, retryWaits)
 }
 
 func TestFetchBlocksFromSourcesCapsHTTPFallbackBatch(t *testing.T) {

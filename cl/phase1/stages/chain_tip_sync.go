@@ -30,10 +30,12 @@ const (
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
 	gloasCollectorFlushBudget         = 30 * time.Second
+	gloasEnvelopeApplyBudget          = 2 * time.Second
 	chainTipHTTPBlockBudget           = 3 * time.Second
 	chainTipHTTPEnvelopeBudget        = 3 * time.Second
 	chainTipBlockP2PReserve           = 3 * time.Second
 	chainTipEnvelopeP2PReserve        = time.Second
+	selectedHeadEnvelopeRetryDelay    = time.Second
 	maxChainTipHTTPBlockCount         = 8
 )
 
@@ -167,6 +169,32 @@ func fetchBlocksFromSources(
 	httpFetch func(context.Context, string, uint64, uint64, *clparams.BeaconChainConfig) ([]*cltypes.SignedBeaconBlock, error),
 	httpScan *chainTipHTTPBlockScan,
 ) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
+	return fetchBlocksFromSourcesWithRetryWait(ctx, from, count, minProgressSlot, fallbackURL, beaconCfg, p2pFetch, httpFetch, httpScan, waitForBlockSourceRetry)
+}
+
+func waitForBlockSourceRetry(ctx context.Context) error {
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func fetchBlocksFromSourcesWithRetryWait(
+	ctx context.Context,
+	from uint64,
+	count uint64,
+	minProgressSlot uint64,
+	fallbackURL string,
+	beaconCfg *clparams.BeaconChainConfig,
+	p2pFetch func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error),
+	httpFetch func(context.Context, string, uint64, uint64, *clparams.BeaconChainConfig) ([]*cltypes.SignedBeaconBlock, error),
+	httpScan *chainTipHTTPBlockScan,
+	retryWait func(context.Context) error,
+) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	httpFrom := from
 	httpRemaining := count
 	if httpScan != nil {
@@ -214,6 +242,9 @@ func fetchBlocksFromSources(
 			continue
 		}
 		if err == nil {
+			if err := retryWait(ctx); err != nil {
+				return nil, err
+			}
 			return nil, nil
 		}
 		// Respect context cancellation to avoid infinite loops.
@@ -223,13 +254,12 @@ func fetchBlocksFromSources(
 		default:
 		}
 		if errors.Is(err, peers.ErrNoPeers) {
-			// Back off when no peers are available to avoid CPU-burning tight loops.
 			log.Debug("[Caplin] no peers available, backing off before retrying block request", "from", from, "count", count)
-			select {
-			case <-time.After(2 * time.Second):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+		} else {
+			log.Debug("[Caplin] block sources made no progress, backing off before retry", "from", from, "count", count, "err", err)
+		}
+		if err := retryWait(ctx); err != nil {
+			return nil, err
 		}
 	}
 }
@@ -406,18 +436,55 @@ MainLoop:
 	return nil
 }
 
+type recoveredEnvelopeStore interface {
+	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+}
+
+func applyRecoveredEnvelopes(
+	ctx context.Context,
+	store recoveredEnvelopeStore,
+	roots [][32]byte,
+	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	validatePayload bool,
+	timeout time.Duration,
+	offset uint32,
+) bool {
+	if len(roots) == 0 {
+		return true
+	}
+	applyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	allApplied := true
+	start := int(uint64(offset) % uint64(len(roots)))
+	for i := range roots {
+		root := roots[(start+i)%len(roots)]
+		envelope := envelopes[common.Hash(root)]
+		if envelope == nil {
+			allApplied = false
+			continue
+		}
+		if applyCtx.Err() != nil {
+			allApplied = false
+			continue
+		}
+		if err := store.OnExecutionPayload(applyCtx, envelope, true, validatePayload); err != nil {
+			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", common.Hash(root), "err", err)
+			allApplied = false
+		}
+	}
+	return allApplied
+}
+
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
-func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
+func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) bool {
 	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots)
 	if err != nil {
 		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
-		return
+		return false
 	}
-	for _, env := range envelopes {
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canValidateGloasPayloads(cfg)); err != nil {
-			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
-		}
-	}
+	offset := cfg.gloasEnvelopeApplyOffset.Add(1) - 1
+	return applyRecoveredEnvelopes(ctx, cfg.forkChoice, roots, envelopes, canValidateGloasPayloads(cfg), gloasEnvelopeApplyBudget, offset)
 }
 
 // determineParentEnvelopeRoots identifies parent blocks that were FULL but missing their
@@ -569,12 +636,23 @@ func fetchEnvelopeSources(
 
 // recoverMissingEnvelopes incrementally scans from the selected head for missing FULL-block envelopes.
 func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
-	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
+	recoverMissingEnvelopesWithApply(ctx, cfg, cfg.forkChoice, fetchAndApplyEnvelopes)
+}
+
+type missingEnvelopeRecoveryStore interface {
+	gloasHeadReader
+	FinalizedSlot() uint64
+	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	HasEnvelope(common.Hash) bool
+}
+
+func recoverMissingEnvelopesWithApply(ctx context.Context, cfg *Cfg, store missingEnvelopeRecoveryStore, fetchAndApply func(context.Context, *Cfg, [][32]byte) bool) {
+	headRoot, err := gloasVerificationHeadRoot(store)
 	if err != nil || headRoot == (common.Hash{}) {
 		return
 	}
 
-	childBlock, ok := cfg.forkChoice.GetBlock(headRoot)
+	childBlock, ok := store.GetBlock(headRoot)
 	if !ok {
 		log.Debug("[chainTipSync] envelope recovery: head block not in fork graph", "headRoot", headRoot)
 		return
@@ -587,18 +665,18 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 
 	missingRoots := make([][32]byte, 0, maxGloasAncestorVisitsPerCycle)
 
-	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	finalizedSlot := store.FinalizedSlot()
 	var directExtensionParent common.Hash
 	if cfg.gloasEnvelopeRecoveryHead != (common.Hash{}) && cfg.gloasEnvelopeRecoveryHead != headRoot {
-		newHeadBlock, ok := cfg.forkChoice.GetBlock(headRoot)
+		newHeadBlock, ok := store.GetBlock(headRoot)
 		directExtension := ok && common.Hash(newHeadBlock.Block.ParentRoot) == cfg.gloasEnvelopeRecoveryHead
 		if directExtension {
 			directExtensionParent = cfg.gloasEnvelopeRecoveryHead
-			oldHeadBlock, oldOK := cfg.forkChoice.GetBlock(cfg.gloasEnvelopeRecoveryHead)
+			oldHeadBlock, oldOK := store.GetBlock(cfg.gloasEnvelopeRecoveryHead)
 			newBid := newHeadBlock.Block.Body.GetSignedExecutionPayloadBid()
 			if oldOK && oldHeadBlock != nil && newBid != nil && newBid.Message != nil {
 				oldBid := oldHeadBlock.Block.Body.GetSignedExecutionPayloadBid()
-				if oldBid != nil && oldBid.Message != nil && newBid.Message.ParentBlockHash == oldBid.Message.BlockHash && !cfg.forkChoice.HasEnvelope(cfg.gloasEnvelopeRecoveryHead) {
+				if oldBid != nil && oldBid.Message != nil && newBid.Message.ParentBlockHash == oldBid.Message.BlockHash && !store.HasEnvelope(cfg.gloasEnvelopeRecoveryHead) {
 					missingRoots = append(missingRoots, [32]byte(cfg.gloasEnvelopeRecoveryHead))
 				}
 			}
@@ -612,13 +690,13 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	if scanRoot == (common.Hash{}) {
 		if directExtensionParent != (common.Hash{}) {
 			scanRoot = directExtensionParent
-			if cursorBlock, ok := cfg.forkChoice.GetBlock(scanRoot); ok {
+			if cursorBlock, ok := store.GetBlock(scanRoot); ok {
 				childBlock = cursorBlock
 			}
 		} else {
 			scanRoot = headRoot
 		}
-	} else if cursorBlock, cursorOK := cfg.forkChoice.GetBlock(scanRoot); cursorOK {
+	} else if cursorBlock, cursorOK := store.GetBlock(scanRoot); cursorOK {
 		childBlock = cursorBlock
 	} else {
 		scanRoot = headRoot
@@ -627,7 +705,7 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	completedScan := false
 	for visited := 1; visited < maxGloasAncestorVisitsPerCycle; visited++ {
 		parentRoot := childBlock.Block.ParentRoot
-		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
+		parentBlock, ok := store.GetBlock(parentRoot)
 		if !ok {
 			completedScan = true
 			break
@@ -654,14 +732,14 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 
 		if childBid.Message.ParentBlockHash == parentBid.Message.BlockHash {
 			// Parent is FULL — check whether its envelope is present.
-			if !cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+			if !store.HasEnvelope(common.Hash(parentRoot)) {
 				missingRoots = append(missingRoots, parentRoot)
 			}
 		}
 	}
 	if len(missingRoots) > 0 {
 		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
-		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+		fetchAndApply(ctx, cfg, missingRoots)
 	}
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
 }
@@ -765,7 +843,7 @@ func observeSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) {
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
 		cfg.gloasHeadEnvelopeAttempted = false
-		cfg.gloasHeadEnvelopeRetryUsed = false
+		cfg.gloasHeadEnvelopeRetryAt = time.Time{}
 	}
 }
 
@@ -775,13 +853,17 @@ func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) (selectedH
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
 		cfg.gloasHeadEnvelopeAttempted = false
-		cfg.gloasHeadEnvelopeRetryUsed = false
+		cfg.gloasHeadEnvelopeRetryAt = time.Time{}
 	}
 	if _, ok := cfg.gloasHeadEnvelopeRequests[headRoot]; ok {
 		return selectedHeadEnvelopeRequestClaim{}, false, true
 	}
 	if cfg.gloasHeadEnvelopeAttempted {
-		return selectedHeadEnvelopeRequestClaim{}, false, false
+		if cfg.gloasHeadEnvelopeRetryAt.IsZero() || time.Now().Before(cfg.gloasHeadEnvelopeRetryAt) {
+			return selectedHeadEnvelopeRequestClaim{}, false, false
+		}
+		cfg.gloasHeadEnvelopeAttempted = false
+		cfg.gloasHeadEnvelopeRetryAt = time.Time{}
 	}
 	if cfg.gloasHeadEnvelopeRequests == nil {
 		cfg.gloasHeadEnvelopeRequests = make(map[common.Hash]uint64)
@@ -804,9 +886,8 @@ func releaseSelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequ
 func retrySelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequestClaim) {
 	cfg.gloasHeadEnvelopeRequestMu.Lock()
 	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
-	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id && !cfg.gloasHeadEnvelopeRetryUsed {
-		cfg.gloasHeadEnvelopeRetryUsed = true
-		cfg.gloasHeadEnvelopeAttempted = false
+	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
+		cfg.gloasHeadEnvelopeRetryAt = time.Now().Add(selectedHeadEnvelopeRetryDelay)
 	}
 }
 
