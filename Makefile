@@ -57,7 +57,7 @@ ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
 CGO_LDFLAGS += -O3 -g
@@ -68,11 +68,20 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
-ifeq ($(CGO_CXXFLAGS),)
-	CGO_CXXFLAGS += -g
-	CGO_CXXFLAGS += -O2
+# Respect CGO_CXXFLAGS if the caller set it, otherwise match the C flags above.
+ifeq ($(origin CGO_CXXFLAGS),undefined)
+	CGO_CXXFLAGS := -g -O3 -DNDEBUG
 endif
+
+# Give the C/C++ compilers the same ISA baseline GOAMD64 gives the Go compiler.
+# Keyed on CPU_ARCH so the two can never target different levels.
+# gcc and clang spell the v1 baseline "x86-64"; "x86-64-v1" is not a valid -march.
+ifneq ($(CPU_ARCH),)
+	CGO_MARCH := -march=$(strip $(if $(filter v1,$(GOAMD64_VERSION)),x86-64,x86-64-$(GOAMD64_VERSION)))
+	CGO_CFLAGS += $(CGO_MARCH)
+	CGO_CXXFLAGS += $(CGO_MARCH)
+endif
+
 export CGO_CXXFLAGS
 
 BUILD_TAGS =
