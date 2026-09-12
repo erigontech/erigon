@@ -262,9 +262,14 @@ func SetupTracerCtx(ctx *cli.Command) (*tracers.Tracer, error) {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
+	return SetupWithPrefix(nodeCtx, ctx, "erigon", rootLogger)
+}
+
+// SetupWithPrefix is Setup with an explicit log-file prefix, for binaries other than erigon.
+func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix string, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	RaiseFdLimit()
 
-	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
 	SetGoMemLimit(logger)
 	raiseGomaxprocsForIO(logger)
 	tracer, err := SetupTracerCtx(ctx)

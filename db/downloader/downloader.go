@@ -412,8 +412,8 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 			}
 			t, complete, new, err := d.addTorrentIfComplete(name)
 			if err != nil {
-				err = fmt.Errorf("adding torrent for %v: %w", path, err)
-				return err
+				d.log(log.LvlWarn, "add torrents from disk: skipping malformed torrent", "path", path, "err", err)
+				return nil
 			}
 			if !complete {
 				d.log(log.LvlDebug, "add torrents from disk: skipping incomplete torrent",
