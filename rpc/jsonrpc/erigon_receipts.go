@@ -60,18 +60,16 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([]t
 		return nil, err
 	}
 
-	var timestamp uint64
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+
 	receipts, ok := api.getCachedReceipts(ctx, hash)
-	if ok {
-		header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			return nil, nil
-		}
-		timestamp = header.Time
-	} else {
+	if !ok {
 		block, err := api.blockByHashWithSenders(ctx, tx, hash)
 		if err != nil {
 			return nil, err
@@ -79,7 +77,6 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([]t
 		if block == nil {
 			return nil, nil
 		}
-		timestamp = block.Time()
 		receipts, err = api.getReceipts(ctx, tx, block)
 		if err != nil {
 			return nil, err
@@ -89,7 +86,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([]t
 	for i, receipt := range receipts {
 		logs[i] = make(types.RPCLogs, len(receipt.Logs))
 		for j, log := range receipt.Logs {
-			logs[i][j] = &types.RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(timestamp)}
+			logs[i][j] = &types.RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(header.Time)}
 		}
 	}
 	return logs, nil
