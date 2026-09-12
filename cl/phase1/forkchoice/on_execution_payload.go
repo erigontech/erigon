@@ -537,6 +537,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
+	if !validatePayload && f.engine != nil && envelope.Payload != nil {
+		f.addPendingELPayload(block, signedEnvelope)
+	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
 	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.

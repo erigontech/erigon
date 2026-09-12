@@ -222,6 +222,30 @@ func TestHasEnvelopeCachesMissAndDumpInvalidatesMiss(t *testing.T) {
 	require.True(t, f.HasEnvelope(root))
 }
 
+func TestReadEnvelopeFromDiskOwnsDecodedTransactions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	firstRoot := common.Hash{1}
+	secondRoot := common.Hash{2}
+	f.headers.Store(firstRoot, &cltypes.BeaconBlockHeader{Slot: 1})
+	f.headers.Store(secondRoot, &cltypes.BeaconBlockHeader{Slot: 2})
+
+	first := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	first.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01, 0x02, 0x03}})
+	second := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	second.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x04, 0x05, 0x06}})
+	require.NoError(t, f.DumpEnvelopeOnDisk(firstRoot, first))
+	require.NoError(t, f.DumpEnvelopeOnDisk(secondRoot, second))
+
+	firstRead, err := f.ReadEnvelopeFromDisk(firstRoot)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x01, 0x02, 0x03}, firstRead.Message.Payload.Transactions.UnderlyngReference()[0])
+	_, err = f.ReadEnvelopeFromDisk(secondRoot)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x01, 0x02, 0x03}, firstRead.Message.Payload.Transactions.UnderlyngReference()[0])
+}
+
 func TestDumpEnvelopeBeforePruneDoesNotSurvivePrune(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	oldRoot := common.Hash{1}

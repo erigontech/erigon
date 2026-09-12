@@ -5,9 +5,42 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
+
+type requeueRootOnlyForkGraph struct {
+	fork_graph.ForkGraph
+}
+
+func (requeueRootOnlyForkGraph) WithRetainedBlock(_ common.Hash, fn func()) bool {
+	fn()
+	return true
+}
+
+func (requeueRootOnlyForkGraph) IsBlockRetained(common.Hash) bool { return true }
+
+func (requeueRootOnlyForkGraph) HasEnvelope(common.Hash) bool {
+	panic("requeue must not reacquire fork graph lifecycle state")
+}
+
+func TestRequeuePendingELPayloadDoesNotRecheckEnvelopeWhileRootIsRetained(t *testing.T) {
+	f := &ForkChoiceStore{forkGraph: requeueRootOnlyForkGraph{}}
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+
+	f.RequeuePendingELPayload(PendingELPayload{
+		Block:    &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}},
+		Envelope: envelope,
+	})
+
+	pending := f.DrainPendingELPayloads()
+	require.Len(t, pending, 1)
+	require.Equal(t, root, pending[0].Root)
+	require.Nil(t, pending[0].Block)
+	require.Nil(t, pending[0].Envelope)
+}
 
 func TestStalePayloadRetryAfterPruneIsDropped(t *testing.T) {
 	root := common.HexToHash("0x1234")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -28,7 +29,39 @@ const (
 	maxGloasAncestorVisitsPerCycle    = 32
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
+	gloasCollectorFlushBudget         = 2 * time.Second
+	chainTipHTTPBlockBudget           = 3 * time.Second
+	chainTipHTTPEnvelopeBudget        = 3 * time.Second
+	chainTipBlockP2PReserve           = 3 * time.Second
+	chainTipEnvelopeP2PReserve        = time.Second
+	maxChainTipHTTPBlockCount         = 8
 )
+
+type chainTipHTTPBlockScan struct {
+	mu              sync.Mutex
+	initialized     bool
+	minProgressSlot uint64
+	nextSlot        uint64
+}
+
+func (s *chainTipHTTPBlockScan) start(from, minProgressSlot uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.initialized || s.minProgressSlot != minProgressSlot || s.nextSlot < from {
+		s.initialized = true
+		s.minProgressSlot = minProgressSlot
+		s.nextSlot = from
+	}
+	return s.nextSlot
+}
+
+func (s *chainTipHTTPBlockScan) advance(minProgressSlot, nextSlot uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.initialized && s.minProgressSlot == minProgressSlot && nextSlot > s.nextSlot {
+		s.nextSlot = nextSlot
+	}
+}
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
@@ -115,9 +148,74 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 // fetchBlocksFromReqResp retrieves blocks starting from a specified block number and continues for a given count.
 // It sends a request to fetch the blocks, verifies the associated blobs, and inserts them into the blob store.
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
-func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
-	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
-	for err != nil {
+func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64, minProgressSlot uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
+	var fallbackURL string
+	if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
+		fallbackURL = urls[0]
+	}
+	return fetchBlocksFromSources(ctx, from, count, minProgressSlot, fallbackURL, cfg.beaconCfg, cfg.rpc.SendBeaconBlocksByRangeReq, network.FetchBlocksFromBeaconAPI, &cfg.chainTipHTTPBlockScan)
+}
+
+func fetchBlocksFromSources(
+	ctx context.Context,
+	from uint64,
+	count uint64,
+	minProgressSlot uint64,
+	fallbackURL string,
+	beaconCfg *clparams.BeaconChainConfig,
+	p2pFetch func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error),
+	httpFetch func(context.Context, string, uint64, uint64, *clparams.BeaconChainConfig) ([]*cltypes.SignedBeaconBlock, error),
+	httpScan *chainTipHTTPBlockScan,
+) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
+	httpFrom := from
+	httpRemaining := count
+	if httpScan != nil {
+		httpFrom = httpScan.start(from, minProgressSlot)
+		if skipped := httpFrom - from; skipped >= count {
+			httpRemaining = 0
+		} else {
+			httpRemaining -= skipped
+		}
+	}
+	for {
+		blocks, pid, err := p2pFetch(ctx, from, count)
+		if err == nil && len(blocks) > 0 {
+			slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
+				return cmp.Compare(a.Block.Slot, b.Block.Slot)
+			})
+			return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: blocks, Peer: pid}, nil
+		}
+		httpAdvanced := false
+		if fallbackURL != "" && httpRemaining > 0 {
+			httpCtx, cancelHTTP, ok := sourceHTTPContext(ctx, chainTipHTTPBlockBudget, chainTipBlockP2PReserve)
+			if ok {
+				httpCount := min(httpRemaining, maxChainTipHTTPBlockCount)
+				httpBlocks, httpErr := httpFetch(httpCtx, fallbackURL, httpFrom, httpCount, beaconCfg)
+				cancelHTTP()
+				if httpErr == nil && blocksReachSlot(httpBlocks, minProgressSlot) {
+					return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: httpBlocks, Peer: "http-fallback"}, nil
+				}
+				if httpErr == nil {
+					httpRemaining -= httpCount
+					nextHTTPFrom := httpFrom + httpCount
+					if nextHTTPFrom < httpFrom {
+						httpRemaining = 0
+					} else {
+						httpFrom = nextHTTPFrom
+						if httpScan != nil {
+							httpScan.advance(minProgressSlot, httpFrom)
+						}
+					}
+					httpAdvanced = true
+				}
+			}
+		}
+		if httpAdvanced && httpRemaining > 0 {
+			continue
+		}
+		if err == nil {
+			return nil, nil
+		}
 		// Respect context cancellation to avoid infinite loops.
 		select {
 		case <-ctx.Done():
@@ -133,23 +231,33 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 				return nil, ctx.Err()
 			}
 		}
-		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
+}
 
-	// If no blocks are returned, return nil without error
-	if len(blocks) == 0 {
-		return nil, nil
+func blocksReachSlot(blocks []*cltypes.SignedBeaconBlock, minSlot uint64) bool {
+	for _, block := range blocks {
+		if block != nil && block.Block != nil && block.Block.Slot >= minSlot {
+			return true
+		}
 	}
+	return false
+}
 
-	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
-		return cmp.Compare(a.Block.Slot, b.Block.Slot)
-	})
-
-	// Return the blocks and the peer ID wrapped in a PeeredObject
-	return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{
-		Data: blocks,
-		Peer: pid,
-	}, nil
+func sourceHTTPContext(ctx context.Context, budget, reserve time.Duration) (context.Context, context.CancelFunc, bool) {
+	if ctx.Err() != nil || budget <= 0 {
+		return nil, nil, false
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= reserve {
+			return nil, nil, false
+		}
+		if available := remaining - reserve; available < budget {
+			budget = available
+		}
+	}
+	httpCtx, cancel := context.WithTimeout(ctx, budget)
+	return httpCtx, cancel, true
 }
 
 // startFetchingBlocksMissedByGossipAfterSomeTime starts fetching blocks that might have been missed by gossip after a delay.
@@ -184,7 +292,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		}
 
 		// Fetch blocks from the specified range
-		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
+		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count, highestSeen+1)
 		if err != nil {
 			// Send error to the error channel and return
 			errCh <- err
@@ -235,7 +343,7 @@ MainLoop:
 
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
-			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+			envelopes := fetchParentEnvelopes(ctx, cfg, blocks.Data, envelopeRoots)
 
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
@@ -265,9 +373,13 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); envErr != nil {
+						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg))
+						log.Debug("[chainTipSync] parent envelope applied", "blockSlot", block.Block.Slot, "parentRoot", common.Hash(parentRoot), "hasEnvelope", cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)), "payloadVerified", cfg.forkChoice.IsPayloadVerified(common.Hash(parentRoot)), "err", envErr)
+						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
+					} else {
+						log.Debug("[chainTipSync] parent envelope absent from fetched set", "blockSlot", block.Block.Slot, "parentRoot", common.Hash(parentRoot), "fetched", len(envelopes))
 					}
 				}
 
@@ -360,24 +472,81 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
 // It retries until all envelopes are obtained or the context is cancelled.
-func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
-	if len(roots) == 0 {
+func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, batchBlocks []*cltypes.SignedBeaconBlock, roots [][32]byte) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	httpRoots := make([][32]byte, 0, len(roots)+len(batchBlocks))
+	rootSeen := make(map[[32]byte]struct{}, len(roots)+len(batchBlocks))
+	for _, root := range roots {
+		httpRoots = append(httpRoots, root)
+		rootSeen[root] = struct{}{}
+	}
+	for _, block := range batchBlocks {
+		if block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+			continue
+		}
+		parentRoot := block.Block.ParentRoot
+		if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+			continue
+		}
+		if _, ok := rootSeen[parentRoot]; ok {
+			continue
+		}
+		httpRoots = append(httpRoots, parentRoot)
+		rootSeen[parentRoot] = struct{}{}
+	}
+	if len(httpRoots) == 0 {
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	var httpFetch func(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
+		blocks := make([]*cltypes.SignedBeaconBlock, 0, len(batchBlocks)+len(httpRoots))
+		blocks = append(blocks, batchBlocks...)
+		for _, root := range httpRoots {
+			if block, ok := cfg.forkChoice.GetBlock(common.Hash(root)); ok && block != nil {
+				blocks = append(blocks, block)
+			}
+		}
+		httpFetch = func(httpCtx context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+			return network.FetchEnvelopesFromBeaconAPI(httpCtx, urls[0], blocks, httpRoots, cfg.beaconCfg)
+		}
+	}
+	return fetchEnvelopeSources(ctx, roots, chainTipHTTPEnvelopeBudget, httpFetch, func(p2pCtx context.Context, remaining [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		return network.RequestEnvelopesFrantically(p2pCtx, cfg.rpc, remaining)
+	})
+}
+
+func fetchEnvelopeSources(
+	ctx context.Context,
+	roots [][32]byte,
+	httpBudget time.Duration,
+	httpFetch func(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	p2pFetch func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error),
+) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-	remaining := make([][32]byte, len(roots))
-	copy(remaining, roots)
+	remaining := slices.Clone(roots)
+	if httpFetch != nil {
+		if httpCtx, cancelHTTP, ok := sourceHTTPContext(ctx, httpBudget, chainTipEnvelopeP2PReserve); ok {
+			maps.Copy(envelopes, httpFetch(httpCtx))
+			cancelHTTP()
+		}
+		missing := make([][32]byte, 0, len(roots))
+		for _, root := range roots {
+			if _, ok := envelopes[common.Hash(root)]; !ok {
+				missing = append(missing, root)
+			}
+		}
+		remaining = missing
+	}
 
 	const maxAttempts = 10
 	for attempt := 0; attempt < maxAttempts && len(remaining) > 0; attempt++ {
 		if ctx.Err() != nil {
 			return envelopes
 		}
-		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining)
+		result, err := p2pFetch(ctx, remaining)
 		if err != nil {
 			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
 			continue
@@ -724,6 +893,12 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 			}
 			return
 		}
+		resolved, ok := cfg.forkChoice.ResolvePendingELPayload(p)
+		if !ok {
+			cfg.forkChoice.RequeuePendingELPayload(p)
+			continue
+		}
+		p = resolved
 		if !validPendingGloasPayload(p) {
 			continue
 		}
@@ -982,6 +1157,28 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 	}
 }
 
+func prepareGloasPayloadRetries(ctx context.Context, cfg *Cfg) {
+	if cfg.executionClient.SupportInsertion() {
+		flushCtx, cancelFlush := context.WithTimeout(ctx, gloasCollectorFlushBudget)
+		if err := cfg.blockCollector.Flush(flushCtx); err != nil {
+			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
+		}
+		cancelFlush()
+	}
+	offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
+	runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset,
+		func(retryCtx context.Context) {
+			cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
+		},
+		func(retryCtx context.Context) {
+			drainPendingGloasPayloads(retryCtx, cfg)
+		},
+		func(retryCtx context.Context) {
+			retryUnverifiedAnchorPayload(retryCtx, cfg)
+		},
+	)
+}
+
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
@@ -990,23 +1187,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	if canValidateGloasPayloads(cfg) {
-		offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
-		runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset,
-			func(retryCtx context.Context) {
-				cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
-			},
-			func(retryCtx context.Context) {
-				drainPendingGloasPayloads(retryCtx, cfg)
-			},
-			func(retryCtx context.Context) {
-				retryUnverifiedAnchorPayload(retryCtx, cfg)
-			},
-		)
-		if cfg.executionClient.SupportInsertion() {
-			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
-			}
-		}
+		prepareGloasPayloadRetries(ctx, cfg)
 	}
 
 	if args.seenSlot >= args.targetSlot {

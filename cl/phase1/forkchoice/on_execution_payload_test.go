@@ -604,6 +604,38 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 }
 
+func TestOnExecutionPayloadWithoutValidationQueuesPayloadUntilEngineAcceptance(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	require.False(t, f.isPayloadAvailable(root))
+	_, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.False(t, ok)
+	pending := f.DrainPendingELPayloads()
+	require.Len(t, pending, 1)
+	require.Equal(t, root, pending[0].Root)
+	require.Nil(t, pending[0].Block)
+	require.Nil(t, pending[0].Envelope)
+	resolved, ok := f.ResolvePendingELPayload(pending[0])
+	require.True(t, ok)
+	require.Same(t, block, resolved.Block)
+	require.Same(t, envelope, resolved.Envelope)
+	f.RequeuePendingELPayload(resolved)
+	requeued := f.DrainPendingELPayloads()
+	require.Len(t, requeued, 1)
+	require.Equal(t, root, requeued[0].Root)
+	require.Nil(t, requeued[0].Block)
+	require.Nil(t, requeued[0].Envelope)
+}
+
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {
 	for _, localOrigin := range []bool{false, true} {
 		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {

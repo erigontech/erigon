@@ -1047,6 +1047,11 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	return blocks, nil
 }
 
+// FetchBlocksFromBeaconAPI returns validated blocks for the requested slot range.
+func FetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, count uint64, beaconCfg *clparams.BeaconChainConfig) ([]*cltypes.SignedBeaconBlock, error) {
+	return fetchBlocksFromBeaconAPI(ctx, baseURL, startSlot, count, beaconCfg)
+}
+
 func readBeaconAPIResponseBody(resp *http.Response) ([]byte, error) {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(clparams.MaxChunkSize)+1))
@@ -1082,6 +1087,23 @@ type fetchEnvelopeHTTPResult struct {
 	fetched int
 }
 
+// FetchEnvelopesFromBeaconAPI returns validated envelopes for the requested blocks and roots.
+func FetchEnvelopesFromBeaconAPI(
+	ctx context.Context,
+	baseURL string,
+	blocks []*cltypes.SignedBeaconBlock,
+	fullRoots [][32]byte,
+	beaconCfg *clparams.BeaconChainConfig,
+) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	result := fetchEnvelopesFromBeaconAPIAllowUnknownSlots(ctx, baseURL, blocks, fullRoots, received, beaconCfg)
+	log.Debug("[chainTipSync] fetched envelopes from beacon API", "count", result.fetched)
+	for root := range received {
+		log.Debug("[chainTipSync] fetched envelope root", "root", root)
+	}
+	return received
+}
+
 // fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API for FULL blocks missing from P2P.
 func fetchEnvelopesFromBeaconAPI(
 	ctx context.Context,
@@ -1090,6 +1112,29 @@ func fetchEnvelopesFromBeaconAPI(
 	fullRoots [][32]byte,
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	beaconCfg *clparams.BeaconChainConfig,
+) fetchEnvelopeHTTPResult {
+	return fetchEnvelopesFromBeaconAPIWithUnknownSlots(ctx, baseURL, blocks, fullRoots, received, beaconCfg, false)
+}
+
+func fetchEnvelopesFromBeaconAPIAllowUnknownSlots(
+	ctx context.Context,
+	baseURL string,
+	blocks []*cltypes.SignedBeaconBlock,
+	fullRoots [][32]byte,
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	beaconCfg *clparams.BeaconChainConfig,
+) fetchEnvelopeHTTPResult {
+	return fetchEnvelopesFromBeaconAPIWithUnknownSlots(ctx, baseURL, blocks, fullRoots, received, beaconCfg, true)
+}
+
+func fetchEnvelopesFromBeaconAPIWithUnknownSlots(
+	ctx context.Context,
+	baseURL string,
+	blocks []*cltypes.SignedBeaconBlock,
+	fullRoots [][32]byte,
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	beaconCfg *clparams.BeaconChainConfig,
+	allowUnknownSlots bool,
 ) fetchEnvelopeHTTPResult {
 	// Build root-to-slot mapping from blocks
 	rootToSlot := make(map[common.Hash]uint64, len(blocks))
@@ -1107,8 +1152,9 @@ func fetchEnvelopesFromBeaconAPI(
 
 	// Filter roots that need fetching
 	var toFetch []struct {
-		root [32]byte
-		slot uint64
+		root      [32]byte
+		slot      uint64
+		knownSlot bool
 	}
 	for _, root := range fullRoots {
 		h := common.Hash(root)
@@ -1116,13 +1162,14 @@ func fetchEnvelopesFromBeaconAPI(
 			continue
 		}
 		slot, ok := rootToSlot[h]
-		if !ok {
+		if !ok && !allowUnknownSlots {
 			continue
 		}
 		toFetch = append(toFetch, struct {
-			root [32]byte
-			slot uint64
-		}{root, slot})
+			root      [32]byte
+			slot      uint64
+			knownSlot bool
+		}{root, slot, ok})
 	}
 
 	if len(toFetch) == 0 {
@@ -1138,6 +1185,7 @@ func fetchEnvelopesFromBeaconAPI(
 		idx := i
 		slot := item.slot
 		root := item.root
+		knownSlot := item.knownSlot
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -1151,20 +1199,35 @@ func fetchEnvelopesFromBeaconAPI(
 
 			resp, err := client.Do(req)
 			if err != nil {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope request failed", "root", common.Hash(root), "err", err)
+				}
 				return
 			}
 			body, err := readBeaconAPIResponseBody(resp)
 			if err != nil {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope read failed", "root", common.Hash(root), "err", err)
+				}
 				return
 			}
 			if resp.StatusCode == http.StatusNotFound {
 				return
 			}
 			if resp.StatusCode != http.StatusOK {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope status", "root", common.Hash(root), "status", resp.StatusCode)
+				}
 				return
 			}
 			version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
-			if err != nil || version != clparams.GloasVersion || validateHTTPBlockVersion(beaconCfg, slot, version) != nil {
+			if err != nil || version != clparams.GloasVersion {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope version rejected", "root", common.Hash(root), "version", version, "err", err)
+				}
+				return
+			}
+			if knownSlot && validateHTTPBlockVersion(beaconCfg, slot, version) != nil {
 				return
 			}
 
@@ -1175,7 +1238,16 @@ func fetchEnvelopesFromBeaconAPI(
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
 				return
 			}
-			if envelope.Message == nil || envelope.Message.BeaconBlockRoot != common.Hash(root) {
+			if envelope.Message == nil {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope message missing", "requested", common.Hash(root))
+				}
+				return
+			}
+			if envelope.Message.BeaconBlockRoot != common.Hash(root) {
+				if allowUnknownSlots {
+					log.Debug("[chainTipSync] HTTP envelope root rejected", "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
+				}
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}
