@@ -875,6 +875,11 @@ func targetOf(br *blockResult) commitTarget {
 	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
 }
 
+// incrementalStepRehash makes a mid-block rehash cover only the accounts changed
+// since the previous one. Block end still covers every key the block touched, so
+// the block's changeset — and the unwind that reads it — are unaffected.
+var incrementalStepRehash = dbg.EnvBool("INCREMENTAL_STEP_REHASH", true)
+
 // computeMode selects compute's per-call behaviour; isolation is otherwise
 // decided by ownsChangeset.
 type computeMode struct {
@@ -901,8 +906,16 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
+	flushQueuedOnly := m.midBlock && incrementalStepRehash
+	if flushQueuedOnly {
+		cc.state.FlushQueuedToUpdates(cc.updates)
+	} else {
+		cc.state.FlushToUpdates(cc.updates)
+	}
 	if !m.midBlock {
+		if dbg.AssertEnabled {
+			cc.state.AssertWorkBound(t.blockNum)
+		}
 		cc.state.ResetBlockFlags()
 	}
 
@@ -928,6 +941,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
+	}
+
+	// After the rehash has landed, never before it.
+	if flushQueuedOnly {
+		cc.state.DrainQueued()
 	}
 
 	if !m.checkRoot {
