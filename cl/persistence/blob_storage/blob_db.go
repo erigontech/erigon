@@ -238,6 +238,9 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateV
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 			return errors.New("blob response contains incomplete sidecar")
 		}
+		if sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+			return errors.New("blob sidecar commitment inclusion proof has the wrong length")
+		}
 		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return errors.New("could not verify blob's inclusion proof")
 		}
@@ -256,8 +259,14 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateV
 	return nil
 }
 
-// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
-func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
+// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion.
+// Returns the slot of the last sidecar it processed and how many it stored.
+//
+// It stops at the first identifier a response does not match and returns a nil error, so a
+// nil error does not mean every sidecar landed — callers must read the store back to confirm.
+//
+// version is the block's, and gates the commitment inclusion proof: Gloas sidecars carry none.
+func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
 	kzgCtx := kzg.Ctx()
 	inserted := atomic.Uint64{}
 	if identifiers.Len() == 0 || len(sidecars) == 0 {
@@ -288,7 +297,13 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			break
 		}
 
-		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+		// The reader always decodes a fixed-length proof, so a shorter one would replace a readable
+		// file with an undecodable one. Checked for every version, including those that skip the
+		// proof's contents.
+		if sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+			return 0, 0, errors.New("blob sidecar commitment inclusion proof has the wrong length")
+		}
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, 0, errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {
