@@ -17,6 +17,8 @@
 package membatchwithdb_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,6 +75,17 @@ func TestRangeDescKeepsLastDbKey(t *testing.T) {
 	keys, _ := collectStream(t, it)
 
 	require.Equal(t, []string{"CCAA", "CBAA", "CAAA", "AAAA", "0AAA"}, keys)
+}
+
+func TestRangeDescWithLimitCountsNonDeletedRows(t *testing.T) {
+	batch := newBatchOverDbNonDupSort(t)
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("CCAA")))
+
+	it, err := batch.Range(kv.HeaderNumber, nil, nil, order.Desc, 2)
+	require.NoError(t, err)
+	keys, _ := collectStream(t, it)
+
+	require.Equal(t, []string{"CBAA", "CAAA"}, keys)
 }
 
 func TestRangeDupSortKeepsLastDbValue(t *testing.T) {
@@ -151,6 +164,53 @@ func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 	keys, _ := collectStream(t, it)
 
 	require.Equal(t, []string{"AAAA", "CAAA", "CCAA"}, keys)
+}
+
+func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbNonDupSort(t, rwTx)
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer overlay.Close()
+	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
+
+	view := overlay.NewReadView(rwTx)
+
+	const rounds = 200
+	var wg sync.WaitGroup
+	var writeErr, readErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range rounds {
+			if err := overlay.Delete(kv.HeaderNumber, []byte(fmt.Sprintf("E%03d", i))); err != nil {
+				writeErr = err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range rounds {
+			it, err := view.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
+			if err != nil {
+				readErr = err
+				return
+			}
+			for it.HasNext() {
+				if _, _, err := it.Next(); err != nil {
+					it.Close()
+					readErr = err
+					return
+				}
+			}
+			it.Close()
+		}
+	}()
+	wg.Wait()
+
+	require.NoError(t, writeErr)
+	require.NoError(t, readErr)
 }
 
 func TestRangeDupSortSkipsDeletedDbKey(t *testing.T) {

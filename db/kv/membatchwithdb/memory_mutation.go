@@ -183,14 +183,6 @@ func (m *MemoryMutation) isDupDeleted(table string, key []byte, val []byte) bool
 	return ok
 }
 
-func (m *MemoryMutation) hasDeletedEntries(table string) bool {
-	return len(m.deletedEntries[table]) > 0
-}
-
-func (m *MemoryMutation) hasDeletedDups(table string, key []byte) bool {
-	return len(m.deletedDups[table][string(key)]) > 0
-}
-
 func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
@@ -400,10 +392,13 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil && !m.isTableCleared(table) {
-		// Hidden rows don't count against limit, so the db side must be free to
-		// look past them; the merge below still stops at limit.
-		hidden := m.hasDeletedEntries(table) || len(m.deletedDups[table]) > 0
+	m.mu.RLock()
+	cleared := m.isTableCleared(table)
+	// Hidden rows don't count against limit, so the db side must be free to
+	// look past them; the merge below still stops at limit.
+	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !cleared {
 		dbLimit := limit
 		if hidden {
 			dbLimit = kv.Unlim
@@ -414,6 +409,8 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		}
 		if hidden {
 			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
 				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
 			})
 		}
@@ -478,16 +475,22 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 		k = s.nextKdb
 		v = s.nextVdb
 		s.hasNextDb = s.iterDb.HasNext()
-		if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
-			return nil, nil, err
+		s.nextKdb, s.nextVdb = nil, nil
+		if s.hasNextDb {
+			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
 		k = s.nextKmem
 		v = s.nextVmem
 		s.hasNextMem = s.iterMem.HasNext()
-		if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
-			return nil, nil, err
+		s.nextKmem, s.nextVmem = nil, nil
+		if s.hasNextMem {
+			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	return
@@ -496,8 +499,11 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil && !m.isTableCleared(table) && !m.isEntryDeleted(table, key) {
-		hidden := m.hasDeletedDups(table, key)
+	m.mu.RLock()
+	skipDb := m.isTableCleared(table) || m.isEntryDeleted(table, key)
+	hidden := len(m.deletedDups[table][string(key)]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !skipDb {
 		dbLimit := limit
 		if hidden {
 			dbLimit = kv.Unlim
@@ -507,7 +513,11 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 			return nil, err
 		}
 		if hidden {
-			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool { return !m.isDupDeleted(table, key, v) })
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isDupDeleted(table, key, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
@@ -572,15 +582,21 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
 		v = s.nextVdb
 		s.hasNextDb = s.iterDb.HasNext()
-		if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
-			return nil, nil, err
+		s.nextVdb = nil
+		if s.hasNextDb {
+			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
 		v = s.nextVmem
 		s.hasNextMem = s.iterMem.HasNext()
-		if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
-			return nil, nil, err
+		s.nextVmem = nil
+		if s.hasNextMem {
+			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	return
@@ -599,6 +615,8 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
 		t = map[string]map[string]struct{}{}
