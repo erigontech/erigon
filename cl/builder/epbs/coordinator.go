@@ -541,7 +541,7 @@ func withdrawalsMatch(actual *solid.ListSSZ[*cltypes.Withdrawal], expected []*ty
 	}
 	for i, want := range expected {
 		got := actual.Get(i)
-		if got == nil || want == nil || got.Index != want.Index || got.Validator != want.Validator || got.Address != want.Address || got.Amount != want.Amount {
+		if got == nil || want == nil || got.Index != uint64(want.Index) || got.Validator != uint64(want.Validator) || got.Address != want.Address || got.Amount != uint64(want.Amount) {
 			return false
 		}
 	}

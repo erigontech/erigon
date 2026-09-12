@@ -195,13 +195,13 @@ func TestLiveSlotInputResolverResolvesEmptyHeadWithOwnedInput(t *testing.T) {
 	require.Equal(t, uint64(2_000), input.AvailableBidValueGwei)
 	require.True(t, input.BuilderActive)
 	require.Len(t, input.Withdrawals, 1)
-	require.Equal(t, uint64(11), input.Withdrawals[0].Amount)
+	require.Equal(t, uint64(11), uint64(input.Withdrawals[0].Amount))
 	require.NotSame(t, preferences, input.ValidatedPreferences)
 
 	preferences.Message.FeeRecipient[0] ^= 1
 	headState.GetPayloadExpectedWithdrawals().Get(0).Amount++
 	require.NotEqual(t, preferences.Message.FeeRecipient, input.ValidatedPreferences.Message.FeeRecipient)
-	require.Equal(t, uint64(11), input.Withdrawals[0].Amount)
+	require.Equal(t, uint64(11), uint64(input.Withdrawals[0].Amount))
 }
 
 func TestLiveSlotInputResolverResolvesFullHeadFromEnvelope(t *testing.T) {

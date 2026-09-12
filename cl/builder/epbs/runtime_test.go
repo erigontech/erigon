@@ -178,8 +178,8 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	payload := validCoordinatorPayload(&cfg, input, big.NewInt(10_000_000_000))
 	for _, withdrawal := range input.Withdrawals {
 		payload.Eth1Block.Withdrawals.Append(&cltypes.Withdrawal{
-			Index: withdrawal.Index, Validator: withdrawal.Validator,
-			Address: withdrawal.Address, Amount: withdrawal.Amount,
+			Index: uint64(withdrawal.Index), Validator: uint64(withdrawal.Validator),
+			Address: withdrawal.Address, Amount: uint64(withdrawal.Amount),
 		})
 	}
 	assembler := &coordinatorAssembler{
@@ -245,8 +245,8 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 	payload := validCoordinatorPayload(&cfg, input, big.NewInt(10_000_000_000))
 	for _, withdrawal := range input.Withdrawals {
 		payload.Eth1Block.Withdrawals.Append(&cltypes.Withdrawal{
-			Index: withdrawal.Index, Validator: withdrawal.Validator,
-			Address: withdrawal.Address, Amount: withdrawal.Amount,
+			Index: uint64(withdrawal.Index), Validator: uint64(withdrawal.Validator),
+			Address: withdrawal.Address, Amount: uint64(withdrawal.Amount),
 		})
 	}
 	processor := &runtimeBidProcessor{processed: make(chan []byte, 1)}
@@ -308,8 +308,8 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	payload := validCoordinatorPayload(&cfg, input, big.NewInt(10_000_000_000))
 	for _, withdrawal := range input.Withdrawals {
 		payload.Eth1Block.Withdrawals.Append(&cltypes.Withdrawal{
-			Index: withdrawal.Index, Validator: withdrawal.Validator,
-			Address: withdrawal.Address, Amount: withdrawal.Amount,
+			Index: uint64(withdrawal.Index), Validator: uint64(withdrawal.Validator),
+			Address: withdrawal.Address, Amount: uint64(withdrawal.Amount),
 		})
 	}
 	payloadProcessor := &runtimePayloadProcessor{processed: make(chan *cltypes.SignedExecutionPayloadEnvelope, 1)}

@@ -178,10 +178,10 @@ func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*Assem
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(a.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, withdrawal := range withdrawals {
 		payload.Withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    withdrawal.Amount,
+			Amount:    uint64(withdrawal.Amount),
 			Address:   withdrawal.Address,
-			Index:     withdrawal.Index,
-			Validator: withdrawal.Validator,
+			Index:     uint64(withdrawal.Index),
+			Validator: uint64(withdrawal.Validator),
 		})
 	}
 	payload.ExcessBlobGas = *header.ExcessBlobGas
