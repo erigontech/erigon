@@ -16,10 +16,3 @@ func marshalAppend(dst []byte, v any) ([]byte, error) {
 	err := jsonv2.MarshalWrite(&w, v, json.DefaultOptionsV1())
 	return w.b, err
 }
-
-type sliceWriter struct{ b []byte }
-
-func (w *sliceWriter) Write(p []byte) (int, error) {
-	w.b = append(w.b, p...)
-	return len(p), nil
-}
