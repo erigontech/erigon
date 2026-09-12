@@ -66,10 +66,6 @@ func addVec(v *metrics.CounterVec, kind string, n uint64) {
 	}
 }
 
-// publishBranchWrites bills n branch writes of bytesOut bytes. Called where the
-// write lands rather than at a round boundary, because deferred writes can be
-// applied after their round has closed. m, when non-nil, also gets them for the
-// trie's own log and CSV counters.
 func publishBranchWrites(n, bytesOut int, m *Metrics) {
 	if n <= 0 {
 		return

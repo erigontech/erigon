@@ -68,7 +68,7 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
 	// same keys the workers do, so aliasing them counts every key twice.
-	p.metrics = NewMetrics("")
+	p.metrics = &Metrics{}
 	return p
 }
 
@@ -191,12 +191,6 @@ func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
 	tw := NewSyncWriter(w)
 	if p.template != nil {
 		p.template.SetTraceWriter(tw)
-	}
-}
-
-func (p *ParallelPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
-	if p.template != nil {
-		p.template.EnableCsvMetrics(filePathPrefix)
 	}
 }
 

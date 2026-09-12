@@ -17,15 +17,12 @@
 package backtester
 
 import (
-	"container/heap"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
 	"path"
 	"runtime/pprof"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type Opt func(bt *Backtester)
@@ -57,26 +53,12 @@ func WithTrieWarmup(trieWarmup bool) Opt {
 	}
 }
 
-func WithChartsTopN(n uint64) Opt {
-	return func(bt *Backtester) {
-		bt.metricsTopN = n
-	}
-}
-
-func WithChartsPageSize(n uint64) Opt {
-	return func(bt *Backtester) {
-		bt.metricsPageSize = n
-	}
-}
-
 func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
-		logger:          logger,
-		db:              db,
-		blockReader:     br,
-		outputDir:       outputDir,
-		metricsTopN:     10,
-		metricsPageSize: 1024,
+		logger:      logger,
+		db:          db,
+		blockReader: br,
+		outputDir:   outputDir,
 	}
 	for _, opt := range opts {
 		opt(&bt)
@@ -85,14 +67,12 @@ func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, o
 }
 
 type Backtester struct {
-	logger          log.Logger
-	db              kv.TemporalRoDB
-	blockReader     dbservices.FullBlockReader
-	outputDir       string
-	paraTrie        bool
-	trieWarmup      bool
-	metricsTopN     uint64
-	metricsPageSize uint64
+	logger      log.Logger
+	db          kv.TemporalRoDB
+	blockReader dbservices.FullBlockReader
+	outputDir   string
+	paraTrie    bool
+	trieWarmup  bool
 }
 
 func (bt Backtester) RunTMinusN(ctx context.Context, n uint64) error {
@@ -164,17 +144,12 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 			return err
 		}
 	}
-	resultsFilePath, err := bt.processResults(fromBlock, toBlock, runOutputDir)
-	if err != nil {
-		return err
-	}
 	bt.logger.Info(
 		"finished commitment backtest",
 		"blocks", toBlock-fromBlock+1,
 		"in", time.Since(start),
 		"results", runOutputDir,
 	)
-	bt.logger.Info("metrics", "at", fmt.Sprintf("file://%s", resultsFilePath))
 	return nil
 }
 
@@ -201,7 +176,6 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
-	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
 		return err
@@ -294,65 +268,6 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	return nil
 }
 
-func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) (string, error) {
-	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
-	var chartsPageFilePaths []string
-	var topNSlowest slowestBatchesHeap
-	var branchJumpdestCounts [128][16]uint64
-	var branchKeyLenCounts [128]uint64
-	pageMetrics := make([]MetricValues, 0, bt.metricsPageSize)
-	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += bt.metricsPageSize {
-		pageBlockTo := min(pageBlockFrom+bt.metricsPageSize-1, toBlock)
-		pageMetrics = pageMetrics[:0]
-		for block := pageBlockFrom; block <= pageBlockTo; block++ {
-			blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
-			commitmentMetricsFilePrefix := deriveBlockMetricsFilePrefix(blockOutputDir)
-			mVals, err := commitment.UnmarshallMetricValuesCsv(commitmentMetricsFilePrefix)
-			if err != nil {
-				return "", err
-			}
-			if len(mVals) != 1 {
-				return "", fmt.Errorf("expected metrics for 1 batch: got=%d, block=%d", len(mVals), block)
-			}
-			mv := MetricValues{
-				BatchId:      block,
-				MetricValues: mVals[0],
-			}
-			if uint64(topNSlowest.Len()) < bt.metricsTopN {
-				heap.Push(&topNSlowest, mv)
-			} else if mv.SpentProcessing > topNSlowest[0].SpentProcessing {
-				heap.Pop(&topNSlowest)
-				heap.Push(&topNSlowest, mv)
-			}
-			for branchKey, branchStats := range mVals[0].Branches {
-				nibs, err := hex.DecodeString(branchKey)
-				if err != nil {
-					return "", err
-				}
-				if nibbles.HasTerm(nibs) {
-					nibs = nibs[:len(nibs)-1]
-				}
-				lastNibble := nibs[len(nibs)-1]
-				depth := len(nibs) - 1
-				branchJumpdestCounts[depth][lastNibble] += branchStats.LoadBranch
-				branchKeyLenCounts[depth]++
-			}
-			pageMetrics = append(pageMetrics, mv)
-		}
-		chartsPageFilePath, err := renderDetailedPage(pageMetrics, runOutputDir)
-		if err != nil {
-			return "", err
-		}
-		chartsPageFilePaths = append(chartsPageFilePaths, chartsPageFilePath)
-	}
-	agg := crossPageAggMetrics{
-		top:                  &topNSlowest,
-		branchJumpdestCounts: &branchJumpdestCounts,
-		branchKeyLenCounts:   &branchKeyLenCounts,
-	}
-	return renderOverviewPage(agg, chartsPageFilePaths, runOutputDir)
-}
-
 func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {
 	firstBlockNum, _, err := tnr.First(tx)
 	if err != nil {
@@ -410,35 +325,6 @@ func (ri runId) String() string {
 	return fmt.Sprintf("%s_%d_%d_%d", sb.String(), ri.fromBlock, ri.toBlock, ri.start.Unix())
 }
 
-func extractRunId(s string) runId {
-	parts := strings.Split(s, "_")
-	paraTrie := parts[0] == "para"
-	trieWarmup := parts[1] == "warm"
-	fromBlock, err := strconv.ParseUint(parts[2], 10, 64)
-	if err != nil {
-		panic(fmt.Errorf("extractRunId failed to parse fromBlock: %w", err))
-	}
-	toBlock, err := strconv.ParseUint(parts[3], 10, 64)
-	if err != nil {
-		panic(fmt.Errorf("extractRunId failed to parse toBlock: %w", err))
-	}
-	startUnix, err := strconv.ParseInt(parts[4], 10, 64)
-	if err != nil {
-		panic(fmt.Errorf("extractRunId failed to parse start: %w", err))
-	}
-	return runId{
-		paraTrie:   paraTrie,
-		trieWarmup: trieWarmup,
-		fromBlock:  fromBlock,
-		toBlock:    toBlock,
-		start:      time.Unix(startUnix, 0),
-	}
-}
-
 func deriveBlockOutputDir(runOutputDir string, block uint64) string {
 	return path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
-}
-
-func deriveBlockMetricsFilePrefix(blockOutputDir string) string {
-	return path.Join(blockOutputDir, "commitment_metrics")
 }

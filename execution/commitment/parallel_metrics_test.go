@@ -86,23 +86,15 @@ func TestParallelPatriciaHashedReportsProgress(t *testing.T) {
 }
 
 func TestMetricsResetClearsEveryCounter(t *testing.T) {
-	m := NewMetrics("")
-	m.cacheBranch.Add(3)
-	m.cacheAccount.Add(4)
-	m.cacheStorage.Add(5)
+	m := &Metrics{}
 	m.folds.Add(6)
 	m.unfolds.Add(7)
-	m.spentFolding.Add(8)
 
 	m.Reset()
 
 	v := m.AsValues()
-	assert.Zero(t, v.CacheBranch)
-	assert.Zero(t, v.CacheAccount)
-	assert.Zero(t, v.CacheStorage)
 	assert.Zero(t, v.Folds)
 	assert.Zero(t, v.Unfolds)
-	assert.Zero(t, v.SpentFolding)
 }
 
 func TestRoundKeysAreDistinctNotTraversals(t *testing.T) {
