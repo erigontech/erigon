@@ -541,6 +541,10 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	} else {
 		cell.accountAddrLen = 0
 	}
+	if depth == 64 && cell.hashedExtLen == 0 && cell.extLen > 0 {
+		copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+		cell.hashedExtLen = cell.extLen
+	}
 	cell.storageAddrLen = upCell.storageAddrLen
 	if upCell.storageAddrLen > 0 {
 		copy(cell.storageAddr[:], upCell.storageAddr[:upCell.storageAddrLen])
@@ -643,7 +647,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
 			}
-			if depth == 0 {
+			if depth == 0 && cell.accountAddrLen == 0 {
 				accountKeyLen = 0
 			}
 			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
@@ -2307,11 +2311,12 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
+		unfoldErr := hph.unfold(hashedKey, unfolding)
 		if unfoldDone != nil {
 			unfoldDone()
+		}
+		if unfoldErr != nil {
+			return fmt.Errorf("unfold: %w", unfoldErr)
 		}
 		if printLater {
 			fmt.Fprintf(hph.traceW, "[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
@@ -2327,11 +2332,12 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
-		if err := hph.fold(); err != nil {
-			return fmt.Errorf("fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return fmt.Errorf("fold: %w", foldErr)
 		}
 	}
 	// Now unfold the path so the cell at hashedKey is reachable.
@@ -2381,8 +2387,13 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
-		if err := hph.fold(); err != nil {
-			return cell{}, fmt.Errorf("final fold: %w", err)
+		foldDone := hph.metrics.StartFolding(nil)
+		foldErr := hph.fold()
+		if foldDone != nil {
+			foldDone()
+		}
+		if foldErr != nil {
+			return cell{}, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2627,11 +2638,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return nil, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
