@@ -19,6 +19,7 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,6 +82,8 @@ type flushTestHarness struct {
 	collector *PersistentBlockCollector
 	inserted  []*types.Block
 	fcuHeads  []common.Hash
+	insertFn  func(context.Context, []*types.Block) error
+	fcuFn     func(context.Context, common.Hash) error
 }
 
 // insertedNumbers returns the block numbers of every inserted block in call order.
@@ -100,14 +103,20 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block) error {
+		func(ctx context.Context, blocks []*types.Block) error {
+			if h.insertFn != nil {
+				return h.insertFn(ctx, blocks)
+			}
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		},
 	).AnyTimes()
 	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+		func(ctx context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			if h.fcuFn != nil {
+				return nil, h.fcuFn(ctx, head)
+			}
 			h.fcuHeads = append(h.fcuHeads, head)
 			return nil, nil
 		},
@@ -405,6 +414,83 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	require.Equal(t, blockHash(blocks[2]), h.fcuHeads[0], "first FCU should target the last block of batch 1 (block 3)")
 	require.Equal(t, blockHash(blocks[5]), h.fcuHeads[1], "second FCU should target the last block of batch 2 (block 6)")
 	require.Equal(t, blockHash(blocks[6]), h.fcuHeads[2], "final FCU should target the last inserted block (block 7)")
+}
+
+func TestFlushPersistsCompletedBatchProgressAfterCancellation(t *testing.T) {
+	origBatchSize := batchSize
+	batchSize = 2
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+	ctx, cancel := context.WithCancel(t.Context())
+	h.insertFn = func(ctx context.Context, blocks []*types.Block) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h.inserted = append(h.inserted, blocks...)
+		cancel()
+		return nil
+	}
+
+	prev := common.Hash{}
+	for i := range 5 {
+		block := makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(block))
+		prev = blockHash(block)
+	}
+
+	require.ErrorIs(t, h.collector.Flush(ctx), context.Canceled)
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.False(t, h.collector.HasBlock(1))
+	require.False(t, h.collector.HasBlock(2))
+	require.True(t, h.collector.HasBlock(3))
+	require.True(t, h.collector.HasBlock(4))
+	require.True(t, h.collector.HasBlock(5))
+
+	h.insertFn = nil
+	require.NoError(t, h.collector.Flush(t.Context()))
+	require.Equal(t, []uint64{1, 2, 3, 4, 5}, h.insertedNumbers())
+}
+
+func TestFlushPersistsMaxHeightProgressAfterCancellation(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+	ctx, cancel := context.WithCancel(t.Context())
+	h.insertFn = func(ctx context.Context, blocks []*types.Block) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h.inserted = append(h.inserted, blocks...)
+		cancel()
+		return nil
+	}
+	block := makeBeaconBlock(t, ^uint64(0), 'a', common.Hash{})
+	require.NoError(t, h.collector.AddBlock(block))
+
+	require.NoError(t, h.collector.Flush(ctx))
+	require.Equal(t, []uint64{^uint64(0)}, h.insertedNumbers())
+	require.False(t, h.collector.HasBlock(^uint64(0)))
+}
+
+func TestFlushRetainsBatchWhenForkChoiceUpdateFails(t *testing.T) {
+	origBatchSize := batchSize
+	batchSize = 2
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+	fcuErr := errors.New("fork choice unavailable")
+	h.fcuFn = func(context.Context, common.Hash) error { return fcuErr }
+	prev := common.Hash{}
+	for i := range 3 {
+		block := makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(block))
+		prev = blockHash(block)
+	}
+
+	require.ErrorIs(t, h.collector.Flush(t.Context()), fcuErr)
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.True(t, h.collector.HasBlock(1))
+	require.True(t, h.collector.HasBlock(2))
+	require.True(t, h.collector.HasBlock(3))
 }
 
 // TestFlushSingleFCUWhenBelowBatchSize verifies the baseline: when total

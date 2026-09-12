@@ -72,6 +72,7 @@ type Cfg struct {
 	caplinConfig                 clparams.CaplinConfig
 	hasDownloaded                bool
 	gloasPayloadRetryOffset      atomic.Uint32
+	gloasEnvelopeApplyOffset     atomic.Uint32
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
 	gloasHeadEnvelopeRequestMu   sync.Mutex
@@ -79,7 +80,7 @@ type Cfg struct {
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64
 	gloasHeadEnvelopeRequestHead common.Hash
 	gloasHeadEnvelopeAttempted   bool
-	gloasHeadEnvelopeRetryUsed   bool
+	gloasHeadEnvelopeRetryAt     time.Time
 	chainTipHTTPBlockScan        chainTipHTTPBlockScan
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash

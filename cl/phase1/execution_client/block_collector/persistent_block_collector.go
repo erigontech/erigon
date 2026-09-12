@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -44,6 +45,8 @@ import (
 // this size; smaller databases are cleared in place so chain-tip flushes don't
 // recreate the directory on every block.
 var dropDBSizeThreshold = uint64(1 * datasize.GB)
+
+const progressPersistTimeout = 5 * time.Second
 
 // PersistentBlockCollector stores downloaded blocks to an MDBX database
 // so they survive restarts. The database is cleared after successful loading.
@@ -295,13 +298,8 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 						return err
 					}
-					// Drive FCU after each batch so execution + prune can drain
-					// BlockTransaction as InsertBlocks proceeds. Without this,
-					// the entire backfill (potentially 100k+ blocks → 20+ GB
-					// of tx data) accumulates in chaindata before any drain
-					// can occur.
-					if lastInsertedBlock != nil {
-						p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+					if err := p.completeInsertedBatch(ctx, lastCommittedHeight, lastInsertedBlock); err != nil {
+						return err
 					}
 					blocksBatch = []*types.Block{}
 				}
@@ -337,39 +335,22 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 			return err
 		}
-	}
-
-	if lastInsertedBlock != nil {
-		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+		if err := p.completeInsertedBatch(ctx, lastCommittedHeight, lastInsertedBlock); err != nil {
+			return err
+		}
 	}
 
 	if gapDetected {
 		// Prune only rows the caller is done with; rows past the gap stay so a
 		// future re-download of the missing range unblocks the next Flush.
-		cutoff := max(lastCommittedHeight+1, minInsertableBlockNumber)
-		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
-			cursor, err := tx.RwCursor(kv.Headers)
-			if err != nil {
-				return err
-			}
-			defer cursor.Close()
-			for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
-				if err != nil {
-					return err
-				}
-				if len(k) < 8 {
-					// Defensive: payloadKey always produces 8-byte keys.
-					continue
-				}
-				if binary.BigEndian.Uint64(k[:8]) >= cutoff {
-					break
-				}
-				if err := cursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+		pruneHeight := lastCommittedHeight
+		if minInsertableBlockNumber > 0 {
+			pruneHeight = max(pruneHeight, minInsertableBlockNumber-1)
+		}
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), progressPersistTimeout)
+		err := p.pruneRowsThrough(persistCtx, pruneHeight)
+		cancel()
+		if err != nil {
 			p.logger.Warn("[BlockCollector] Failed to prune consumed blocks", "err", err)
 		}
 		return nil
@@ -403,6 +384,43 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.db = db
 
 	return nil
+}
+
+func (p *PersistentBlockCollector) completeInsertedBatch(ctx context.Context, lastCommittedHeight uint64, lastInsertedBlock *types.Block) error {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), progressPersistTimeout)
+	defer cancel()
+	if err := p.doForkChoiceUpdate(persistCtx, lastInsertedBlock); err != nil {
+		return fmt.Errorf("failed to persist block collector fork choice: %w", err)
+	}
+	if err := p.pruneRowsThrough(persistCtx, lastCommittedHeight); err != nil {
+		return fmt.Errorf("failed to persist block collector progress: %w", err)
+	}
+	return nil
+}
+
+func (p *PersistentBlockCollector) pruneRowsThrough(ctx context.Context, maxHeight uint64) error {
+	return p.db.Update(ctx, func(tx kv.RwTx) error {
+		cursor, err := tx.RwCursor(kv.Headers)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+			if err != nil {
+				return err
+			}
+			if len(k) < 8 {
+				continue
+			}
+			if binary.BigEndian.Uint64(k[:8]) > maxHeight {
+				break
+			}
+			if err := cursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // dbSize returns the current database file size, or 0 when unavailable —
@@ -494,16 +512,16 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 }
 
 // doForkChoiceUpdate sends a ForkChoiceUpdate to the EL for the given block.
-func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastBlock *types.Block) {
+func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastBlock *types.Block) error {
 	lastBlockHash := lastBlock.Hash()
 	currentHeader, err := p.engine.CurrentHeader(ctx)
 	if err != nil {
-		p.logger.Warn("[BlockCollector] Failed to get current header", "err", err)
+		return fmt.Errorf("failed to get current header: %w", err)
 	}
 
 	isForkchoiceNeeded := currentHeader == nil || lastBlock.NumberU64() > currentHeader.Number.Uint64()
 	if !isForkchoiceNeeded {
-		return
+		return nil
 	}
 
 	fcuVersion := clparams.DenebVersion
@@ -511,8 +529,9 @@ func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastB
 		fcuVersion = clparams.GloasVersion
 	}
 	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
-		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
+		return fmt.Errorf("failed to update fork choice: %w", err)
 	}
+	return nil
 }
 
 // HasBlock checks if a block with the given number is already in the collector
