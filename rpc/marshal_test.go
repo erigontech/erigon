@@ -10,9 +10,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Only one marshalAppend compiles per toolchain, so both are pinned to the same
-// oracle: whatever json.Marshal produces, byte for byte, appended to dst.
-func TestMarshalAppendMatchesMarshal(t *testing.T) {
+// Only one marshalInto compiles per toolchain, so both are pinned to the same
+// oracle: whatever json.Marshal produces, byte for byte, appended to the buffer.
+func TestMarshalIntoMatchesMarshal(t *testing.T) {
 	t.Parallel()
 
 	for name, v := range map[string]any{
@@ -33,36 +33,37 @@ func TestMarshalAppendMatchesMarshal(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, prefix := range []string{"", "keep-me"} {
-				got, err := marshalAppend([]byte(prefix), v)
-				if err != nil {
+				var buf bytes.Buffer
+				buf.WriteString(prefix)
+				if err := marshalInto(&buf, v); err != nil {
 					t.Fatal(err)
 				}
-				if string(got) != prefix+string(want) {
-					t.Errorf("prefix %q:\n want %q\n got  %q", prefix, prefix+string(want), got)
+				if buf.String() != prefix+string(want) {
+					t.Errorf("prefix %q:\n want %q\n got  %q", prefix, prefix+string(want), buf.String())
 				}
 			}
 		})
 	}
 }
 
-// A reused buffer must not leak the previous response into the next one.
-func TestMarshalAppendReusesBuffer(t *testing.T) {
+// A reused buffer must keep its capacity and not leak the previous response.
+func TestMarshalIntoReusesBuffer(t *testing.T) {
 	t.Parallel()
 
-	buf, err := marshalAppend(nil, benchLogs(8))
-	if err != nil {
+	var buf bytes.Buffer
+	if err := marshalInto(&buf, benchLogs(8)); err != nil {
 		t.Fatal(err)
 	}
-	big := cap(buf)
+	big := buf.Cap()
 
-	buf, err = marshalAppend(buf[:0], hexutil.Uint64(1))
-	if err != nil {
+	buf.Reset()
+	if err := marshalInto(&buf, hexutil.Uint64(1)); err != nil {
 		t.Fatal(err)
 	}
-	if want := []byte(`"0x1"`); !bytes.Equal(buf, want) {
-		t.Fatalf("want %s, got %s", want, buf)
+	if want := `"0x1"`; buf.String() != want {
+		t.Fatalf("want %s, got %s", want, buf.String())
 	}
-	if cap(buf) != big {
-		t.Errorf("capacity not reused: had %d, now %d", big, cap(buf))
+	if buf.Cap() != big {
+		t.Errorf("capacity not reused: had %d, now %d", big, buf.Cap())
 	}
 }

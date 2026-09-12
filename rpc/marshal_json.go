@@ -7,13 +7,12 @@ import (
 	"encoding/json"
 )
 
-// marshalAppend appends the JSON encoding of v to dst. Encoding through a
-// Writer skips the copy json.Marshal makes on the way out. Encode terminates
-// the value with a newline that the RPC framing does not want.
-func marshalAppend(dst []byte, v any) ([]byte, error) {
-	w := sliceWriter{dst}
-	if err := json.NewEncoder(&w).Encode(v); err != nil {
-		return dst, err
+// marshalInto appends the JSON encoding of v to buf. Encoding through a Writer
+// skips the copy json.Marshal makes on the way out.
+func marshalInto(buf *bytes.Buffer, v any) error {
+	if err := json.NewEncoder(buf).Encode(v); err != nil {
+		return err
 	}
-	return bytes.TrimSuffix(w.b, []byte("\n")), nil
+	buf.Truncate(buf.Len() - 1) // Encode terminates the value with a newline
+	return nil
 }

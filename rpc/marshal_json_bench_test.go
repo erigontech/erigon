@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -51,18 +52,18 @@ func BenchmarkResultMarshal(b *testing.B) {
 		b.Run(fmt.Sprintf("logs=%d/%dKB/write_fresh", n, size/1024), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := marshalAppend(nil, logs); err != nil {
+				var buf bytes.Buffer
+				if err := marshalInto(&buf, logs); err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
 		b.Run(fmt.Sprintf("logs=%d/%dKB/write_reused", n, size/1024), func(b *testing.B) {
 			b.ReportAllocs()
-			buf := make([]byte, 0, 1024)
+			var buf bytes.Buffer
 			for b.Loop() {
-				var err error
-				buf, err = marshalAppend(buf[:0], logs)
-				if err != nil {
+				buf.Reset()
+				if err := marshalInto(&buf, logs); err != nil {
 					b.Fatal(err)
 				}
 			}
