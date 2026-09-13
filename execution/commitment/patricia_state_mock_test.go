@@ -84,6 +84,10 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, nil
 }
 
+func (ms *MockState) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return ms.Branch(prefix)
+}
+
 func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	if ms.concurrent.Load() {
 		ms.mu.RLock()
