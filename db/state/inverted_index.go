@@ -518,16 +518,27 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64, err error) {
+// iiSeekResult locates a key's next txNum at or above the requested one, plus
+// where that value sits: the key's ordinal in the .ef file and the rank of the
+// txNum in that key's list. The history value index is addressed by the pair,
+// and only the .vi built from fileIdx's .ef can resolve it.
+type iiSeekResult struct {
+	txNum      uint64
+	keyOrdinal uint64
+	rank       uint64
+	fileIdx    int
+}
+
+func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, res iiSeekResult, err error) {
 	if len(iit.files) == 0 {
-		return false, 0, nil
+		return false, res, nil
 	}
 
 	if txNum < iit.files[0].startTxNum {
-		return false, 0, fmt.Errorf("seekInFiles(invIndex=%s,txNum=%d) but data before txNum=%d not available", iit.name.String(), txNum, iit.files[0].startTxNum)
+		return false, res, fmt.Errorf("seekInFiles(invIndex=%s,txNum=%d) but data before txNum=%d not available", iit.name.String(), txNum, iit.files[0].startTxNum)
 	}
 	if iit.files[len(iit.files)-1].endTxNum <= txNum {
-		return false, 0, nil
+		return false, res, nil
 	}
 
 	var seq multiencseq.SequenceReader
@@ -540,13 +551,17 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.total++
 		fromCache, ok := iit.seekInFilesCache.Get(hi)
-		if ok && fromCache.requested <= txNum {
+		// A miss is stored as found=0, and a hit is only stored when found>txNum,
+		// so found=0 is unambiguous. It has to be tested first: txNum=0 also
+		// satisfies txNum<=found and would turn the miss into a hit.
+		if ok && fromCache.lo == lo && fromCache.requested <= txNum {
+			if fromCache.found == 0 {
+				iit.seekInFilesCache.hit++
+				return false, res, nil
+			}
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
-				return true, fromCache.found, nil
-			} else if fromCache.found == 0 { //not found
-				iit.seekInFilesCache.hit++
-				return false, 0, nil
+				return true, iiSeekResult{txNum: fromCache.found, keyOrdinal: fromCache.keyOrdinal, rank: fromCache.rank, fileIdx: fromCache.fileIdx}, nil
 			}
 		}
 	}
@@ -555,7 +570,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if iit.files[i].endTxNum <= txNum {
 			continue
 		}
-		offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+		offset, keyOrdinal, ok := iit.statelessIdxReader(i).TwoLayerLookupByHashWithOrdinal(hi, lo)
 		if !ok {
 			continue
 		}
@@ -568,24 +583,24 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		encodedSeq, _ := g.Next(nil)
 
 		seq.Reset(iit.files[i].startTxNum, encodedSeq)
-		equalOrHigherTxNum, _, found = seq.Seek(txNum)
+		equalOrHigherTxNum, rank, found := seq.Seek(txNum)
 		if !found {
 			continue
 		}
 
 		if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
-			return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
+			return false, iiSeekResult{txNum: equalOrHigherTxNum}, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
-			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
+			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i})
 		}
-		return true, equalOrHigherTxNum, nil
+		return true, iiSeekResult{txNum: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i}, nil
 	}
 
 	if iit.seekInFilesCache != nil {
-		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: 0})
+		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: 0})
 	}
-	return false, 0, nil
+	return false, res, nil
 }
 
 // IdxRange - return range of txNums for given `key`

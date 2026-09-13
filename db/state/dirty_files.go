@@ -120,6 +120,7 @@ func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
+	vi                   *HistoryValueIndex
 	bindex               *btindex.BtIndex
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
@@ -149,16 +150,19 @@ func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
 	i.index.MadvNormal()
+	i.vi.MadvNormal()
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
 	i.index.MadvSequential()
+	i.vi.MadvSequential()
 }
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()
+	i.vi.DisableReadAhead()
 	//i.bindex.DisableReadAhead()
 	//i.existence.DisableReadAhead()
 }
@@ -217,6 +221,8 @@ func (i *FilesItem) closeFiles() {
 	i.decompressor = nil
 	i.index.Close()
 	i.index = nil
+	i.vi.Close()
+	i.vi = nil
 	i.bindex.Close()
 	i.bindex = nil
 	i.existence.Close()
@@ -229,6 +235,9 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	}
 	if i.index != nil {
 		relativePaths = append(relativePaths, i.index.FilePath())
+	}
+	if i.vi != nil {
+		relativePaths = append(relativePaths, i.vi.FilePath())
 	}
 	if i.bindex != nil {
 		relativePaths = append(relativePaths, i.bindex.FilePath())
@@ -263,6 +272,17 @@ func (i *FilesItem) closeFilesAndRemove() {
 			log.Trace("remove after close", "err", err, "file", i.index.FileName())
 		}
 		i.index = nil
+	}
+	if i.vi != nil {
+		path := i.vi.FilePath()
+		i.vi.Close()
+		if err := dir.RemoveFile(path); err != nil {
+			log.Trace("remove after close", "err", err, "file", path)
+		}
+		if err := dir.RemoveFile(path + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", path)
+		}
+		i.vi = nil
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
@@ -400,7 +420,7 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 // openDirtyAccessor opens a matching, supported accessor.
 // Missing accessors do not invalidate the item, and matching or opening failures
 // are tolerated because accessors can be rebuilt from the data file.
-func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string) error, tag string, logger log.Logger) {
+func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string, fileVer version.Version) error, tag string, logger log.Logger) {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
 		logger.Debug("[agg] "+tag, "err", err, "f", mask)
@@ -413,7 +433,7 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	fName := filepath.Base(fPath)
 	ver.MustSupport(fileVer, fName)
 
-	if err := open(fPath); err != nil {
+	if err := open(fPath, fileVer); err != nil {
 		logger.Debug("[agg] "+tag, "err", err, "f", fName)
 	}
 }
@@ -439,19 +459,19 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 		}
 
 		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
-			openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string) (err error) {
+			openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string, _ version.Version) (err error) {
 				item.index, err = d.openHashMapAccessor(fPath)
 				return err
 			}, tag, d.logger)
 		}
 		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
-			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string) (err error) {
+			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string, _ version.Version) (err error) {
 				item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor))
 				return err
 			}, tag, d.logger)
 		}
 		if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
-			openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string) (err error) {
+			openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string, _ version.Version) (err error) {
 				item.existence, err = d.openExistenceFilter(fPath)
 				return err
 			}, tag, d.logger)
@@ -484,9 +504,9 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			}
 		}
 
-		if item.index == nil {
-			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string) (err error) {
-				item.index, err = h.openHashMapAccessor(fPath)
+		if item.vi == nil {
+			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string, fileVer version.Version) (err error) {
+				item.vi, err = OpenHistoryValueIndex(fPath, fileVer)
 				return err
 			}, tag, h.logger)
 		}
@@ -519,7 +539,7 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		}
 
 		if item.index == nil {
-			openDirtyAccessor(ii.efAccessorFileNameMask(fromStep, toStep), accessorEntries, ii.dirs.SnapAccessors, ii.FileVersion.AccessorEFI, func(fPath string) (err error) {
+			openDirtyAccessor(ii.efAccessorFileNameMask(fromStep, toStep), accessorEntries, ii.dirs.SnapAccessors, ii.FileVersion.AccessorEFI, func(fPath string, _ version.Version) (err error) {
 				item.index, err = ii.openHashMapAccessor(fPath)
 				return err
 			}, tag, ii.logger)
@@ -640,7 +660,7 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil && item.vi == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
