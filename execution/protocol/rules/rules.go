@@ -136,6 +136,11 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
+	// AmendBlockContext lets a rules engine populate BlockContext fields it
+	// owns after NewEVMBlockContext has built the context, including the
+	// per-block BlockContext.L2 an L2 stack installs its hooks through.
+	AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header)
+
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 		receipts types.Receipts, txns types.Transactions, logger log.Logger) error

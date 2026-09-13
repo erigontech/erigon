@@ -587,6 +587,15 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}()
 	}
 
+	if l2 := st.evm.Context.L2; l2 != nil && l2.StartTx != nil {
+		if done, result, hookErr := l2.StartTx(st.state, st.msg); done {
+			if result == nil && hookErr == nil {
+				return nil, fmt.Errorf("%w: StartTx hook short-circuited with neither result nor error", ErrTxnExecutionFailed)
+			}
+			return result, hookErr
+		}
+	}
+
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -637,6 +646,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
+
+	if l2 := st.evm.Context.L2; l2 != nil && l2.GasCharging != nil {
+		adjustedGasRemaining, tipRecipient, hookErr := l2.GasCharging(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
+		if hookErr != nil {
+			return nil, hookErr
+		}
+		if adjustedGasRemaining.Execution > st.gasRemaining.Execution || adjustedGasRemaining.State > st.gasRemaining.State {
+			return nil, fmt.Errorf("%w: GasCharging hook raised gas above the tx budget (execution %d->%d, state %d->%d)", ErrTxnExecutionFailed, st.gasRemaining.Execution, adjustedGasRemaining.Execution, st.gasRemaining.State, adjustedGasRemaining.State)
+		}
+		st.gasRemaining = adjustedGasRemaining
+		if !tipRecipient.IsNil() {
+			coinbase = tipRecipient
+		}
+	}
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.msg.Gas(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
@@ -718,28 +741,39 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	totalGasUsed := gasUsed.total()
 	switch {
 	case refunds && !gasBailout:
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
-		switch {
-		case rules.IsAmsterdam:
-			combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
-			st.blockStateGasUsed = combined.StateClamped()
-			st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = combined.Total()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-		case rules.IsPrague:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			st.blockExecutionGasUsed = st.txnGasUsed
-		default:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
-			st.blockExecutionGasUsed = st.txnGasUsed
+		if l2 := st.evm.Context.L2; l2 != nil && l2.ComputeRefund != nil {
+			rr := l2.ComputeRefund(totalGasUsed, intrinsicGas, intrinsicGasResult, st.state.GetRefund(), rules)
+			if rr.TxnGasUsed > st.msg.Gas() {
+				return nil, fmt.Errorf("%w: ComputeRefund hook claims %d gas used, above the tx limit %d", ErrTxnExecutionFailed, rr.TxnGasUsed, st.msg.Gas())
+			}
+			st.blockExecutionGasUsed = rr.BlockExecutionGasUsed
+			st.blockStateGasUsed = rr.BlockStateGasUsed
+			st.txnGasUsedB4Refunds = rr.TxnGasUsedB4Refunds
+			st.txnGasUsed = rr.TxnGasUsed
+		} else {
+			refundQuotient := params.RefundQuotient
+			if rules.IsLondon {
+				refundQuotient = params.RefundQuotientEIP3529
+			}
+			switch {
+			case rules.IsAmsterdam:
+				combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
+				st.blockStateGasUsed = combined.StateClamped()
+				st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
+				st.txnGasUsedB4Refunds = combined.Total()
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			case rules.IsPrague:
+				st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+				st.blockExecutionGasUsed = st.txnGasUsed
+			default:
+				st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = st.txnGasUsedB4Refunds - refund
+				st.blockExecutionGasUsed = st.txnGasUsed
+			}
 		}
 		if err := st.refundGas(); err != nil {
 			return nil, err

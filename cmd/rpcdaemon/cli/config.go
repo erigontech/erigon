@@ -1091,6 +1091,14 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 	return e.engine.GetPostApplyMessageFunc()
 }
 
+func (e *remoteRulesEngine) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	e.engine.AmendBlockContext(bc, header)
+}
+
 func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {

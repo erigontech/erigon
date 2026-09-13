@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -40,6 +41,11 @@ type BlockContext struct {
 	GetHash          GetHashFunc
 	PostApplyMessage PostApplyMessageFunc
 
+	// L2 carries the L2 stack's version and tx lifecycle hooks; nil on L1.
+	// A pointer, not inline fields: BlockContext is embedded by value in EVM,
+	// which sits exactly on a malloc size class.
+	L2 *L2
+
 	// Block information
 	Coinbase    accounts.Address // Provides information for COINBASE
 	GasLimit    uint64           // Provides information for GASLIMIT
@@ -51,10 +57,28 @@ type BlockContext struct {
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
 	SlotNumber  uint64           // Provides information for SLOTNUM
+}
 
-	// L2Version is populated by the chain's engine/block-context construction
-	// for L2 chains; zero otherwise.
-	L2Version uint64
+// L2 is the per-block L2 context a rules engine installs through
+// AmendBlockContext. Every field is optional.
+type L2 struct {
+	// Version is the L2 stack's own upgrade version, feeding fork resolution.
+	Version uint64
+
+	// StartTx runs at the very top of TxnExecutor.Execute, before intrinsic
+	// gas or preCheck. When done is true it short-circuits the whole
+	// transition, returning result and err as-is (system/deposit txs).
+	StartTx StartTxFunc
+
+	// GasCharging runs once gas has been purchased and split for execution,
+	// letting a chain charge extra cost out of the tx's own gas budget (via
+	// ibs) and redirect the tip recipient. A non-nil error aborts the
+	// transaction before execution starts.
+	GasCharging GasChargingFunc
+
+	// ComputeRefund, when non-nil, replaces TxnExecutor's built-in refund
+	// ladder for this tx.
+	ComputeRefund ComputeRefundFunc
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -82,6 +106,10 @@ type ExecutionResult struct {
 	FeeTipped             uint256.Int
 	FeeBurnt              uint256.Int
 	BurntContractAddress  accounts.Address
+
+	// L2 is an opaque value the lifecycle hooks may populate (e.g. an L1-fee
+	// split or retryable ticket info); nil unless a hook sets it.
+	L2 any
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -125,7 +153,51 @@ type (
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// Used to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
+
+	StartTxFunc func(ibs IntraBlockState, msg Message) (done bool, result *ExecutionResult, err error)
+
+	GasChargingFunc func(ibs IntraBlockState, msg Message, gasRemaining mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult) (adjustedGasRemaining mdgas.MdGas, tipRecipient accounts.Address, err error)
+
+	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, intrinsicGas uint64, intrinsicGasResult mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
 )
+
+// RefundResult is what ComputeRefundFunc produces in place of the refund
+// ladder: the final per-tx gas-used values TxnExecutor.Execute needs to
+// charge the block gas pool and pay tips/burn the base fee.
+type RefundResult struct {
+	BlockExecutionGasUsed uint64
+	BlockStateGasUsed     uint64
+	TxnGasUsedB4Refunds   uint64
+	TxnGasUsed            uint64
+}
+
+// Message is the subset of protocol.Message the lifecycle hooks read; its
+// method set must stay a subset of protocol.Message so that type satisfies
+// this interface structurally without evmtypes importing protocol.
+type Message interface {
+	From() accounts.Address
+	To() accounts.Address
+
+	GasPrice() *uint256.Int
+	FeeCap() *uint256.Int
+	TipCap() *uint256.Int
+	Gas() uint64
+	CheckGas() bool
+	BlobGas() uint64
+	MaxFeePerBlobGas() *uint256.Int
+	Value() *uint256.Int
+
+	Nonce() uint64
+	CheckNonce() bool
+	CheckTransaction() bool
+	Data() []byte
+	AccessList() types.AccessList
+	BlobHashes() []common.Hash
+	Authorizations() []types.Authorization
+
+	IsFree() bool
+	SetIsFree(bool)
+}
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
