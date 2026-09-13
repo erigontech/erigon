@@ -651,8 +651,8 @@ const (
 	earlyTxnFound
 )
 
-// earlyTxnSearchBudget bounds the bodies one search reads; past it the question is left
-// open rather than settled on what the search has not seen.
+// earlyTxnSearchBudget bounds the bodies one search reads; past it the search stops where
+// it is rather than walking the whole range.
 const earlyTxnSearchBudget = 256
 
 // earlyTxnBound is a block whose cumulative count ran ahead of what the search had
