@@ -1,7 +1,4 @@
-// Copyright 2016 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,16 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package netutil
+package rpc
 
 import (
+	"context"
+	"io"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkCheckRelayIP(b *testing.B) {
-	sender := parseIP("23.55.1.242")
-	addr := parseIP("23.55.1.2")
-	for b.Loop() {
-		_ = CheckRelayIP(sender, addr)
-	}
+func TestStdioConnWriteJSON(t *testing.T) {
+	codec := NewCodec(stdioConn{in: strings.NewReader(""), out: io.Discard})
+	defer codec.Close()
+
+	err := codec.WriteJSON(context.Background(), map[string]string{"jsonrpc": "2.0"})
+	require.NoError(t, err)
 }
