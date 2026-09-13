@@ -95,8 +95,7 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 }
 
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
-	fromB := hexutil.EncodeTs(from)
-	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
+	if _, err := kv.DeleteRange(tx, kv.BlockBody, hexutil.EncodeTs(from), nil); err != nil {
 		return err
 	}
 
@@ -117,7 +116,7 @@ var (
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+// doesn't delete Receipts, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
