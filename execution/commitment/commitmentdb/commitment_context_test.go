@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -251,4 +252,21 @@ func Test_TrieContext_BranchKeepsNilAndEmptyDistinct(t *testing.T) {
 	got, _, err = ctx.Branch([]byte{0xdd})
 	require.NoError(t, err)
 	require.Nil(t, got, "absent branch must stay nil after the buffer is warm")
+}
+
+type commitmentTimeRecorder struct {
+	sd
+	calls int
+}
+
+func (r *commitmentTimeRecorder) AddCommitmentTime(time.Duration) { r.calls++ }
+
+func TestComputeCommitmentReportsItsDuration(t *testing.T) {
+	t.Parallel()
+	rec := &commitmentTimeRecorder{}
+	sdc := NewSharedDomainsCommitmentContext(rec, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+
+	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, rec.calls)
 }
