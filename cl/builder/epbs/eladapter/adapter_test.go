@@ -203,7 +203,9 @@ func TestAdapterDoesNotBuildWhenConditionalAdvanceIsRejected(t *testing.T) {
 			state:          execmodule.ForkChoiceState{HeadHash: common.Hash{0x41}},
 			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
 		},
-		advanceResult: &execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
+		advanceResult: &execmodule.ForkChoiceResult{
+			Status: execmodule.ExecutionStatusBusy, ValidationError: "execution semaphore busy",
+		},
 	}
 
 	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
@@ -213,6 +215,7 @@ func TestAdapterDoesNotBuildWhenConditionalAdvanceIsRejected(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
 	require.ErrorContains(t, err, "conditional forkchoice rejected")
+	require.ErrorContains(t, err, "execution semaphore busy")
 	require.Equal(t, 1, module.advanceCalls)
 	require.Zero(t, module.assembleCalls)
 }

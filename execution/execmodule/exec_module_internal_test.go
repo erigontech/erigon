@@ -280,7 +280,8 @@ func TestConditionalForkChoicePreflightRejectsOverflowingHeaderNumber(t *testing
 		},
 	}
 
-	decision, _, _, err := module.conditionalForkChoicePreflight(t.Context(), expectedHead, targetHead)
+	decision, _, _, reason, err := module.conditionalForkChoicePreflight(t.Context(), expectedHead, targetHead)
 	require.NoError(t, err)
 	require.Equal(t, conditionalForkChoiceRejected, decision)
+	require.Equal(t, "target header is inconsistent", reason)
 }

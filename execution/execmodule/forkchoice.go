@@ -153,12 +153,12 @@ func (e *ExecModule) updateForkChoiceAndWait(
 			current, err := e.waitForConditionalForkChoiceReadiness(ctx, headHash)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
-					return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+					return ForkChoiceResult{Status: ExecutionStatusBusy, ValidationError: "conditional readiness deadline"}, nil
 				}
 				return ForkChoiceResult{}, err
 			}
 			if !current {
-				return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+				return ForkChoiceResult{Status: ExecutionStatusBusy, ValidationError: "conditional target is no longer current"}, nil
 			}
 		}
 		return outcome.result, outcome.err
@@ -197,13 +197,13 @@ func (e *ExecModule) conditionalForkChoicePreflight(
 	ctx context.Context,
 	expectedHead common.Hash,
 	targetHead common.Hash,
-) (conditionalForkChoiceDecision, common.Hash, common.Hash, error) {
+) (conditionalForkChoiceDecision, common.Hash, common.Hash, string, error) {
 	if expectedHead == (common.Hash{}) || targetHead == (common.Hash{}) {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "expected or target head is zero", nil
 	}
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	defer cleanup()
 
@@ -211,49 +211,52 @@ func (e *ExecModule) conditionalForkChoicePreflight(
 	observedBlockHead := rawdb.ReadHeadBlockHash(tx)
 	alreadyCurrent := observedForkchoiceHead == targetHead && observedBlockHead == targetHead
 	if !alreadyCurrent && (observedForkchoiceHead != expectedHead || observedBlockHead != expectedHead) {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "execution head changed", nil
 	}
 	targetNumber, err := e.conditionalHeaderNumber(ctx, tx, targetHead)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	if targetNumber == nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target header number is unavailable", nil
 	}
 	targetHeader, err := e.getHeader(ctx, tx, targetHead, *targetNumber)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	if targetHeader == nil || !targetHeader.Number.IsUint64() || targetHeader.Number.Uint64() != *targetNumber ||
-		targetHeader.Hash() != targetHead || targetHeader.ParentHash != expectedHead {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		targetHeader.Hash() != targetHead {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target header is inconsistent", nil
+	}
+	if targetHeader.ParentHash != expectedHead {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target is not a direct child", nil
 	}
 	targetBody, err := e.getBody(ctx, tx, targetHead, *targetNumber)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	if targetBody == nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target body is unavailable", nil
 	}
 	if alreadyCurrent {
-		return conditionalForkChoiceAlreadyCurrent, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceAlreadyCurrent, common.Hash{}, common.Hash{}, "", nil
 	}
 	expectedNumber, err := e.conditionalHeaderNumber(ctx, tx, expectedHead)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	if expectedNumber == nil || *expectedNumber == math.MaxUint64 || targetHeader.Number.Uint64() != *expectedNumber+1 {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target is not a direct child", nil
 	}
 	expectedCanonical, err := e.conditionalCanonicalHash(ctx, tx, expectedHead)
 	if err != nil {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 	}
 	if !expectedCanonical {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "expected head is not canonical", nil
 	}
 	if e.forkValidator == nil || !e.forkValidator.hasRetainedExtendingFork(targetHead, *targetNumber) {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "validated target is not retained", nil
 	}
 	preservedSafe := rawdb.ReadForkchoiceSafe(tx)
 	preservedFinalized := rawdb.ReadForkchoiceFinalized(tx)
@@ -263,20 +266,20 @@ func (e *ExecModule) conditionalForkChoicePreflight(
 		}
 		preservedNumber, err := e.conditionalHeaderNumber(ctx, tx, preservedHash)
 		if err != nil {
-			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 		}
 		if preservedNumber == nil || *preservedNumber >= *targetNumber {
-			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "preserved checkpoint is unavailable or not below target", nil
 		}
 		canonical, err := e.conditionalCanonicalHash(ctx, tx, preservedHash)
 		if err != nil {
-			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "", err
 		}
 		if !canonical {
-			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "preserved checkpoint is not canonical", nil
 		}
 	}
-	return conditionalForkChoiceReady, preservedSafe, preservedFinalized, nil
+	return conditionalForkChoiceReady, preservedSafe, preservedFinalized, "", nil
 }
 
 func (e *ExecModule) conditionalHeaderNumber(ctx context.Context, tx kv.Tx, hash common.Hash) (*uint64, error) {
@@ -524,9 +527,14 @@ func (e *ExecModule) updateForkChoice(
 ) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
+		validationError := ""
+		if expectedHead != nil {
+			validationError = "execution semaphore busy"
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusBusy,
+			ValidationError: validationError,
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
@@ -538,13 +546,13 @@ func (e *ExecModule) updateForkChoice(
 	}()
 	conditionalValidationNeedsRecovery := false
 	if expectedHead != nil {
-		decision, preservedSafe, preservedFinalized, err := e.conditionalForkChoicePreflight(ctx, *expectedHead, originalBlockHash)
+		decision, preservedSafe, preservedFinalized, rejectReason, err := e.conditionalForkChoicePreflight(ctx, *expectedHead, originalBlockHash)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		switch decision {
 		case conditionalForkChoiceRejected:
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{Status: ExecutionStatusBusy}, false)
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{Status: ExecutionStatusBusy, ValidationError: rejectReason}, false)
 			return nil
 		case conditionalForkChoiceAlreadyCurrent:
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{

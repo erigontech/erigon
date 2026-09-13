@@ -82,7 +82,7 @@ func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Ha
 		return fmt.Errorf("eladapter: conditional forkchoice: %w", err)
 	}
 	if result.Status != execmodule.ExecutionStatusSuccess || result.LatestValidHash != parentHash {
-		return fmt.Errorf("%w: conditional forkchoice rejected: executionHead=%s requestedParent=%s status=%d latestValidHash=%s", ErrExecutionBusy, state.HeadHash, parentHash, result.Status, result.LatestValidHash)
+		return fmt.Errorf("%w: conditional forkchoice rejected: executionHead=%s requestedParent=%s status=%s latestValidHash=%s reason=%q", ErrExecutionBusy, state.HeadHash, parentHash, result.Status, result.LatestValidHash, result.ValidationError)
 	}
 	return nil
 }

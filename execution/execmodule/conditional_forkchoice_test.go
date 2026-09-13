@@ -279,6 +279,7 @@ func TestUpdateForkChoiceIfHeadRejectsWithoutConsumingValidatedChild(t *testing.
 			result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, test.expected, test.target)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+			require.NotEmpty(t, result.ValidationError)
 			assertHead(t, m, m.Genesis.Hash())
 			gotHash, gotNumber, gotState := m.ExecModule.ForkValidator().ExtendingFork()
 			require.Equal(t, wantHash, gotHash)
@@ -306,6 +307,7 @@ func TestUpdateForkChoiceIfHeadRejectsUnvalidatedTarget(t *testing.T) {
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, genesisHash, chainPack.TopBlock.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "validated target is not retained", result.ValidationError)
 	assertHead(t, m, genesisHash)
 }
 
@@ -328,6 +330,7 @@ func TestUpdateForkChoiceIfHeadRejectsValidatedNonChildWithoutCleanup(t *testing
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, genesisHash, chainPack.TopBlock.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "target is not a direct child", result.ValidationError)
 	assertHead(t, m, genesisHash)
 	gotHash, gotNumber, gotState := m.ExecModule.ForkValidator().ExtendingFork()
 	require.Equal(t, wantHash, gotHash)
@@ -360,6 +363,7 @@ func TestUpdateForkChoiceIfHeadRejectsMissingTargetBodyWithoutCleanup(t *testing
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, genesisHash, target.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "target body is unavailable", result.ValidationError)
 	assertHead(t, m, genesisHash)
 	gotHash, gotNumber, gotState := m.ExecModule.ForkValidator().ExtendingFork()
 	require.Equal(t, wantHash, gotHash)
@@ -381,6 +385,7 @@ func TestUpdateForkChoiceIfHeadRejectsAlreadyCurrentTargetWithoutBody(t *testing
 	result, err = m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), child.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "target body is unavailable", result.ValidationError)
 }
 
 func TestUpdateForkChoiceIfHeadRejectsInvalidCheckpointWithoutCleanup(t *testing.T) {
@@ -551,6 +556,7 @@ func TestUpdateForkChoiceIfHeadExcludesConcurrentForkchoice(t *testing.T) {
 	concurrent, err := m.ExecModule.UpdateForkChoice(ctx, genesisHash, genesisHash, genesisHash)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, concurrent.Status)
+	require.Empty(t, concurrent.ValidationError)
 	close(release)
 	require.NoError(t, <-conditionalErr)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, (<-conditionalDone).Status)
