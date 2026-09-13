@@ -115,6 +115,18 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	return fv.extendingForkHeadHash
 }
 
+func (fv *ForkValidator) hasRetainedExtendingFork(hash common.Hash, number uint64) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.extendingForkHeadHash == hash && fv.extendingForkNumber == number && fv.sharedDom != nil
+}
+
+func (fv *ForkValidator) forgetValidatedPayload(hash common.Hash) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.validHashes.Remove(hash)
+}
+
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()

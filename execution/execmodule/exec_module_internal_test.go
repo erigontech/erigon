@@ -31,8 +31,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -58,6 +63,40 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+type conditionalPreflightReader struct {
+	dbservices.FullBlockReader
+	numbers   map[common.Hash]uint64
+	header    *types.Header
+	body      *types.Body
+	canonical common.Hash
+}
+
+func (r conditionalPreflightReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	number, ok := r.numbers[hash]
+	if !ok {
+		return nil, nil
+	}
+	return &number, nil
+}
+
+func (r conditionalPreflightReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Header, error) {
+	if r.header != nil && hash == r.header.Hash() {
+		return r.header, nil
+	}
+	return nil, nil
+}
+
+func (r conditionalPreflightReader) BodyWithTransactions(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Body, error) {
+	if r.header != nil && hash == r.header.Hash() {
+		return r.body, nil
+	}
+	return nil, nil
+}
+
+func (r conditionalPreflightReader) CanonicalHash(_ context.Context, _ kv.Getter, number uint64) (common.Hash, bool, error) {
+	return r.canonical, number == 0, nil
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
@@ -171,4 +210,55 @@ func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
 	every := time.Duration(0)
 	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)
 	require.NotNil(t, on.blockMetricsCache)
+}
+
+func TestForkValidatorForgetsValidatedPayloadForRetry(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(2)}
+	fv := newForkValidator(t.Context(), 0, &PipelineExecutor{}, sideForkReader{}, 1, nil)
+	fv.validHashes.Add(header.Hash(), true)
+
+	status, _, _, _ := fv.ValidatePayload(t.Context(), nil, nil, header, &types.RawBody{}, func() error { return nil }, log.New())
+	require.Equal(t, engine_types.ValidStatus, status)
+	fv.forgetValidatedPayload(header.Hash())
+	status, _, _, _ = fv.ValidatePayload(t.Context(), nil, nil, header, &types.RawBody{}, func() error { return nil }, log.New())
+	require.Equal(t, engine_types.AcceptedStatus, status)
+}
+
+func TestConditionalForkChoicePreflightRejectsOverflowingHeaderNumber(t *testing.T) {
+	expectedHead := common.Hash{1}
+	header := &types.Header{ParentHash: expectedHead}
+	header.Number.Lsh(uint256.NewInt(1), 64)
+	header.Number.Add(&header.Number, uint256.NewInt(1))
+	targetHead := header.Hash()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, expectedHead)
+		rawdb.WriteHeadBlockHash(tx, expectedHead)
+		if err := rawdb.WriteHeaderNumber(tx, expectedHead, 0); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, expectedHead, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteTd(tx, expectedHead, 0, *uint256.NewInt(1))
+	}))
+	reader := conditionalPreflightReader{
+		numbers:   map[common.Hash]uint64{expectedHead: 0, targetHead: 1},
+		header:    header,
+		body:      &types.Body{},
+		canonical: expectedHead,
+	}
+	module := &ExecModule{
+		db:          db,
+		blockReader: reader,
+		forkValidator: &ForkValidator{
+			extendingForkHeadHash: targetHead,
+			extendingForkNumber:   1,
+			sharedDom:             &execctx.SharedDomains{},
+		},
+	}
+
+	decision, _, _, err := module.conditionalForkChoicePreflight(t.Context(), expectedHead, targetHead)
+	require.NoError(t, err)
+	require.Equal(t, conditionalForkChoiceRejected, decision)
 }

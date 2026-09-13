@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/types"
@@ -171,6 +172,18 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
+	if e.db != nil {
+		tx, cleanup, err := e.beginOverlayOrRo(ctx)
+		if err != nil {
+			return AssembleBlockResult{}, err
+		}
+		forkchoiceHead := rawdb.ReadForkchoiceHead(tx)
+		blockHead := rawdb.ReadHeadBlockHash(tx)
+		cleanup()
+		if forkchoiceHead != params.ParentHash || blockHead != params.ParentHash {
+			return AssembleBlockResult{Busy: true}, nil
+		}
+	}
 
 	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 		return AssembleBlockResult{}, err

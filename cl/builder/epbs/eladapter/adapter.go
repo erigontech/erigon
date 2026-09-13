@@ -31,6 +31,10 @@ type Adapter struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
+type conditionalForkChoiceUpdater interface {
+	UpdateForkChoiceIfHead(context.Context, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error)
+}
+
 func NewAdapter(execution execmodule.ExecutionModule, beaconCfg *clparams.BeaconChainConfig) *Adapter {
 	return &Adapter{execution: execution, beaconCfg: beaconCfg}
 }
@@ -63,7 +67,18 @@ func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Ha
 	if err != nil {
 		return fmt.Errorf("eladapter: get forkchoice: %w", err)
 	}
-	if state.HeadHash != parentHash {
+	if state.HeadHash == parentHash {
+		return nil
+	}
+	updater, ok := a.execution.(conditionalForkChoiceUpdater)
+	if !ok || state.HeadHash == (common.Hash{}) {
+		return ErrExecutionBusy
+	}
+	result, err := updater.UpdateForkChoiceIfHead(ctx, state.HeadHash, parentHash)
+	if err != nil {
+		return fmt.Errorf("eladapter: conditional forkchoice: %w", err)
+	}
+	if result.Status != execmodule.ExecutionStatusSuccess || result.LatestValidHash != parentHash {
 		return ErrExecutionBusy
 	}
 	return nil
