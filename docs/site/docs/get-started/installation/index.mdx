@@ -116,7 +116,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 **General Info**
 
 * The Docker images feature several binaries, including: `erigon`, `downloader`, `evm`, `caplin`, `capcli`, `integration`, `rpcdaemon`, `sentry`, and `txpool`.
-* The multi-platform Docker image is available for `linux/amd64/v2` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform.
+* The multi-platform Docker image is available for `linux/amd64` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform.
 * All build flags are now passed to the release workflow, allowing users to view previously missed build information in the released binaries and Docker images. This change is also expected to result in better build optimization.
 * Docker images now contain the label `org.opencontainers.image.revision`, which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
@@ -191,9 +191,11 @@ Download the appropriate binary file for your processor architecture:
 | 64-bit Intel/AMD | Debian Package (.deb) | erigon_{ERIGON_VERSION}_amd64.deb |
 | 64-bit ARM | Debian Package (.deb) | erigon_{ERIGON_VERSION}_arm64.deb |
 | 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz |
-| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64v2.tar.gz |
 | 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_arm64.tar.gz |
 
+
+The amd64 artifacts are compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT). Intel Nehalem (2008) and AMD
+Bulldozer (2011) or newer qualify; older hardware is not supported.
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
 

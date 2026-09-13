@@ -53,7 +53,7 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 
