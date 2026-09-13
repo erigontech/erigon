@@ -221,7 +221,6 @@ func putContentLocked[T any, L contentLRU[T]](
 		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
 			return
 		}
-		lru.Remove(h) // stale — OnEvict decrements counter for the removed entry
 	}
 	// Charge before the put: the put can evict this very entry again, and that
 	// onEvict must not run ahead of the charge it cancels. A value too big to be
