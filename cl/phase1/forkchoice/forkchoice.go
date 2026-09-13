@@ -856,6 +856,10 @@ type retainedBlockGuard interface {
 	IsBlockRetained(common.Hash) bool
 }
 
+type durablePayloadStatusAuthority interface {
+	HasDurablePayloadStatusAuthority()
+}
+
 func (f *ForkChoiceStore) MarkPayloadStatusIfRetained(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -886,21 +890,35 @@ func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(blockRoot common.Hash,
 	return f.markPayloadStatus(blockRoot, executionBlockHash, status, true)
 }
 
+func mergePayloadStatus(current execution_client.PayloadStatus, next execution_client.PayloadStatus) execution_client.PayloadStatus {
+	switch current {
+	case execution_client.PayloadStatusInvalidated:
+		return execution_client.PayloadStatusInvalidated
+	case execution_client.PayloadStatusValidated:
+		if next != execution_client.PayloadStatusInvalidated {
+			return execution_client.PayloadStatusValidated
+		}
+	case execution_client.PayloadStatusNotValidated:
+		if next == execution_client.PayloadStatusNone {
+			return execution_client.PayloadStatusNotValidated
+		}
+	}
+	return next
+}
+
 func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus, retained bool) execution_client.PayloadStatus {
 	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
 	effective := status
 	if known {
-		switch current {
-		case execution_client.PayloadStatusInvalidated:
+		effective = mergePayloadStatus(current, status)
+	}
+	hashStatus := effective
+	if f.executionPayloadStatus != nil {
+		if currentHashStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok {
+			hashStatus = mergePayloadStatus(currentHashStatus, effective)
+		}
+		if hashStatus == execution_client.PayloadStatusInvalidated {
 			effective = execution_client.PayloadStatusInvalidated
-		case execution_client.PayloadStatusValidated:
-			if status != execution_client.PayloadStatusInvalidated {
-				effective = execution_client.PayloadStatusValidated
-			}
-		case execution_client.PayloadStatusNotValidated:
-			if status == execution_client.PayloadStatusNone {
-				effective = execution_client.PayloadStatusNotValidated
-			}
 		}
 	}
 	if f.verifiedExecutionPayload != nil {
@@ -911,7 +929,7 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 		}
 	}
 	if f.executionPayloadStatus != nil {
-		f.executionPayloadStatus.Add(executionBlockHash, effective)
+		f.executionPayloadStatus.Add(executionBlockHash, hashStatus)
 	}
 	if f.payloadStatusByRoot != nil {
 		f.payloadStatusByRoot.Add(blockRoot, effective)
@@ -1003,7 +1021,17 @@ func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot common.Hash)
 }
 
 func (f *ForkChoiceStore) IsRootOptimistic(root common.Hash) bool {
-	return f.optimisticStore.IsOptimistic(root)
+	if f.payloadStatusByRoot != nil {
+		if status, ok := f.payloadStatusByRoot.Get(root); ok && status != execution_client.PayloadStatusNone {
+			return status == execution_client.PayloadStatusNotValidated
+		}
+	}
+	if _, ok := f.forkGraph.(durablePayloadStatusAuthority); ok {
+		if status, found := f.payloadStatusAuthority(root); found && status != execution_client.PayloadStatusNone {
+			return status == execution_client.PayloadStatusNotValidated
+		}
+	}
+	return f.optimisticStore != nil && f.optimisticStore.IsOptimistic(root)
 }
 
 func (f *ForkChoiceStore) IsHeadOptimistic() bool {
@@ -1011,7 +1039,7 @@ func (f *ForkChoiceStore) IsHeadOptimistic() bool {
 		return false
 	}
 
-	return f.optimisticStore.IsOptimistic(f.syncedDataManager.HeadRoot())
+	return f.IsRootOptimistic(f.syncedDataManager.HeadRoot())
 }
 
 func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) error {
