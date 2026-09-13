@@ -71,7 +71,10 @@ func TestLiveSlotInputResolverRejectsExecutionRequestsRootMismatch(t *testing.T)
 		envelope:    envelope,
 		hasEnvelope: true,
 		buildOnFull: true,
-		gasLimits:   map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
+		verifiedRoots: map[common.Hash]bool{
+			headRoot: true,
+		},
+		gasLimits: map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
 		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
 			parentBid.BlockHash: execution_client.PayloadStatusValidated,
 		},
