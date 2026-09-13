@@ -180,19 +180,27 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return err
 		case err, ok := <-subscription.Err():
 			if !ok || err == nil {
-				return errors.New("epbs/runtime: accepted block subscription stopped")
+				return errors.New("epbs/runtime: block event subscription stopped")
 			}
-			return fmt.Errorf("epbs/runtime: accepted block subscription: %w", err)
+			return fmt.Errorf("epbs/runtime: block event subscription: %w", err)
 		case event, ok := <-events:
 			if !ok {
-				return errors.New("epbs/runtime: accepted block event stream stopped")
+				return errors.New("epbs/runtime: block event stream stopped")
 			}
-			if event == nil || event.Event != beaconevents.StateBlock {
+			if event == nil {
 				continue
 			}
-			data, ok := event.Data.(*beaconevents.BlockData)
-			if ok && data != nil {
-				r.reveals.SubmitAcceptedBlock(data.Block)
+			switch event.Event {
+			case beaconevents.StateBlock:
+				data, ok := event.Data.(*beaconevents.BlockData)
+				if ok && data != nil {
+					r.reveals.SubmitAcceptedBlock(data.Block)
+				}
+			case beaconevents.StateBlockGossip:
+				data, ok := event.Data.(*beaconevents.BlockGossipData)
+				if ok && data != nil {
+					r.reveals.SubmitGossipValidatedBlock(data.Block, data.SignedBlock)
+				}
 			}
 		}
 	}

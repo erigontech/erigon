@@ -235,6 +235,13 @@ func (r *revealRunner) SubmitAcceptedBlock(blockRoot common.Hash) bool {
 	return r.submitAcceptedBlock(blockRoot, false)
 }
 
+func (r *revealRunner) SubmitGossipValidatedBlock(blockRoot common.Hash, block *cltypes.SignedBeaconBlock) bool {
+	if block == nil {
+		return false
+	}
+	return r.submitBlock(blockRoot, block, false)
+}
+
 func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
 	if ctx.Err() != nil || isNilDependency(r.head) {
 		return
@@ -247,6 +254,10 @@ func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
 }
 
 func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactive bool) bool {
+	return r.submitBlock(blockRoot, nil, replaceInactive)
+}
+
+func (r *revealRunner) submitBlock(blockRoot common.Hash, block *cltypes.SignedBeaconBlock, replaceInactive bool) bool {
 	if replaceInactive {
 		if !r.canonicalNeedsValidation(blockRoot) {
 			return false
@@ -255,8 +266,14 @@ func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactiv
 		return false
 	}
 	r.pruneTracked(r.clock.GetCurrentSlot())
-	block, ok := r.blocks.GetBlock(blockRoot)
-	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+	if block == nil {
+		var ok bool
+		block, ok = r.blocks.GetBlock(blockRoot)
+		if !ok {
+			return false
+		}
+	}
+	if block == nil || block.Block == nil || block.Block.Body == nil {
 		return false
 	}
 	computedRoot, err := block.Block.HashSSZ()

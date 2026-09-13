@@ -31,6 +31,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -52,6 +53,27 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestPublishBlockGossipEventIncludesInternalSignedBlock(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	service := &blockService{emitter: emitter}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 1
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	service.publishBlockGossipEvent(block)
+
+	event := <-events
+	require.Equal(t, beaconevents.StateBlockGossip, event.Event)
+	data, ok := event.Data.(*beaconevents.BlockGossipData)
+	require.True(t, ok)
+	require.Equal(t, common.Hash(root), data.Block)
+	require.Same(t, block, data.SignedBlock)
+}
 
 type attesterSlashingErrorStore struct {
 	forkchoice.ForkChoiceStorage

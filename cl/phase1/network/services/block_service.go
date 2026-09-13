@@ -770,8 +770,9 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 	}
 	// publish block to event handler
 	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
-		Slot:  block.Block.Slot,
-		Block: common.Hash(blockRoot),
+		Slot:        block.Block.Slot,
+		Block:       common.Hash(blockRoot),
+		SignedBlock: block,
 	})
 }
 

@@ -295,6 +295,14 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 }
 
 func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false)
+}
+
+func TestRuntimeRevealsRetainedPayloadSelectedByGossipValidatedBlock(t *testing.T) {
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, true)
+}
+
+func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipValidated bool) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
 	cfg.NumberOfColumns = peerdasutils.CELLS_PER_EXT_BLOB
 	privateKey, err := bls.GenerateKey()
@@ -370,10 +378,32 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	block.Block.Body.SignedExecutionPayloadBid = selectedBid
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	acceptedBlocks.setBlock(common.Hash(blockRoot), block)
-	emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
+	if gossipValidated {
+		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
+			Slot: block.Block.Slot, Block: common.Hash(blockRoot),
+		})
+		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
+			Slot: block.Block.Slot, Block: common.Hash{1}, SignedBlock: block,
+		})
+		select {
+		case publication := <-publisher.publications:
+			t.Fatalf("invalid gossip block triggered publication on %s", publication.topic)
+		case <-time.After(20 * time.Millisecond):
+		}
+		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
+			Slot: block.Block.Slot, Block: common.Hash(blockRoot), SignedBlock: block,
+		})
+	} else {
+		acceptedBlocks.setBlock(common.Hash(blockRoot), block)
+		emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
+	}
 
-	firstEnvelopePublication := <-publisher.publications
+	var firstEnvelopePublication runtimePublication
+	select {
+	case firstEnvelopePublication = <-publisher.publications:
+	case <-time.After(time.Second):
+		t.Fatal("gossip-validated selected block did not trigger payload reveal")
+	}
 	require.Equal(t, gossip.TopicNameExecutionPayload, firstEnvelopePublication.topic)
 	for range cfg.NumberOfColumns {
 		publication := <-publisher.publications
@@ -392,6 +422,19 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	require.Equal(t, common.Hash(blockRoot), envelope.Message.BeaconBlockRoot)
 	require.Equal(t, selectedBid.Message.ParentBlockRoot, envelope.Message.ParentBeaconBlockRoot)
 	require.NotEqual(t, common.Bytes96{}, envelope.Signature)
+	if gossipValidated {
+		acceptedBlocks.setBlock(common.Hash(blockRoot), block)
+		emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
+	} else {
+		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
+			Slot: block.Block.Slot, Block: common.Hash(blockRoot), SignedBlock: block,
+		})
+	}
+	select {
+	case publication := <-publisher.publications:
+		t.Fatalf("accepted block retriggered publication on %s", publication.topic)
+	case <-time.After(20 * time.Millisecond):
+	}
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
