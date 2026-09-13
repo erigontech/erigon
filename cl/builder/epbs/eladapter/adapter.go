@@ -54,14 +54,14 @@ func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Param
 		return 0, fmt.Errorf("eladapter: assemble block: %w", err)
 	}
 	if result.Busy {
-		return 0, ErrExecutionBusy
+		return 0, fmt.Errorf("%w: assemble block is busy: parentHash=%s", ErrExecutionBusy, parameters.ParentHash)
 	}
 	return result.PayloadID, nil
 }
 
 func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Hash) error {
 	if parentHash == (common.Hash{}) {
-		return ErrExecutionBusy
+		return fmt.Errorf("%w: payload parent is zero", ErrExecutionBusy)
 	}
 	state, err := a.execution.GetForkChoice(ctx)
 	if err != nil {
@@ -71,15 +71,18 @@ func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Ha
 		return nil
 	}
 	updater, ok := a.execution.(conditionalForkChoiceUpdater)
-	if !ok || state.HeadHash == (common.Hash{}) {
-		return ErrExecutionBusy
+	if !ok {
+		return fmt.Errorf("%w: conditional forkchoice is unavailable: executionHead=%s requestedParent=%s", ErrExecutionBusy, state.HeadHash, parentHash)
+	}
+	if state.HeadHash == (common.Hash{}) {
+		return fmt.Errorf("%w: execution head is zero: requestedParent=%s", ErrExecutionBusy, parentHash)
 	}
 	result, err := updater.UpdateForkChoiceIfHead(ctx, state.HeadHash, parentHash)
 	if err != nil {
 		return fmt.Errorf("eladapter: conditional forkchoice: %w", err)
 	}
 	if result.Status != execmodule.ExecutionStatusSuccess || result.LatestValidHash != parentHash {
-		return ErrExecutionBusy
+		return fmt.Errorf("%w: conditional forkchoice rejected: executionHead=%s requestedParent=%s status=%d latestValidHash=%s", ErrExecutionBusy, state.HeadHash, parentHash, result.Status, result.LatestValidHash)
 	}
 	return nil
 }

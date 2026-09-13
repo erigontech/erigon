@@ -129,6 +129,7 @@ func TestAdapterWaitsForMatchingExecutionHead(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "conditional forkchoice is unavailable")
 	require.Zero(t, module.updateCalls)
 	require.Zero(t, module.assembleCalls)
 	require.Equal(t, currentHead, module.state.HeadHash)
@@ -191,6 +192,7 @@ func TestAdapterDoesNotConditionallyAdvanceFromZeroExecutionHead(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "execution head is zero")
 	require.Zero(t, module.advanceCalls)
 	require.Zero(t, module.assembleCalls)
 }
@@ -210,6 +212,7 @@ func TestAdapterDoesNotBuildWhenConditionalAdvanceIsRejected(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "conditional forkchoice rejected")
 	require.Equal(t, 1, module.advanceCalls)
 	require.Zero(t, module.assembleCalls)
 }
@@ -232,6 +235,7 @@ func TestAdapterDoesNotBuildWhenConditionalAdvanceReturnsWrongHead(t *testing.T)
 	)
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "conditional forkchoice rejected")
 	require.Equal(t, 1, module.advanceCalls)
 	require.Zero(t, module.assembleCalls)
 }
@@ -247,6 +251,7 @@ func TestAdapterRejectsZeroPayloadParent(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "payload parent is zero")
 	require.Zero(t, module.updateCalls)
 	require.Zero(t, module.assembleCalls)
 }
@@ -315,6 +320,7 @@ func TestAdapterRejectsBusyBuild(t *testing.T) {
 	adapter := NewAdapter(assembledBlockModule{assembleResult: execmodule.AssembleBlockResult{Busy: true}}, &clparams.MainnetBeaconConfig)
 	_, err := adapter.AssemblePayload(t.Context(), &builder.Parameters{ParentHash: common.Hash{0x42}})
 	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.ErrorContains(t, err, "assemble block is busy")
 }
 
 func TestAdapterPreservesBlockAccessList(t *testing.T) {
