@@ -2511,6 +2511,12 @@ type blockExecutor struct {
 	// keys, not every later committed task.
 	readerIdx map[readerKey][]int
 
+	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
+	// published, so it must be re-validated at the finalize boundary. A clean tx is
+	// provably still valid there — every predecessor is final and any write to one of
+	// its read cells went through markReadersDirty. Apply-loop-only, like readerIdx.
+	revalidate map[int]bool
+
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
@@ -2569,6 +2575,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
 		readerIdx:           map[readerKey][]int{},
+		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
 		slDone:              make(chan struct{}),
 	}
@@ -2592,6 +2599,24 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 		be.readerIdx[rk] = append(be.readerIdx[rk], taskIdx)
 		return true
 	})
+}
+
+// markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
+// just published as needing finalize-boundary re-validation: a value it read may
+// have changed. Only successors can be invalidated by writerTx's write. Apply-loop
+// only, so the readerIdx read and revalidate write need no lock. A missed reader is
+// unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
+func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
+	if ws == nil {
+		return
+	}
+	for h := range ws.AllHeaders() {
+		for _, tx := range be.readerIdx[readerKey{h.Address, h.Path, h.Key}] {
+			if tx > writerTx {
+				be.revalidate[tx] = true
+			}
+		}
+	}
 }
 
 // invalidBlockResult wraps a block-validity failure as a *blockResult carrying Err.
@@ -2693,6 +2718,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
 		be.versionMap.FlushVersionedWrites(merged, true, "")
+		be.markReadersDirty(tx, merged)
 
 		// Update CollectorWrites with fee-adjusted balances so the apply fold records
 		// the correct accumulated fees.
@@ -2738,23 +2764,32 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		txVersion := txResult.Task.Version()
 
 		// Authoritative re-validation at the finalize boundary: every predecessor
-		// < tx is now final, so this is the last point a stale read can be caught
-		// (the nextResult write-change re-check can miss a predecessor's late first
-		// write over a base-read key). If stale, un-commit and stop the sweep; the
-		// fixpoint loop re-executes it against the now-final predecessors.
+		// < tx is now final, so this is the last point a stale read can be caught.
+		// Incremental: a tx untouched since it validated (no write to a cell it read
+		// has published — tracked via markReadersDirty) is provably still valid here,
+		// so only dirty txs are re-checked. Under ERIGON_ASSERT clean txs are checked
+		// too and a failure panics, proving the dirty-tracking is complete. If stale,
+		// un-commit and stop the sweep; the fixpoint loop re-executes it.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
-			be.finRevalChecks++
-			if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(rv, wv state.Version) state.VersionValidity {
-					if rv != wv {
-						return state.VersionInvalid
+			dirty := be.revalidate[tx]
+			if dirty || dbg.AssertEnabled {
+				be.finRevalChecks++
+				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+					func(rv, wv state.Version) state.VersionValidity {
+						if rv != wv {
+							return state.VersionInvalid
+						}
+						return state.VersionValid
+					}, false, "") != state.VersionValid {
+					if !dirty {
+						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
-					return state.VersionValid
-				}, false, "") != state.VersionValid {
-				be.finRevalFires++
-				be.validateTasks.clearComplete(tx)
-				be.signalSelfLoopReexec(tx)
-				break
+					be.finRevalFires++
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
+				}
+				delete(be.revalidate, tx)
 			}
 		}
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
@@ -2780,6 +2815,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false, "")
+				be.markReadersDirty(tx, tipWrites)
 			}
 		}
 		be.coinbaseFlushedUpTo = tx
@@ -3009,6 +3045,9 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 						func(addr accounts.Address) bool { return addr == be.coinbase })
 				}
 				be.validateTasks.markComplete(tx)
+				// Validated against current state; only a later write to one of its
+				// read cells (markReadersDirty) re-flags it for finalize re-validation.
+				delete(be.revalidate, tx)
 				be.finalizedResults[tx] = txResult
 				// This tx's writes are now flushed. A committed dependent may have
 				// validated earlier against the pre-flush state (reading a key from base,
@@ -3071,6 +3110,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	be.blockIO.RecordReads(txVersion, res.TxIn)
 	be.indexReads(tx, res.TxIn)
+	// This tx's writes just published; flag any successor that already read one of
+	// its cells for finalize-boundary re-validation.
+	be.markReadersDirty(tx, res.TxOut)
 
 	if res.Version().Incarnation == 0 {
 		be.blockIO.RecordWrites(txVersion, res.TxOut)
