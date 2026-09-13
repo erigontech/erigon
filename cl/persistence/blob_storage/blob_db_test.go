@@ -102,11 +102,45 @@ func TestVerifyAgainstIdentifiersRejectsAShortProofWithoutLosingStoredData(t *te
 	require.Error(t, err, "a sidecar the reader cannot decode must be rejected before it is written")
 	require.Zero(t, inserted)
 
+	// A JSON null proof decodes to a nil interface rather than a short vector, so the shape check
+	// has to answer that without dereferencing it.
+	nilProof := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	nilProof.CommitmentInclusionProof = nil
+	_, inserted, err = VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a nil proof must be an error, not a panic")
+	require.Zero(t, inserted)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil))
+
 	sidecars, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
 	require.NoError(t, err)
 	require.True(t, found, "a rejected write must leave the existing sidecar readable")
 	require.Len(t, sidecars, 1)
 	require.Equal(t, stored.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
+}
+
+// A remote response can decode with the nested header absent, and the insert path reads through it
+// before validating anything, so the structural check has to come first.
+func TestVerifyAgainstIdentifiersRejectsAnIncompleteHeader(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
+
+	for _, tc := range []struct {
+		name    string
+		sidecar *cltypes.BlobSidecar
+	}{
+		{"nil signed block header", &cltypes.BlobSidecar{}},
+		{"nil header", &cltypes.BlobSidecar{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{tc.sidecar}, clparams.DenebVersion, nil)
+			require.Error(t, err)
+			require.Zero(t, inserted)
+		})
+	}
 }
 
 func setupTestDB(t *testing.T) kv.RwDB {
