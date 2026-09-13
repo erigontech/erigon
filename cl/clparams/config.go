@@ -83,7 +83,7 @@ type CaplinConfig struct {
 	//
 	// This hook lets the embedder hold the CL until the node is actually up, stamp genesis at that
 	// moment, and only then start it. Nil means start immediately, which is every non-dev path.
-	WaitForChainStart func(context.Context) error `json:"-"`
+	WaitForChainStart func(context.Context) (uint64, error) `json:"-"`
 
 	// SuggestedFeeRecipient is the coinbase every client opens a block under. It has to be a
 	// CHAIN-LEVEL value, not a proposer-local one: coinbase is execution-affecting (fee credit and

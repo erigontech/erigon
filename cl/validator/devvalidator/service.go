@@ -162,8 +162,18 @@ func (s *Service) anchorClockToHead(ctx context.Context) {
 		return
 	}
 	s.genesisTime = now - headSlot*secPerSlot
-	s.logger.Info("[dev-validator] re-anchored slot clock to head",
-		"headSlot", headSlot, "wallSlotWas", wallSlot, "genesisTime", s.genesisTime)
+	// LOUD, because this is a compensation and not a fix. Re-anchoring shifts THIS validator's clock
+	// and never shifts it back, so whatever gap it absorbs here becomes a permanent skew between the
+	// validator and the beacon: every block is then produced that far after its own slot, the head
+	// sits that far behind the wall clock for the life of the run, and everything downstream inherits
+	// it — stage loop, state dumps, payload attributes, block production.
+	//
+	// It cost several rounds of debugging precisely because it announced itself at Info and looked
+	// like housekeeping. On a chain that stamps its genesis when its consensus layer is READY this
+	// cannot fire at boot, so if it does, the chain started late and that is the thing to fix.
+	s.logger.Warn("[dev-validator] RE-ANCHORED the slot clock to the head — the chain started LATE and this validator is now permanently skewed by that much",
+		"headSlot", headSlot, "wallSlotWas", wallSlot, "skewSeconds", wallSlot*secPerSlot,
+		"genesisTime", s.genesisTime)
 }
 
 // headSlot returns the beacon chain head slot.

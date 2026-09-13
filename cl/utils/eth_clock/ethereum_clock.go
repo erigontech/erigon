@@ -17,6 +17,7 @@
 package eth_clock
 
 import (
+	"sync/atomic"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -30,6 +31,27 @@ import (
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
+
+// StartChainAt sets a clock's genesis time after construction, for a chain whose genesis is decided
+// when its consensus layer is READY rather than before it starts.
+//
+// A dev chain's genesis time is the embedder's to choose, but the clock is built from the genesis
+// state at the top of the CL's startup — so the origin is committed before the CL can run, and the
+// startup that follows is counted as elapsed chain time. That gap is not constant (measured between
+// 1.2s and 4.2s on the same code, disk contention), so no allowance predicts it; the only correct
+// value is the one read once the CL is up, which is what this exists to apply.
+//
+// Safe after construction: genesis time is used only in slot arithmetic, while the fork-digest map
+// built by NewEthereumClock derives from the validators root and fork versions, not the time. It
+// must still be called before any slot processing begins, and only once.
+func StartChainAt(c EthereumClock, genesisTime uint64) bool {
+	impl, ok := c.(*ethereumClockImpl)
+	if !ok {
+		return false
+	}
+	impl.genesisTime.Store(genesisTime)
+	return true
+}
 
 //go:generate mockgen -typed=true -source=./ethereum_clock.go -destination=./ethereum_clock_mock.go -package=eth_clock . EthereumClock
 type EthereumClock interface {
@@ -73,7 +95,7 @@ func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []for
 }
 
 type ethereumClockImpl struct {
-	genesisTime           uint64
+	genesisTime           atomic.Uint64
 	genesisValidatorsRoot common.Hash
 	beaconCfg             *clparams.BeaconChainConfig
 	forkDigestToVersion   map[common.Bytes4]clparams.StateVersion
@@ -81,11 +103,11 @@ type ethereumClockImpl struct {
 
 func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig) EthereumClock {
 	impl := &ethereumClockImpl{
-		genesisTime:           genesisTime,
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
 	}
+	impl.genesisTime.Store(genesisTime)
 
 	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
 		digest, err := impl.computeForkDigestForVersion(fork.version)
@@ -116,17 +138,17 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 }
 
 func (t *ethereumClockImpl) GetSlotTime(slot uint64) time.Time {
-	slotTime := t.genesisTime + t.beaconCfg.SecondsPerSlot*slot
+	slotTime := t.genesisTime.Load() + t.beaconCfg.SecondsPerSlot*slot
 	return time.Unix(int64(slotTime), 0)
 }
 
 func (t *ethereumClockImpl) GetCurrentSlot() uint64 {
 	now := uint64(time.Now().Unix())
-	if now < t.genesisTime {
+	if now < t.genesisTime.Load() {
 		return 0
 	}
 
-	return (now - t.genesisTime) / t.beaconCfg.SecondsPerSlot
+	return (now - t.genesisTime.Load()) / t.beaconCfg.SecondsPerSlot
 }
 
 func (t *ethereumClockImpl) GetEpochAtSlot(slot uint64) uint64 {
@@ -142,12 +164,12 @@ func (t *ethereumClockImpl) IsSlotCurrentSlotWithMaximumClockDisparity(slot uint
 }
 
 func (t *ethereumClockImpl) GetSlotByTime(time time.Time) uint64 {
-	return (uint64(time.Unix()) - t.genesisTime) / t.beaconCfg.SecondsPerSlot
+	return (uint64(time.Unix()) - t.genesisTime.Load()) / t.beaconCfg.SecondsPerSlot
 }
 
 func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 	now := uint64(time.Now().Unix())
-	if now < t.genesisTime {
+	if now < t.genesisTime.Load() {
 		return 0
 	}
 
@@ -175,7 +197,7 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 
 	currentEpoch := t.GetCurrentEpoch()
 
-	if time.Now().Unix() < int64(t.genesisTime) {
+	if time.Now().Unix() < int64(t.genesisTime.Load()) {
 		currentEpoch = 0
 	}
 
@@ -293,7 +315,7 @@ func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {
 }
 
 func (t *ethereumClockImpl) GenesisTime() uint64 {
-	return t.genesisTime
+	return t.genesisTime.Load()
 }
 
 func computeForkDataRoot(version [4]byte, genesisValidatorsRoot common.Hash) common.Hash {

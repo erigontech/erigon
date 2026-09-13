@@ -1044,20 +1044,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return nil, err
 			}
 		}
-		// Hold the CL until the embedder says the chain has started, if it asked to. A dev chain
-		// stamps its genesis TIME at that moment, so starting Caplin first would fix its clock to a
-		// genesis that has not been written yet. Nil hook = start now, which is every other path.
-		waitForChainStart := config.CaplinConfig.WaitForChainStart
 		go func() {
-			if waitForChainStart != nil {
-				if err := waitForChainStart(ctx); err != nil {
-					if !errors.Is(err, context.Canceled) {
-						logger.Error("could not start caplin: waiting for chain start", "err", err)
-					}
-					ctxCancel()
-					return
-				}
-			}
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -1069,13 +1056,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// Start embedded dev validator if configured.
 		if config.CaplinConfig.DevValidatorSeed != "" {
 			go func() {
-				// The validator reads the beacon's genesis to build its own clock, so it must not
-				// look until the chain has started and that genesis is the real one.
-				if waitForChainStart != nil {
-					if err := waitForChainStart(ctx); err != nil {
-						return
-					}
-				}
+				// No gate here: the genesis time is applied inside RunCaplinService before the
+				// beacon API opens, so /eth/v1/beacon/genesis cannot serve a placeholder and this
+				// validator cannot build its clock from one.
 				beaconAddr := config.CaplinConfig.BeaconAPIRouter.Address
 				if beaconAddr == "" {
 					beaconAddr = "127.0.0.1:5555"

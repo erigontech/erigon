@@ -613,6 +613,31 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
+	// THE CHAIN STARTS HERE, when the embedder decides when.
+	//
+	// Everything above is startup, and its cost is not constant — measured between 1.2s and 4.2s on
+	// the same code, varying with disk contention. Taking the genesis time from the state before all
+	// of it counts that startup as elapsed chain time, and no allowance predicts it: on a 2s-slot
+	// chain the validator came up already two slots behind, re-anchored its own clock to the head,
+	// and because that compensation is one-way the chain stayed behind for the whole run. So the
+	// genesis time is an OUTPUT of being ready, not an input to starting.
+	//
+	// Applied BEFORE the beacon API opens: /eth/v1/beacon/genesis reports ethClock.GenesisTime(),
+	// and that is where the dev validator reads the origin it builds its own clock from — it must
+	// never be able to observe the placeholder. Nothing has read a slot yet either; the stage loop
+	// below is the first thing that will.
+	if config.WaitForChainStart != nil {
+		genesisTime, err := config.WaitForChainStart(ctx)
+		if err != nil {
+			return err
+		}
+		if !eth_clock.StartChainAt(ethClock, genesisTime) {
+			return errors.New("caplin: this clock cannot be given a genesis time")
+		}
+		logger.Info("[Caplin] chain start applied", "genesisTime", genesisTime,
+			"startsIn", int64(genesisTime)-time.Now().Unix())
+	}
+
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots, syncedDataManager)
 	if config.BeaconAPIRouter.Active {
 		apiHandler := handler.NewApiHandler(
