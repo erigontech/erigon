@@ -361,6 +361,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	}
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
+	w := seg.NewWriter(f, seg.CompressKeys|seg.CompressVals)
 	for _, d := range cList {
 		if err := func() error {
 			view, err := d.OpenSequentialView()
@@ -371,7 +372,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 			g := view.MakeGetter()
 			for g.HasNext() {
 				word, _ = g.Next(word[:0])
-				if err := f.AddWord(word); err != nil {
+				if _, err := w.Write(word); err != nil {
 					return err
 				}
 			}
