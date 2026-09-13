@@ -202,13 +202,13 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
 	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice head hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
@@ -276,13 +276,13 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
 	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice finalized hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
@@ -320,13 +320,13 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
 	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice safe block hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)

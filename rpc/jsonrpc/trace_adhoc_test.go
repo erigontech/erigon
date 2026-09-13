@@ -711,11 +711,16 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.Output.String())
 }
 
+// runtimeReturningOpcode returns the given zero-argument opcode's value as a
+// 32-byte word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
+func runtimeReturningOpcode(opcode byte) []byte {
+	return []byte{opcode, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+}
+
 // deployCodeReturningOpcode returns CREATE init code that deploys a contract
-// whose runtime returns the given zero-argument opcode's value as a 32-byte
-// word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
+// whose runtime is runtimeReturningOpcode.
 func deployCodeReturningOpcode(opcode byte) []byte {
-	runtime := []byte{opcode, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	runtime := runtimeReturningOpcode(opcode)
 	initHeader := []byte{
 		0x60, byte(len(runtime)), // PUSH1 length
 		0x60, 0x0c, // PUSH1 12 (runtime offset in initcode)
