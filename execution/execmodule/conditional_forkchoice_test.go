@@ -311,6 +311,65 @@ func TestUpdateForkChoiceIfHeadRejectsUnvalidatedTarget(t *testing.T) {
 	assertHead(t, m, genesisHash)
 }
 
+func TestUpdateForkChoiceIfHeadRetainsValidatedTargetAcrossDuplicateInsertion(t *testing.T) {
+	ctx := t.Context()
+	m, child := newValidatedChild(t)
+
+	status, err := m.InsertBlocks(ctx, []*types.Block{child})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), child.Hash())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, result.ValidationError)
+	assertHead(t, m, child.Hash())
+}
+
+func TestUpdateForkChoiceIfHeadDoesNotReuseRetainedStateForInsertedSibling(t *testing.T) {
+	ctx := t.Context()
+	m, validated := newValidatedChild(t)
+	siblingPack, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{0xff})
+	})
+	require.NoError(t, err)
+	sibling := siblingPack.TopBlock
+	require.NotEqual(t, validated.Hash(), sibling.Hash())
+
+	status, err := m.InsertBlocks(ctx, []*types.Block{sibling})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), sibling.Hash())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "validated target is not retained", result.ValidationError)
+	assertHead(t, m, m.Genesis.Hash())
+
+	result, err = m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), validated.Hash())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, result.ValidationError)
+	assertHead(t, m, validated.Hash())
+}
+
+func TestUpdateForkChoiceIfHeadDoesNotRetainValidatedTargetAcrossBulkInsertion(t *testing.T) {
+	ctx := t.Context()
+	m, validated := newValidatedChild(t)
+	bulk, err := m.GenerateChainFrom(m.Genesis, 17, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{0xff})
+	})
+	require.NoError(t, err)
+
+	status, err := m.InsertBlocks(ctx, bulk.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), validated.Hash())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.Equal(t, "validated target is not retained", result.ValidationError)
+	assertHead(t, m, m.Genesis.Hash())
+}
+
 func TestUpdateForkChoiceIfHeadRejectsValidatedNonChildWithoutCleanup(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
