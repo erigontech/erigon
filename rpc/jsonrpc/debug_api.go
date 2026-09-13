@@ -780,14 +780,9 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 			blockRlp = fmt.Sprintf("%#x", rlpBytes)
 		}
 
-		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
-		if err != nil {
-			log.Error("Failed to marshal block", "err", err)
-			blockJson = map[string]any{}
-		}
 		results = append(results, map[string]any{
 			"hash":  block.Hash(),
-			"block": blockJson,
+			"block": ethapi.RPCMarshalBlock(block, true, true),
 			"rlp":   blockRlp,
 		})
 	}

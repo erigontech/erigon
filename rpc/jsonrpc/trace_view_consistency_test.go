@@ -287,8 +287,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	baseline, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, baseline, 1)
-	expectedRoot, ok := baseline[0]["stateRoot"].(common.Hash)
-	require.True(t, ok)
+	expectedRoot := baseline[0].StateRoot
 
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -313,7 +312,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	result, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
-	require.Equal(t, expectedRoot, result[0]["stateRoot"])
+	require.Equal(t, expectedRoot, result[0].StateRoot)
 }
 
 func TestExecutionWitnessRejectsNonCanonicalBlockHash(t *testing.T) {

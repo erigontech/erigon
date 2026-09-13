@@ -94,7 +94,7 @@ type CallResult struct {
 }
 
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
-type SimulatedBlockResult map[string]any
+type SimulatedBlockResult = *ethapi.RPCBlock
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
 type SimulationResult []SimulatedBlockResult
@@ -635,13 +635,9 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	additionalFields := make(map[string]any)
-	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
-	if err != nil {
-		return nil, nil, err
-	}
+	blockResult := ethapi.RPCMarshalBlock(block, true, s.fullTransactions)
 	repairLogs(callResults, block.Hash())
-	blockResult["calls"] = callResults
+	blockResult.Calls = callResults
 	return blockResult, block, nil
 }
 

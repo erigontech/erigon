@@ -459,7 +459,7 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	resp, err := api.GetBlockByTimestamp(h.m.Ctx, rpc.Timestamp(h.overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, h.overlayHeader.Number.ToBig(), resp["number"].(*hexutil.U256).ToInt(),
+	require.Equal(t, h.overlayHeader.Number.ToBig(), resp.Number.ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 
@@ -722,7 +722,7 @@ func TestGetBlockByNumber_SiblingPublishDuringTxAcquisition(t *testing.T) {
 	got, err := api.GetBlockByNumber(h.m.Ctx, rpc.LatestBlockNumber, false)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, committed.Hash(), got["hash"],
+	require.Equal(t, committed.Hash(), *got.Hash,
 		"an unstable capture must fall back to the committed head, not serve the sibling generation")
 }
 
@@ -748,7 +748,7 @@ func TestGetBlockByNumber_RemoteModeServesCommittedHead(t *testing.T) {
 	got, err := api.GetBlockByNumber(m.Ctx, rpc.LatestBlockNumber, false)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, head.Hash(), got["hash"],
+	require.Equal(t, head.Hash(), *got.Hash,
 		"a nil pin must read committed data exactly as an unwrapped tx does")
 }
 
@@ -1209,7 +1209,7 @@ func TestErigonGetBlockByTimestamp_PublishCycleDuringTxAcquisition(t *testing.T)
 	got, err := api.GetBlockByTimestamp(h.m.Ctx, rpc.Timestamp(h.overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.Hash(), got["hash"],
+	require.Equal(t, h.overlayHeader.Hash(), *got.Hash,
 		"a publish/commit/unpublish cycle during tx acquisition must not bound the search on the stale head")
 }
 
@@ -2055,7 +2055,7 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 		return rpc.BlockNumber(h.overlayHeader.Number.Uint64())
 	}
 	blockHash := func(v any) common.Hash {
-		return v.(map[string]any)["hash"].(common.Hash)
+		return *v.(*ethapi.RPCBlock).Hash
 	}
 	detailsHash := func(v any) common.Hash {
 		return blockHash(v.(map[string]any)["block"])

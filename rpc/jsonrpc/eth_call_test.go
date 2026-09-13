@@ -1041,21 +1041,16 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
@@ -1069,21 +1064,16 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+	if rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
@@ -1097,21 +1087,16 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()+999999999999), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimeMiddle(t *testing.T) {
@@ -1131,20 +1116,15 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	middleBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(middleBlock, true, false)
+	if rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Time()), false)
 	require.NoError(t, err)
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimestamp(t *testing.T) {
@@ -1159,21 +1139,16 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	require.NoError(t, err)
 	require.NotNil(t, pickedBlock)
-	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(pickedBlock, true, false)
+	if rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 // contractHexString is the output of compiling the following solidity contract:

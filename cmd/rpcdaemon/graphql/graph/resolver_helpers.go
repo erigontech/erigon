@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -32,6 +34,8 @@ func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, de
 	}, nil
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	block := &model.Block{}
 	absBlk := res["block"]
@@ -39,41 +43,63 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 		return block, nil
 	}
 
-	blk := absBlk.(map[string]any)
+	blk, ok := absBlk.(*ethapi.RPCBlock)
+	if !ok {
+		return nil, fmt.Errorf("unexpected block type %T", absBlk)
+	}
 
-	block.Difficulty = *convertDataToStringP(blk, "difficulty")
-	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
-	block.ExtraData = *convertDataToStringP(blk, "extraData")
-	block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
-	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
-	block.Hash = *convertDataToStringP(blk, "hash")
+	hexU256 := func(v *hexutil.U256) string {
+		if v == nil {
+			return ""
+		}
+		return v.String()
+	}
+
+	block.Difficulty = hexU256(blk.Difficulty)
+	block.TotalDifficulty = hexU256(blk.TotalDifficulty)
+	block.ExtraData = blk.ExtraData.String()
+	block.GasLimit = uint64(blk.GasLimit)
+	block.GasUsed = uint64(blk.GasUsed)
 	block.Miner = &model.Account{}
-	if address := convertDataToStringP(blk, "miner"); address != nil {
-		block.Miner.Address = strings.ToLower(*address)
+	// A pending block has no hash, miner or nonce yet; MarkPending nils them.
+	if blk.Hash != nil {
+		block.Hash = blk.Hash.Hex()
 	}
-	if mixHash := convertDataToStringP(blk, "mixHash"); mixHash != nil {
-		block.MixHash = *mixHash
+	if blk.Miner != nil {
+		block.Miner.Address = strings.ToLower(blk.Miner.Hex())
 	}
-	if blockNonce := convertDataToStringP(blk, "nonce"); blockNonce != nil {
-		block.Nonce = *blockNonce
+	if blk.Nonce != nil {
+		block.Nonce = hexutil.Encode(blk.Nonce[:])
 	}
-	block.Number = *convertDataToUint64P(blk, "number")
+	block.MixHash = blk.MixHash.Hex()
+	block.Number = (*uint256.Int)(blk.Number).Uint64()
 	block.Miner.BlockNum = block.Number
-	block.Parent = &model.Block{}
-	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
-	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
-	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = *convertDataToStringP(blk, "timestamp")
-	block.TransactionCount = convertDataToUint64P(blk, "transactionCount")
-	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
-	block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
-	block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
-	block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
-	block.WithdrawalsRoot = convertDataToStringP(blk, "withdrawalsRoot")
-	block.BlobGasUsed = convertDataToUint64P(blk, "blobGasUsed")
-	block.ExcessBlobGas = convertDataToUint64P(blk, "excessBlobGas")
+	block.Parent = &model.Block{Hash: blk.ParentHash.Hex()}
+	block.ReceiptsRoot = blk.ReceiptsRoot.Hex()
+	block.StateRoot = blk.StateRoot.Hex()
+	block.Timestamp = hexutil.Uint64(blk.Timestamp).String()
+	block.TransactionsRoot = blk.TransactionsRoot.Hex()
+	block.OmmerHash = blk.Sha3Uncles.Hex()
+	if blk.LogsBloom != nil {
+		block.LogsBloom = hexutil.Encode(blk.LogsBloom[:])
+	}
+	if blk.BaseFeePerGas != nil {
+		block.BaseFeePerGas = ptr(blk.BaseFeePerGas.String())
+	}
+	if blk.WithdrawalsRoot != nil {
+		block.WithdrawalsRoot = ptr(blk.WithdrawalsRoot.Hex())
+	}
+	if blk.BlobGasUsed != nil {
+		block.BlobGasUsed = ptr(uint64(*blk.BlobGasUsed))
+	}
+	if blk.ExcessBlobGas != nil {
+		block.ExcessBlobGas = ptr(uint64(*blk.ExcessBlobGas))
+	}
+	if n, ok := blk.TransactionCount.(hexutil.Uint64); ok {
+		block.TransactionCount = ptr(uint64(n))
+	}
 
-	uncles := blk["uncles"].([]common.Hash)
+	uncles := blk.Uncles
 	block.Ommers = make([]*model.Block, 0, len(uncles))
 	for _, ommerHash := range uncles {
 		block.Ommers = append(block.Ommers, &model.Block{Hash: ommerHash.String()})
