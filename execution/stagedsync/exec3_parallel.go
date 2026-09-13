@@ -951,9 +951,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 	// sizeCutPending: on a size-limit cut, execute one more block so state catches
 	// up to any block the fold computed ahead, then stop where state and commitment
-	// agree. Under the current C=1 contiguous fold nothing is folded ahead of the
-	// cut, so this only overshoots the budget by one block; kept for a future C>1
-	// fold-ahead mode.
+	// agree.
 	sizeCutPending := false
 
 	// np-phase exec-loop attribution: wall spent waiting for the next in-order
@@ -2514,7 +2512,8 @@ type blockExecutor struct {
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
 	// published, so it must be re-validated at the finalize boundary. A clean tx is
 	// provably still valid there — every predecessor is final and any write to one of
-	// its read cells went through markReadersDirty. Apply-loop-only, like readerIdx.
+	// its read cells went through markReadersDirty. Maintained only on the execLoop
+	// (the single result-processing/finalize goroutine), like readerIdx, so no lock.
 	revalidate map[int]bool
 
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
@@ -2603,9 +2602,9 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 
 // markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
 // just published as needing finalize-boundary re-validation: a value it read may
-// have changed. Only successors can be invalidated by writerTx's write. Apply-loop
-// only, so the readerIdx read and revalidate write need no lock. A missed reader is
-// unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
+// have changed. Only successors can be invalidated by writerTx's write. Runs only
+// on the execLoop, so the readerIdx read and revalidate write need no lock. A missed
+// reader is unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
 func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	if ws == nil {
 		return

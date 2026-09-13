@@ -241,9 +241,9 @@ func ExecV3(ctx context.Context,
 	return out, execErr
 }
 
-// execV3Serial runs the legacy serial executor. It stays welded to the stage
-// (execStage/u) — serial is scheduled for removal and does not need the
-// stage-agnostic split ExecV3 has. The stage wrapper calls it directly.
+// execV3Serial runs the serial executor. It stays welded to the stage
+// (execStage/u) rather than taking the stage-agnostic split ExecV3 has, and the
+// stage wrapper calls it directly.
 func execV3Serial(ctx context.Context,
 	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
@@ -514,12 +514,9 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // (executed in an earlier batch) so Finalize and the notification cache can see
 // the block's full receipt set.
 //
-// Best-effort. At a mid-block step boundary the committed domain latest is the
-// step-edge value, not the block-start pre-state, so the prefix is not always
-// reconstructable (and minimal nodes retain no receipts at all). Callers MUST
-// treat a failure as non-fatal: the node still resumes from a mid-step boundary
-// and the block's own receipts and cumulative gas stay correct — only the prior
-// receipts are absent (block then left not receipts-complete).
+// At a mid-block step boundary the committed domain latest is the step-edge
+// value, not the block-start pre-state, so the prefix cannot always be
+// reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer priorIbs.Close()
