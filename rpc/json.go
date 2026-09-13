@@ -114,10 +114,9 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// maxPooledResult bounds what the pool retains. It has to sit above the
-// responses worth pooling, not below them: a multi-megabyte eth_getLogs answer
-// that misses the bound is rebuilt from a small buffer every time, which costs
-// more than not pooling at all. Traces run to gigabytes and are left out.
+// maxPooledResult bounds what the pool retains. The bound must sit above the
+// responses worth pooling: one that misses it is rebuilt from a small buffer
+// every time, which costs more than not pooling at all.
 const maxPooledResult = 128 * jsonstream.FlushThreshold
 
 var resultBufPool = sync.Pool{New: func() any {
