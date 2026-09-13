@@ -29,6 +29,49 @@ type assembledBlockModule struct {
 	assembledErr   error
 }
 
+type forkchoiceAwareBlockModule struct {
+	execmodule.ExecutionModule
+	state          execmodule.ForkChoiceState
+	stateAfterRead *execmodule.ForkChoiceState
+	getErr         error
+	assembleResult execmodule.AssembleBlockResult
+	updateCalls    int
+	assembleCalls  int
+}
+
+func (m *forkchoiceAwareBlockModule) GetForkChoice(context.Context) (execmodule.ForkChoiceState, error) {
+	if m.getErr != nil {
+		return execmodule.ForkChoiceState{}, m.getErr
+	}
+	state := m.state
+	if m.stateAfterRead != nil {
+		m.state = *m.stateAfterRead
+	}
+	return state, nil
+}
+
+func (m *forkchoiceAwareBlockModule) UpdateForkChoice(
+	context.Context,
+	common.Hash,
+	common.Hash,
+	common.Hash,
+) (execmodule.ForkChoiceResult, error) {
+	m.updateCalls++
+	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil
+}
+
+func (m *forkchoiceAwareBlockModule) AssembleBlock(
+	_ context.Context,
+	_ *builder.Parameters,
+) (execmodule.AssembleBlockResult, error) {
+	m.assembleCalls++
+	return m.assembleResult, nil
+}
+
+func (m assembledBlockModule) GetForkChoice(context.Context) (execmodule.ForkChoiceState, error) {
+	return execmodule.ForkChoiceState{HeadHash: common.Hash{0x42}}, nil
+}
+
 func (m assembledBlockModule) AssembleBlock(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 	return m.assembleResult, m.assembleErr
 }
@@ -39,14 +82,116 @@ func (m assembledBlockModule) GetAssembledBlock(context.Context, uint64) (execmo
 
 func TestAdapterStartsAvailableBuild(t *testing.T) {
 	adapter := NewAdapter(assembledBlockModule{assembleResult: execmodule.AssembleBlockResult{PayloadID: 42}}, &clparams.MainnetBeaconConfig)
-	payloadID, err := adapter.AssemblePayload(t.Context(), &builder.Parameters{})
+	payloadID, err := adapter.AssemblePayload(t.Context(), &builder.Parameters{ParentHash: common.Hash{0x42}})
 	require.NoError(t, err)
 	require.Equal(t, uint64(42), payloadID)
 }
 
+func TestAdapterWaitsForMatchingExecutionHead(t *testing.T) {
+	currentHead := common.Hash{0x41}
+	targetHead := common.Hash{0x42}
+	safeHead := common.Hash{0x31}
+	finalizedHead := common.Hash{0x21}
+	module := &forkchoiceAwareBlockModule{
+		state: execmodule.ForkChoiceState{
+			HeadHash:      currentHead,
+			SafeHash:      safeHead,
+			FinalizedHash: finalizedHead,
+		},
+		assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: targetHead},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Zero(t, module.updateCalls)
+	require.Zero(t, module.assembleCalls)
+	require.Equal(t, currentHead, module.state.HeadHash)
+	require.Equal(t, safeHead, module.state.SafeHash)
+	require.Equal(t, finalizedHead, module.state.FinalizedHash)
+}
+
+func TestAdapterRejectsZeroPayloadParent(t *testing.T) {
+	module := &forkchoiceAwareBlockModule{
+		assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Zero(t, module.updateCalls)
+	require.Zero(t, module.assembleCalls)
+}
+
+func TestAdapterDoesNotRepeatMatchingForkchoice(t *testing.T) {
+	head := common.Hash{0x42}
+	module := &forkchoiceAwareBlockModule{
+		state:          execmodule.ForkChoiceState{HeadHash: head},
+		assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+	}
+
+	payloadID, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: head},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), payloadID)
+	require.Zero(t, module.updateCalls)
+	require.Equal(t, 1, module.assembleCalls)
+}
+
+func TestAdapterNeverUpdatesForkchoiceWhenHeadAdvancesAfterRead(t *testing.T) {
+	targetHead := common.Hash{0x42}
+	newSafe := common.Hash{0x32}
+	newFinalized := common.Hash{0x22}
+	module := &forkchoiceAwareBlockModule{
+		state: execmodule.ForkChoiceState{
+			HeadHash: targetHead,
+		},
+		stateAfterRead: &execmodule.ForkChoiceState{
+			HeadHash:      common.Hash{0x43},
+			SafeHash:      newSafe,
+			FinalizedHash: newFinalized,
+		},
+		assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+	}
+
+	payloadID, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: targetHead},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), payloadID)
+	require.Zero(t, module.updateCalls)
+	require.Equal(t, 1, module.assembleCalls)
+	require.Equal(t, common.Hash{0x43}, module.state.HeadHash)
+	require.Equal(t, newSafe, module.state.SafeHash)
+	require.Equal(t, newFinalized, module.state.FinalizedHash)
+}
+
+func TestAdapterPropagatesForkchoiceErrors(t *testing.T) {
+	getErr := errors.New("get forkchoice failed")
+	module := &forkchoiceAwareBlockModule{getErr: getErr}
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: common.Hash{0x42}},
+	)
+
+	require.ErrorIs(t, err, getErr)
+	require.Zero(t, module.assembleCalls)
+}
+
 func TestAdapterRejectsBusyBuild(t *testing.T) {
 	adapter := NewAdapter(assembledBlockModule{assembleResult: execmodule.AssembleBlockResult{Busy: true}}, &clparams.MainnetBeaconConfig)
-	_, err := adapter.AssemblePayload(t.Context(), &builder.Parameters{})
+	_, err := adapter.AssemblePayload(t.Context(), &builder.Parameters{ParentHash: common.Hash{0x42}})
 	require.ErrorIs(t, err, ErrExecutionBusy)
 }
 
@@ -271,7 +416,7 @@ func TestAdapterEnforcesConfiguredPayloadLimits(t *testing.T) {
 
 func TestAdapterPropagatesExecutionErrors(t *testing.T) {
 	want := errors.New("execution failed")
-	_, err := NewAdapter(assembledBlockModule{assembleErr: want}, &clparams.MainnetBeaconConfig).AssemblePayload(t.Context(), &builder.Parameters{})
+	_, err := NewAdapter(assembledBlockModule{assembleErr: want}, &clparams.MainnetBeaconConfig).AssemblePayload(t.Context(), &builder.Parameters{ParentHash: common.Hash{0x42}})
 	require.ErrorIs(t, err, want)
 
 	_, err = NewAdapter(assembledBlockModule{assembledErr: want}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
