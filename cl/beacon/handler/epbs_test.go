@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
@@ -1932,6 +1933,73 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 		DependentRoot: common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
 	})
 	require.True(t, ok)
+}
+
+func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
+	for _, contentType := range []string{"application/json", "application/octet-stream"} {
+		t.Run(contentType, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fc, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.GloasForkEpoch = 3
+			cfg.InitializeForkSchedule()
+			root := common.Hash{1}
+			depState := state.New(cfg)
+			depState.SetVersion(clparams.FuluVersion)
+			require.NoError(t, depState.SetSlot(64))
+			key, err := bls.GenerateKey()
+			require.NoError(t, err)
+			pubkey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+			require.NoError(t, depState.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), 0))
+			depState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)))
+			fc.StateAtBlockRootVal[root] = depState
+			fc.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 63}
+			fc.HeadVal = root
+			handler.epbsPool = pool.NewEpbsPool()
+			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-64*cfg.SecondsPerSlot, common.Hash{}, cfg)
+			handler.proposerPreferencesService = services.NewProposerPreferencesService(nil, fc, clock, cfg, handler.epbsPool, nil)
+			preferences := make([]*cltypes.SignedProposerPreferences, 0, 3)
+			for _, slot := range []uint64{95, 96, 100} {
+				preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: slot, DependentRoot: root}}
+				domain, err := depState.GetDomain(cfg.DomainProposerPreferences, slot/cfg.SlotsPerEpoch)
+				require.NoError(t, err)
+				signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
+				require.NoError(t, err)
+				copy(preference.Signature[:], key.Sign(signingRoot[:]).Bytes())
+				preferences = append(preferences, preference)
+			}
+			var body []byte
+			if contentType == "application/json" {
+				body, err = json.Marshal(preferences)
+				require.NoError(t, err)
+			} else {
+				for _, preference := range preferences {
+					body, err = preference.EncodeSSZ(body)
+					require.NoError(t, err)
+				}
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+			request.Header.Set("Content-Type", contentType)
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), "pre-Gloas")
+			var response struct {
+				Failures []struct {
+					Index int `json:"index"`
+				} `json:"failures"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Len(t, response.Failures, 1)
+			require.Zero(t, response.Failures[0].Index)
+			_, ok := handler.epbsPool.GetPreference(95, root)
+			require.False(t, ok)
+			for _, slot := range []uint64{96, 100} {
+				_, ok := handler.epbsPool.GetPreference(slot, root)
+				require.True(t, ok)
+			}
+		})
+	}
 }
 
 func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailures(t *testing.T) {

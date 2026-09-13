@@ -445,14 +445,8 @@ func NewForkChoiceStore(
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
-	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
-	for i := range anchorTimelinessVotes {
-		anchorTimelinessVotes[i] = 1
-		anchorDataAvailabilityVotes[i] = 1
-	}
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
