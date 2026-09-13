@@ -45,25 +45,3 @@ func TestMarshalIntoMatchesMarshal(t *testing.T) {
 		})
 	}
 }
-
-// A reused buffer must keep its capacity and not leak the previous response.
-func TestMarshalIntoReusesBuffer(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	if err := marshalInto(&buf, benchLogs(8)); err != nil {
-		t.Fatal(err)
-	}
-	big := buf.Cap()
-
-	buf.Reset()
-	if err := marshalInto(&buf, hexutil.Uint64(1)); err != nil {
-		t.Fatal(err)
-	}
-	if want := `"0x1"`; buf.String() != want {
-		t.Fatalf("want %s, got %s", want, buf.String())
-	}
-	if buf.Cap() != big {
-		t.Errorf("capacity not reused: had %d, now %d", big, buf.Cap())
-	}
-}

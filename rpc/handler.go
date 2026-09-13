@@ -696,11 +696,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // Nothing here may reach the underlying writer: the response must stay in the stream buffer
 // until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	// The stream copies or writes through synchronously, so the marshal buffer is
-	// free the moment this returns.
-	defer msg.releaseResult()
-
-	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
+	if msg.Error != nil || (msg.Result == nil && !msg.hasResult) || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, err := json.Marshal(msg)
 		if err != nil {
 			buf, err = json.Marshal(msg.errorResponse(err))
@@ -710,15 +706,37 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 		}
 		return
 	}
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString(msg.Version)
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteRawBytes(msg.ID)
-	stream.WriteMore()
-	stream.WriteObjectField("result")
-	stream.WriteRawBytes(msg.Result)
+	writePrefix := func() {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("jsonrpc")
+		stream.WriteString(msg.Version)
+		stream.WriteMore()
+		stream.WriteObjectField("id")
+		stream.WriteRawBytes(msg.ID)
+		stream.WriteMore()
+		stream.WriteObjectField("result")
+	}
+	if msg.Result != nil {
+		writePrefix()
+		stream.WriteRawBytes(msg.Result)
+		stream.WriteObjectEnd()
+		return
+	}
+
+	w := spillWriter{s: stream, onSpill: writePrefix}
+	switch err := marshalInto(&w, msg.result); {
+	case err == nil:
+		w.commit()
+	case w.spilled:
+		// Already on its way to the client and cannot be withdrawn: close the
+		// value off and report the failure beside it.
+		stream.WriteNil()
+		HandleError(err, stream)
+	default:
+		// Nothing was written, so the whole message is still replaceable.
+		msg.errorResponse(err).writeTo(stream)
+		return
+	}
 	stream.WriteObjectEnd()
 }
 

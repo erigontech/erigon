@@ -3,16 +3,18 @@
 package rpc
 
 import (
-	"bytes"
 	"encoding/json"
+	"io"
 )
 
-// marshalInto appends the JSON encoding of v to buf. Encoding through a Writer
-// skips the copy json.Marshal makes on the way out.
-func marshalInto(buf *bytes.Buffer, v any) error {
-	if err := json.NewEncoder(buf).Encode(v); err != nil {
+// marshalInto writes the JSON encoding of v to w. v1 has no streaming encoder:
+// Marshal builds the whole value first either way, so there is nothing to gain
+// from Encoder here and its trailing newline would corrupt the RPC framing.
+func marshalInto(w io.Writer, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
 		return err
 	}
-	buf.Truncate(buf.Len() - 1) // Encode terminates the value with a newline
-	return nil
+	_, err = w.Write(b)
+	return err
 }

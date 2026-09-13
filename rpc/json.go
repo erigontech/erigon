@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -61,9 +59,29 @@ type jsonrpcMessage struct {
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 
-	// resultBuf is the pooled buffer Result aliases. Unexported, so it stays out
-	// of the encoding; releaseResult hands it back once the message is written.
-	resultBuf *bytes.Buffer
+	// result is the value before encoding, valid only when hasResult is set: a
+	// successful call may legitimately return nil, which must still encode as
+	// "result":null. Unexported so they stay out of the encoding; writeTo
+	// marshals into the stream so a large response flushes as it is produced.
+	result    any
+	hasResult bool
+}
+
+// MarshalJSON encodes the lazy result for the paths that marshal a message
+// directly instead of going through writeTo: batches and the websocket codec.
+// Only writeTo can stream, so here the value is materialised.
+func (msg *jsonrpcMessage) MarshalJSON() ([]byte, error) {
+	type plain jsonrpcMessage // no MarshalJSON, so no recursion
+	if !msg.hasResult {
+		return json.Marshal((*plain)(msg))
+	}
+	enc, err := json.Marshal(msg.result)
+	if err != nil {
+		return nil, err
+	}
+	clone := *msg
+	clone.Result, clone.result, clone.hasResult = enc, nil, false
+	return json.Marshal((*plain)(&clone))
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -114,46 +132,16 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// maxPooledResult bounds what the pool retains. The bound must sit above the
-// responses worth pooling: one that misses it is rebuilt from a small buffer
-// every time, which costs more than not pooling at all.
-const maxPooledResult = 128 * jsonstream.FlushThreshold
-
-var resultBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
-func putResultBuf(buf *bytes.Buffer) {
-	if buf.Cap() > maxPooledResult {
-		return
-	}
-	buf.Reset()
-	resultBufPool.Put(buf)
-}
-
-// releaseResult returns the marshal buffer to the pool. Result aliases it, so
-// the message must not be read after this.
-func (msg *jsonrpcMessage) releaseResult() {
-	if msg.resultBuf == nil {
-		return
-	}
-	putResultBuf(msg.resultBuf)
-	msg.resultBuf, msg.Result = nil, nil
-}
-
-// TODO: wrap marshalling failures with 'internal server error'
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 	if fm, ok := result.(fastJSONResult); ok {
 		enc, err := fm.MarshalFastJSON()
 		if err != nil {
+			// TODO: wrap with 'internal server error'
 			return msg.errorResponse(err)
 		}
 		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
 	}
-	buf := resultBufPool.Get().(*bytes.Buffer)
-	if err := marshalInto(buf, result); err != nil {
-		putResultBuf(buf)
-		return msg.errorResponse(err)
-	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: buf.Bytes(), resultBuf: buf}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, result: result, hasResult: true}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
