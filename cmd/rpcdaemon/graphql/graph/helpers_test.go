@@ -66,7 +66,8 @@ func TestConvertDataToUint64P_Nil(t *testing.T) {
 	}
 }
 
-// RPCMarshalHeader emits number, difficulty and baseFeePerGas as *hexutil.U256.
+// buildBlockDetailsResponse puts maxFeePerBlobGas into each blob transaction's
+// receipt map as *hexutil.U256, so the conversion must handle that type.
 // Without a case for it the type switch falls through to "unhandled" (strings)
 // or 0 (uint64s), which GraphQL then serves as the block's number.
 func TestConvertDataU256(t *testing.T) {

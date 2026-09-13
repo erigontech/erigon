@@ -466,12 +466,3 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 
 	assert.Equal(t, expectedAmount, *txCount)
 }
-
-func jsonFields(t *testing.T, v any) map[string]any {
-	t.Helper()
-	encoded, err := json.Marshal(v)
-	require.NoError(t, err)
-	var fields map[string]any
-	require.NoError(t, json.Unmarshal(encoded, &fields))
-	return fields
-}

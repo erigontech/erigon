@@ -402,8 +402,8 @@ type RPCHeader struct {
 }
 
 // RPCBlock is the RPC representation of a block. TransactionCount, TotalDifficulty
-// and Calls are not part of the eth_ block output; the erigon_, ots_, graphql_ and
-// eth_simulateV1 responses fill them in.
+// and Calls are not part of the eth_ block output and are omitted unless a caller
+// sets them.
 type RPCBlock struct {
 	RPCHeader
 	Size         hexutil.Uint64     `json:"size"`
