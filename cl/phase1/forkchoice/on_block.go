@@ -166,6 +166,40 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
+// checkFinalizedHorizon applies the two spec on_block finality assertions: the block is
+// above the finalized horizon and descends from the finalized checkpoint. It must be
+// redone after any yield of f.mu, since finality can advance while the lock is not held.
+func (f *ForkChoiceStore) checkFinalizedHorizon(block *cltypes.BeaconBlock) error {
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// A checkpoint-sync anchor can be newer than the store's finalized checkpoint and defines the earliest admissible block.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
+	if block.Slot <= finalizedSlot {
+		return errBlockAtFinalizedHorizon
+	}
+	if ancestorNode := f.getAncestor(ForkChoiceNode{Root: block.ParentRoot, PayloadStatus: cltypes.PayloadStatusPending}, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return invalidBlockError(ErrNotFinalizedDescendant)
+	}
+	return nil
+}
+
+// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
+// was released caches a head that predates this block.
+func (f *ForkChoiceStore) invalidateCachedHead() {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
+// getBlobsWhileYieldingForkChoiceLock asks the EL for the block's blobs, releasing the
+// caller-held f.mu for the duration of the call.
+func (f *ForkChoiceStore) getBlobsWhileYieldingForkChoiceLock(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte, error) {
+	f.mu.Unlock()
+	defer f.mu.Lock()
+	return f.engine.GetBlobs(ctx, versionedHashes, version)
+}
+
 func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -178,17 +212,8 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 	if f.Slot() < block.Block.Slot {
 		return common.Hash{}, 0, ErrBlockTooEarly
 	}
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-	// A checkpoint-sync anchor can be newer than the store's finalized checkpoint and defines the earliest admissible block.
-	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
-		finalizedSlot = anchorSlot
-	}
-	if block.Block.Slot <= finalizedSlot {
-		return common.Hash{}, 0, errBlockAtFinalizedHorizon
-	}
-	if ancestorNode := f.getAncestor(ForkChoiceNode{Root: block.Block.ParentRoot, PayloadStatus: cltypes.PayloadStatusPending}, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return common.Hash{}, 0, invalidBlockError(ErrNotFinalizedDescendant)
+	if err := f.checkFinalizedHorizon(block.Block); err != nil {
+		return common.Hash{}, 0, err
 	}
 	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
 		return common.Hash{}, 0, invalidBlockError(ErrForkSchemaSlotMismatch)
@@ -245,8 +270,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
@@ -288,12 +312,19 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		// Check if EL has blobs
 		elHasBlobs := false
 		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+			blobsWithProof, proofs, err := f.getBlobsWhileYieldingForkChoiceLock(ctx, versionedHashes, block.Version())
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
 			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+			f.invalidateCachedHead()
+			if recheckErr := f.checkFinalizedHorizon(block.Block); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
+			}
 		}
 
 		// Check if blob data is available (skip if blobs are in txpool)
@@ -338,8 +369,13 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
-			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
+				return f.verifiedExecutionPayload.Contains(blockRoot)
+			}, func() {
+				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			f.invalidateCachedHead()
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
@@ -374,6 +410,12 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
+			}
+			if recheckErr := f.checkFinalizedHorizon(block.Block); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
 			}
 		}
 	}
