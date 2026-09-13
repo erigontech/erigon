@@ -1123,3 +1123,150 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 	}
 	return last
 }
+
+func TestEngineApiForkChoiceRecoversOlderLocallyBuiltPayload(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		baseTimestamp := eat.MockCl.State().ParentElTimestamp
+		var first *engineapitester.MockClPayload
+		var latest *engineapitester.MockClPayload
+
+		for i := uint64(1); i <= 4; i++ {
+			payload, err := eat.MockCl.BuildNewPayload(ctx, engineapitester.WithTimestamp(baseTimestamp+i))
+			require.NoError(t, err)
+			if first == nil {
+				first = payload
+			}
+			latest = payload
+		}
+
+		require.NotNil(t, first)
+		require.NotNil(t, latest)
+		require.Equal(t, first.ExecutionPayload.BlockNumber, latest.ExecutionPayload.BlockNumber)
+		require.NotEqual(t, first.ExecutionPayload.BlockHash, latest.ExecutionPayload.BlockHash)
+
+		forkChoice := enginetypes.ForkChoiceState{
+			HeadHash:           first.ExecutionPayload.BlockHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+
+		var response *enginetypes.ForkChoiceUpdatedResponse
+		if eat.ChainConfig.AmsterdamTime != nil {
+			response, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoice, nil, nil)
+		} else {
+			response, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoice, nil)
+		}
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Equal(t, enginetypes.ValidStatus, response.PayloadStatus.Status,
+			"forkchoice must recover an older locally built payload instead of returning SYNCING")
+	})
+}
+
+func TestEngineApiForkChoiceDoesNotLaunderInvalidBlobHashesViaLocalRecovery(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	// Keep Osaka/Electra active but disable Amsterdam/Gloas. This makes
+	// NewPayloadV4 and ForkchoiceUpdatedV3 the fork-appropriate methods while
+	// retaining the modern test harness and blob validation.
+	genesis.Config.AmsterdamTime = nil
+
+	eat, err := engineapitester.InitialiseEngineApiTester(
+		ctx,
+		engineapitester.EngineApiTesterInitArgs{
+			Logger:      logger,
+			DataDir:     t.TempDir(),
+			Genesis:     genesis,
+			CoinbaseKey: coinbaseKey,
+		},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		require.Nil(t, eat.ChainConfig.AmsterdamTime)
+		require.NotNil(t, eat.ChainConfig.OsakaTime)
+
+		payload, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, payload)
+		require.NotNil(t, payload.ExecutionPayload)
+		require.NotNil(t, payload.ParentBeaconBlockRoot)
+
+		// This payload contains no blob transactions. One otherwise correctly
+		// version-prefixed hash therefore makes the auxiliary blob-hash list
+		// inconsistent with the payload.
+		badVersionedHashes := []common.Hash{{0x01}}
+
+		executionRequests := payload.ExecutionRequests
+		if executionRequests == nil {
+			executionRequests = []hexutil.Bytes{}
+		}
+
+		status, err := eat.EngineApiClient.NewPayloadV4(
+			ctx,
+			payload.ExecutionPayload,
+			badVersionedHashes,
+			payload.ParentBeaconBlockRoot,
+			executionRequests,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "mismatch blob hashes")
+
+		forkChoice := enginetypes.ForkChoiceState{
+			HeadHash:           payload.ExecutionPayload.BlockHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+
+		response, err := eat.EngineApiClient.ForkchoiceUpdatedV3(
+			ctx,
+			&forkChoice,
+			nil,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+
+		require.NotEqual(
+			t,
+			enginetypes.ValidStatus,
+			response.PayloadStatus.Status,
+			"forkchoice must not turn an INVALID newPayload request into VALID through local-cache recovery",
+		)
+
+		status, err = eat.EngineApiClient.NewPayloadV4(
+			ctx,
+			payload.ExecutionPayload,
+			[]common.Hash{},
+			payload.ParentBeaconBlockRoot,
+			executionRequests,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		require.Equal(t, enginetypes.ValidStatus, status.Status,
+			"a correctly formed newPayload request must remain able to validate the same execution payload")
+
+		response, err = eat.EngineApiClient.ForkchoiceUpdatedV3(
+			ctx,
+			&forkChoice,
+			nil,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Equal(t, enginetypes.ValidStatus, response.PayloadStatus.Status,
+			"correct newPayload validation must restore normal forkchoice validity")
+	})
+}

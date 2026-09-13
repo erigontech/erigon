@@ -19,27 +19,99 @@ package builder
 import (
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type LatestBlockBuiltStore struct {
-	block *types.Block
+const recentBlockBuiltCapacity = 16
 
-	lock sync.Mutex
+type LatestBlockBuiltStore struct {
+	block              *types.Block
+	blocks             map[common.Hash]*types.Block
+	order              []common.Hash
+	recoveryIneligible map[common.Hash]struct{}
+
+	lock sync.RWMutex
 }
 
 func NewLatestBlockBuiltStore() *LatestBlockBuiltStore {
-	return &LatestBlockBuiltStore{}
+	return &LatestBlockBuiltStore{
+		blocks:             make(map[common.Hash]*types.Block),
+		recoveryIneligible: make(map[common.Hash]struct{}),
+	}
 }
 
 func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
+	if block == nil {
+		return
+	}
+
+	hash := block.Hash()
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
 	s.block = block
+
+	if s.blocks == nil {
+		s.blocks = make(map[common.Hash]*types.Block)
+	}
+	if s.recoveryIneligible == nil {
+		s.recoveryIneligible = make(map[common.Hash]struct{})
+	}
+
+	if _, ok := s.blocks[hash]; ok {
+		for i, existing := range s.order {
+			if existing == hash {
+				copy(s.order[i:], s.order[i+1:])
+				s.order = s.order[:len(s.order)-1]
+				break
+			}
+		}
+	}
+
+	s.order = append(s.order, hash)
+	s.blocks[hash] = block
+
+	for len(s.order) > recentBlockBuiltCapacity {
+		oldest := s.order[0]
+		s.order = s.order[1:]
+		delete(s.blocks, oldest)
+		delete(s.recoveryIneligible, oldest)
+	}
 }
 
 func (s *LatestBlockBuiltStore) BlockBuilt() *types.Block {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return s.block
+}
+
+func (s *LatestBlockBuiltStore) BlockBuiltByHash(hash common.Hash) *types.Block {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return s.blocks[hash]
+}
+
+func (s *LatestBlockBuiltStore) BlockBuiltForRecovery(hash common.Hash) *types.Block {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	if _, blocked := s.recoveryIneligible[hash]; blocked {
+		return nil
+	}
+	return s.blocks[hash]
+}
+
+func (s *LatestBlockBuiltStore) MarkRecoveryIneligible(hash common.Hash) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.block
+
+	if _, ok := s.blocks[hash]; !ok {
+		return
+	}
+	if s.recoveryIneligible == nil {
+		s.recoveryIneligible = make(map[common.Hash]struct{})
+	}
+	s.recoveryIneligible[hash] = struct{}{}
 }

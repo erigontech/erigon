@@ -68,6 +68,37 @@ type stubExecutionModule struct {
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
 
+type stubBlockDownloader struct {
+	status engine_block_downloader.Status
+}
+
+var _ engineBlockDownloader = (*stubBlockDownloader)(nil)
+
+func (*stubBlockDownloader) ReportBadHeader(
+	common.Hash,
+	common.Hash,
+	string,
+) {
+}
+
+func (*stubBlockDownloader) IsBadHeader(
+	common.Hash,
+) (bool, common.Hash, string) {
+	return false, common.Hash{}, ""
+}
+
+func (s *stubBlockDownloader) Status() engine_block_downloader.Status {
+	return s.status
+}
+
+func (*stubBlockDownloader) StartDownloading(
+	common.Hash,
+	*types.Block,
+	engine_block_downloader.Trigger,
+) bool {
+	return false
+}
+
 func (s *stubExecutionModule) GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
 	if s.getHeaderFunc != nil {
 		return s.getHeaderFunc(ctx, blockHash, blockNumber)
@@ -1201,6 +1232,75 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.True(t, errors.As(err, &rpcErr))
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
+}
+
+func TestGetQuickPayloadStatusAllowsCachedForkchoiceDuringActiveDownload(t *testing.T) {
+	t.Parallel()
+
+	cfg := preCancunChainConfig()
+	srv := NewEngineServer(
+		log.New(),
+		cfg,
+		&stubExecutionModule{},
+		nil,
+		false,
+		false,
+		false,
+		true,
+		nil,
+		nil,
+		0,
+		0,
+	)
+
+	srv.blockDownloader = &stubBlockDownloader{
+		status: engine_block_downloader.Syncing,
+	}
+
+	store := builder.NewLatestBlockBuiltStore()
+	block := types.NewBlockWithHeader(
+		&types.Header{Time: 1},
+		nil,
+	)
+	store.AddBlockBuilt(block)
+	srv.SetLatestBlockBuiltStore(store)
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash: block.Hash(),
+	}
+
+	status, err := srv.getQuickPayloadStatusIfPossible(
+		context.Background(),
+		block.Hash(),
+		0,
+		common.Hash{},
+		forkchoiceState,
+		false,
+	)
+	require.NoError(t, err)
+	require.Nil(
+		t,
+		status,
+		"cached local head must reach HandleForkChoice even while another download is active",
+	)
+
+	unknownHash := common.Hash{0xff}
+	unknownForkchoice := &engine_types.ForkChoiceState{
+		HeadHash: unknownHash,
+	}
+
+	status, err = srv.getQuickPayloadStatusIfPossible(
+		context.Background(),
+		unknownHash,
+		0,
+		common.Hash{},
+		unknownForkchoice,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.SyncingStatus, status.Status,
+		"genuinely unknown head must remain SYNCING during an active download")
 }
 
 // TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing pins the engine-api spec
