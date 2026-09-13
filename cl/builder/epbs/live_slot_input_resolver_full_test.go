@@ -97,35 +97,41 @@ func TestLiveSlotInputResolverRejectsUnavailableFullParentEnvelope(t *testing.T)
 
 func TestLiveSlotInputResolverRejectsSameRootFreshnessChanges(t *testing.T) {
 	tests := []struct {
-		name   string
-		mutate func(*resolverForkchoice, common.Hash)
+		name        string
+		errorDetail string
+		mutate      func(*resolverForkchoice, common.Hash)
 	}{
 		{
-			name: "payload status",
+			name:        "payload status",
+			errorDetail: "build mode changed",
 			mutate: func(fc *resolverForkchoice, _ common.Hash) {
 				fc.headNode.PayloadStatus = cltypes.PayloadStatusEmpty
 			},
 		},
 		{
-			name: "envelope availability",
+			name:        "envelope availability",
+			errorDetail: "build mode changed",
 			mutate: func(fc *resolverForkchoice, _ common.Hash) {
 				fc.hasEnvelope = false
 			},
 		},
 		{
-			name: "build on full decision",
+			name:        "build on full decision",
+			errorDetail: "build mode changed",
 			mutate: func(fc *resolverForkchoice, _ common.Hash) {
 				fc.buildOnFull = false
 			},
 		},
 		{
-			name: "gas limit",
+			name:        "gas limit",
+			errorDetail: "execution parent gas limit changed",
 			mutate: func(fc *resolverForkchoice, parentHash common.Hash) {
 				fc.gasLimits[parentHash]++
 			},
 		},
 		{
-			name: "recent status",
+			name:        "recent status",
+			errorDetail: "execution parent status changed",
 			mutate: func(fc *resolverForkchoice, parentHash common.Hash) {
 				fc.recentStatuses[parentHash] = execution_client.PayloadStatusInvalidated
 			},
@@ -167,6 +173,7 @@ func TestLiveSlotInputResolverRejectsSameRootFreshnessChanges(t *testing.T) {
 
 			err = resolver.ValidateCurrent(t.Context(), input)
 			require.ErrorIs(t, err, ErrSlotInputStale)
+			require.ErrorContains(t, err, tt.errorDetail)
 		})
 	}
 }
@@ -253,18 +260,27 @@ func TestLiveSlotInputResolverWaitsForValidatedFullExecutionParent(t *testing.T)
 
 	_, err := resolver.Resolve(t.Context(), preferences)
 	require.ErrorIs(t, err, ErrSlotInputUnavailable)
+	require.ErrorContains(t, err, "execution parent is not validated")
+	require.ErrorContains(t, err, "available=true")
+	require.ErrorContains(t, err, "status=1")
 
 	fc.recentStatuses[parentHash] = execution_client.PayloadStatusValidated
 	fc.verifiedRoots[headRoot] = false
 	_, err = resolver.Resolve(t.Context(), preferences)
 	require.ErrorIs(t, err, ErrSlotInputUnavailable)
+	require.ErrorContains(t, err, "full execution parent is not verified")
+	require.ErrorContains(t, err, "payloadStatus=1")
+	require.ErrorContains(t, err, "hasEnvelope=true")
+	require.ErrorContains(t, err, "buildOnFull=true")
 
 	fc.verifiedRoots[headRoot] = true
 	input, err := resolver.Resolve(t.Context(), preferences)
 	require.NoError(t, err)
 
 	fc.verifiedRoots[headRoot] = false
-	require.ErrorIs(t, resolver.ValidateCurrent(t.Context(), input), ErrSlotInputStale)
+	err = resolver.ValidateCurrent(t.Context(), input)
+	require.ErrorIs(t, err, ErrSlotInputStale)
+	require.ErrorContains(t, err, "full execution parent became unverified")
 }
 
 func TestLiveSlotInputResolverRejectsPayloadStatusTransitionChangingParent(t *testing.T) {

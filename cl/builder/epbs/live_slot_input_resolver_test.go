@@ -53,16 +53,17 @@ func (s *resolverHeadSource) ViewHeadStateWithIdentity(view synced_data.ViewHead
 }
 
 type resolverForkchoice struct {
-	headNode       forkchoice.ForkChoiceNode
-	headErr        error
-	envelope       *cltypes.SignedExecutionPayloadEnvelope
-	envelopeErr    error
-	hasEnvelope    bool
-	buildOnFull    bool
-	verifiedRoots  map[common.Hash]bool
-	gasLimits      map[common.Hash]uint64
-	recentStatuses map[common.Hash]execution_client.PayloadStatus
-	readEnvelope   func() (*cltypes.SignedExecutionPayloadEnvelope, error)
+	headNode         forkchoice.ForkChoiceNode
+	headErr          error
+	envelope         *cltypes.SignedExecutionPayloadEnvelope
+	envelopeErr      error
+	hasEnvelope      bool
+	buildOnFull      bool
+	verifiedRoots    map[common.Hash]bool
+	gasLimits        map[common.Hash]uint64
+	recentStatuses   map[common.Hash]execution_client.PayloadStatus
+	readEnvelope     func() (*cltypes.SignedExecutionPayloadEnvelope, error)
+	shouldBuildCalls int
 }
 
 type resolverBuilderSigner struct {
@@ -84,6 +85,7 @@ func (f *resolverForkchoice) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
 }
 func (f *resolverForkchoice) HasEnvelope(common.Hash) bool { return f.hasEnvelope }
 func (f *resolverForkchoice) ShouldBuildOnFull(forkchoice.ForkChoiceNode, uint64) bool {
+	f.shouldBuildCalls++
 	return f.buildOnFull
 }
 func (f *resolverForkchoice) IsPayloadVerified(root common.Hash) bool { return f.verifiedRoots[root] }
@@ -147,6 +149,31 @@ func TestLiveSlotInputResolverRejectsTargetPastHeadProposerLookahead(t *testing.
 	_, err := resolver.Resolve(t.Context(), preferences)
 	require.ErrorContains(t, err, "past the head's proposer lookahead")
 	require.Equal(t, 1, head.calls)
+}
+
+func TestLiveSlotInputResolverReportsStateAndForkchoiceHeadMismatch(t *testing.T) {
+	cfg, headState, preferences, headRoot, _, _ := liveResolverFixture(t)
+	forkchoiceRoot := common.HexToHash("0xbeef")
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).Times(2)
+	resolver := NewLiveSlotInputResolver(
+		&cfg,
+		new(coordinatorSigner),
+		clock,
+		&resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()},
+		&resolverForkchoice{headNode: forkchoice.ForkChoiceNode{
+			Root: forkchoiceRoot, PayloadStatus: cltypes.PayloadStatusPending,
+		}},
+	)
+
+	_, err := resolver.Resolve(t.Context(), preferences)
+	require.ErrorIs(t, err, ErrSlotInputUnavailable)
+	require.ErrorContains(t, err, "state and forkchoice heads differ")
+	require.ErrorContains(t, err, "stateRoot="+headRoot.String())
+	require.ErrorContains(t, err, "stateSlot=1")
+	require.ErrorContains(t, err, "stateBlockSlot=1")
+	require.ErrorContains(t, err, "forkchoiceRoot="+forkchoiceRoot.String())
+	require.ErrorContains(t, err, "forkchoicePayloadStatus=2")
 }
 
 func TestLiveSlotInputResolverAcceptsExactHeadProposerLookahead(t *testing.T) {
@@ -315,8 +342,10 @@ func TestLiveSlotInputResolverResolvesFirstGloasSlotFromPreGloasParent(t *testin
 	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
 	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
 	fc := &resolverForkchoice{
-		headNode:  forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty},
-		gasLimits: map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
+		headNode:    forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull},
+		hasEnvelope: true,
+		buildOnFull: true,
+		gasLimits:   map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
 		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
 			parentBid.BlockHash: execution_client.PayloadStatusValidated,
 		},
@@ -338,6 +367,7 @@ func TestLiveSlotInputResolverResolvesFirstGloasSlotFromPreGloasParent(t *testin
 	require.Equal(t, uint64(0), uint64(input.Withdrawals[0].Validator))
 	require.Equal(t, withdrawalAddress, input.Withdrawals[0].Address)
 	require.Equal(t, withdrawalBalance, uint64(input.Withdrawals[0].Amount))
+	require.Zero(t, fc.shouldBuildCalls)
 }
 
 func TestLiveSlotInputResolverRejectsBuilderExitedByFullParent(t *testing.T) {

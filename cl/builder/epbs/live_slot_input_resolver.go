@@ -124,47 +124,63 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 		return fmt.Errorf("%w: %w", ErrSlotInputStale, err)
 	}
 	preferenceRoot, err := input.ValidatedPreferences.HashSSZ()
-	if err != nil || common.Hash(preferenceRoot) != input.freshness.preferenceRoot ||
+	if err != nil {
+		return fmt.Errorf("%w: hash proposer preferences: %w", ErrSlotInputStale, err)
+	}
+	if common.Hash(preferenceRoot) != input.freshness.preferenceRoot ||
 		input.ValidatedPreferences.Message.ProposalSlot != input.Slot ||
-		input.ValidatedPreferences.Message.DependentRoot != input.DependentRoot ||
-		input.BuilderIndex != input.freshness.builderIndex ||
+		input.ValidatedPreferences.Message.DependentRoot != input.DependentRoot {
+		return fmt.Errorf("%w: proposer preferences changed", ErrSlotInputStale)
+	}
+	if input.BuilderIndex != input.freshness.builderIndex ||
 		input.BuilderPubkey != input.freshness.builderPubkey ||
 		input.BuilderExecutionAddress != input.freshness.builderExecutionAddress {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: builder identity token changed", ErrSlotInputStale)
 	}
 
 	var header cltypes.BeaconBlockHeader
 	var parentBid cltypes.ExecutionPayloadBid
 	if err := r.head.ViewHeadStateWithIdentity(func(current *state.CachingBeaconState, root common.Hash, slot uint64) error {
-		if current == nil || root != input.ParentBlockRoot || slot != input.freshness.headStateSlot ||
-			current.Slot() != slot || current.GenesisValidatorsRoot() != input.GenesisValidatorsRoot ||
+		if current == nil {
+			return fmt.Errorf("%w: head state is nil", ErrSlotInputStale)
+		}
+		if root != input.ParentBlockRoot {
+			return fmt.Errorf("%w: head state root changed: inputRoot=%s currentRoot=%s currentIdentitySlot=%d", ErrSlotInputStale, input.ParentBlockRoot, root, slot)
+		}
+		if slot != input.freshness.headStateSlot || current.Slot() != slot {
+			return fmt.Errorf("%w: head state slot changed: inputStateSlot=%d currentIdentitySlot=%d currentStateSlot=%d", ErrSlotInputStale, input.freshness.headStateSlot, slot, current.Slot())
+		}
+		if current.GenesisValidatorsRoot() != input.GenesisValidatorsRoot ||
 			current.GenesisValidatorsRoot() != r.clock.GenesisValidatorsRoot() {
-			return ErrSlotInputStale
+			return fmt.Errorf("%w: genesis validators root changed", ErrSlotInputStale)
 		}
 		header = current.LatestBlockHeader()
-		if header.Slot != input.freshness.headBlockSlot || input.Slot <= header.Slot || input.Slot < current.Slot() {
-			return ErrSlotInputStale
+		if header.Slot != input.freshness.headBlockSlot {
+			return fmt.Errorf("%w: head block slot changed: inputBlockSlot=%d currentBlockSlot=%d", ErrSlotInputStale, input.freshness.headBlockSlot, header.Slot)
+		}
+		if input.Slot <= header.Slot || input.Slot < current.Slot() {
+			return fmt.Errorf("%w: target slot passed head: targetSlot=%d currentStateSlot=%d currentBlockSlot=%d", ErrSlotInputStale, input.Slot, current.Slot(), header.Slot)
 		}
 		if current.Version() < clparams.GloasVersion {
 			payloadHeader := current.LatestExecutionPayloadHeader()
 			if payloadHeader == nil {
-				return ErrSlotInputStale
+				return fmt.Errorf("%w: latest execution payload header disappeared", ErrSlotInputStale)
 			}
 			parentBid.ParentBlockHash = payloadHeader.ParentHash
 			parentBid.BlockHash = payloadHeader.BlockHash
 		} else {
 			bid := current.GetLatestExecutionPayloadBid()
 			if bid == nil {
-				return ErrSlotInputStale
+				return fmt.Errorf("%w: latest execution payload bid disappeared", ErrSlotInputStale)
 			}
 			parentBid = *bid
 			builders := current.GetBuilders()
 			if builders == nil || input.BuilderIndex >= uint64(builders.Len()) {
-				return ErrSlotInputStale
+				return fmt.Errorf("%w: builder registry changed", ErrSlotInputStale)
 			}
 			builder := builders.Get(int(input.BuilderIndex))
 			if builder == nil || builder.Pubkey != input.BuilderPubkey || builder.ExecutionAddress != input.BuilderExecutionAddress {
-				return ErrSlotInputStale
+				return fmt.Errorf("%w: builder identity changed", ErrSlotInputStale)
 			}
 		}
 		return nil
@@ -175,33 +191,40 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 		return err
 	}
 	headNode, err := r.forkchoice.GetHeadNode()
-	if err != nil || headNode.Root != input.ParentBlockRoot || headNode.PayloadStatus > cltypes.PayloadStatusPending {
-		return ErrSlotInputStale
+	if err != nil {
+		return fmt.Errorf("%w: forkchoice head: %w", ErrSlotInputStale, err)
+	}
+	if headNode.Root != input.ParentBlockRoot {
+		return fmt.Errorf("%w: forkchoice head changed: inputRoot=%s currentRoot=%s payloadStatus=%d", ErrSlotInputStale, input.ParentBlockRoot, headNode.Root, headNode.PayloadStatus)
+	}
+	if headNode.PayloadStatus > cltypes.PayloadStatusPending {
+		return fmt.Errorf("%w: forkchoice payload status is invalid: root=%s payloadStatus=%d", ErrSlotInputStale, headNode.Root, headNode.PayloadStatus)
 	}
 	preGloasParent := header.Slot/r.beaconCfg.SlotsPerEpoch < r.beaconCfg.GloasForkEpoch
 	hasEnvelope := r.forkchoice.HasEnvelope(input.ParentBlockRoot)
-	buildOnFull := !preGloasParent && headNode.PayloadStatus == cltypes.PayloadStatusFull && hasEnvelope &&
+	shouldBuildOnFull := !preGloasParent && headNode.PayloadStatus == cltypes.PayloadStatusFull && hasEnvelope &&
 		r.forkchoice.ShouldBuildOnFull(headNode, input.Slot)
+	buildOnFull := shouldBuildOnFull
 	if buildOnFull != input.freshness.buildOnFull {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: build mode changed: inputBuildOnFull=%t currentBuildOnFull=%t payloadStatus=%d hasEnvelope=%t", ErrSlotInputStale, input.freshness.buildOnFull, buildOnFull, headNode.PayloadStatus, hasEnvelope)
 	}
 	if buildOnFull && !r.forkchoice.IsPayloadVerified(input.ParentBlockRoot) {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: full execution parent became unverified: headRoot=%s", ErrSlotInputStale, input.ParentBlockRoot)
 	}
 	parentHash := parentBid.ParentBlockHash
 	if preGloasParent || buildOnFull {
 		parentHash = parentBid.BlockHash
 	}
 	if parentHash == (common.Hash{}) || parentHash != input.ParentBlockHash {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: execution parent changed: inputHash=%s currentHash=%s", ErrSlotInputStale, input.ParentBlockHash, parentHash)
 	}
 	status, ok := r.forkchoice.GetRecentExecutionPayloadStatus(parentHash)
 	if !ok || status != execution_client.PayloadStatusValidated {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: execution parent status changed: parentHash=%s available=%t status=%d", ErrSlotInputStale, parentHash, ok, status)
 	}
 	gasLimit, ok := r.forkchoice.GetExecutionPayloadGasLimit(parentHash)
 	if !ok || gasLimit == 0 || gasLimit != input.ParentGasLimit {
-		return ErrSlotInputStale
+		return fmt.Errorf("%w: execution parent gas limit changed: parentHash=%s inputGasLimit=%d available=%t currentGasLimit=%d", ErrSlotInputStale, parentHash, input.ParentGasLimit, ok, gasLimit)
 	}
 	return ctx.Err()
 }
@@ -209,7 +232,7 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 func (r *LiveSlotInputResolver) validateTargetSlot(targetSlot uint64) error {
 	currentSlot := r.clock.GetCurrentSlot()
 	if targetSlot == math.MaxUint64 || targetSlot < currentSlot || targetSlot-currentSlot > 1 {
-		return fmt.Errorf("%w: slot %d is not current or next", ErrSlotInputUnavailable, targetSlot)
+		return fmt.Errorf("%w: slot %d is not current or next: currentSlot=%d", ErrSlotInputUnavailable, targetSlot, currentSlot)
 	}
 	if targetSlot <= r.beaconCfg.GenesisSlot {
 		return fmt.Errorf("%w: slot %d is not after genesis", ErrSlotInputUnavailable, targetSlot)
@@ -262,7 +285,7 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 		return SlotInput{}, fmt.Errorf("%w: forkchoice head: %w", ErrSlotInputUnavailable, err)
 	}
 	if headNode.Root != headRoot || headNode.PayloadStatus > cltypes.PayloadStatusPending {
-		return SlotInput{}, fmt.Errorf("%w: state and forkchoice heads differ", ErrSlotInputUnavailable)
+		return SlotInput{}, fmt.Errorf("%w: state and forkchoice heads differ: stateRoot=%s stateSlot=%d stateBlockSlot=%d forkchoiceRoot=%s forkchoicePayloadStatus=%d", ErrSlotInputUnavailable, headRoot, headStateSlot, header.Slot, headNode.Root, headNode.PayloadStatus)
 	}
 	parentEpoch := state.Epoch(headState)
 	proposalEpoch := targetSlot / r.beaconCfg.SlotsPerEpoch
@@ -304,10 +327,14 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 		return SlotInput{}, fmt.Errorf("%w: latest execution payload bid is unavailable", ErrSlotInputUnavailable)
 	}
 	preGloasParent := header.Slot/r.beaconCfg.SlotsPerEpoch < r.beaconCfg.GloasForkEpoch
-	buildOnFull := !preGloasParent && headNode.PayloadStatus == cltypes.PayloadStatusFull &&
-		r.forkchoice.HasEnvelope(headRoot) && r.forkchoice.ShouldBuildOnFull(headNode, targetSlot)
+	hasEnvelope := false
+	if !preGloasParent && headNode.PayloadStatus == cltypes.PayloadStatusFull {
+		hasEnvelope = r.forkchoice.HasEnvelope(headRoot)
+	}
+	shouldBuildOnFull := hasEnvelope && r.forkchoice.ShouldBuildOnFull(headNode, targetSlot)
+	buildOnFull := shouldBuildOnFull
 	if buildOnFull && !r.forkchoice.IsPayloadVerified(headRoot) {
-		return SlotInput{}, fmt.Errorf("%w: full execution parent is not verified", ErrSlotInputUnavailable)
+		return SlotInput{}, fmt.Errorf("%w: full execution parent is not verified: headRoot=%s payloadStatus=%d hasEnvelope=%t buildOnFull=%t", ErrSlotInputUnavailable, headRoot, headNode.PayloadStatus, hasEnvelope, buildOnFull)
 	}
 	parentHash := parentBid.ParentBlockHash
 	if preGloasParent || buildOnFull {
@@ -318,11 +345,11 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 	}
 	parentStatus, ok := r.forkchoice.GetRecentExecutionPayloadStatus(parentHash)
 	if !ok || parentStatus != execution_client.PayloadStatusValidated {
-		return SlotInput{}, fmt.Errorf("%w: execution parent is not validated", ErrSlotInputUnavailable)
+		return SlotInput{}, fmt.Errorf("%w: execution parent is not validated: parentHash=%s available=%t status=%d", ErrSlotInputUnavailable, parentHash, ok, parentStatus)
 	}
 	parentGasLimit, ok := r.forkchoice.GetExecutionPayloadGasLimit(parentHash)
 	if !ok || parentGasLimit == 0 {
-		return SlotInput{}, fmt.Errorf("%w: execution parent gas limit is unavailable", ErrSlotInputUnavailable)
+		return SlotInput{}, fmt.Errorf("%w: execution parent gas limit is unavailable: parentHash=%s available=%t gasLimit=%d", ErrSlotInputUnavailable, parentHash, ok, parentGasLimit)
 	}
 	builderIndex, builder, available, err := r.resolveBuilder(headState)
 	if err != nil {
