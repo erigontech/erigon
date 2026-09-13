@@ -352,9 +352,11 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
-func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+// newAmsterdamPoolWithPendingSelfTransfer returns a pool on an Amsterdam chain
+// holding one pending zero-value self-transfer with the given gas limit, so its
+// intrinsic gas is exactly params.TxBaseEIP2780.
+func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimit uint64) *TxPool {
+	t.Helper()
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := mdbxtest.NewTestPoolDB(t)
@@ -376,7 +378,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	sender := common.Address{0x01}
+	sender := common.Address{0x01} // newTestTxnSlot sends to this same address
 	account := accounts3.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
 		CodeHash: accounts.EmptyCodeHash,
@@ -396,8 +398,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	const gasLimit = uint64(100_000)
-	slot := newTestTxnSlot(0, 0, 300_000, 300_000, gasLimit)
+	slot := newTestTxnSlot(0, 0, 300_000, 300_000, txnGasLimit)
 	slot.IDHash[0] = 1
 	slot.Rlp = []byte{1}
 	slot.Size = uint32(len(slot.Rlp))
@@ -406,6 +407,16 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	return pool
+}
+
+func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	const gasLimit = uint64(100_000)
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, gasLimit)
 
 	var selected TxnsRlp
 	_, count, err := pool.best(
@@ -419,6 +430,34 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+// TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam pins the EIP-2780 floor in
+// best. With execution gas left between TX_BASE_COST and the legacy 21,000, a
+// zero-value self-transfer is still includable, so the scan must keep going
+// instead of breaking out on the pre-Amsterdam threshold.
+func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	const gasLimit = uint64(15_000)
+	require.Less(t, gasLimit, params.TxGas)
+	require.GreaterOrEqual(t, gasLimit, params.TxBaseEIP2780)
+
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, gasLimit)
+
+	var selected TxnsRlp
+	_, count, err := pool.best(
+		ctx,
+		1,
+		&selected,
+		0,
+		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
+		nil,
+		math.MaxInt,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }
 
 func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
