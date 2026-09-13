@@ -28,6 +28,7 @@ type RuntimeDependencies struct {
 	Forkchoice       LiveForkchoiceSource
 	Assembler        PayloadAssembler
 	Publisher        GossipPublisher
+	ColumnStorage    DataColumnWriter
 	BidProcessor     BidProcessor
 	PayloadProcessor PayloadProcessor
 	AcceptedBlocks   AcceptedBlockReader
@@ -51,17 +52,16 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	}
 	cfg = resolvedCfg
 	if isNilDependency(deps.Clock) || isNilDependency(deps.Head) || isNilDependency(deps.Forkchoice) ||
-		isNilDependency(deps.Assembler) || isNilDependency(deps.Publisher) || isNilDependency(deps.BidProcessor) ||
+		isNilDependency(deps.Assembler) || isNilDependency(deps.Publisher) || isNilDependency(deps.ColumnStorage) || isNilDependency(deps.BidProcessor) ||
 		isNilDependency(deps.PayloadProcessor) || isNilDependency(deps.AcceptedBlocks) || deps.Events == nil {
 		return nil, errors.New("epbs/runtime: missing dependency")
 	}
 	bidPublisher := newValidatedBidPublisher(deps.BidProcessor, deps.Publisher, cfg.RetryInterval)
-	assembler := newBloblessPayloadAssembler(deps.Assembler)
 	coordinator := NewCoordinator(
 		deps.BeaconConfig,
 		signer,
 		FixedMarginStrategy{Margin: cfg.BidMargin},
-		assembler,
+		deps.Assembler,
 		bidPublisher,
 		cfg.MaxRetained,
 	)
@@ -75,6 +75,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		deps.BeaconConfig, deps.Clock, signer, coordinator, deps.AcceptedBlocks, deps.PayloadProcessor,
 		deps.Publisher, deps.Forkchoice, deps.Forkchoice, cfg.RetryInterval, cfg.MaxRetained,
 	)
+	reveals.blobData = newBlobDataPreparer(deps.BeaconConfig, deps.ColumnStorage, deps.Publisher)
 	return &Runtime{coordinator: coordinator, runner: runner, reveals: reveals, events: deps.Events}, nil
 }
 
@@ -104,6 +105,9 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	}
 	if beaconCfg.SlotsPerEpoch == 0 {
 		return cfg, nil, errors.New("epbs/runtime: slots per epoch must be positive")
+	}
+	if beaconCfg.NumberOfColumns == 0 || beaconCfg.DataColumnSidecarSubnetCount == 0 {
+		return cfg, nil, errors.New("epbs/runtime: data column and subnet counts must be positive")
 	}
 	if beaconCfg.PayloadDueBps > clparams.BpsFactor {
 		return cfg, nil, errors.New("epbs/runtime: payload deadline must be within the slot")

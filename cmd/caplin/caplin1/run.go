@@ -537,6 +537,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			Forkchoice:       forkChoice,
 			Assembler:        eladapter.NewAdapter(executionModule, beaconConfig),
 			Publisher:        gossipManager,
+			ColumnStorage:    columnStorage,
 			BidProcessor:     executionPayloadBidService,
 			PayloadProcessor: executionPayloadService,
 			AcceptedBlocks:   forkChoice,

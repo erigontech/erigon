@@ -84,7 +84,24 @@ func GetDataColumnSidecarsGloas(
 	beaconBlockRoot common.Hash,
 	cellsAndKZGProofs []CellsAndKZGProofs,
 ) ([]*cltypes.DataColumnSidecar, error) {
-	cfg := clparams.GetBeaconConfig()
+	return GetDataColumnSidecarsGloasWithConfig(clparams.GetBeaconConfig(), slot, beaconBlockRoot, cellsAndKZGProofs)
+}
+
+// GetDataColumnSidecarsGloasWithConfig assembles Gloas sidecars using the supplied chain limits.
+func GetDataColumnSidecarsGloasWithConfig(
+	cfg *clparams.BeaconChainConfig,
+	slot uint64,
+	beaconBlockRoot common.Hash,
+	cellsAndKZGProofs []CellsAndKZGProofs,
+) ([]*cltypes.DataColumnSidecar, error) {
+	if cfg == nil || cfg.NumberOfColumns == 0 {
+		return nil, fmt.Errorf("invalid data column configuration")
+	}
+	for i := range cellsAndKZGProofs {
+		if uint64(len(cellsAndKZGProofs[i].Blobs)) < cfg.NumberOfColumns || uint64(len(cellsAndKZGProofs[i].Proofs)) < cfg.NumberOfColumns {
+			return nil, fmt.Errorf("blob %d has incomplete cells or proofs", i)
+		}
+	}
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
 	// Initialize sidecars for each column
@@ -103,7 +120,7 @@ func GetDataColumnSidecarsGloas(
 			columnProofs.Append(proof)
 		}
 
-		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+		sidecar := cltypes.NewDataColumnSidecarWithVersionAndConfig(clparams.GloasVersion, cfg)
 		sidecar.Index = columnIndex
 		sidecar.Column = columnCells
 		sidecar.KzgProofs = columnProofs

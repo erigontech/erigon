@@ -23,10 +23,10 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -153,6 +153,7 @@ func (p *retryingRuntimePublisher) Publish(_ context.Context, topic string, data
 
 func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
+	cfg.NumberOfColumns = peerdasutils.CELLS_PER_EXT_BLOB
 	privateKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 	keyPath := filepath.Join(t.TempDir(), "builder.key")
@@ -176,6 +177,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	input, err := resolver.Resolve(t.Context(), preferences)
 	require.NoError(t, err)
 	payload := validCoordinatorPayload(&cfg, input, big.NewInt(10_000_000_000))
+	payload.BlobsBundle = validBlobDataBundle(t)
 	for _, withdrawal := range input.Withdrawals {
 		payload.Eth1Block.Withdrawals.Append(&cltypes.Withdrawal{
 			Index: uint64(withdrawal.Index), Validator: uint64(withdrawal.Validator),
@@ -197,6 +199,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 		Forkchoice:       fc,
 		Assembler:        assembler,
 		Publisher:        publisher,
+		ColumnStorage:    new(recordingColumnWriter),
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
@@ -262,6 +265,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 		Forkchoice:       fc,
 		Assembler:        &coordinatorAssembler{payloadID: 7, payload: payload},
 		Publisher:        publisher,
+		ColumnStorage:    new(recordingColumnWriter),
 		BidProcessor:     processor,
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
@@ -282,6 +286,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 
 func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
+	cfg.NumberOfColumns = peerdasutils.CELLS_PER_EXT_BLOB
 	privateKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 	keyPath := filepath.Join(t.TempDir(), "builder.key")
@@ -293,7 +298,7 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).AnyTimes()
 	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
-	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot).Return(time.Now().Add(-time.Second)).AnyTimes()
+	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot).Return(time.Now().Add(time.Minute)).AnyTimes()
 	head := &resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()}
 	fc := &resolverForkchoice{
 		headNode:  forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: 0},
@@ -306,6 +311,7 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	input, err := resolver.Resolve(t.Context(), preferences)
 	require.NoError(t, err)
 	payload := validCoordinatorPayload(&cfg, input, big.NewInt(10_000_000_000))
+	payload.BlobsBundle = validBlobDataBundle(t)
 	for _, withdrawal := range input.Withdrawals {
 		payload.Eth1Block.Withdrawals.Append(&cltypes.Withdrawal{
 			Index: uint64(withdrawal.Index), Validator: uint64(withdrawal.Validator),
@@ -315,9 +321,10 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	payloadProcessor := &runtimePayloadProcessor{processed: make(chan *cltypes.SignedExecutionPayloadEnvelope, 1)}
 	publisher := &runtimeLifecyclePublisher{
 		payloadProcessed: payloadProcessor.processed,
-		publications:     make(chan runtimePublication, 2),
+		publications:     make(chan runtimePublication, int(cfg.NumberOfColumns)+3),
 		payloadFailures:  1,
 	}
+	columnWriter := new(recordingColumnWriter)
 	acceptedBlocks := &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)}
 	emitters := beaconevents.NewEventEmitter()
 	runtimeCfg := epbscfg.DefaultConfig()
@@ -331,6 +338,7 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 		Forkchoice:       fc,
 		Assembler:        &coordinatorAssembler{payloadID: 7, payload: payload},
 		Publisher:        publisher,
+		ColumnStorage:    columnWriter,
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: payloadProcessor,
 		AcceptedBlocks:   acceptedBlocks,
@@ -356,6 +364,12 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
 
 	firstEnvelopePublication := <-publisher.publications
+	require.Equal(t, gossip.TopicNameExecutionPayload, firstEnvelopePublication.topic)
+	for range cfg.NumberOfColumns {
+		publication := <-publisher.publications
+		require.True(t, gossip.IsTopicDataColumnSidecar(publication.topic))
+	}
+	require.Len(t, columnWriter.writes, int(cfg.NumberOfColumns))
 	envelopePublication := <-publisher.publications
 	require.Equal(t, firstEnvelopePublication, envelopePublication)
 	require.Equal(t, gossip.TopicNameExecutionPayload, envelopePublication.topic)
@@ -375,19 +389,6 @@ func TestRuntimeDisabledNeedsNoDependencies(t *testing.T) {
 	runtime, err := NewRuntime(epbscfg.Config{}, RuntimeDependencies{})
 	require.NoError(t, err)
 	require.Nil(t, runtime)
-}
-
-func TestRuntimePayloadAssemblerRejectsBlobPayloadBeforeBidding(t *testing.T) {
-	payload := &eladapter.AssembledPayload{BlobsBundle: &eladapter.BlobsBundle{
-		Commitments: [][]byte{make([]byte, len(cltypes.KZGCommitment{}))},
-		Proofs:      [][]byte{make([]byte, len(cltypes.KZGProof{}))},
-		Blobs:       [][]byte{make([]byte, cltypes.BytesPerBlob)},
-	}}
-	assembler := newBloblessPayloadAssembler(&coordinatorAssembler{payloadID: 7, payload: payload})
-
-	_, err := assembler.GetPayload(t.Context(), 7)
-
-	require.ErrorIs(t, err, ErrBlobPayloadUnsupported)
 }
 
 func TestPayloadRevealDeadlineHandlesLargestSupportedSlotDuration(t *testing.T) {
@@ -420,6 +421,7 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		Forkchoice:       new(resolverForkchoice),
 		Assembler:        new(coordinatorAssembler),
 		Publisher:        &runtimePublisher{published: make(chan string, 1)},
+		ColumnStorage:    new(recordingColumnWriter),
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
@@ -433,6 +435,7 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		{name: "missing key", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.KeyPath = "" }},
 		{name: "invalid margin", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.BidMargin = math.NaN() }},
 		{name: "missing dependency", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.Publisher = nil }},
+		{name: "missing column storage", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.ColumnStorage = nil }},
 		{name: "gloas unavailable", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.GloasForkEpoch = copy.FarFutureEpoch
@@ -456,6 +459,16 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		{name: "zero slot duration", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.SecondsPerSlot = 0
+			deps.BeaconConfig = &copy
+		}},
+		{name: "zero data columns", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
+			copy := *deps.BeaconConfig
+			copy.NumberOfColumns = 0
+			deps.BeaconConfig = &copy
+		}},
+		{name: "zero data column subnets", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
+			copy := *deps.BeaconConfig
+			copy.DataColumnSidecarSubnetCount = 0
 			deps.BeaconConfig = &copy
 		}},
 		{name: "negative pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = -1 }},
@@ -495,6 +508,7 @@ func TestRuntimeDefaultPendingCapacityTracksChain(t *testing.T) {
 		Forkchoice:       new(resolverForkchoice),
 		Assembler:        new(coordinatorAssembler),
 		Publisher:        &runtimePublisher{published: make(chan string, 1)},
+		ColumnStorage:    new(recordingColumnWriter),
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
@@ -33,6 +34,15 @@ const maxConcurrentReveals = 4
 
 type PayloadProcessor interface {
 	ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error
+}
+
+type BlobDataPreparer interface {
+	Prepare(context.Context, uint64, common.Hash, *eladapter.BlobsBundle) (PreparedBlobData, error)
+}
+
+type PreparedBlobData interface {
+	Store(context.Context) error
+	Publish(context.Context) error
 }
 
 type AcceptedBlockReader interface {
@@ -72,6 +82,7 @@ type revealRunner struct {
 	persisted     PersistedEnvelopeReader
 	head          CanonicalHeadReader
 	processor     PayloadProcessor
+	blobData      BlobDataPreparer
 	publisher     GossipPublisher
 	retryInterval time.Duration
 	requests      chan revealRequest
@@ -298,9 +309,6 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 	if retained.SignedBidRoot != request.key.signedBidRoot {
 		return errors.New("epbs/reveal: retained bid root mismatch")
 	}
-	if hasBlobData(retained) {
-		return errors.New("epbs/reveal: blob payload reveal is not supported")
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -341,6 +349,24 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 		return errors.New("epbs/reveal: signer returned an empty signature")
 	}
 	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: envelope, Signature: signature}
+	var preparedBlobData PreparedBlobData
+	if hasBlobData(retained) {
+		if isNilDependency(r.blobData) {
+			return errors.New("epbs/reveal: blob data preparer is unavailable")
+		}
+		preparedBlobData, err = r.blobData.Prepare(
+			revealCtx,
+			request.slot,
+			request.key.beaconBlockRoot,
+			retained.Assembled.BlobsBundle,
+		)
+		if err != nil {
+			return fmt.Errorf("epbs/reveal: prepare blob data: %w", err)
+		}
+		if isNilDependency(preparedBlobData) {
+			return errors.New("epbs/reveal: blob data preparer returned nil data")
+		}
+	}
 	encoded, err := signedEnvelope.EncodeSSZ(nil)
 	if err != nil {
 		return fmt.Errorf("epbs/reveal: encode envelope: %w", err)
@@ -350,12 +376,22 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 		return fmt.Errorf("epbs/reveal: decode envelope: %w", err)
 	}
 	localAccepted := false
+	blobStored := preparedBlobData == nil
+	blobPublished := preparedBlobData == nil
+	envelopePublished := false
 	var attemptErr error
 	for {
 		if err := revealContextError(ctx, revealCtx, deadline); err != nil {
 			return errors.Join(err, attemptErr)
 		}
-		if !localAccepted {
+		switch {
+		case !blobStored:
+			attemptErr = preparedBlobData.Store(revealCtx)
+			blobStored = attemptErr == nil
+			if blobStored {
+				continue
+			}
+		case !localAccepted:
 			attemptErr = r.processor.ProcessMessage(revealCtx, nil, localEnvelope)
 			localAccepted = attemptErr == nil
 			if localAccepted {
@@ -365,9 +401,19 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 				localAccepted = true
 				continue
 			}
-		} else {
-			attemptErr = r.publisher.Publish(revealCtx, gossip.TopicNameExecutionPayload, encoded)
-			if attemptErr == nil {
+		default:
+			attemptErr = nil
+			if !envelopePublished {
+				err := r.publisher.Publish(revealCtx, gossip.TopicNameExecutionPayload, encoded)
+				envelopePublished = err == nil
+				attemptErr = errors.Join(attemptErr, err)
+			}
+			if !blobPublished {
+				err := preparedBlobData.Publish(revealCtx)
+				blobPublished = err == nil
+				attemptErr = errors.Join(attemptErr, err)
+			}
+			if envelopePublished && blobPublished {
 				if err := revealContextError(ctx, revealCtx, deadline); err != nil {
 					return err
 				}

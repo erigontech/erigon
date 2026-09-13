@@ -19,8 +19,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 )
@@ -203,13 +205,18 @@ func retainedRevealFixture(
 	store *revealBlockStore,
 	maxQueued int,
 	retryInterval time.Duration,
+	blobs ...*eladapter.BlobsBundle,
 ) (*revealRunner, revealRequest) {
 	t.Helper()
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)
+	payload := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	if len(blobs) != 0 {
+		payload.BlobsBundle = blobs[0]
+	}
 	assembler := &coordinatorAssembler{
 		payloadID: 1,
-		payload:   validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000)),
+		payload:   payload,
 	}
 	coordinator := NewCoordinator(
 		&config,
@@ -243,6 +250,232 @@ func retainedRevealFixture(
 		identity: identity,
 		slot:     signedBid.Message.Slot,
 	}
+}
+
+type orderedBlobDataPreparer struct {
+	order  *[]string
+	bundle **eladapter.BlobsBundle
+}
+
+func (p orderedBlobDataPreparer) Prepare(
+	_ context.Context,
+	_ uint64,
+	_ common.Hash,
+	bundle *eladapter.BlobsBundle,
+) (PreparedBlobData, error) {
+	*p.bundle = bundle
+	*p.order = append(*p.order, "prepare")
+	return orderedPreparedBlobData{order: p.order}, nil
+}
+
+type orderedPreparedBlobData struct {
+	order *[]string
+}
+
+func (p orderedPreparedBlobData) Store(context.Context) error {
+	*p.order = append(*p.order, "store")
+	return nil
+}
+
+func (p orderedPreparedBlobData) Publish(context.Context) error {
+	*p.order = append(*p.order, "columns")
+	return nil
+}
+
+type retryingBlobDataPreparer struct {
+	prepareCalls atomic.Int32
+	prepared     *retryingPreparedBlobData
+}
+
+func (p *retryingBlobDataPreparer) Prepare(context.Context, uint64, common.Hash, *eladapter.BlobsBundle) (PreparedBlobData, error) {
+	p.prepareCalls.Add(1)
+	return p.prepared, nil
+}
+
+type retryingPreparedBlobData struct {
+	storeCalls    atomic.Int32
+	publishCalls  atomic.Int32
+	storeFailures int32
+	pubFailures   int32
+}
+
+type blockingBlobDataPreparer struct {
+	prepared *blockingPreparedBlobData
+}
+
+func (p *blockingBlobDataPreparer) Prepare(context.Context, uint64, common.Hash, *eladapter.BlobsBundle) (PreparedBlobData, error) {
+	return p.prepared, nil
+}
+
+type blockingPreparedBlobData struct {
+	started      chan struct{}
+	contextErr   chan error
+	storeOnce    sync.Once
+	publishCalls atomic.Int32
+}
+
+func (p *blockingPreparedBlobData) Store(ctx context.Context) error {
+	p.storeOnce.Do(func() { close(p.started) })
+	<-ctx.Done()
+	p.contextErr <- ctx.Err()
+	return ctx.Err()
+}
+
+func (p *blockingPreparedBlobData) Publish(context.Context) error {
+	p.publishCalls.Add(1)
+	return nil
+}
+
+type rootRecordingBlobDataPreparer struct {
+	mu    sync.Mutex
+	roots []common.Hash
+}
+
+func (p *rootRecordingBlobDataPreparer) Prepare(
+	_ context.Context,
+	_ uint64,
+	root common.Hash,
+	_ *eladapter.BlobsBundle,
+) (PreparedBlobData, error) {
+	p.mu.Lock()
+	p.roots = append(p.roots, root)
+	p.mu.Unlock()
+	return orderedPreparedBlobData{order: new([]string)}, nil
+}
+
+func (p *rootRecordingBlobDataPreparer) preparedRoots() []common.Hash {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]common.Hash(nil), p.roots...)
+}
+
+func (p *retryingPreparedBlobData) Store(context.Context) error {
+	if p.storeCalls.Add(1) <= p.storeFailures {
+		return errors.New("column store failed")
+	}
+	return nil
+}
+
+func (p *retryingPreparedBlobData) Publish(context.Context) error {
+	if p.publishCalls.Add(1) <= p.pubFailures {
+		return errors.New("column gossip failed")
+	}
+	return nil
+}
+
+type orderedRevealProcessor struct {
+	order *[]string
+}
+
+func (p orderedRevealProcessor) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error {
+	*p.order = append(*p.order, "process")
+	return nil
+}
+
+type orderedRevealPublisher struct {
+	order  *[]string
+	topics *[]string
+}
+
+func (p orderedRevealPublisher) Publish(_ context.Context, topic string, _ []byte) error {
+	*p.topics = append(*p.topics, topic)
+	*p.order = append(*p.order, "envelope")
+	return nil
+}
+
+func TestRevealRunnerPublishesEnvelopeBeforeBlobGossipAfterLocalAvailability(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	order := make([]string, 0, 5)
+	topics := make([]string, 0, 1)
+	var preparedBundle *eladapter.BlobsBundle
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		orderedRevealProcessor{order: &order},
+		orderedRevealPublisher{order: &order, topics: &topics},
+		store,
+		1,
+		time.Millisecond,
+		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+	)
+	runner.blobData = orderedBlobDataPreparer{order: &order, bundle: &preparedBundle}
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
+
+	require.NoError(t, runner.reveal(t.Context(), request))
+	require.Equal(t, []string{"prepare", "store", "process", "envelope", "columns"}, order)
+	require.NotNil(t, preparedBundle)
+	require.Len(t, preparedBundle.Blobs, 1)
+	require.Equal(t, []string{gossip.TopicNameExecutionPayload}, topics)
+}
+
+func TestRevealRunnerRetriesBlobSideEffectsWithoutRepreparingOrReprocessingEnvelope(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	processor := new(successfulRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		processor,
+		publisher,
+		store,
+		1,
+		time.Millisecond,
+		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+	)
+	prepared := &retryingPreparedBlobData{storeFailures: 1, pubFailures: 1}
+	preparer := &retryingBlobDataPreparer{prepared: prepared}
+	runner.blobData = preparer
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
+
+	require.NoError(t, runner.reveal(t.Context(), request))
+	require.Equal(t, int32(1), preparer.prepareCalls.Load())
+	require.Equal(t, int32(2), prepared.storeCalls.Load())
+	require.Equal(t, int32(1), processor.calls.Load())
+	require.Equal(t, int32(2), prepared.publishCalls.Load())
+	require.Equal(t, int32(1), publisher.calls.Load())
+}
+
+func TestRevealRunnerBlobStorageStopsAtPayloadDeadline(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	processor := new(successfulRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		processor,
+		publisher,
+		store,
+		1,
+		time.Millisecond,
+		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+	)
+	prepared := &blockingPreparedBlobData{started: make(chan struct{}), contextErr: make(chan error, 1)}
+	runner.blobData = &blockingBlobDataPreparer{prepared: prepared}
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: request.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 20*time.Millisecond),
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- runner.reveal(t.Context(), request) }()
+	<-prepared.started
+
+	require.ErrorIs(t, <-result, ErrRevealExpired)
+	require.ErrorIs(t, <-prepared.contextErr, context.DeadlineExceeded)
+	require.Zero(t, processor.calls.Load())
+	require.Zero(t, prepared.publishCalls.Load())
+	require.Zero(t, publisher.calls.Load())
 }
 
 type revealTestClock struct {
@@ -622,7 +855,10 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 		store,
 		1,
 		5*time.Millisecond,
+		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
 	)
+	blobData := new(rootRecordingBlobDataPreparer)
+	runner.blobData = blobData
 	clock.slot.Store(firstRequest.slot)
 	head := new(revealHeadReader)
 	runner.head = head
@@ -685,6 +921,7 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 	require.Eventually(t, func() bool { return head.calls.Load() >= headCalls+3 }, 100*time.Millisecond, time.Millisecond)
 	require.Equal(t, int32(2), processor.calls.Load())
 	require.Equal(t, int32(2), publisher.calls.Load())
+	require.Equal(t, []common.Hash{firstRequest.key.beaconBlockRoot, secondRoot}, blobData.preparedRoots())
 	require.Equal(t, blockReads, store.getBlockCalls.Load())
 
 	reorgRoot := common.Hash{0: 0xff}

@@ -42,7 +42,8 @@ type DataColumnSidecar struct {
 	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header,omitempty"`             // [Removed in Gloas:EIP7732]
 	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof,omitempty"` // [Removed in Gloas:EIP7732]
 
-	version clparams.StateVersion // internal: tracks the version for encoding
+	version   clparams.StateVersion
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 func NewDataColumnSidecar() *DataColumnSidecar {
@@ -59,6 +60,13 @@ func NewDataColumnSidecarWithVersion(version clparams.StateVersion) *DataColumnS
 	return d
 }
 
+// NewDataColumnSidecarWithVersionAndConfig creates a versioned sidecar using the supplied chain limits.
+func NewDataColumnSidecarWithVersionAndConfig(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *DataColumnSidecar {
+	d := &DataColumnSidecar{version: version, beaconCfg: cfg}
+	d.tryInitWithVersion(version)
+	return d
+}
+
 // Version returns the version used for encoding.
 func (d *DataColumnSidecar) Version() clparams.StateVersion {
 	return d.version
@@ -70,6 +78,7 @@ func (d *DataColumnSidecar) Clone() clonable.Clonable {
 		Slot:            d.Slot,
 		BeaconBlockRoot: d.BeaconBlockRoot,
 		version:         d.version,
+		beaconCfg:       d.beaconCfg,
 	}
 	newSidecar.tryInitWithVersion(d.version)
 	return newSidecar
@@ -80,7 +89,14 @@ func (d *DataColumnSidecar) tryInit() {
 }
 
 func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
-	cfg := clparams.GetBeaconConfig()
+	cfg := d.beaconCfg
+	if cfg == nil {
+		cfg = clparams.GetBeaconConfig()
+	}
+	d.tryInitWithConfig(version, cfg)
+}
+
+func (d *DataColumnSidecar) tryInitWithConfig(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
 	if d.Column == nil {
 		if version >= clparams.GloasVersion {
 			d.Column = solid.NewStaticProgressiveListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)

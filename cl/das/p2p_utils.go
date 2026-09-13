@@ -103,43 +103,45 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 		return false
 	}
 
-	return verifyKZGProofsInternal(sidecar, sidecar.KzgCommitments)
+	return VerifyDataColumnSidecarsKZGProofsWithCommitments([]*cltypes.DataColumnSidecar{sidecar}, sidecar.KzgCommitments)
 }
 
 // VerifyDataColumnSidecarKZGProofsWithCommitments verifies if the KZG proofs in the sidecar are correct.
 // [Modified in Gloas:EIP7732] kzg_commitments is now passed as a parameter.
 // This function is re-entrant and thread-safe.
 func VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
-	if kzgCommitments == nil || kzgCommitments.Len() == 0 {
-		return false
-	}
-	return verifyKZGProofsInternal(sidecar, kzgCommitments)
+	return VerifyDataColumnSidecarsKZGProofsWithCommitments([]*cltypes.DataColumnSidecar{sidecar}, kzgCommitments)
 }
 
-// verifyKZGProofsInternal is the internal implementation for KZG proof verification.
-func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
-	// The column index represents the cell index for each proof
-	cellIndices := make([]uint64, sidecar.Column.Len())
-	for i := range cellIndices {
-		cellIndices[i] = sidecar.Index
+// VerifyDataColumnSidecarsKZGProofsWithCommitments verifies several columns in one KZG batch.
+func VerifyDataColumnSidecarsKZGProofsWithCommitments(sidecars []*cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	if len(sidecars) == 0 || kzgCommitments == nil || kzgCommitments.Len() == 0 ||
+		len(sidecars) > int(^uint(0)>>1)/kzgCommitments.Len() {
+		return false
 	}
-
-	ckzgCommitments := make([]goethkzg.KZGCommitment, kzgCommitments.Len())
-	for i := range ckzgCommitments {
-		copy(ckzgCommitments[i][:], kzgCommitments.Get(i)[:])
+	proofCount := len(sidecars) * kzgCommitments.Len()
+	ckzgCommitments := make([]goethkzg.KZGCommitment, 0, proofCount)
+	cellIndices := make([]uint64, 0, proofCount)
+	ckzgCells := make([]*goethkzg.Cell, 0, proofCount)
+	ckzgProofs := make([]goethkzg.KZGProof, 0, proofCount)
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.Column == nil || sidecar.KzgProofs == nil ||
+			sidecar.Column.Len() != kzgCommitments.Len() || sidecar.KzgProofs.Len() != kzgCommitments.Len() {
+			return false
+		}
+		for i := range kzgCommitments.Len() {
+			commitment := kzgCommitments.Get(i)
+			proof := sidecar.KzgProofs.Get(i)
+			cell := sidecar.Column.Get(i)
+			if commitment == nil || proof == nil || cell == nil {
+				return false
+			}
+			ckzgCommitments = append(ckzgCommitments, goethkzg.KZGCommitment(*commitment))
+			cellIndices = append(cellIndices, sidecar.Index)
+			ckzgCells = append(ckzgCells, (*goethkzg.Cell)(cell))
+			ckzgProofs = append(ckzgProofs, goethkzg.KZGProof(*proof))
+		}
 	}
-
-	ckzgCells := make([]*goethkzg.Cell, sidecar.Column.Len())
-	for i := range ckzgCells {
-		cell := sidecar.Column.Get(i)
-		ckzgCells[i] = (*goethkzg.Cell)(cell)
-	}
-
-	ckzgProofs := make([]goethkzg.KZGProof, sidecar.KzgProofs.Len())
-	for i := range ckzgProofs {
-		copy(ckzgProofs[i][:], sidecar.KzgProofs.Get(i)[:])
-	}
-
 	err := kzg.Ctx().VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
 	if err != nil {
 		log.Warn("failed to verify cell kzg proofs", "error", err)
