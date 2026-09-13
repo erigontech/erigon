@@ -42,6 +42,9 @@ func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Param
 	if parameters == nil {
 		return 0, fmt.Errorf("eladapter: nil build parameters")
 	}
+	if err := a.requirePayloadParent(ctx, parameters.ParentHash); err != nil {
+		return 0, err
+	}
 	result, err := a.execution.AssembleBlock(ctx, parameters)
 	if err != nil {
 		return 0, fmt.Errorf("eladapter: assemble block: %w", err)
@@ -50,6 +53,20 @@ func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Param
 		return 0, ErrExecutionBusy
 	}
 	return result.PayloadID, nil
+}
+
+func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Hash) error {
+	if parentHash == (common.Hash{}) {
+		return ErrExecutionBusy
+	}
+	state, err := a.execution.GetForkChoice(ctx)
+	if err != nil {
+		return fmt.Errorf("eladapter: get forkchoice: %w", err)
+	}
+	if state.HeadHash != parentHash {
+		return ErrExecutionBusy
+	}
+	return nil
 }
 
 func (a *Adapter) GetPayload(ctx context.Context, payloadID uint64) (*AssembledPayload, error) {
