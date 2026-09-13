@@ -76,3 +76,22 @@ func TestGetSetSecp256k1(t *testing.T) {
 	require.NoError(t, r.Load(&pk))
 	assert.EqualValues(t, pubkey, &pk)
 }
+
+// TestNullIDNodeAddrMissingEntry checks that a "null" scheme record missing its
+// nulladdr entry fails New rather than being accepted with a zero-value ID.
+func TestNullIDNodeAddrMissingEntry(t *testing.T) {
+	var r enr.Record
+	r.Set(enr.ID("null"))
+	require.NoError(t, r.SetSig(NullID{}, []byte{}))
+
+	assert.Nil(t, NullID{}.NodeAddr(&r))
+
+	_, err := New(ValidSchemesForTesting, &r)
+	require.Error(t, err)
+}
+
+func TestNullIDNodeAddr(t *testing.T) {
+	id := ID{1, 2, 3, 4}
+	n := SignNull(&enr.Record{}, id)
+	assert.Equal(t, id[:], NullID{}.NodeAddr(n.Record()))
+}

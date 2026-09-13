@@ -368,7 +368,7 @@ func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
 	}
 	checked := 0
 	var victims []victim
-	ff.trackedSubs.Range(func(id SubscriptionID, sub trackedSub) error {
+	_ = ff.trackedSubs.Range(func(id SubscriptionID, sub trackedSub) error {
 		checked++
 		if sub.tracker.CloseIfIdle(timeout) {
 			victims = append(victims, victim{id, sub.ft, sub.tracker.Protocol()})
@@ -494,7 +494,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpoolproto.OnPendingBlockReply) {
 	defer ff.mu.Unlock()
 	ff.pendingBlock = b
 
-	ff.pendingBlockSubs.Range(func(k PendingBlockSubID, v Sub[*types.Block]) error {
+	_ = ff.pendingBlockSubs.Range(func(k PendingBlockSubID, v Sub[*types.Block]) error {
 		v.Send(b)
 		return nil
 	})
@@ -537,7 +537,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 	if err := rlp.DecodeBytes(reply.RplLogs, &l); err != nil {
 		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
-	ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
+	_ = ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
 		v.Send(l)
 		return nil
 	})
@@ -1007,7 +1007,7 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 			break
 		}
 	}
-	ff.pendingTxsSubs.Range(func(k PendingTxsSubID, v Sub[[]types.Transaction]) error {
+	_ = ff.pendingTxsSubs.Range(func(k PendingTxsSubID, v Sub[[]types.Transaction]) error {
 		v.Send(txs)
 		return nil
 	})

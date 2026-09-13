@@ -123,7 +123,9 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 	defer func() {
 		refresh.Stop()
 		logger1.Trace("Deleting port mapping")
-		m.DeleteMapping(protocol, extport, intport)
+		if err := m.DeleteMapping(protocol, extport, intport); err != nil {
+			logger1.Debug("Couldn't delete port mapping", "err", err)
+		}
 	}()
 	if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
 		logger1.Debug("Couldn't add port mapping", "err", err)

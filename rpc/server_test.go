@@ -106,7 +106,9 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 		case strings.HasPrefix(line, "--> "):
 			t.Log(line)
 			// write to connection
-			clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("set write deadline error: %v", err)
+			}
 			if _, err := io.WriteString(clientConn, line[4:]+"\n"); err != nil {
 				t.Fatalf("write error: %v", err)
 			}
@@ -114,7 +116,9 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 			t.Log(line)
 			want := line[4:]
 			// read line from connection and compare text
-			clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if err := clientConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("set read deadline error: %v", err)
+			}
 			sent, err := readbuf.ReadString('\n')
 			if err != nil {
 				t.Fatalf("read error: %v", err)
@@ -161,7 +165,7 @@ func TestServerShortLivedConn(t *testing.T) {
 		t.Fatal("can't listen:", err)
 	}
 	defer listener.Close()
-	go server.ServeListener(listener)
+	go func() { _ = server.ServeListener(listener) }()
 
 	var (
 		request  = `{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}` + "\n"
@@ -174,10 +178,16 @@ func TestServerShortLivedConn(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't dial:", err)
 		}
-		conn.SetDeadline(deadline)
+		if err := conn.SetDeadline(deadline); err != nil {
+			t.Fatal("set deadline error:", err)
+		}
 		// Write the request, then half-close the connection so the server stops reading.
-		conn.Write([]byte(request))
-		conn.(*net.TCPConn).CloseWrite()
+		if _, err := conn.Write([]byte(request)); err != nil {
+			t.Fatal("write error:", err)
+		}
+		if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+			t.Fatal("close write error:", err)
+		}
 		// Now try to get the response.
 		buf := make([]byte, 2000)
 		n, err := conn.Read(buf)

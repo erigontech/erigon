@@ -418,7 +418,7 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 				t.Error(dbg.Stack())
 			}
 		}()
-		client.EthSubscribe(context.Background(), arg, "foo_bar")
+		_, _ = client.EthSubscribe(context.Background(), arg, "foo_bar")
 	}
 	check(true, nil)
 	check(true, 1)
@@ -679,7 +679,7 @@ func TestClientReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+		go func() { _ = http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger)) }()
 		return srv, l
 	}
 
@@ -898,7 +898,7 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 	}
 
 	hs := &http.Server{Handler: srv}
-	go hs.Serve(listener)
+	go func() { _ = hs.Serve(listener) }()
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{

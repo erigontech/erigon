@@ -352,6 +352,46 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
+func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	hash := common.Hash{0xAB, 0xCD}
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		value := make([]byte, len(sender)+3)
+		copy(value, sender[:])
+		copy(value[len(sender):], []byte{0xff, 0xff, 0xff}) // not valid RLP
+		return tx.Put(kv.PoolTransaction, hash[:], value)
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		mt, err := pool.getCachedBlobTxnLocked(tx, hash[:])
+		require.NoError(t, err)
+		require.Nil(t, mt)
+		return nil
+	}))
+}
+
+func TestGetCachedBlobTxnLockedSkipsTruncatedCachedRow(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	hash := common.Hash{0xAB, 0xCD}
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		// shorter than the 20-byte sender prefix v[20:] expects
+		return tx.Put(kv.PoolTransaction, hash[:], []byte{0x01, 0x02, 0x03})
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		mt, err := pool.getCachedBlobTxnLocked(tx, hash[:])
+		require.NoError(t, err)
+		require.Nil(t, mt)
+		return nil
+	}))
+}
+
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1599,7 +1639,9 @@ func makeBlobTxn() TxnSlot {
 	blobTxn := TxnSlot{}
 	tctx := NewTxnParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)
-	tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil)
+	if _, err := tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil); err != nil {
+		panic(err)
+	}
 	// Set blob hashes and fee fields on the underlying transaction
 	bt := blobTxn.Txn.(*types.BlobTx)
 	bt.BlobVersionedHashes = make([]common.Hash, 2)

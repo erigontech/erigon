@@ -159,7 +159,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		// Decrement the count for AllAddresses
 		activeSubscriptionsLogsAllAddressesGauge.Dec()
 	}
-	f.addrs.Range(func(addr common.Address, count int) error {
+	_ = f.addrs.Range(func(addr common.Address, count int) error {
 		a.aggLogsFilter.addrs.Do(addr, func(value int, exists bool) (int, bool) {
 			if exists {
 				// Decrement the count for subscribed address
@@ -179,7 +179,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		// Decrement the count for AllTopics
 		activeSubscriptionsLogsAllTopicsGauge.Dec()
 	}
-	f.topics.Range(func(topic common.Hash, count int) error {
+	_ = f.topics.Range(func(topic common.Hash, count int) error {
 		a.aggLogsFilter.topics.Do(topic, func(value int, exists bool) (int, bool) {
 			if exists {
 				// Decrement the count for subscribed topic
@@ -202,7 +202,7 @@ func (a *LogsFilterAggregator) addLogsFilterLocked(f *LogsFilter) {
 		// Increment the count for AllAddresses
 		activeSubscriptionsLogsAllAddressesGauge.Inc()
 	}
-	f.addrs.Range(func(addr common.Address, count int) error {
+	_ = f.addrs.Range(func(addr common.Address, count int) error {
 		// Increment the count for subscribed address
 		activeSubscriptionsLogsAddressesGauge.Inc()
 		a.aggLogsFilter.addrs.DoAndStore(addr, func(value int, exists bool) int {
@@ -215,7 +215,7 @@ func (a *LogsFilterAggregator) addLogsFilterLocked(f *LogsFilter) {
 		// Increment the count for AllTopics
 		activeSubscriptionsLogsAllTopicsGauge.Inc()
 	}
-	f.topics.Range(func(topic common.Hash, count int) error {
+	_ = f.topics.Range(func(topic common.Hash, count int) error {
 		// Increment the count for subscribed topic
 		activeSubscriptionsLogsTopicsGauge.Inc()
 		a.aggLogsFilter.topics.DoAndStore(topic, func(value int, exists bool) int {
@@ -231,12 +231,12 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 	addresses := make(map[common.Address]int)
-	a.aggLogsFilter.addrs.Range(func(k common.Address, v int) error {
+	_ = a.aggLogsFilter.addrs.Range(func(k common.Address, v int) error {
 		addresses[k] = v
 		return nil
 	})
 	topics := make(map[common.Hash]int)
-	a.aggLogsFilter.topics.Range(func(k common.Hash, v int) error {
+	_ = a.aggLogsFilter.topics.Range(func(k common.Hash, v int) error {
 		topics[k] = v
 		return nil
 	})
@@ -271,7 +271,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
+	_ = a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
 			if _, ok := filter.addrs.Get(addr); !ok {
 				return nil

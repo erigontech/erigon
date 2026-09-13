@@ -716,11 +716,18 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error)
 	if len(v) == 0 {
 		return nil, nil
 	}
+	if len(v) < 20 {
+		p.logger.Warn("[txpool] getCachedBlobTxnLocked: truncated row", "hash", hex.EncodeToString(hash), "len", len(v))
+		return nil, nil
+	}
 	txnRlp := bytes.Clone(v[20:])
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 	txnSlot := &TxnSlot{}
-	parseCtx.ParseTransaction(txnRlp, 0, txnSlot, nil, false, true, nil)
+	if _, err := parseCtx.ParseTransaction(txnRlp, 0, txnSlot, nil, false, true, nil); err != nil {
+		p.logger.Warn("[txpool] getCachedBlobTxnLocked: parseTransaction", "hash", hex.EncodeToString(hash), "err", err)
+		return nil, nil
+	}
 	return newMetaTxn(txnSlot, false, 0), nil
 }
 

@@ -199,11 +199,12 @@ func (cd *componentDomain) Activate(ctx context.Context, handler ...ActivityHand
 }
 
 func (cd *componentDomain) Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error {
-	return cd.component.deactivate(ctx, func(ctx context.Context, c *component, err error) {
+	cd.component.deactivate(ctx, func(ctx context.Context, c *component, err error) {
 		if len(handler) > 0 {
 			handler[0].OnActivity(ctx, typedComponent[ComponentDomain]{cd.component}, c.State(), err)
 		}
 	})
+	return nil
 }
 
 // Exec executes a task in the mamagers workerpool.  This is primarily used for event processing

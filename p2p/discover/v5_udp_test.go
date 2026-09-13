@@ -533,7 +533,9 @@ type BadIdentityScheme struct{}
 func (s BadIdentityScheme) Verify(r *enr.Record, sig []byte) error { return nil }
 func (s BadIdentityScheme) NodeAddr(r *enr.Record) []byte {
 	var id enode.ID
-	r.Load(enr.WithEntry("badaddr", &id))
+	if err := r.Load(enr.WithEntry("badaddr", &id)); err != nil {
+		return nil
+	}
 	return id[:]
 }
 
@@ -562,7 +564,7 @@ func TestUDPv5_findnodeCall_InvalidNodes(t *testing.T) {
 			sign: func(r *enr.Record, id enode.ID) *enode.Node {
 				r.Set(enr.ID("bad"))
 				r.Set(enr.WithEntry("badaddr", id))
-				r.SetSig(BadIdentityScheme{}, []byte{})
+				require.NoError(t, r.SetSig(BadIdentityScheme{}, []byte{}))
 				n, _ := enode.New(BadIdentityScheme{}, r)
 				return n
 			},

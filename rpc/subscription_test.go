@@ -138,12 +138,18 @@ func TestServerUnsubscribe(t *testing.T) {
 	// Start the server.
 	server := newTestServer(logger)
 	service := &notificationTestService{unsubscribed: make(chan string, 1)}
-	server.RegisterName("nftest2", service)
+	if err := server.RegisterName("nftest2", service); err != nil {
+		t.Fatal(err)
+	}
 	go server.ServeCodec(NewCodec(p1), 0)
 
 	// Subscribe.
-	p2.SetDeadline(time.Now().Add(10 * time.Second))
-	p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`))
+	if err := p2.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Handle received messages.
 	var (
@@ -162,7 +168,9 @@ func TestServerUnsubscribe(t *testing.T) {
 	}
 
 	// Unsubscribe and check that it is handled on the server side.
-	p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`))
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`)); err != nil {
+		t.Fatal(err)
+	}
 	for {
 		select {
 		case id := <-service.unsubscribed:
@@ -218,8 +226,9 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 			return nil, nil, msg.Error
 		} else if err := json.Unmarshal(msg.Result, &c.subid); err != nil {
 			return nil, nil, fmt.Errorf("invalid response: %w", err)
+		} else if err := json.Unmarshal(msg.ID, &c.reqid); err != nil {
+			return nil, nil, fmt.Errorf("invalid request id: %w", err)
 		} else {
-			json.Unmarshal(msg.ID, &c.reqid)
 			return &c, nil, nil
 		}
 	default:

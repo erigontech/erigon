@@ -77,7 +77,9 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
-	server.RegisterName(MetadataApi, rpcService)
+	if err := server.RegisterName(MetadataApi, rpcService); err != nil {
+		panic(err)
+	}
 	return server
 }
 
