@@ -38,6 +38,12 @@ const (
 	// StateTransitionOverlayCleared means new RPC views fall back to the
 	// committed database after the FCU-published SharedDomains is unpublished.
 	StateTransitionOverlayCleared
+	// StateTransitionPostForkchoiceStarted means background prune owns the
+	// execution semaphore and is about to start.
+	StateTransitionPostForkchoiceStarted
+	// StateTransitionConditionalResultSent means a successful conditional
+	// forkchoice result is visible while execution still owns the semaphore.
+	StateTransitionConditionalResultSent
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each

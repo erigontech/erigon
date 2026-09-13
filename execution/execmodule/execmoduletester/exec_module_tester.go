@@ -399,6 +399,13 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 	}
 }
 
+// WithConditionalForkChoiceReadyHook injects a post-preflight failure in conditional forkchoice tests.
+func WithConditionalForkChoiceReadyHook(hook func() error) Option {
+	return func(opts *options) {
+		opts.conditionalReadyHook = hook
+	}
+}
+
 type options struct {
 	stepSize                      *uint64
 	e2RetireStep                  *uint64
@@ -416,6 +423,7 @@ type options struct {
 	slowBlockThreshold            *time.Duration
 	sentryProtocol                uint
 	stateTransitionObserver       execmodule.StateTransitionObserver
+	conditionalReadyHook          func() error
 	skipAmsterdamBuilderContracts bool
 }
 
@@ -819,6 +827,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		readAheader,
 		func() error { return nil },
 		execmodule.WithStateTransitionObserver(opt.stateTransitionObserver),
+		execmodule.WithConditionalForkChoiceReadyHook(opt.conditionalReadyHook),
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 

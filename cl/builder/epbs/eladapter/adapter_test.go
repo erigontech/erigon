@@ -39,6 +39,28 @@ type forkchoiceAwareBlockModule struct {
 	assembleCalls  int
 }
 
+type conditionalForkchoiceBlockModule struct {
+	*forkchoiceAwareBlockModule
+	advanceCalls  int
+	advanceResult *execmodule.ForkChoiceResult
+}
+
+func (m *conditionalForkchoiceBlockModule) UpdateForkChoiceIfHead(
+	_ context.Context,
+	expectedHead common.Hash,
+	targetHead common.Hash,
+) (execmodule.ForkChoiceResult, error) {
+	m.advanceCalls++
+	if m.advanceResult != nil {
+		return *m.advanceResult, nil
+	}
+	if m.state.HeadHash != expectedHead {
+		return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+	}
+	m.state.HeadHash = targetHead
+	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: targetHead}, nil
+}
+
 func (m *forkchoiceAwareBlockModule) GetForkChoice(context.Context) (execmodule.ForkChoiceState, error) {
 	if m.getErr != nil {
 		return execmodule.ForkChoiceState{}, m.getErr
@@ -112,6 +134,106 @@ func TestAdapterWaitsForMatchingExecutionHead(t *testing.T) {
 	require.Equal(t, currentHead, module.state.HeadHash)
 	require.Equal(t, safeHead, module.state.SafeHash)
 	require.Equal(t, finalizedHead, module.state.FinalizedHash)
+}
+
+func TestAdapterConditionallyAdvancesEmbeddedExecutionHeadBeforeBuild(t *testing.T) {
+	currentHead := common.Hash{0x41}
+	targetHead := common.Hash{0x42}
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			state:          execmodule.ForkChoiceState{HeadHash: currentHead},
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+	}
+
+	payloadID, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: targetHead},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), payloadID)
+	require.Equal(t, 1, module.advanceCalls)
+	require.Equal(t, 1, module.assembleCalls)
+	require.Zero(t, module.updateCalls)
+}
+
+func TestAdapterDoesNotConditionallyAdvanceMatchingExecutionHead(t *testing.T) {
+	head := common.Hash{0x42}
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			state:          execmodule.ForkChoiceState{HeadHash: head},
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+	}
+
+	payloadID, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: head},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), payloadID)
+	require.Zero(t, module.advanceCalls)
+	require.Equal(t, 1, module.assembleCalls)
+}
+
+func TestAdapterDoesNotConditionallyAdvanceFromZeroExecutionHead(t *testing.T) {
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: common.Hash{0x42}},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Zero(t, module.advanceCalls)
+	require.Zero(t, module.assembleCalls)
+}
+
+func TestAdapterDoesNotBuildWhenConditionalAdvanceIsRejected(t *testing.T) {
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			state:          execmodule.ForkChoiceState{HeadHash: common.Hash{0x41}},
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+		advanceResult: &execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: common.Hash{0x42}},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Equal(t, 1, module.advanceCalls)
+	require.Zero(t, module.assembleCalls)
+}
+
+func TestAdapterDoesNotBuildWhenConditionalAdvanceReturnsWrongHead(t *testing.T) {
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			state:          execmodule.ForkChoiceState{HeadHash: common.Hash{0x41}},
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+		advanceResult: &execmodule.ForkChoiceResult{
+			Status:          execmodule.ExecutionStatusSuccess,
+			LatestValidHash: common.Hash{0x43},
+		},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: common.Hash{0x42}},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Equal(t, 1, module.advanceCalls)
+	require.Zero(t, module.assembleCalls)
 }
 
 func TestAdapterRejectsZeroPayloadParent(t *testing.T) {

@@ -113,6 +113,24 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
+	return e.updateForkChoiceAndWait(ctx, headHash, safeHash, finalizedHash, nil)
+}
+
+// UpdateForkChoiceIfHead advances to targetHead only while expectedHead remains current.
+func (e *ExecModule) UpdateForkChoiceIfHead(ctx context.Context, expectedHead, targetHead common.Hash) (ForkChoiceResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ForkChoiceResult{}, err
+	}
+	return e.updateForkChoiceAndWait(ctx, targetHead, common.Hash{}, common.Hash{}, &expectedHead)
+}
+
+func (e *ExecModule) updateForkChoiceAndWait(
+	ctx context.Context,
+	headHash common.Hash,
+	safeHash common.Hash,
+	finalizedHash common.Hash,
+	expectedHead *common.Hash,
+) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
 	// Spawn the actual forkchoice work using the module's background context so
@@ -124,13 +142,25 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
 	// the semaphore observes fully-settled state.
 	go func() {
-		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, expectedHead, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
 
 	select {
 	case outcome := <-outcomeCh:
+		if expectedHead != nil && outcome.err == nil && outcome.result.Status == ExecutionStatusSuccess {
+			current, err := e.waitForConditionalForkChoiceReadiness(ctx, headHash)
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+				}
+				return ForkChoiceResult{}, err
+			}
+			if !current {
+				return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+			}
+		}
 		return outcome.result, outcome.err
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
@@ -140,6 +170,136 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 		e.logger.Debug("forkChoiceUpdate cancelled")
 		return ForkChoiceResult{}, ctx.Err()
 	}
+}
+
+func (e *ExecModule) waitForConditionalForkChoiceReadiness(ctx context.Context, targetHead common.Hash) (bool, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return false, err
+	}
+	defer e.semaphore.Release(1)
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer cleanup()
+	return rawdb.ReadForkchoiceHead(tx) == targetHead && rawdb.ReadHeadBlockHash(tx) == targetHead, nil
+}
+
+type conditionalForkChoiceDecision uint8
+
+const (
+	conditionalForkChoiceRejected conditionalForkChoiceDecision = iota
+	conditionalForkChoiceReady
+	conditionalForkChoiceAlreadyCurrent
+)
+
+func (e *ExecModule) conditionalForkChoicePreflight(
+	ctx context.Context,
+	expectedHead common.Hash,
+	targetHead common.Hash,
+) (conditionalForkChoiceDecision, common.Hash, common.Hash, error) {
+	if expectedHead == (common.Hash{}) || targetHead == (common.Hash{}) {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	defer cleanup()
+
+	observedForkchoiceHead := rawdb.ReadForkchoiceHead(tx)
+	observedBlockHead := rawdb.ReadHeadBlockHash(tx)
+	alreadyCurrent := observedForkchoiceHead == targetHead && observedBlockHead == targetHead
+	if !alreadyCurrent && (observedForkchoiceHead != expectedHead || observedBlockHead != expectedHead) {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	targetNumber, err := e.conditionalHeaderNumber(ctx, tx, targetHead)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	if targetNumber == nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	targetHeader, err := e.getHeader(ctx, tx, targetHead, *targetNumber)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	if targetHeader == nil || !targetHeader.Number.IsUint64() || targetHeader.Number.Uint64() != *targetNumber ||
+		targetHeader.Hash() != targetHead || targetHeader.ParentHash != expectedHead {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	targetBody, err := e.getBody(ctx, tx, targetHead, *targetNumber)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	if targetBody == nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	if alreadyCurrent {
+		return conditionalForkChoiceAlreadyCurrent, common.Hash{}, common.Hash{}, nil
+	}
+	expectedNumber, err := e.conditionalHeaderNumber(ctx, tx, expectedHead)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	if expectedNumber == nil || *expectedNumber == math.MaxUint64 || targetHeader.Number.Uint64() != *expectedNumber+1 {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	expectedCanonical, err := e.conditionalCanonicalHash(ctx, tx, expectedHead)
+	if err != nil {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+	}
+	if !expectedCanonical {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	if e.forkValidator == nil || !e.forkValidator.hasRetainedExtendingFork(targetHead, *targetNumber) {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+	}
+	preservedSafe := rawdb.ReadForkchoiceSafe(tx)
+	preservedFinalized := rawdb.ReadForkchoiceFinalized(tx)
+	for _, preservedHash := range []common.Hash{preservedSafe, preservedFinalized} {
+		if preservedHash == (common.Hash{}) {
+			continue
+		}
+		preservedNumber, err := e.conditionalHeaderNumber(ctx, tx, preservedHash)
+		if err != nil {
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		}
+		if preservedNumber == nil || *preservedNumber >= *targetNumber {
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		}
+		canonical, err := e.conditionalCanonicalHash(ctx, tx, preservedHash)
+		if err != nil {
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, err
+		}
+		if !canonical {
+			return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, nil
+		}
+	}
+	return conditionalForkChoiceReady, preservedSafe, preservedFinalized, nil
+}
+
+func (e *ExecModule) conditionalHeaderNumber(ctx context.Context, tx kv.Tx, hash common.Hash) (*uint64, error) {
+	if e.blockReader == nil {
+		return rawdb.ReadHeaderNumber(tx, hash), nil
+	}
+	return e.blockReader.HeaderNumber(ctx, tx, hash)
+}
+
+func (e *ExecModule) conditionalCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
+	number, err := e.conditionalHeaderNumber(ctx, tx, hash)
+	if err != nil || number == nil {
+		return false, err
+	}
+	header, err := e.getHeader(ctx, tx, hash, *number)
+	if err != nil || header == nil || !header.Number.IsUint64() || header.Number.Uint64() != *number || header.Hash() != hash {
+		return false, err
+	}
+	if e.blockReader != nil {
+		return e.blockReader.IsCanonical(ctx, tx, hash, *number)
+	}
+	canonical, err := rawdb.ReadCanonicalHash(tx, *number)
+	return canonical == hash, err
 }
 
 func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common.Hash) {
@@ -354,7 +514,14 @@ func (e *ExecModule) unwindIfNeeded(
 	return nil, nil
 }
 
-func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+func (e *ExecModule) updateForkChoice(
+	ctx context.Context,
+	originalBlockHash common.Hash,
+	safeHash common.Hash,
+	finalizedHash common.Hash,
+	expectedHead *common.Hash,
+	outcomeCh chan forkchoiceOutcome,
+) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -369,6 +536,35 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.semaphore.Release(1)
 		}
 	}()
+	conditionalValidationNeedsRecovery := false
+	if expectedHead != nil {
+		decision, preservedSafe, preservedFinalized, err := e.conditionalForkChoicePreflight(ctx, *expectedHead, originalBlockHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		switch decision {
+		case conditionalForkChoiceRejected:
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{Status: ExecutionStatusBusy}, false)
+			return nil
+		case conditionalForkChoiceAlreadyCurrent:
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: originalBlockHash,
+				Status:          ExecutionStatusSuccess,
+			}, false)
+			e.observeStateTransition(ctx, StateTransitionConditionalResultSent)
+			return nil
+		case conditionalForkChoiceReady:
+			safeHash = preservedSafe
+			finalizedHash = preservedFinalized
+			conditionalValidationNeedsRecovery = true
+		}
+	}
+	conditionalUpdateSucceeded := false
+	defer func() {
+		if conditionalValidationNeedsRecovery && !conditionalUpdateSucceeded {
+			e.forkValidator.forgetValidatedPayload(originalBlockHash)
+		}
+	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
 	// The next semaphore acquirer must observe settled state, so the bg-prune
@@ -378,6 +574,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
+	if expectedHead != nil && e.conditionalReadyHook != nil {
+		if err := e.conditionalReadyHook(); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+	}
 
 	resumeReadAhead, err := e.suspendReadAhead(ctx)
 	if err != nil {
@@ -555,9 +756,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
+	outcomeSentEarly := stateFlushingInParallel && expectedHead == nil
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
-		if stateFlushingInParallel {
+		if outcomeSentEarly {
 			// Send forkchoice early (We already know the fork is valid)
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: blockHash,
@@ -567,7 +769,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
@@ -645,17 +847,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
 				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
-			}, stateFlushingInParallel)
+			}, outcomeSentEarly)
 			return nil
 		}
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 	}
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 	}
 	if headNumber != nil {
 		e.forkValidator.NotifyCurrentHeight(*headNumber)
@@ -685,29 +887,29 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 		if !valid {
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusInvalidForkchoice,
 				LatestValidHash: common.Hash{},
-			}, stateFlushingInParallel)
+			}, outcomeSentEarly)
 			return nil
 		}
 		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, *headNumber+1); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 
 		txnum, err := rawdbv3.TxNums.Max(ctx, tx, fcuHeader.Number.Uint64())
 		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 
-		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
+		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", outcomeSentEarly)
 
 		// Close the persistent SD (overlay was already flushed into rwTx at
 		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
@@ -724,7 +926,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore)
 		overlayPublished = published
 		if dispatchErr != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), outcomeSentEarly)
 		}
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
@@ -745,7 +947,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		persistStart := time.Now()
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
 		persist := time.Since(persistStart)
 		e.observeStateTransition(ctx, StateTransitionCommitComplete)
@@ -763,7 +965,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		} else {
 			pruneTimings, err := e.runForkchoicePrune(initialCycle)
 			if err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 			}
 			commitTimings = append(commitTimings, pruneTimings...)
 		}
@@ -772,17 +974,23 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)
 	}
 
-	sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+	outcome := ForkChoiceResult{
 		LatestValidHash: headHash,
 		Status:          status,
 		ValidationError: validationError,
-	}, stateFlushingInParallel)
+	}
+	conditionalUpdateSucceeded = outcome.Status == ExecutionStatusSuccess
+	sendForkchoiceResultWithoutWaiting(outcomeCh, outcome, outcomeSentEarly)
+	if expectedHead != nil && outcome.Status == ExecutionStatusSuccess {
+		e.observeStateTransition(ctx, StateTransitionConditionalResultSent)
+	}
 	return nil
 }
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the
 // notification dispatch have already run inline.
 func (e *ExecModule) runPostForkchoice(initialCycle bool) error {
+	e.observeStateTransition(e.backgroundCtx, StateTransitionPostForkchoiceStarted)
 	timings, err := e.runForkchoicePrune(initialCycle)
 	if err != nil {
 		return err
