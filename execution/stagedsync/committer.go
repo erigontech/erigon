@@ -1163,3 +1163,7 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	}
 	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
+
+// BindsWorkerTx: CloneForWorker rebinds both roTx and getter, and state reads
+// resolve at txNum, so a worker view past the caller's cannot change the answer.
+func (r *asOfStateReader) BindsWorkerTx() bool { return true }
