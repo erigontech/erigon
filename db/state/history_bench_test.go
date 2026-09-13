@@ -34,7 +34,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -63,7 +63,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -94,7 +94,7 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
@@ -123,7 +123,7 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
@@ -154,7 +154,7 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 // rpcdaemon request does and what leaves the page-decode buffer cold every time.
 func BenchmarkHistorySeekInFiles(b *testing.B) {
 	logger := log.New()
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	ht := h.beginForTests()
@@ -215,7 +215,7 @@ func BenchmarkHistoryRangePaged(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
