@@ -119,11 +119,7 @@ type fastJSONResult interface {
 // every time, which costs more than not pooling at all.
 const maxPooledResult = 128 * jsonstream.FlushThreshold
 
-var resultBufPool = sync.Pool{New: func() any {
-	var buf bytes.Buffer
-	//buf.Grow(4 * jsonstream.FlushThreshold)
-	return &buf
-}}
+var resultBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 func putResultBuf(buf *bytes.Buffer) {
 	if buf.Cap() > maxPooledResult {
