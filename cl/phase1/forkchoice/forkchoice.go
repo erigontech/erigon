@@ -1297,6 +1297,15 @@ func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 }
 
 func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayload {
+	return f.drainPendingELPayloads(limit, false)
+}
+
+// DrainPendingELPayloadsPrioritizingNewest reserves one limited-batch slot for the sync frontier.
+func (f *ForkChoiceStore) DrainPendingELPayloadsPrioritizingNewest(limit int) []PendingELPayload {
+	return f.drainPendingELPayloads(limit, true)
+}
+
+func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeNewest bool) []PendingELPayload {
 	if limit <= 0 {
 		return nil
 	}
@@ -1306,6 +1315,17 @@ func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayl
 		return nil
 	}
 	if len(f.pendingELPayloads) > limit {
+		if prioritizeNewest {
+			result := make([]PendingELPayload, limit)
+			oldestCount := limit - 1
+			copy(result, f.pendingELPayloads[:oldestCount])
+			result[oldestCount] = f.pendingELPayloads[len(f.pendingELPayloads)-1]
+			remaining := len(f.pendingELPayloads) - limit
+			copy(f.pendingELPayloads[:remaining], f.pendingELPayloads[oldestCount:len(f.pendingELPayloads)-1])
+			clear(f.pendingELPayloads[remaining:])
+			f.pendingELPayloads = f.pendingELPayloads[:remaining]
+			return result
+		}
 		result := make([]PendingELPayload, limit)
 		copy(result, f.pendingELPayloads[:limit])
 		copy(f.pendingELPayloads, f.pendingELPayloads[limit:])

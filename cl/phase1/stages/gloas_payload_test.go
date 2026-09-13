@@ -1208,6 +1208,42 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	require.Equal(t, blockRoot, queued[0].Envelope.Message.BeaconBlockRoot)
 }
 
+func TestDrainPendingGloasPayloadsValidatesSyncFrontierWithBacklog(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+	fc := &forkchoice.ForkChoiceStore{}
+	for i := byte(1); i <= maxPendingGloasPayloadsPerCycle+1; i++ {
+		root := common.Hash{i}
+		payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+		payload.BlockHash = common.Hash{i + 64}
+		body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+		body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+		}}
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+		envelope.Message.BeaconBlockRoot = root
+		envelope.Message.Payload = payload
+		fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+			Block:    &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: uint64(i), Body: body}},
+			Envelope: envelope,
+		})
+	}
+
+	drainPendingGloasPayloads(t.Context(), &Cfg{
+		beaconCfg:             cfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            fc,
+	})
+
+	require.Equal(t, maxPendingGloasPayloadsPerCycle, engine.newPayloadCalls)
+	require.Contains(t, engine.newPayloadHashes, common.Hash{maxPendingGloasPayloadsPerCycle + 65})
+	require.NotContains(t, engine.newPayloadHashes, common.Hash{maxPendingGloasPayloadsPerCycle + 64})
+	remaining := fc.DrainPendingELPayloads()
+	require.Len(t, remaining, 1)
+	require.Equal(t, uint64(maxPendingGloasPayloadsPerCycle), remaining[0].Block.Block.Slot)
+}
+
 func TestDrainPendingGloasPayloadsRetriesRootOnlyAfterTransientDiskFailure(t *testing.T) {
 	beaconCfg, anchorState, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
 	root := common.HexToHash("0x1234")
@@ -1503,6 +1539,7 @@ type testExecutionEngine struct {
 	supportInsertion bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
+	newPayloadHashes []common.Hash
 	newPayloadFn     func(context.Context) (execution_client.PayloadStatus, error)
 }
 
@@ -1515,6 +1552,9 @@ func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Blo
 }
 
 func (t *testExecutionEngine) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	if payload != nil {
+		t.newPayloadHashes = append(t.newPayloadHashes, payload.BlockHash)
+	}
 	return t.NewPayload(ctx, payload, parentRoot, hashes, requests)
 }
 
