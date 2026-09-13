@@ -44,6 +44,11 @@ var (
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
 	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
+	// errShortTxnRLP reports RLP too small to hold a transaction. DecodeTransaction
+	// reports the empty case as a bare io.EOF, which reads as a clean end of input,
+	// so this package keeps its own sentinel.
+	errShortTxnRLP    = errors.New("short rlp encoded transaction")
+	errWrappedBlobTxn = errors.New("blob transaction wrapped with blobs")
 )
 
 // Transaction types.
@@ -273,6 +278,86 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, errTrailingBytes
 	}
 	return t, nil
+}
+
+// txnTypeHashesItsEncoding reports whether type b hashes keccak of its own canonical
+// encoding. Registered types are deliberately absent: TxTypeSpec puts no constraint on
+// what a type's Hash returns. RegisterTxType panics on a built-in id, so this set stays
+// closed - a registered type can never reach the true branch.
+func txnTypeHashesItsEncoding(b byte) bool {
+	switch b {
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+		return true
+	}
+	return false
+}
+
+// TxnHashFromRLP returns the hash of a transaction, without decoding it.
+//
+// A transaction hashes its canonical (EIP-2718) form, and every encoding
+// DecodeTransaction accepts carries that form verbatim: a legacy transaction as
+// the canonical list itself, a typed one as the canonical form either bare or
+// wrapped in an RLP string. Framing and the envelope type byte are checked as
+// DecodeTransaction checks them. The payload's fields are not, so a well-framed
+// transaction carrying a malformed body hashes here where the decode would turn it down.
+func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
+	if len(txnRlp) == 0 {
+		return common.Hash{}, errShortTxnRLP
+	}
+	if txnRlp[0] < rlp.SingleByteThreshold { // canonical form, not RLP framed
+		return typedTxnHash(txnRlp)
+	}
+	kind, content, rest, err := rlp.Split(txnRlp)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(rest) != 0 {
+		return common.Hash{}, errTrailingBytes
+	}
+	if kind == rlp.List {
+		if len(content) == 0 { // a legacy txn carries nine fields, not none
+			return common.Hash{}, errShortTxnRLP
+		}
+		return libcrypto.Keccak256Hash(txnRlp), nil
+	}
+	return typedTxnHash(content)
+}
+
+// typedTxnHash hashes an EIP-2718 envelope: a type byte followed by its payload.
+// It turns down the envelopes DecodeTransaction turns down - too short, unknown
+// type, trailing bytes, or a blob txn carrying its sidecar, whose hash is that of
+// the transaction it wraps rather than of these bytes.
+func typedTxnHash(envelope []byte) (common.Hash, error) {
+	if len(envelope) <= 1 { // no type prefix, or nothing past it
+		return common.Hash{}, errShortTxnRLP
+	}
+	if envelope[0] >= rlp.SingleByteThreshold {
+		return common.Hash{}, ErrInvalidTxType
+	}
+	if !txnTypeHashesItsEncoding(envelope[0]) {
+		return common.Hash{}, ErrTxTypeNotSupported
+	}
+	kind, fields, rest, err := rlp.Split(envelope[1:])
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if kind != rlp.List {
+		return common.Hash{}, rlp.ErrExpectedList
+	}
+	if len(rest) != 0 {
+		return common.Hash{}, errTrailingBytes
+	}
+	if envelope[0] == BlobTxType && blobFieldsAreWrapped(fields) {
+		return common.Hash{}, errWrappedBlobTxn
+	}
+	return libcrypto.Keccak256Hash(envelope), nil
+}
+
+// blobFieldsAreWrapped reports whether an EIP-4844 payload carries the blob sidecar:
+// a wrapped payload opens with the transaction it wraps, a bare one with the chain id.
+func blobFieldsAreWrapped(fields []byte) bool {
+	kind, _, _, err := rlp.Split(fields)
+	return err == nil && kind == rlp.List
 }
 
 // Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
