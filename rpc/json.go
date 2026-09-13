@@ -121,7 +121,7 @@ const maxPooledResult = 128 * jsonstream.FlushThreshold
 
 var resultBufPool = sync.Pool{New: func() any {
 	var buf bytes.Buffer
-	buf.Grow(4 * jsonstream.FlushThreshold)
+	//buf.Grow(4 * jsonstream.FlushThreshold)
 	return &buf
 }}
 
