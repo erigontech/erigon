@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -1229,4 +1230,40 @@ func TestReplayTransactionInvalidType(t *testing.T) {
 	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, new(bool), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unrecognized trace type")
+}
+
+func TestOeTracerMcopyMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code string
+		off  int
+		data string
+	}{
+		{"copy", "60016000526020600060205e00", 32, "0x" + strings.Repeat("00", 31) + "01"},
+		{"overlap", "63010203045f526004601c601d5e00", 29, "0x01020304"},
+		{"zero_length", "5f5f60205e00", 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &TraceCallResult{VmTrace: &VmTrace{}}
+			tracer := &OeTracer{r: result}
+			_, _, err := runtime.Execute(common.FromHex(tc.code), nil, &runtime.Config{
+				GasLimit:  1000000,
+				EVMConfig: vm.Config{Tracer: tracer.Tracer().Hooks},
+			}, t.TempDir())
+			require.NoError(t, err)
+			var found bool
+			for _, op := range result.VmTrace.Ops {
+				if op.Op == "MCOPY" {
+					found = true
+					require.NotNil(t, op.Ex)
+					if tc.data == "" {
+						require.Nil(t, op.Ex.Mem)
+					} else {
+						require.Equal(t, &VmTraceMem{Off: tc.off, Data: tc.data}, op.Ex.Mem)
+					}
+				}
+			}
+			require.True(t, found)
+		})
+	}
 }
