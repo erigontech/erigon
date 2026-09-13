@@ -73,7 +73,7 @@ func (f *operationFeed) SendBlobSidecar(value *BlobSidecarData) int {
 }
 
 func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int {
-	return f.feed.Send(&EventStream{
+	return f.feed.TrySend(&EventStream{
 		Event: OpDataColumnSidecar,
 		Data:  value,
 	})

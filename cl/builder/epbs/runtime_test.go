@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,12 +122,21 @@ func (p *runtimeLifecyclePublisher) Publish(_ context.Context, topic string, dat
 }
 
 type runtimeAcceptedBlockReader struct {
+	mu     sync.RWMutex
 	blocks map[common.Hash]*cltypes.SignedBeaconBlock
 }
 
 func (r *runtimeAcceptedBlockReader) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	block, ok := r.blocks[root]
 	return block, ok
+}
+
+func (r *runtimeAcceptedBlockReader) setBlock(root common.Hash, block *cltypes.SignedBeaconBlock) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.blocks[root] = block
 }
 
 func (p *retryingRuntimePublisher) Publish(_ context.Context, topic string, data []byte) error {
@@ -360,7 +370,7 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 	block.Block.Body.SignedExecutionPayloadBid = selectedBid
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	acceptedBlocks.blocks[common.Hash(blockRoot)] = block
+	acceptedBlocks.setBlock(common.Hash(blockRoot), block)
 	emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
 
 	firstEnvelopePublication := <-publisher.publications
@@ -369,7 +379,9 @@ func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
 		publication := <-publisher.publications
 		require.True(t, gossip.IsTopicDataColumnSidecar(publication.topic))
 	}
-	require.Len(t, columnWriter.writes, int(cfg.NumberOfColumns))
+	require.Eventually(t, func() bool {
+		return len(columnWriter.snapshot()) == int(cfg.NumberOfColumns)
+	}, time.Second, time.Millisecond)
 	envelopePublication := <-publisher.publications
 	require.Equal(t, firstEnvelopePublication, envelopePublication)
 	require.Equal(t, gossip.TopicNameExecutionPayload, envelopePublication.topic)

@@ -255,6 +255,32 @@ func TestWriteColumnSidecars(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestWriteColumnSidecarsDoesNotBlockOnBackpressuredEventSubscriber(t *testing.T) {
+	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(fs, globalBeaconConfig, emitters)
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1000, 0)))
+	done := make(chan error, 1)
+	go func() {
+		done <- storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1))
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("event backpressure blocked the durable write")
+	}
+	first := <-events
+	require.Equal(t, uint64(0), first.Data.(*beaconevents.DataColumnSidecarData).Index)
+	require.Empty(t, events)
+}
+
 func TestReadColumnSidecarByColumnIndex(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()

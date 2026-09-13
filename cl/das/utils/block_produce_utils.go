@@ -106,24 +106,20 @@ func GetDataColumnSidecarsGloasWithConfig(
 
 	// Initialize sidecars for each column
 	for columnIndex := uint64(0); columnIndex < cfg.NumberOfColumns; columnIndex++ {
-		columnCells := solid.NewStaticListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
-		columnProofs := solid.NewStaticListSSZ[*cltypes.KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		sidecar := cltypes.NewDataColumnSidecarWithVersionAndConfig(clparams.GloasVersion, cfg)
 
 		// For each blob, extract the cell and proof for this column
 		for blobIndex := range cellsAndKZGProofs {
 			cell := &cltypes.Cell{}
 			copy(cell[:], cellsAndKZGProofs[blobIndex].Blobs[columnIndex][:])
-			columnCells.Append(cell)
+			sidecar.Column.Append(cell)
 
 			proof := &cltypes.KZGProof{}
 			copy(proof[:], cellsAndKZGProofs[blobIndex].Proofs[columnIndex][:])
-			columnProofs.Append(proof)
+			sidecar.KzgProofs.Append(proof)
 		}
 
-		sidecar := cltypes.NewDataColumnSidecarWithVersionAndConfig(clparams.GloasVersion, cfg)
 		sidecar.Index = columnIndex
-		sidecar.Column = columnCells
-		sidecar.KzgProofs = columnProofs
 		sidecar.Slot = slot
 		sidecar.BeaconBlockRoot = beaconBlockRoot
 		sidecars[columnIndex] = sidecar

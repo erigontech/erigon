@@ -326,6 +326,39 @@ func (p *blockingPreparedBlobData) Publish(context.Context) error {
 	return nil
 }
 
+type selectiveBlockingBlobDataPreparer struct {
+	blockedRoot common.Hash
+	blocked     PreparedBlobData
+	prepared    chan common.Hash
+}
+
+type heldPreparedBlobData struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *heldPreparedBlobData) Store(ctx context.Context) error {
+	p.once.Do(func() { close(p.started) })
+	<-p.release
+	return ctx.Err()
+}
+
+func (*heldPreparedBlobData) Publish(context.Context) error { return nil }
+
+func (p *selectiveBlockingBlobDataPreparer) Prepare(
+	_ context.Context,
+	_ uint64,
+	root common.Hash,
+	_ *eladapter.BlobsBundle,
+) (PreparedBlobData, error) {
+	p.prepared <- root
+	if root == p.blockedRoot {
+		return p.blocked, nil
+	}
+	return orderedPreparedBlobData{order: new([]string)}, nil
+}
+
 type rootRecordingBlobDataPreparer struct {
 	mu    sync.Mutex
 	roots []common.Hash
@@ -383,7 +416,7 @@ func (p orderedRevealPublisher) Publish(_ context.Context, topic string, _ []byt
 	return nil
 }
 
-func TestRevealRunnerPublishesEnvelopeBeforeBlobGossipAfterLocalAvailability(t *testing.T) {
+func TestRevealRunnerValidatesLocallyBeforeBlobGossipAndPersistence(t *testing.T) {
 	store := &revealBlockStore{
 		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
@@ -399,13 +432,13 @@ func TestRevealRunnerPublishesEnvelopeBeforeBlobGossipAfterLocalAvailability(t *
 		store,
 		1,
 		time.Millisecond,
-		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
 	)
 	runner.blobData = orderedBlobDataPreparer{order: &order, bundle: &preparedBundle}
 	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
 
 	require.NoError(t, runner.reveal(t.Context(), request))
-	require.Equal(t, []string{"prepare", "store", "process", "envelope", "columns"}, order)
+	require.Equal(t, []string{"prepare", "process", "envelope", "columns", "store"}, order)
 	require.NotNil(t, preparedBundle)
 	require.Len(t, preparedBundle.Blobs, 1)
 	require.Equal(t, []string{gossip.TopicNameExecutionPayload}, topics)
@@ -426,7 +459,7 @@ func TestRevealRunnerRetriesBlobSideEffectsWithoutRepreparingOrReprocessingEnvel
 		store,
 		1,
 		time.Millisecond,
-		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
 	)
 	prepared := &retryingPreparedBlobData{storeFailures: 1, pubFailures: 1}
 	preparer := &retryingBlobDataPreparer{prepared: prepared}
@@ -441,7 +474,7 @@ func TestRevealRunnerRetriesBlobSideEffectsWithoutRepreparingOrReprocessingEnvel
 	require.Equal(t, int32(1), publisher.calls.Load())
 }
 
-func TestRevealRunnerBlobStorageStopsAtPayloadDeadline(t *testing.T) {
+func TestRevealRunnerBlobStorageStopsAtPayloadDeadlineAfterNetworkReveal(t *testing.T) {
 	store := &revealBlockStore{
 		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
@@ -456,7 +489,7 @@ func TestRevealRunnerBlobStorageStopsAtPayloadDeadline(t *testing.T) {
 		store,
 		1,
 		time.Millisecond,
-		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
 	)
 	prepared := &blockingPreparedBlobData{started: make(chan struct{}), contextErr: make(chan error, 1)}
 	runner.blobData = &blockingBlobDataPreparer{prepared: prepared}
@@ -473,9 +506,39 @@ func TestRevealRunnerBlobStorageStopsAtPayloadDeadline(t *testing.T) {
 
 	require.ErrorIs(t, <-result, ErrRevealExpired)
 	require.ErrorIs(t, <-prepared.contextErr, context.DeadlineExceeded)
-	require.Zero(t, processor.calls.Load())
-	require.Zero(t, prepared.publishCalls.Load())
+	require.Equal(t, int32(1), processor.calls.Load())
+	require.Equal(t, int32(1), prepared.publishCalls.Load())
+	require.Equal(t, int32(1), publisher.calls.Load())
+}
+
+func TestRevealRunnerDoesNotPublishBlobRevealBeforeLocalValidation(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	processor := new(failingRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		processor,
+		publisher,
+		store,
+		1,
+		100*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	prepared := new(retryingPreparedBlobData)
+	runner.blobData = &retryingBlobDataPreparer{prepared: prepared}
+	runner.beaconCfg.SecondsPerSlot = 1
+	runner.beaconCfg.PayloadDueBps = 200
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
+
+	require.ErrorIs(t, runner.reveal(t.Context(), request), ErrRevealExpired)
+	require.Equal(t, int32(1), processor.calls.Load())
 	require.Zero(t, publisher.calls.Load())
+	require.Zero(t, prepared.publishCalls.Load())
+	require.Zero(t, prepared.storeCalls.Load())
 }
 
 type revealTestClock struct {
@@ -582,7 +645,7 @@ func TestRevealRunnerDeadlineCancelsBlockingProcessorAndRunJoins(t *testing.T) {
 	runner.beaconCfg.SecondsPerSlot = 1
 	runner.beaconCfg.PayloadDueBps = 200
 	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
-	runner.requests <- request
+	require.True(t, runner.SubmitAcceptedBlock(request.key.beaconBlockRoot))
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
@@ -814,7 +877,7 @@ func TestRevealRunnerCompletedSameSlotDedupeStaysBoundedUntilNextSlot(t *testing
 	clock.slot.Store(request.slot)
 	require.True(t, runner.SubmitAcceptedBlock(request.key.beaconBlockRoot))
 	queued := <-runner.requests
-	runner.finishRequest(queued.key)
+	runner.finishRequest(queued.key, queued.generation)
 	require.Len(t, runner.tracked, 1)
 	require.Zero(t, runner.activeCount)
 
@@ -835,7 +898,7 @@ func TestRevealRunnerCompletedSameSlotDedupeStaysBoundedUntilNextSlot(t *testing
 	require.Equal(t, 1, runner.activeCount)
 }
 
-func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *testing.T) {
+func TestRevealRunnerReconcilesCanonicalHeadWithReservedCapacity(t *testing.T) {
 	clock := new(mutableRevealClock)
 	store := &revealBlockStore{
 		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
@@ -855,7 +918,7 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 		store,
 		1,
 		5*time.Millisecond,
-		validCoordinatorBlobsBundle(gloasCoordinatorConfig(), 1),
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
 	)
 	blobData := new(rootRecordingBlobDataPreparer)
 	runner.blobData = blobData
@@ -895,7 +958,9 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 	}
 	require.Eventually(t, func() bool { return head.calls.Load() > 0 }, 100*time.Millisecond, time.Millisecond)
 	require.Eventually(t, func() bool { return store.getBlockCalls.Load() > 2 }, 100*time.Millisecond, time.Millisecond)
-	require.Equal(t, int32(1), processor.calls.Load())
+	require.Eventually(t, func() bool { return processor.calls.Load() == 2 }, 100*time.Millisecond, time.Millisecond)
+	require.Equal(t, firstRequest.key.beaconBlockRoot, <-processor.processed)
+	require.Equal(t, secondRoot, <-processor.processed)
 	close(processor.release)
 
 	for range 2 {
@@ -905,15 +970,13 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 			t.Fatal("canonical head was not gossiped after capacity release")
 		}
 	}
-	require.Equal(t, firstRequest.key.beaconBlockRoot, <-processor.processed)
-	require.Equal(t, secondRoot, <-processor.processed)
 	require.Eventually(t, func() bool {
 		runner.mu.Lock()
 		defer runner.mu.Unlock()
-		_, firstTracked := runner.tracked[firstRequest.key]
+		firstTracking, firstTracked := runner.tracked[firstRequest.key]
 		secondKey := revealKey{beaconBlockRoot: secondRoot, signedBidRoot: firstRequest.key.signedBidRoot}
-		tracking, secondTracked := runner.tracked[secondKey]
-		return len(runner.tracked) == 1 && !firstTracked && secondTracked && !tracking.active && runner.activeCount == 0
+		secondTracking, secondTracked := runner.tracked[secondKey]
+		return len(runner.tracked) == 2 && firstTracked && !firstTracking.active && secondTracked && !secondTracking.active && runner.activeCount == 0
 	}, time.Second, time.Millisecond)
 
 	headCalls := head.calls.Load()
@@ -927,4 +990,320 @@ func TestRevealRunnerReconcilesRejectedCanonicalHeadAfterCapacityRelease(t *test
 	reorgRoot := common.Hash{0: 0xff}
 	head.setRoot(reorgRoot)
 	require.Eventually(t, func() bool { return store.getBlockCalls.Load() > blockReads }, 100*time.Millisecond, time.Millisecond)
+}
+
+func TestRevealRunnerReservesWorkerAndCapacityForCanonicalHead(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	runner, firstRequest := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		1,
+		5*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: firstRequest.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 500*time.Millisecond),
+	}
+	blocked := &blockingPreparedBlobData{started: make(chan struct{}), contextErr: make(chan error, 1)}
+	preparer := &selectiveBlockingBlobDataPreparer{
+		blockedRoot: firstRequest.key.beaconBlockRoot,
+		blocked:     blocked,
+		prepared:    make(chan common.Hash, 2),
+	}
+	runner.blobData = preparer
+	head := new(revealHeadReader)
+	runner.head = head
+	require.True(t, runner.SubmitAcceptedBlock(firstRequest.key.beaconBlockRoot))
+
+	secondBlock := store.blocks[firstRequest.key.beaconBlockRoot]
+	secondBlock.Block.StateRoot[0] ^= 1
+	secondBlockRoot, err := secondBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	secondRoot := common.Hash(secondBlockRoot)
+	store.blocks[secondRoot] = secondBlock
+	head.setRoot(secondRoot)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("reveal runner did not join")
+		}
+	}()
+	<-blocked.started
+	require.Equal(t, firstRequest.key.beaconBlockRoot, <-preparer.prepared)
+
+	select {
+	case root := <-preparer.prepared:
+		require.Equal(t, secondRoot, root)
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("canonical reveal did not receive reserved execution capacity")
+	}
+}
+
+func TestRevealRunnerCanonicalHeadUsesLatestRoot(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	runner, firstRequest := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		1,
+		5*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: firstRequest.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 500*time.Millisecond),
+	}
+	blocked := &blockingPreparedBlobData{started: make(chan struct{}), contextErr: make(chan error, 1)}
+	preparer := &selectiveBlockingBlobDataPreparer{
+		blockedRoot: firstRequest.key.beaconBlockRoot,
+		blocked:     blocked,
+		prepared:    make(chan common.Hash, 2),
+	}
+	runner.blobData = preparer
+	head := new(revealHeadReader)
+	head.setRoot(firstRequest.key.beaconBlockRoot)
+	runner.head = head
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("reveal runner did not join")
+		}
+	}()
+	require.Equal(t, firstRequest.key.beaconBlockRoot, <-preparer.prepared)
+	<-blocked.started
+
+	secondBlock := store.blocks[firstRequest.key.beaconBlockRoot]
+	secondBlock.Block.StateRoot[0] ^= 1
+	secondBlockRoot, err := secondBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	secondRoot := common.Hash(secondBlockRoot)
+	store.blocks[secondRoot] = secondBlock
+	head.setRoot(secondRoot)
+
+	select {
+	case root := <-preparer.prepared:
+		require.Equal(t, secondRoot, root)
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("canonical reveal did not switch to the latest head")
+	}
+}
+
+func TestRevealRunnerPromotesQueuedCanonicalRoot(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		1,
+		5*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: request.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 500*time.Millisecond),
+	}
+	preparer := new(rootRecordingBlobDataPreparer)
+	runner.blobData = preparer
+	require.True(t, runner.SubmitAcceptedBlock(request.key.beaconBlockRoot))
+	require.True(t, runner.submitAcceptedBlock(request.key.beaconBlockRoot, true))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.Run(ctx)
+		close(done)
+	}()
+	require.Eventually(t, func() bool { return len(preparer.preparedRoots()) == 1 }, 150*time.Millisecond, time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reveal runner did not join")
+	}
+	require.Equal(t, []common.Hash{request.key.beaconBlockRoot}, preparer.preparedRoots())
+}
+
+func TestRevealRunnerCanonicalHeadReverseFlipDropsStalePendingRoot(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	runner, firstRequest := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		1,
+		5*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: firstRequest.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 500*time.Millisecond),
+	}
+	blocked := &heldPreparedBlobData{started: make(chan struct{}), release: make(chan struct{})}
+	preparer := &selectiveBlockingBlobDataPreparer{
+		blockedRoot: firstRequest.key.beaconBlockRoot,
+		blocked:     blocked,
+		prepared:    make(chan common.Hash, 3),
+	}
+	runner.blobData = preparer
+
+	firstBlock := store.blocks[firstRequest.key.beaconBlockRoot]
+	secondBlock := cltypes.NewSignedBeaconBlock(runner.beaconCfg, clparams.GloasVersion)
+	secondBlock.Block.Slot = firstBlock.Block.Slot
+	secondBlock.Block.ParentRoot = firstBlock.Block.ParentRoot
+	secondBlock.Block.StateRoot[0] = 1
+	secondBlock.Block.Body.SignedExecutionPayloadBid = firstBlock.Block.Body.SignedExecutionPayloadBid
+	secondBlockRoot, err := secondBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	secondRoot := common.Hash(secondBlockRoot)
+	store.blocks[secondRoot] = secondBlock
+
+	require.True(t, runner.submitAcceptedBlock(firstRequest.key.beaconBlockRoot, true))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("reveal runner did not join")
+		}
+	}()
+	require.Equal(t, firstRequest.key.beaconBlockRoot, <-preparer.prepared)
+	<-blocked.started
+	require.True(t, runner.submitAcceptedBlock(secondRoot, true))
+	require.True(t, runner.submitAcceptedBlock(firstRequest.key.beaconBlockRoot, true))
+	close(blocked.release)
+
+	select {
+	case root := <-preparer.prepared:
+		require.Equal(t, firstRequest.key.beaconBlockRoot, root)
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("canonical reveal retained the stale intermediate head")
+	}
+}
+
+func TestRevealRunnerCanonicalHeadReturnToCompletedRootCancelsNewerReveal(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	runner, firstRequest := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		4,
+		5*time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	deadlineOffset := time.Duration(runner.beaconCfg.SecondsPerSlot) * time.Second *
+		time.Duration(runner.beaconCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: firstRequest.slot},
+		slotTime:        time.Now().Add(-deadlineOffset + 5*time.Second),
+	}
+
+	firstBlock := store.blocks[firstRequest.key.beaconBlockRoot]
+	secondBlock := cltypes.NewSignedBeaconBlock(runner.beaconCfg, clparams.GloasVersion)
+	secondBlock.Block.Slot = firstBlock.Block.Slot
+	secondBlock.Block.ParentRoot = firstBlock.Block.ParentRoot
+	secondBlock.Block.StateRoot[0] = 1
+	secondBlock.Block.Body.SignedExecutionPayloadBid = firstBlock.Block.Body.SignedExecutionPayloadBid
+	secondBlockRoot, err := secondBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	secondRoot := common.Hash(secondBlockRoot)
+	store.blocks[secondRoot] = secondBlock
+	blocked := &blockingPreparedBlobData{started: make(chan struct{}), contextErr: make(chan error, 1)}
+	preparer := &selectiveBlockingBlobDataPreparer{
+		blockedRoot: secondRoot,
+		blocked:     blocked,
+		prepared:    make(chan common.Hash, 3),
+	}
+	runner.blobData = preparer
+
+	require.True(t, runner.submitAcceptedBlock(firstRequest.key.beaconBlockRoot, true))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("reveal runner did not join")
+		}
+	}()
+	require.Equal(t, firstRequest.key.beaconBlockRoot, <-preparer.prepared)
+	require.Eventually(t, func() bool {
+		runner.mu.Lock()
+		defer runner.mu.Unlock()
+		tracking, ok := runner.tracked[firstRequest.key]
+		return ok && !tracking.active
+	}, 150*time.Millisecond, time.Millisecond)
+	require.True(t, runner.submitAcceptedBlock(secondRoot, true))
+	require.Equal(t, secondRoot, <-preparer.prepared)
+	<-blocked.started
+	runner.submitAcceptedBlock(firstRequest.key.beaconBlockRoot, true)
+
+	select {
+	case err := <-blocked.contextErr:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("stale canonical reveal was not cancelled")
+	}
 }

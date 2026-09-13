@@ -229,6 +229,11 @@ func (c *Coordinator) runSlotGuarded(
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
 	}
+	if commitments.Len() != 0 {
+		if _, err := buildBlobDataColumns(ctx, c.beaconCfg, input.Slot, common.Hash{}, assembled.BlobsBundle, commitments); err != nil {
+			return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+		}
+	}
 	bidValue, ok, err := c.reserveBid(auction, candidateBidValue, input.AvailableBidValueGwei)
 	if err != nil || !ok {
 		return nil, err

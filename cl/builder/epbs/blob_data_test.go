@@ -12,7 +12,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
@@ -34,12 +36,21 @@ type recordedColumnWrite struct {
 }
 
 type recordingColumnWriter struct {
+	mu     sync.Mutex
 	writes []recordedColumnWrite
 }
 
 func (w *recordingColumnWriter) WriteColumnSidecars(_ context.Context, root common.Hash, index int64, column *cltypes.DataColumnSidecar) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.writes = append(w.writes, recordedColumnWrite{root: root, index: index, column: column})
 	return nil
+}
+
+func (w *recordingColumnWriter) snapshot() []recordedColumnWrite {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]recordedColumnWrite(nil), w.writes...)
 }
 
 type recordingColumnPublisher struct {
@@ -66,6 +77,43 @@ type failOnceColumnPublisher struct {
 	failedAt string
 	failed   bool
 	topics   []string
+}
+
+type failingColumnWriter struct {
+	failedAt int64
+	writes   []int64
+}
+
+func (w *failingColumnWriter) WriteColumnSidecars(_ context.Context, _ common.Hash, index int64, _ *cltypes.DataColumnSidecar) error {
+	w.writes = append(w.writes, index)
+	if index == w.failedAt {
+		return errors.New("write failed")
+	}
+	return nil
+}
+
+type failingColumnPublisher struct {
+	failedAt string
+	topics   []string
+}
+
+type blockingColumnWriter struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingColumnWriter) WriteColumnSidecars(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+	close(w.started)
+	<-w.release
+	return nil
+}
+
+func (p *failingColumnPublisher) Publish(_ context.Context, topic string, _ []byte) error {
+	p.topics = append(p.topics, topic)
+	if topic == p.failedAt {
+		return errors.New("publish failed")
+	}
+	return nil
 }
 
 func (p *failOnceColumnPublisher) Publish(_ context.Context, topic string, _ []byte) error {
@@ -97,11 +145,12 @@ func TestBlobDataPreparerStoresAndPublishesGloasColumns(t *testing.T) {
 	require.NoError(t, prepared.Store(t.Context()))
 	require.NoError(t, prepared.Publish(t.Context()))
 
-	require.Len(t, writer.writes, int(cfg.NumberOfColumns))
+	writes := writer.snapshot()
+	require.Len(t, writes, int(cfg.NumberOfColumns))
 	require.Len(t, publisher.data, int(cfg.NumberOfColumns))
 	commitments, err := buildBlobCommitments(&cfg, 64, bundle)
 	require.NoError(t, err)
-	for i, write := range writer.writes {
+	for i, write := range writes {
 		require.Equal(t, blockRoot, write.root)
 		require.Equal(t, int64(i), write.index)
 		require.Equal(t, uint64(64), write.column.Slot)
@@ -114,6 +163,11 @@ func TestBlobDataPreparerStoresAndPublishesGloasColumns(t *testing.T) {
 		decoded := cltypes.NewDataColumnSidecarWithVersionAndConfig(clparams.GloasVersion, &cfg)
 		require.NoError(t, decoded.DecodeSSZ(publisher.data[i], int(clparams.GloasVersion)))
 		require.Equal(t, uint64(i), decoded.Index)
+		directRoot, err := write.column.HashSSZ()
+		require.NoError(t, err)
+		decodedRoot, err := decoded.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, directRoot, decodedRoot)
 		require.Equal(t, gossip.TopicNameDataColumnSidecar(uint64(i)%cfg.DataColumnSidecarSubnetCount), publisher.topics[i])
 	}
 }
@@ -143,7 +197,7 @@ func TestBlobDataPreparerRejectsInvalidProofBeforeSideEffects(t *testing.T) {
 
 	require.ErrorContains(t, err, "invalid KZG proof")
 	require.Nil(t, prepared)
-	require.Empty(t, writer.writes)
+	require.Empty(t, writer.snapshot())
 	require.Empty(t, publisher.data)
 }
 
@@ -158,7 +212,7 @@ func TestBlobDataPreparerEmptyBundleHasNoSideEffects(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, prepared.Store(t.Context()))
 	require.NoError(t, prepared.Publish(t.Context()))
-	require.Empty(t, writer.writes)
+	require.Empty(t, writer.snapshot())
 	require.Empty(t, publisher.data)
 }
 
@@ -177,10 +231,57 @@ func TestPreparedBlobDataRetriesFromFirstUnconfirmedColumn(t *testing.T) {
 
 	require.Error(t, prepared.Store(t.Context()))
 	require.NoError(t, prepared.Store(t.Context()))
-	require.Equal(t, []int64{0, 1, 1, 2}, writer.writes)
+	require.Equal(t, []int64{0, 1, 2, 1}, writer.writes)
 	require.Error(t, prepared.Publish(t.Context()))
 	require.NoError(t, prepared.Publish(t.Context()))
-	require.Equal(t, []string{"column-0", "column-1", "column-1", "column-2"}, publisher.topics)
+	require.Equal(t, []string{"column-0", "column-1", "column-2", "column-1"}, publisher.topics)
+}
+
+func TestPreparedBlobDataFailureDoesNotStarveLaterColumns(t *testing.T) {
+	writer := &failingColumnWriter{failedAt: 1}
+	publisher := &failingColumnPublisher{failedAt: "column-1"}
+	prepared := &preparedBlobData{
+		writer:    writer,
+		publisher: publisher,
+		columns: []preparedDataColumn{
+			{index: 0, sidecar: new(cltypes.DataColumnSidecar), topic: "column-0"},
+			{index: 1, sidecar: new(cltypes.DataColumnSidecar), topic: "column-1"},
+			{index: 2, sidecar: new(cltypes.DataColumnSidecar), topic: "column-2"},
+		},
+	}
+
+	require.Error(t, prepared.Store(t.Context()))
+	require.Equal(t, []int64{0, 1, 2}, writer.writes)
+	require.Error(t, prepared.Store(t.Context()))
+	require.Equal(t, []int64{0, 1, 2, 1}, writer.writes)
+	require.Error(t, prepared.Publish(t.Context()))
+	require.Equal(t, []string{"column-0", "column-1", "column-2"}, publisher.topics)
+	require.Error(t, prepared.Publish(t.Context()))
+	require.Equal(t, []string{"column-0", "column-1", "column-2", "column-1"}, publisher.topics)
+}
+
+func TestPreparedBlobDataStoreReturnsWhenContextExpiresDuringBlockedWrite(t *testing.T) {
+	writer := &blockingColumnWriter{started: make(chan struct{}), release: make(chan struct{})}
+	prepared := &preparedBlobData{
+		writer:    writer,
+		publisher: new(recordingColumnPublisher),
+		columns:   []preparedDataColumn{{sidecar: new(cltypes.DataColumnSidecar)}},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- prepared.Store(ctx) }()
+	<-writer.started
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+		close(writer.release)
+	case <-time.After(100 * time.Millisecond):
+		close(writer.release)
+		<-done
+		t.Fatal("blocked storage write held the caller past context cancellation")
+	}
 }
 
 func BenchmarkBlobDataPreparerPrepareOneBlob(b *testing.B) {

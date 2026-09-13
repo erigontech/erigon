@@ -17,6 +17,7 @@
 package epbs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -705,7 +706,7 @@ func TestCoordinatorAcceptsPeerDASProofsForEveryColumn(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)
 	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
-	assembled.BlobsBundle = validCoordinatorBlobsBundle(config, 1)
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
 	coordinator := NewCoordinator(
 		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
 		&coordinatorAssembler{payload: assembled}, new(coordinatorPublisher), 1,
@@ -720,7 +721,7 @@ func TestCoordinatorRejectsMissingPeerDASColumnProof(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)
 	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
-	assembled.BlobsBundle = validCoordinatorBlobsBundle(config, 1)
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
 	assembled.BlobsBundle.Proofs = assembled.BlobsBundle.Proofs[:len(assembled.BlobsBundle.Proofs)-1]
 	publisher := new(coordinatorPublisher)
 	coordinator := NewCoordinator(
@@ -737,7 +738,7 @@ func TestCoordinatorRejectsMalformedPeerDASColumnProof(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)
 	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
-	assembled.BlobsBundle = validCoordinatorBlobsBundle(config, 1)
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
 	assembled.BlobsBundle.Proofs[1] = assembled.BlobsBundle.Proofs[1][:len(cltypes.KZGProof{})-1]
 	publisher := new(coordinatorPublisher)
 	coordinator := NewCoordinator(
@@ -748,6 +749,26 @@ func TestCoordinatorRejectsMalformedPeerDASColumnProof(t *testing.T) {
 	_, err := coordinator.RunSlot(t.Context(), input)
 	require.ErrorContains(t, err, "proof 1 has length")
 	require.Zero(t, publisher.calls)
+}
+
+func TestCoordinatorRejectsInvalidPeerDASProofBeforePublishingBid(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
+	assembled.BlobsBundle.Proofs[0][0] ^= 0xff
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: assembled}, publisher, 1,
+	)
+
+	_, err := coordinator.RunSlot(t.Context(), input)
+	require.ErrorContains(t, err, "invalid KZG proof")
+	require.Zero(t, publisher.calls)
+	_, retained, lookupErr := coordinator.Payload(payloadIdentity(input, assembled))
+	require.NoError(t, lookupErr)
+	require.False(t, retained)
 }
 
 func TestCoordinatorRejectsPreferenceForAnotherIdentity(t *testing.T) {
@@ -916,7 +937,7 @@ func TestCoordinatorPayloadLookupReturnsOwnedDefensiveCopy(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)
 	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
-	assembled.BlobsBundle = validCoordinatorBlobsBundle(config, 1)
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
 	wantBlockHash := assembled.Eth1Block.BlockHash
 	wantBlockValue := new(big.Int).Set(assembled.BlockValue)
 	wantBlobByte := assembled.BlobsBundle.Blobs[0][0]
@@ -1033,18 +1054,20 @@ func validCoordinatorPayload(config *clparams.BeaconChainConfig, input SlotInput
 	}
 }
 
-func validCoordinatorBlobsBundle(config clparams.BeaconChainConfig, blobs int) *eladapter.BlobsBundle { //nolint:gocritic // Tests use isolated config values.
+func validCoordinatorBlobsBundle(t testing.TB, config clparams.BeaconChainConfig, blobs int) *eladapter.BlobsBundle { //nolint:gocritic // Tests use isolated config values.
+	t.Helper()
 	bundle := &eladapter.BlobsBundle{
-		Commitments: make([][]byte, blobs),
-		Proofs:      make([][]byte, blobs*int(config.NumberOfColumns)),
-		Blobs:       make([][]byte, blobs),
+		Commitments: make([][]byte, 0, blobs),
+		Proofs:      make([][]byte, 0, blobs*int(config.NumberOfColumns)),
+		Blobs:       make([][]byte, 0, blobs),
 	}
-	for i := range bundle.Commitments {
-		bundle.Commitments[i] = make([]byte, len(cltypes.KZGCommitment{}))
-		bundle.Blobs[i] = make([]byte, cltypes.BytesPerBlob)
-	}
-	for i := range bundle.Proofs {
-		bundle.Proofs[i] = make([]byte, len(cltypes.KZGProof{}))
+	for range blobs {
+		single := validBlobDataBundle(t)
+		bundle.Commitments = append(bundle.Commitments, bytes.Clone(single.Commitments[0]))
+		bundle.Blobs = append(bundle.Blobs, bytes.Clone(single.Blobs[0]))
+		for column := range config.NumberOfColumns {
+			bundle.Proofs = append(bundle.Proofs, bytes.Clone(single.Proofs[column]))
+		}
 	}
 	return bundle
 }

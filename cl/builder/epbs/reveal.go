@@ -63,14 +63,18 @@ type revealKey struct {
 }
 
 type revealRequest struct {
-	key      revealKey
-	identity PayloadIdentity
-	slot     uint64
+	key        revealKey
+	identity   PayloadIdentity
+	slot       uint64
+	generation uint64
 }
 
 type revealTracking struct {
-	slot   uint64
-	active bool
+	slot       uint64
+	generation uint64
+	active     bool
+	reserved   bool
+	stop       context.CancelFunc
 }
 
 type revealRunner struct {
@@ -86,10 +90,14 @@ type revealRunner struct {
 	publisher     GossipPublisher
 	retryInterval time.Duration
 	requests      chan revealRequest
+	canonical     chan struct{}
 
-	mu          sync.Mutex
-	tracked     map[revealKey]revealTracking
-	activeCount int
+	mu               sync.Mutex
+	tracked          map[revealKey]revealTracking
+	activeCount      int
+	reservedActive   int
+	canonicalPending *revealRequest
+	nextGeneration   uint64
 }
 
 func (r *revealRunner) maxQueue() int {
@@ -112,24 +120,27 @@ func newRevealRunner(
 	return &revealRunner{
 		beaconCfg: beaconCfg, clock: clock, signer: signer, coordinator: coordinator, blocks: blocks,
 		processor: processor, publisher: publisher, persisted: persisted, head: head, retryInterval: retryInterval,
-		requests: make(chan revealRequest, maxQueued), tracked: make(map[revealKey]revealTracking),
+		requests: make(chan revealRequest, maxQueued), canonical: make(chan struct{}, 1),
+		tracked: make(map[revealKey]revealTracking),
 	}
 }
 
 func (r *revealRunner) Run(ctx context.Context) {
 	var workers sync.WaitGroup
-	for range maxConcurrentReveals {
-		workers.Go(func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case request := <-r.requests:
-					r.runRequest(ctx, request)
-				}
+	runWorker := func(requests <-chan revealRequest) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case request := <-requests:
+				r.runRequest(ctx, request)
 			}
-		})
+		}
 	}
+	for range maxConcurrentReveals {
+		workers.Go(func() { runWorker(r.requests) })
+	}
+	workers.Go(func() { r.runCanonicalWorker(ctx) })
 	ticker := time.NewTicker(r.retryInterval)
 	defer ticker.Stop()
 	for {
@@ -144,11 +155,80 @@ func (r *revealRunner) Run(ctx context.Context) {
 	}
 }
 
+func (r *revealRunner) runCanonicalWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.canonical:
+		}
+		for {
+			request, ok := r.nextCanonicalRequest()
+			if !ok {
+				break
+			}
+			r.runRequest(ctx, request)
+		}
+	}
+}
+
+func (r *revealRunner) nextCanonicalRequest() (revealRequest, bool) {
+	var stop context.CancelFunc
+	r.mu.Lock()
+	if r.canonicalPending == nil {
+		r.mu.Unlock()
+		return revealRequest{}, false
+	}
+	request := *r.canonicalPending
+	r.canonicalPending = nil
+	if tracking, ok := r.tracked[request.key]; ok {
+		if !tracking.active {
+			r.mu.Unlock()
+			return revealRequest{}, false
+		}
+		stop = r.retireTrackingLocked(request.key, tracking)
+	}
+	if len(r.tracked) >= cap(r.requests) {
+		key, _, ok := r.inactiveEvictionCandidateLocked()
+		if ok {
+			delete(r.tracked, key)
+		}
+	}
+	r.tracked[request.key] = revealTracking{
+		slot: request.slot, generation: request.generation, active: true, reserved: true,
+	}
+	r.activeCount++
+	r.reservedActive++
+	r.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	return request, true
+}
+
 func (r *revealRunner) runRequest(ctx context.Context, request revealRequest) {
-	defer r.finishRequest(request.key)
-	if err := r.reveal(ctx, request); err != nil && !errors.Is(err, context.Canceled) {
+	requestCtx, stop, ok := r.startRequest(ctx, request)
+	if !ok {
+		return
+	}
+	defer stop()
+	defer r.finishRequest(request.key, request.generation)
+	if err := r.reveal(requestCtx, request); err != nil && !errors.Is(err, context.Canceled) {
 		log.Warn("Embedded builder payload reveal failed", "slot", request.slot, "blockRoot", request.key.beaconBlockRoot, "err", err)
 	}
+}
+
+func (r *revealRunner) startRequest(ctx context.Context, request revealRequest) (context.Context, context.CancelFunc, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tracking, ok := r.tracked[request.key]
+	if !ok || !tracking.active || tracking.generation != request.generation {
+		return nil, nil, false
+	}
+	requestCtx, stop := context.WithCancel(ctx)
+	tracking.stop = stop
+	r.tracked[request.key] = tracking
+	return requestCtx, stop, true
 }
 
 func (r *revealRunner) SubmitAcceptedBlock(blockRoot common.Hash) bool {
@@ -167,7 +247,11 @@ func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
 }
 
 func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactive bool) bool {
-	if r.tracksBlockRoot(blockRoot) {
+	if replaceInactive {
+		if !r.canonicalNeedsValidation(blockRoot) {
+			return false
+		}
+	} else if r.tracksBlockRoot(blockRoot) {
 		return false
 	}
 	r.pruneTracked(r.clock.GetCurrentSlot())
@@ -195,29 +279,21 @@ func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactiv
 		return false
 	}
 	key := revealKey{beaconBlockRoot: blockRoot, signedBidRoot: common.Hash(signedBidRoot)}
+	request := revealRequest{key: key, identity: identity, slot: signedBid.Message.Slot}
+	if replaceInactive {
+		return r.submitCanonicalRequest(request)
+	}
 	r.mu.Lock()
-	if _, exists := r.tracked[key]; exists || r.activeCount >= cap(r.requests) {
+	if _, exists := r.tracked[key]; exists ||
+		(r.canonicalPending != nil && r.canonicalPending.key.beaconBlockRoot == request.key.beaconBlockRoot) ||
+		r.activeCount-r.reservedActive >= cap(r.requests) ||
+		len(r.tracked) >= cap(r.requests)+r.reservedActive {
 		r.mu.Unlock()
 		return false
 	}
-	var evictedKey revealKey
-	var evictedTracking revealTracking
-	var evicted bool
-	if len(r.tracked) >= cap(r.requests) {
-		if !replaceInactive {
-			r.mu.Unlock()
-			return false
-		}
-		evictedKey, evictedTracking, evicted = r.inactiveEvictionCandidate()
-		if !evicted {
-			r.mu.Unlock()
-			return false
-		}
-		delete(r.tracked, evictedKey)
-	}
-	r.tracked[key] = revealTracking{slot: signedBid.Message.Slot, active: true}
+	request.generation = r.newGenerationLocked()
+	r.tracked[key] = revealTracking{slot: request.slot, generation: request.generation, active: true}
 	r.activeCount++
-	request := revealRequest{key: key, identity: identity, slot: signedBid.Message.Slot}
 	select {
 	case r.requests <- request:
 		r.mu.Unlock()
@@ -225,17 +301,98 @@ func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactiv
 	default:
 		delete(r.tracked, key)
 		r.activeCount--
-		if evicted {
-			r.tracked[evictedKey] = evictedTracking
-		}
 		r.mu.Unlock()
 		return false
 	}
 }
 
+func (r *revealRunner) canonicalNeedsValidation(blockRoot common.Hash) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.canonicalPending != nil {
+		if r.canonicalPending.key.beaconBlockRoot == blockRoot {
+			return false
+		}
+	}
+	known := false
+	competing := r.canonicalPending != nil
+	for key, tracking := range r.tracked {
+		if key.beaconBlockRoot == blockRoot {
+			if tracking.active && !tracking.reserved {
+				return true
+			}
+			known = true
+			continue
+		}
+		competing = competing || tracking.active && tracking.reserved
+	}
+	return !known || competing
+}
+
+func (r *revealRunner) submitCanonicalRequest(request revealRequest) bool {
+	var stops []context.CancelFunc
+	r.mu.Lock()
+	if r.canonicalPending != nil && r.canonicalPending.key.beaconBlockRoot == request.key.beaconBlockRoot {
+		r.mu.Unlock()
+		return false
+	}
+	satisfied := false
+	for key, tracking := range r.tracked {
+		if key.beaconBlockRoot == request.key.beaconBlockRoot {
+			if !tracking.active {
+				satisfied = true
+				continue
+			}
+			if stop := r.retireTrackingLocked(key, tracking); stop != nil {
+				stops = append(stops, stop)
+			}
+			continue
+		}
+		if tracking.active && tracking.reserved {
+			if stop := r.retireTrackingLocked(key, tracking); stop != nil {
+				stops = append(stops, stop)
+			}
+		}
+	}
+	if satisfied {
+		r.canonicalPending = nil
+	} else {
+		request.generation = r.newGenerationLocked()
+		r.canonicalPending = &request
+		select {
+		case r.canonical <- struct{}{}:
+		default:
+		}
+	}
+	r.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
+	return !satisfied
+}
+
+func (r *revealRunner) newGenerationLocked() uint64 {
+	r.nextGeneration++
+	return r.nextGeneration
+}
+
+func (r *revealRunner) retireTrackingLocked(key revealKey, tracking revealTracking) context.CancelFunc {
+	delete(r.tracked, key)
+	if tracking.active {
+		r.activeCount--
+		if tracking.reserved {
+			r.reservedActive--
+		}
+	}
+	return tracking.stop
+}
+
 func (r *revealRunner) tracksBlockRoot(blockRoot common.Hash) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.canonicalPending != nil && r.canonicalPending.key.beaconBlockRoot == blockRoot {
+		return true
+	}
 	for key := range r.tracked {
 		if key.beaconBlockRoot == blockRoot {
 			return true
@@ -244,7 +401,7 @@ func (r *revealRunner) tracksBlockRoot(blockRoot common.Hash) bool {
 	return false
 }
 
-func (r *revealRunner) inactiveEvictionCandidate() (revealKey, revealTracking, bool) {
+func (r *revealRunner) inactiveEvictionCandidateLocked() (revealKey, revealTracking, bool) {
 	var candidateKey revealKey
 	var candidateTracking revealTracking
 	found := false
@@ -279,16 +436,20 @@ func (r *revealRunner) pruneTracked(currentSlot uint64) {
 	}
 }
 
-func (r *revealRunner) finishRequest(key revealKey) {
+func (r *revealRunner) finishRequest(key revealKey, generation uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tracking, ok := r.tracked[key]
-	if !ok || !tracking.active {
+	if !ok || !tracking.active || tracking.generation != generation {
 		return
 	}
-	tracking.active = false
-	r.tracked[key] = tracking
 	r.activeCount--
+	if tracking.reserved {
+		r.reservedActive--
+	}
+	tracking.active = false
+	tracking.stop = nil
+	r.tracked[key] = tracking
 }
 
 func (r *revealRunner) releaseActiveTracking() {
@@ -296,9 +457,12 @@ func (r *revealRunner) releaseActiveTracking() {
 	defer r.mu.Unlock()
 	for key, tracking := range r.tracked {
 		tracking.active = false
+		tracking.stop = nil
 		r.tracked[key] = tracking
 	}
 	r.activeCount = 0
+	r.reservedActive = 0
+	r.canonicalPending = nil
 }
 
 func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error {
@@ -384,41 +548,37 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 		if err := revealContextError(ctx, revealCtx, deadline); err != nil {
 			return errors.Join(err, attemptErr)
 		}
-		switch {
-		case !blobStored:
-			attemptErr = preparedBlobData.Store(revealCtx)
-			blobStored = attemptErr == nil
-			if blobStored {
-				continue
-			}
-		case !localAccepted:
-			attemptErr = r.processor.ProcessMessage(revealCtx, nil, localEnvelope)
-			localAccepted = attemptErr == nil
-			if localAccepted {
-				continue
-			}
-			if r.persistedEnvelopeMatches(request.key.beaconBlockRoot, encoded) {
+		attemptErr = nil
+		if !localAccepted {
+			err := r.processor.ProcessMessage(revealCtx, nil, localEnvelope)
+			localAccepted = err == nil
+			attemptErr = errors.Join(attemptErr, err)
+			if !localAccepted && r.persistedEnvelopeMatches(request.key.beaconBlockRoot, encoded) {
 				localAccepted = true
-				continue
 			}
-		default:
-			attemptErr = nil
-			if !envelopePublished {
-				err := r.publisher.Publish(revealCtx, gossip.TopicNameExecutionPayload, encoded)
-				envelopePublished = err == nil
-				attemptErr = errors.Join(attemptErr, err)
-			}
+		}
+		if localAccepted && !envelopePublished {
+			err := r.publisher.Publish(revealCtx, gossip.TopicNameExecutionPayload, encoded)
+			envelopePublished = err == nil
+			attemptErr = errors.Join(attemptErr, err)
+		}
+		if localAccepted && preparedBlobData != nil {
 			if !blobPublished {
 				err := preparedBlobData.Publish(revealCtx)
 				blobPublished = err == nil
 				attemptErr = errors.Join(attemptErr, err)
 			}
-			if envelopePublished && blobPublished {
-				if err := revealContextError(ctx, revealCtx, deadline); err != nil {
-					return err
-				}
-				return nil
+			if !blobStored {
+				err := preparedBlobData.Store(revealCtx)
+				blobStored = err == nil
+				attemptErr = errors.Join(attemptErr, err)
 			}
+		}
+		if localAccepted && envelopePublished && blobStored && blobPublished {
+			if err := revealContextError(ctx, revealCtx, deadline); err != nil {
+				return err
+			}
+			return nil
 		}
 		if err := revealContextError(ctx, revealCtx, deadline); err != nil {
 			return errors.Join(err, attemptErr)

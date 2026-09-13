@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -28,9 +29,10 @@ type DataColumnWriter interface {
 }
 
 type blobDataPreparer struct {
-	beaconCfg *clparams.BeaconChainConfig
-	writer    DataColumnWriter
-	publisher GossipPublisher
+	beaconCfg  *clparams.BeaconChainConfig
+	writer     DataColumnWriter
+	publisher  GossipPublisher
+	storeSlots chan struct{}
 }
 
 type preparedDataColumn struct {
@@ -42,15 +44,22 @@ type preparedDataColumn struct {
 }
 
 type preparedBlobData struct {
-	writer    DataColumnWriter
-	publisher GossipPublisher
-	columns   []preparedDataColumn
-	storeNext int
-	pubNext   int
+	writer      DataColumnWriter
+	publisher   GossipPublisher
+	columns     []preparedDataColumn
+	stored      []bool
+	published   []bool
+	storeSlots  chan struct{}
+	storeFlight <-chan error
 }
 
 func newBlobDataPreparer(beaconCfg *clparams.BeaconChainConfig, writer DataColumnWriter, publisher GossipPublisher) BlobDataPreparer {
-	return &blobDataPreparer{beaconCfg: beaconCfg, writer: writer, publisher: publisher}
+	return &blobDataPreparer{
+		beaconCfg:  beaconCfg,
+		writer:     writer,
+		publisher:  publisher,
+		storeSlots: make(chan struct{}, maxConcurrentReveals+1),
+	}
 }
 
 func (p *blobDataPreparer) Prepare(
@@ -73,36 +82,18 @@ func (p *blobDataPreparer) Prepare(
 		return nil, fmt.Errorf("epbs/blob-data: %w", err)
 	}
 	if commitments.Len() == 0 {
-		return &preparedBlobData{writer: p.writer, publisher: p.publisher}, nil
+		return &preparedBlobData{writer: p.writer, publisher: p.publisher, storeSlots: p.storeSlots}, nil
 	}
-	if bundle == nil || p.beaconCfg.NumberOfColumns == 0 || uint64(len(bundle.Blobs)) > math.MaxUint64/p.beaconCfg.NumberOfColumns {
-		return nil, errors.New("epbs/blob-data: invalid blob bundle")
-	}
-	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(bundle.Blobs))
-	for blobIndex := range bundle.Blobs {
-		blob := new(cltypes.Blob)
-		copy(blob[:], bundle.Blobs[blobIndex])
-		cells, err := das.ComputeCells(blob)
-		if err != nil {
-			return nil, fmt.Errorf("epbs/blob-data: compute cells for blob %d: %w", blobIndex, err)
-		}
-		proofs := make([]cltypes.KZGProof, p.beaconCfg.NumberOfColumns)
-		proofOffset := uint64(blobIndex) * p.beaconCfg.NumberOfColumns
-		for columnIndex := range p.beaconCfg.NumberOfColumns {
-			copy(proofs[columnIndex][:], bundle.Proofs[proofOffset+columnIndex])
-		}
-		cellsAndProofs[blobIndex] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
-	}
-	columns, err := peerdasutils.GetDataColumnSidecarsGloasWithConfig(p.beaconCfg, slot, blockRoot, cellsAndProofs)
+	columns, err := buildBlobDataColumns(ctx, p.beaconCfg, slot, blockRoot, bundle, commitments)
 	if err != nil {
-		return nil, fmt.Errorf("epbs/blob-data: build columns: %w", err)
+		return nil, err
 	}
 	prepared := &preparedBlobData{
 		writer: p.writer, publisher: p.publisher,
-		columns: make([]preparedDataColumn, len(columns)),
-	}
-	if !das.VerifyDataColumnSidecarsKZGProofsWithCommitments(columns, commitments) {
-		return nil, errors.New("epbs/blob-data: invalid KZG proof")
+		columns:    make([]preparedDataColumn, len(columns)),
+		stored:     make([]bool, len(columns)),
+		published:  make([]bool, len(columns)),
+		storeSlots: p.storeSlots,
 	}
 	for i, column := range columns {
 		encoded, err := column.EncodeSSZ(nil)
@@ -118,30 +109,111 @@ func (p *blobDataPreparer) Prepare(
 	return prepared, nil
 }
 
+func buildBlobDataColumns(
+	ctx context.Context,
+	beaconCfg *clparams.BeaconChainConfig,
+	slot uint64,
+	blockRoot common.Hash,
+	bundle *eladapter.BlobsBundle,
+	commitments *solid.ListSSZ[*cltypes.KZGCommitment],
+) ([]*cltypes.DataColumnSidecar, error) {
+	if bundle == nil || beaconCfg == nil || beaconCfg.NumberOfColumns == 0 || uint64(len(bundle.Blobs)) > math.MaxUint64/beaconCfg.NumberOfColumns {
+		return nil, errors.New("epbs/blob-data: invalid blob bundle")
+	}
+	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(bundle.Blobs))
+	for blobIndex := range bundle.Blobs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		blob := new(cltypes.Blob)
+		copy(blob[:], bundle.Blobs[blobIndex])
+		cells, err := das.ComputeCells(blob)
+		if err != nil {
+			return nil, fmt.Errorf("epbs/blob-data: compute cells for blob %d: %w", blobIndex, err)
+		}
+		proofs := make([]cltypes.KZGProof, beaconCfg.NumberOfColumns)
+		proofOffset := uint64(blobIndex) * beaconCfg.NumberOfColumns
+		for columnIndex := range beaconCfg.NumberOfColumns {
+			copy(proofs[columnIndex][:], bundle.Proofs[proofOffset+columnIndex])
+		}
+		cellsAndProofs[blobIndex] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
+	}
+	columns, err := peerdasutils.GetDataColumnSidecarsGloasWithConfig(beaconCfg, slot, blockRoot, cellsAndProofs)
+	if err != nil {
+		return nil, fmt.Errorf("epbs/blob-data: build columns: %w", err)
+	}
+	if !das.VerifyDataColumnSidecarsKZGProofsWithCommitments(columns, commitments) {
+		return nil, errors.New("epbs/blob-data: invalid KZG proof")
+	}
+	return columns, nil
+}
+
 func (p *preparedBlobData) Store(ctx context.Context) error {
-	for i := p.storeNext; i < len(p.columns); i++ {
+	if p.storeFlight == nil {
+		if p.storeSlots == nil {
+			p.storeSlots = make(chan struct{}, 1)
+		}
+		select {
+		case p.storeSlots <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		finished := make(chan error, 1)
+		p.storeFlight = finished
+		go func() {
+			defer func() { <-p.storeSlots }()
+			finished <- p.store(ctx)
+		}()
+	}
+	select {
+	case err := <-p.storeFlight:
+		p.storeFlight = nil
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *preparedBlobData) store(ctx context.Context) error {
+	if len(p.stored) != len(p.columns) {
+		p.stored = make([]bool, len(p.columns))
+	}
+	var result error
+	for i := range p.columns {
+		if p.stored[i] {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		column := &p.columns[i]
 		if err := p.writer.WriteColumnSidecars(ctx, column.root, column.index, column.sidecar); err != nil {
-			return fmt.Errorf("epbs/blob-data: store column %d: %w", column.index, err)
+			result = errors.Join(result, fmt.Errorf("epbs/blob-data: store column %d: %w", column.index, err))
+			continue
 		}
-		p.storeNext = i + 1
+		p.stored[i] = true
 	}
-	return nil
+	return result
 }
 
 func (p *preparedBlobData) Publish(ctx context.Context) error {
-	for i := p.pubNext; i < len(p.columns); i++ {
+	if len(p.published) != len(p.columns) {
+		p.published = make([]bool, len(p.columns))
+	}
+	var result error
+	for i := range p.columns {
+		if p.published[i] {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		column := &p.columns[i]
 		if err := p.publisher.Publish(ctx, column.topic, column.encoded); err != nil {
-			return fmt.Errorf("epbs/blob-data: publish column %d: %w", column.index, err)
+			result = errors.Join(result, fmt.Errorf("epbs/blob-data: publish column %d: %w", column.index, err))
+			continue
 		}
-		p.pubNext = i + 1
+		p.published[i] = true
 	}
-	return nil
+	return result
 }
