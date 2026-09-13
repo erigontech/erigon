@@ -720,6 +720,8 @@ func (f *forkGraphDisk) PayloadAccepted(blockRoot common.Hash) (bool, bool) {
 	return verified.(bool), true
 }
 
+func (*forkGraphDisk) HasDurablePayloadStatusAuthority() {}
+
 func (f *forkGraphDisk) retainedBlock(blockRoot common.Hash) bool {
 	header, ok := f.headers.Load(blockRoot)
 	if !ok {

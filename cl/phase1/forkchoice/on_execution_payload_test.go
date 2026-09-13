@@ -87,6 +87,7 @@ type persistedEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
 	hasEnvelope bool
 	envelope    *cltypes.SignedExecutionPayloadEnvelope
+	invalidated common.Hash
 }
 
 func (g *persistedEnvelopeForkGraph) HasEnvelope(common.Hash) bool { return g.hasEnvelope }
@@ -98,10 +99,14 @@ func (g *persistedEnvelopeForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope 
 func (g *persistedEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	return g.envelope, nil
 }
-func (g *persistedEnvelopeForkGraph) IsBlockInvalid(common.Hash) bool          { return false }
+func (g *persistedEnvelopeForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalidated == root
+}
 func (g *persistedEnvelopeForkGraph) IsPayloadUnavailable(common.Hash) bool    { return false }
 func (g *persistedEnvelopeForkGraph) MarkPayloadAvailable(common.Hash)         {}
 func (g *persistedEnvelopeForkGraph) MarkPayloadAccepted(common.Hash, bool)    {}
+func (g *persistedEnvelopeForkGraph) ClearPayloadAccepted(common.Hash)         {}
+func (g *persistedEnvelopeForkGraph) MarkHeaderAsInvalid(root common.Hash)     { g.invalidated = root }
 func (g *persistedEnvelopeForkGraph) PayloadAccepted(common.Hash) (bool, bool) { return false, false }
 
 type admissionYieldForkGraph struct {
@@ -604,7 +609,7 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 }
 
-func TestOnExecutionPayloadWithoutValidationQueuesPayloadUntilEngineAcceptance(t *testing.T) {
+func TestOnExecutionPayloadWithoutValidationMarksPayloadOptimisticAndQueues(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	root := envelope.Message.BeaconBlockRoot
 	f := newPayloadVoteTestStore(t, root, false, false)
@@ -616,9 +621,10 @@ func TestOnExecutionPayloadWithoutValidationQueuesPayloadUntilEngineAcceptance(t
 	}}
 
 	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
-	require.False(t, f.isPayloadAvailable(root))
-	_, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
-	require.False(t, ok)
+	require.True(t, f.isPayloadAvailable(root))
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 	pending := f.DrainPendingELPayloads()
 	require.Len(t, pending, 1)
 	require.Equal(t, root, pending[0].Root)
@@ -634,6 +640,121 @@ func TestOnExecutionPayloadWithoutValidationQueuesPayloadUntilEngineAcceptance(t
 	require.Equal(t, root, requeued[0].Root)
 	require.Nil(t, requeued[0].Block)
 	require.Nil(t, requeued[0].Envelope)
+}
+
+func TestOnExecutionPayloadWithoutValidationCachesGasLimit(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	gasLimit, ok := f.GetExecutionPayloadGasLimit(envelope.Message.Payload.BlockHash)
+	require.True(t, ok)
+	require.Equal(t, envelope.Message.Payload.GasLimit, gasLimit)
+}
+
+func TestOnExecutionPayloadWithoutValidationReportsOptimisticUntilTerminalStatus(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	executionBlockHash := envelope.Message.Payload.BlockHash
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	require.True(t, f.IsRootOptimistic(root))
+	f.MarkPayloadVerified(root, executionBlockHash)
+	require.False(t, f.IsRootOptimistic(root))
+	f.MarkPayloadInvalid(root, executionBlockHash)
+	require.False(t, f.IsRootOptimistic(root))
+}
+
+func TestOnExecutionPayloadWithoutValidationPreservesInvalidatedHash(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	executionBlockHash := envelope.Message.Payload.BlockHash
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+	f.MarkPayloadInvalid(common.HexToHash("0x1234"), executionBlockHash)
+
+	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, false), ErrInvalidExecutionPayloadEnvelope)
+	status, ok := f.GetRecentExecutionPayloadStatus(executionBlockHash)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
+	status, ok = f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
+	require.False(t, f.isPayloadAvailable(root))
+	require.Empty(t, f.DrainPendingELPayloads())
+	require.False(t, f.HasEnvelope(root))
+	_, ok = f.GetExecutionPayloadGasLimit(executionBlockHash)
+	require.False(t, ok)
+	_, ok = f.eth2Roots.Get(root)
+	require.False(t, ok)
+}
+
+func TestOnExecutionPayloadWithoutValidationRejectsInvalidatedRootAfterHashStatusEviction(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	executionBlockHash := envelope.Message.Payload.BlockHash
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+	statusByHash, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	f.executionPayloadStatus = statusByHash
+	f.MarkPayloadInvalid(root, executionBlockHash)
+	f.executionPayloadStatus.Add(common.HexToHash("0x9999"), execution_client.PayloadStatusValidated)
+
+	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, false), ErrInvalidExecutionPayloadEnvelope)
+	require.False(t, f.HasEnvelope(root))
+	_, ok := f.GetExecutionPayloadGasLimit(executionBlockHash)
+	require.False(t, ok)
+	_, ok = f.eth2Roots.Get(root)
+	require.False(t, ok)
+}
+
+func TestOnExecutionPayloadWithoutValidationDoesNotDowngradeValidatedHash(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	executionBlockHash := envelope.Message.Payload.BlockHash
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+	f.MarkPayloadVerified(common.HexToHash("0x1234"), executionBlockHash)
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	status, ok := f.GetRecentExecutionPayloadStatus(executionBlockHash)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+	status, ok = f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+	require.True(t, f.isPayloadAvailable(root))
+	require.Len(t, f.DrainPendingELPayloads(), 1)
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {
@@ -2318,6 +2439,7 @@ func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfi
 	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
 	payload.BlockHash = common.HexToHash("0x22")
+	payload.GasLimit = 30_000_000
 	payload.SlotNumber = blockState.Slot()
 	payload.Time = state2.ComputeTimestampAtSlot(blockState, blockState.Slot())
 	payload.Withdrawals = withdrawals
@@ -2326,6 +2448,7 @@ func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfi
 	payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
 	bid := &cltypes.ExecutionPayloadBid{
 		BlockHash:             payload.BlockHash,
+		GasLimit:              payload.GasLimit,
 		BuilderIndex:          0,
 		Slot:                  payload.SlotNumber,
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),

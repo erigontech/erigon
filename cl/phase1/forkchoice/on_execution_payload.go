@@ -523,6 +523,23 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		}
 	}
 
+	deferredPayload := (f.engine == nil || !validatePayload) && envelope.Payload != nil
+	invalidPayload := false
+	if deferredPayload {
+		status, ok := f.payloadStatusAuthority(beaconBlockRoot)
+		invalidPayload = ok && status == execution_client.PayloadStatusInvalidated
+		if !invalidPayload && f.executionPayloadStatus != nil {
+			status, ok = f.executionPayloadStatus.Get(envelope.Payload.BlockHash)
+			invalidPayload = ok && status == execution_client.PayloadStatusInvalidated
+		}
+	}
+	if invalidPayload {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated); !retained {
+			return false, fmt.Errorf("%w: block disappeared while rejecting payload for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+		}
+		return false, fmt.Errorf("%w: execution payload is invalid", ErrInvalidExecutionPayloadEnvelope)
+	}
+
 	// Update eth2Roots mapping for FCU
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
@@ -532,13 +549,18 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
-	if f.engine == nil && envelope.Payload != nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+	if deferredPayload {
+		f.executionPayloadGasLimit.Add(envelope.Payload.BlockHash, envelope.Payload.GasLimit)
+		status, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated)
+		if !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
-	}
-	if !validatePayload && f.engine != nil && envelope.Payload != nil {
-		f.addPendingELPayload(block, signedEnvelope)
+		if status == execution_client.PayloadStatusInvalidated {
+			return false, fmt.Errorf("%w: execution payload is invalid", ErrInvalidExecutionPayloadEnvelope)
+		}
+		if !validatePayload && f.engine != nil && status == execution_client.PayloadStatusNotValidated {
+			f.addPendingELPayload(block, signedEnvelope)
+		}
 	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.

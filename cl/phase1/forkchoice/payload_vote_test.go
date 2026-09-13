@@ -68,6 +68,8 @@ type payloadVoteForkGraph struct {
 	retained           *bool
 }
 
+func (payloadVoteForkGraph) HasDurablePayloadStatusAuthority() {}
+
 func (g payloadVoteForkGraph) IsBlockRetained(common.Hash) bool {
 	return g.retained == nil || *g.retained
 }
@@ -725,6 +727,48 @@ func TestPayloadStatusTransitionsUpdateDurableAvailability(t *testing.T) {
 	}
 }
 
+func TestPayloadStatusRetryDoesNotDowngradeInvalidatedHash(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	execHash := common.HexToHash("0xabcd")
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.MarkPayloadStatus(root, execHash, execution_client.PayloadStatusNotValidated)
+	f.MarkPayloadInvalid(common.HexToHash("0x1234"), execHash)
+
+	effective, retained := f.MarkPayloadStatusIfRetained(root, execHash, execution_client.PayloadStatusNone)
+	require.True(t, retained)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), effective)
+	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
+}
+
+func TestPayloadStatusRetryDoesNotDowngradeValidatedHash(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	execHash := common.HexToHash("0xabcd")
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.MarkPayloadStatus(root, execHash, execution_client.PayloadStatusNotValidated)
+	f.MarkPayloadVerified(common.HexToHash("0x1234"), execHash)
+
+	effective, retained := f.MarkPayloadStatusIfRetained(root, execHash, execution_client.PayloadStatusNone)
+	require.True(t, retained)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), effective)
+	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+}
+
+func TestIsRootOptimisticUsesRetainedPayloadAuthorityAfterCacheEviction(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	f := newPayloadVoteTestStore(t, root, true, false)
+	statusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	f.payloadStatusByRoot = statusByRoot
+	f.MarkPayloadStatus(root, common.HexToHash("0xabcd"), execution_client.PayloadStatusNotValidated)
+	f.payloadStatusByRoot.Add(common.HexToHash("0x9999"), execution_client.PayloadStatusValidated)
+
+	require.True(t, f.IsRootOptimistic(root))
+}
+
 func TestPayloadStatusGetterUsesDurableAuthorityAfterEviction(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	for _, status := range []execution_client.PayloadStatus{
@@ -856,6 +900,8 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 	require.NoError(t, err)
 	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
 	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](16)
+	require.NoError(t, err)
 	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)
 
@@ -870,6 +916,7 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 		verifiedExecutionPayload: verifiedExecutionPayload,
 		executionPayloadStatus:   executionPayloadStatus,
 		payloadStatusByRoot:      payloadStatusByRoot,
+		executionPayloadGasLimit: executionPayloadGasLimit,
 		optimisticStore:          optimistic.NewOptimisticStore(),
 	}
 	f.proposerBoostRoot.Store(common.Hash{})
