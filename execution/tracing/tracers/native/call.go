@@ -63,6 +63,8 @@ type callFrame struct {
 	Logs     []callLog       `json:"logs,omitempty"`
 	Value    *hexutil.U256   `json:"value,omitempty"`
 	TypeStr  string          `json:"type"`
+
+	revertedSnapshot bool
 }
 
 // setType keeps the opcode and its wire spelling in step.
@@ -71,16 +73,23 @@ func (f *callFrame) setType(op vm.OpCode) {
 }
 
 func (f *callFrame) failed() bool {
-	return len(f.Error) > 0
+	return len(f.Error) > 0 && f.revertedSnapshot
 }
 
-func (f *callFrame) processOutput(output []byte, err error) {
+func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 	output = bytes.Clone(output)
+	// An exit that did not revert is not a failure, whatever the error says:
+	// pre-Homestead a creation that ran out of gas storing its code kept its
+	// address and its leftover gas.
+	if err != nil && !reverted {
+		err = nil
+	}
 	if err == nil {
 		f.Output = output
 		return
 	}
 	f.Error = err.Error()
+	f.revertedSnapshot = reverted
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
 		f.To = nil
 	}
@@ -179,7 +188,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 		return
 	}
 
-	t.callstack[0].processOutput(output, err)
+	t.callstack[0].processOutput(output, err, err != nil)
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
@@ -251,7 +260,7 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	size -= 1
 
 	call.GasUsed = hexutil.Uint64(gasUsed)
-	call.processOutput(output, err)
+	call.processOutput(output, err, reverted)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
@@ -259,7 +268,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 	if len(t.callstack) != 1 {
 		return
 	}
-	t.callstack[0].processOutput(output, err)
+	t.callstack[0].processOutput(output, err, reverted)
 }
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
