@@ -18,6 +18,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type ValidatedPreferencesCoordinator interface {
@@ -40,32 +41,44 @@ type systemRunnerTicker struct {
 
 func (t systemRunnerTicker) Chan() <-chan time.Time { return t.C }
 
+func logValidatedPreferencesFailure(slot uint64, root common.Hash, err error) {
+	log.Warn("Embedded builder proposer preferences attempt failed", "slot", slot, "dependentRoot", root, "err", err)
+}
+
 type preferencesKey struct {
 	slot uint64
 	root common.Hash
 }
 
 type preferencesAttempt struct {
-	key         preferencesKey
-	preferences *cltypes.SignedProposerPreferences
-	cancel      context.CancelFunc
+	key             preferencesKey
+	preferences     *cltypes.SignedProposerPreferences
+	failureObserved bool
+	cancel          context.CancelFunc
+}
+
+type pendingPreferences struct {
+	preferences     *cltypes.SignedProposerPreferences
+	failureObserved bool
 }
 
 type preferencesAttemptResult struct {
-	key preferencesKey
-	bid *cltypes.SignedExecutionPayloadBid
-	err error
+	key      preferencesKey
+	bid      *cltypes.SignedExecutionPayloadBid
+	err      error
+	canceled bool
 }
 
 type ValidatedPreferencesRunner struct {
-	coordinator   ValidatedPreferencesCoordinator
-	clock         SlotClock
-	maxPending    int
-	retryInterval time.Duration
-	newTicker     func(time.Duration) runnerTicker
+	coordinator    ValidatedPreferencesCoordinator
+	clock          SlotClock
+	maxPending     int
+	retryInterval  time.Duration
+	newTicker      func(time.Duration) runnerTicker
+	observeFailure func(uint64, common.Hash, error)
 
 	mu              sync.Mutex
-	pending         map[preferencesKey]*cltypes.SignedProposerPreferences
+	pending         map[preferencesKey]pendingPreferences
 	blocked         map[preferencesKey]struct{}
 	active          *preferencesAttempt
 	retryCursor     preferencesKey
@@ -79,7 +92,10 @@ type ValidatedPreferencesRunner struct {
 	results         chan preferencesAttemptResult
 }
 
-var errValidatedPreferencesRunnerStopped = errors.New("epbs/preferences runner: already run")
+var (
+	errValidatedPreferencesRunnerStopped = errors.New("epbs/preferences runner: already run")
+	errValidatedPreferencesAttemptNoBid  = errors.New("epbs/preferences runner: attempt returned no bid")
+)
 
 const minValidatedPreferencesRetryInterval = 100 * time.Millisecond
 
@@ -111,15 +127,16 @@ func newValidatedPreferencesRunner(
 		return nil, errors.New("epbs/preferences runner: retry interval is too short")
 	}
 	return &ValidatedPreferencesRunner{
-		coordinator:   coordinator,
-		clock:         clock,
-		maxPending:    maxPending,
-		retryInterval: retryInterval,
-		newTicker:     newTicker,
-		pending:       make(map[preferencesKey]*cltypes.SignedProposerPreferences),
-		blocked:       make(map[preferencesKey]struct{}),
-		wake:          make(chan struct{}, 1),
-		results:       make(chan preferencesAttemptResult, 1),
+		coordinator:    coordinator,
+		clock:          clock,
+		maxPending:     maxPending,
+		retryInterval:  retryInterval,
+		newTicker:      newTicker,
+		observeFailure: logValidatedPreferencesFailure,
+		pending:        make(map[preferencesKey]pendingPreferences),
+		blocked:        make(map[preferencesKey]struct{}),
+		wake:           make(chan struct{}, 1),
+		results:        make(chan preferencesAttemptResult, 1),
 	}, nil
 }
 
@@ -169,7 +186,7 @@ func (r *ValidatedPreferencesRunner) SubmitValidatedPreferences(preferences *clt
 		}
 		return
 	}
-	r.admitWaitingLocked(key, owned)
+	r.admitWaitingLocked(key, pendingPreferences{preferences: owned})
 	r.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -261,12 +278,12 @@ func (r *ValidatedPreferencesRunner) startNext(ctx context.Context, currentSlot 
 	if r.haveSlot && r.observedSlot > currentSlot {
 		currentSlot = r.observedSlot
 	}
-	key, preferences, ok := r.nextEligibleLocked(currentSlot)
+	key, pending, ok := r.nextEligibleLocked(currentSlot)
 	if !ok {
 		r.mu.Unlock()
 		return
 	}
-	ownedAttempt, ok := preferences.Clone().(*cltypes.SignedProposerPreferences)
+	ownedAttempt, ok := pending.preferences.Clone().(*cltypes.SignedProposerPreferences)
 	if !ok || ownedAttempt == nil || ownedAttempt.Message == nil {
 		delete(r.pending, key)
 		delete(r.blocked, key)
@@ -281,16 +298,18 @@ func (r *ValidatedPreferencesRunner) startNext(ctx context.Context, currentSlot 
 	delete(r.pending, key)
 	delete(r.blocked, key)
 	r.attemptPermit = false
-	r.active = &preferencesAttempt{key: key, preferences: preferences, cancel: cancel}
+	r.active = &preferencesAttempt{
+		key: key, preferences: pending.preferences, failureObserved: pending.failureObserved, cancel: cancel,
+	}
 	r.mu.Unlock()
 
 	go func() {
 		bid, err := r.coordinator.HandleValidatedPreferences(attemptCtx, ownedAttempt)
-		r.results <- preferencesAttemptResult{key: key, bid: bid, err: err}
+		r.results <- preferencesAttemptResult{key: key, bid: bid, err: err, canceled: attemptCtx.Err() != nil}
 	}()
 }
 
-func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64) (preferencesKey, *cltypes.SignedProposerPreferences, bool) {
+func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64) (preferencesKey, pendingPreferences, bool) {
 	var earliestSlot uint64
 	foundSlot := false
 	for key := range r.pending {
@@ -301,61 +320,81 @@ func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64) (pre
 		foundSlot = true
 	}
 	if !foundSlot {
-		return preferencesKey{}, nil, false
+		return preferencesKey{}, pendingPreferences{}, false
 	}
 	var selected preferencesKey
-	var preferences *cltypes.SignedProposerPreferences
+	var preferences pendingPreferences
 	var blockedSelected preferencesKey
-	var blockedPreferences *cltypes.SignedProposerPreferences
+	var blockedPreferences pendingPreferences
 	var blockedAfterCursor preferencesKey
-	var blockedAfterCursorPreferences *cltypes.SignedProposerPreferences
+	var blockedAfterCursorPreferences pendingPreferences
 	for key, candidate := range r.pending {
 		if key.slot != earliestSlot {
 			continue
 		}
 		if _, blocked := r.blocked[key]; blocked {
-			if blockedPreferences == nil || preferencesKeyLess(key, blockedSelected) {
+			if blockedPreferences.preferences == nil || preferencesKeyLess(key, blockedSelected) {
 				blockedSelected = key
 				blockedPreferences = candidate
 			}
 			if r.haveRetryCursor && r.retryCursor.slot == earliestSlot && preferencesKeyLess(r.retryCursor, key) &&
-				(blockedAfterCursorPreferences == nil || preferencesKeyLess(key, blockedAfterCursor)) {
+				(blockedAfterCursorPreferences.preferences == nil || preferencesKeyLess(key, blockedAfterCursor)) {
 				blockedAfterCursor = key
 				blockedAfterCursorPreferences = candidate
 			}
 			continue
 		}
-		if preferences == nil || preferencesKeyLess(key, selected) {
+		if preferences.preferences == nil || preferencesKeyLess(key, selected) {
 			selected = key
 			preferences = candidate
 		}
 	}
-	if preferences != nil {
+	if preferences.preferences != nil {
 		return selected, preferences, true
 	}
-	if blockedAfterCursorPreferences != nil {
+	if blockedAfterCursorPreferences.preferences != nil {
 		return blockedAfterCursor, blockedAfterCursorPreferences, true
 	}
-	return blockedSelected, blockedPreferences, blockedPreferences != nil
+	return blockedSelected, blockedPreferences, blockedPreferences.preferences != nil
 }
 
 func (r *ValidatedPreferencesRunner) finish(result preferencesAttemptResult) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.active == nil || r.active.key != result.key {
+		r.mu.Unlock()
 		return
 	}
 	attempt := r.active
 	attempt.cancel()
 	r.active = nil
 	if r.stopping || result.key.slot < r.observedSlot {
+		r.mu.Unlock()
 		return
 	}
-	if result.bid != nil || errors.Is(result.err, ErrAuctionAlreadyTracked) {
+	tracked := errors.Is(result.err, ErrAuctionAlreadyTracked)
+	if tracked || result.bid != nil && result.err == nil {
+		r.mu.Unlock()
 		return
 	}
-	if r.admitRetryLocked(result.key, attempt.preferences) {
-		r.blocked[result.key] = struct{}{}
+	observeFailure := r.observeFailure
+	firstFailure := !attempt.failureObserved && !result.canceled
+	if firstFailure {
+		attempt.failureObserved = true
+	}
+	if result.bid == nil {
+		if r.admitRetryLocked(result.key, pendingPreferences{
+			preferences: attempt.preferences, failureObserved: attempt.failureObserved,
+		}) {
+			r.blocked[result.key] = struct{}{}
+		}
+	}
+	r.mu.Unlock()
+	if firstFailure && observeFailure != nil {
+		err := result.err
+		if err == nil {
+			err = errValidatedPreferencesAttemptNoBid
+		}
+		observeFailure(result.key.slot, result.key.root, err)
 	}
 }
 
@@ -438,7 +477,7 @@ func (r *ValidatedPreferencesRunner) waitForActive() {
 	}
 }
 
-func (r *ValidatedPreferencesRunner) admitWaitingLocked(key preferencesKey, preferences *cltypes.SignedProposerPreferences) bool {
+func (r *ValidatedPreferencesRunner) admitWaitingLocked(key preferencesKey, preferences pendingPreferences) bool {
 	if _, exists := r.pending[key]; exists {
 		return false
 	}
@@ -462,7 +501,7 @@ func (r *ValidatedPreferencesRunner) admitWaitingLocked(key preferencesKey, pref
 	return true
 }
 
-func (r *ValidatedPreferencesRunner) admitRetryLocked(key preferencesKey, preferences *cltypes.SignedProposerPreferences) bool {
+func (r *ValidatedPreferencesRunner) admitRetryLocked(key preferencesKey, preferences pendingPreferences) bool {
 	if len(r.pending) < r.maxPending {
 		r.pending[key] = preferences
 		return true

@@ -319,24 +319,51 @@ func TestValidatedPreferencesRunnerTreatsPublishedAndTrackedAuctionsAsTerminal(t
 	clock := &manualRunnerClock{slot: 10}
 	rootA := common.HexToHash("0xaa")
 	rootB := common.HexToHash("0xbb")
+	rootC := common.HexToHash("0xcc")
 	callA := runnerCall{slot: 11, root: rootA}
 	callB := runnerCall{slot: 11, root: rootB}
+	callC := runnerCall{slot: 11, root: rootC}
+	publishErr := errors.New("publish failed")
 	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
-		callA: {{bid: new(cltypes.SignedExecutionPayloadBid), err: errors.New("publish failed")}},
+		callA: {{bid: new(cltypes.SignedExecutionPayloadBid), err: publishErr}},
 		callB: {{err: ErrAuctionAlreadyTracked}},
+		callC: {{bid: new(cltypes.SignedExecutionPayloadBid)}},
 	}}
-	runner, ticker, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 3)
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time, 3)}
+	runner, err := newValidatedPreferencesRunner(coordinator, clock, 3, time.Second, func(time.Duration) runnerTicker { return ticker })
+	require.NoError(t, err)
+	type observedFailure struct {
+		slot uint64
+		root common.Hash
+		err  error
+	}
+	failures := make(chan observedFailure, 2)
+	runner.observeFailure = func(slot uint64, root common.Hash, err error) {
+		failures <- observedFailure{slot: slot, root: root, err: err}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
 	runner.SubmitValidatedPreferences(runnerPreferences(11, rootA))
 	runner.SubmitValidatedPreferences(runnerPreferences(11, rootB))
+	runner.SubmitValidatedPreferences(runnerPreferences(11, rootC))
 	waitForRunnerCalls(t, coordinator, 1)
+	failure := <-failures
+	require.Equal(t, callA.slot, failure.slot)
+	require.Equal(t, callA.root, failure.root)
+	require.ErrorIs(t, failure.err, publishErr)
 	waitForRunnerIdle(t, runner)
 	ticker.tick()
 	waitForRunnerCalls(t, coordinator, 2)
 	waitForRunnerIdle(t, runner)
 	ticker.tick()
+	waitForRunnerCalls(t, coordinator, 3)
+	waitForRunnerIdle(t, runner)
+	ticker.tick()
 	calls, _ := coordinator.snapshot()
-	require.Len(t, calls, 2)
+	require.Len(t, calls, 3)
 	stopTestPreferencesRunner(t, cancel, done)
+	require.Empty(t, failures)
 }
 
 func TestValidatedPreferencesRunnerPrunesAndCancelsExpiredAttempt(t *testing.T) {
@@ -595,6 +622,134 @@ func TestValidatedPreferencesRunnerRecoversOnLaterTickInSameTargetSlot(t *testin
 	ticker.tick()
 	calls = waitForRunnerCalls(t, coordinator, 3)
 	require.Equal(t, call, calls[2])
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
+func TestValidatedPreferencesRunnerObservesOnlyFirstFailurePerPreference(t *testing.T) {
+	clock := &manualRunnerClock{slot: 11}
+	root := common.HexToHash("0x11")
+	call := runnerCall{slot: 11, root: root}
+	afterSuccessErr := errors.New("failure after success")
+	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
+		call: {
+			{},
+			{err: errors.New("retry failure")},
+			{bid: new(cltypes.SignedExecutionPayloadBid)},
+			{err: afterSuccessErr},
+			{err: ErrAuctionAlreadyTracked},
+		},
+	}}
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time, 5)}
+	runner, err := newValidatedPreferencesRunner(coordinator, clock, 1, time.Second, func(time.Duration) runnerTicker { return ticker })
+	require.NoError(t, err)
+	type observedFailure struct {
+		slot uint64
+		root common.Hash
+		err  error
+	}
+	failures := make(chan observedFailure, 3)
+	runner.observeFailure = func(slot uint64, root common.Hash, err error) {
+		failures <- observedFailure{slot: slot, root: root, err: err}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+	failure := <-failures
+	require.Equal(t, call.slot, failure.slot)
+	require.Equal(t, call.root, failure.root)
+	require.ErrorIs(t, failure.err, errValidatedPreferencesAttemptNoBid)
+
+	ticker.tick()
+	waitForRunnerCalls(t, coordinator, 2)
+	waitForRunnerIdle(t, runner)
+	ticker.tick()
+	waitForRunnerCalls(t, coordinator, 3)
+	waitForRunnerIdle(t, runner)
+	require.Empty(t, failures)
+
+	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+	ticker.tick()
+	waitForRunnerCalls(t, coordinator, 4)
+	failure = <-failures
+	require.Equal(t, call.slot, failure.slot)
+	require.Equal(t, call.root, failure.root)
+	require.ErrorIs(t, failure.err, afterSuccessErr)
+
+	ticker.tick()
+	waitForRunnerCalls(t, coordinator, 5)
+	waitForRunnerIdle(t, runner)
+	stopTestPreferencesRunner(t, cancel, done)
+	require.Empty(t, failures)
+}
+
+func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailure(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		stopping    bool
+		canceled    bool
+		current     uint64
+		wantPending bool
+	}{
+		{name: "expired", current: 12},
+		{name: "stopping", stopping: true, current: 11},
+		{name: "canceled before stop is handled", canceled: true, current: 11, wantPending: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clock := &manualRunnerClock{slot: test.current}
+			coordinator := &recordingPreferencesCoordinator{outcomes: make(map[runnerCall][]runnerOutcome)}
+			runner, err := newValidatedPreferencesRunner(coordinator, clock, 1, time.Second, func(time.Duration) runnerTicker {
+				return &manualRunnerTicker{ticks: make(chan time.Time, 1)}
+			})
+			require.NoError(t, err)
+			observed := 0
+			runner.observeFailure = func(uint64, common.Hash, error) { observed++ }
+			key := preferencesKey{slot: 11, root: common.HexToHash("0x11")}
+			runner.active = &preferencesAttempt{
+				key: key, preferences: runnerPreferences(key.slot, key.root), cancel: func() {},
+			}
+			runner.haveSlot = true
+			runner.observedSlot = test.current
+			runner.stopping = test.stopping
+
+			runner.finish(preferencesAttemptResult{key: key, err: context.Canceled, canceled: test.canceled})
+
+			require.Zero(t, observed)
+			if test.wantPending {
+				require.Contains(t, runner.pending, key)
+				require.False(t, runner.pending[key].failureObserved)
+			} else {
+				require.Empty(t, runner.pending)
+			}
+		})
+	}
+}
+
+func TestValidatedPreferencesRunnerEvictionClearsObservedFailure(t *testing.T) {
+	clock := &manualRunnerClock{slot: 11}
+	rootA := common.HexToHash("0x01")
+	callA := runnerCall{slot: 11, root: rootA}
+	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
+		callA: {{err: errors.New("first lifecycle")}, {err: errors.New("second lifecycle")}},
+	}}
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time, 1)}
+	runner, err := newValidatedPreferencesRunner(coordinator, clock, 1, time.Second, func(time.Duration) runnerTicker { return ticker })
+	require.NoError(t, err)
+	failures := make(chan error, 2)
+	runner.observeFailure = func(_ uint64, _ common.Hash, err error) { failures <- err }
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	runner.SubmitValidatedPreferences(runnerPreferences(callA.slot, callA.root))
+	require.EqualError(t, <-failures, "first lifecycle")
+	runner.SubmitValidatedPreferences(runnerPreferences(11, common.HexToHash("0x02")))
+	runner.SubmitValidatedPreferences(runnerPreferences(callA.slot, callA.root))
+	ticker.tick()
+	calls := waitForRunnerCalls(t, coordinator, 2)
+	require.Equal(t, callA, calls[1])
+	require.EqualError(t, <-failures, "second lifecycle")
 	stopTestPreferencesRunner(t, cancel, done)
 }
 
