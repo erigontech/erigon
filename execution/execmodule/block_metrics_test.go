@@ -157,8 +157,6 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		timing := rec["timing"].(map[string]any)
 		require.Contains(t, timing, "execution_ms")
 		require.Contains(t, timing, "state_hash_ms")
-		// state_hash_ms gets no lower bound: commitment over a test-sized block runs
-		// in ~0.1ms whatever the block carries, below the Windows clock resolution.
 		assert.GreaterOrEqual(t, timing["total_ms"].(float64), timing["state_hash_ms"].(float64))
 
 		if block["gas_used"].(float64) > 0 {

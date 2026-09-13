@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -171,4 +173,25 @@ func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
 	every := time.Duration(0)
 	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)
 	require.NotNil(t, on.blockMetricsCache)
+}
+
+func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
+	prevReadMetrics := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+
+	every := time.Duration(0)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, sideForkReader{}, 16, &every)
+	sd := &execctx.SharedDomains{}
+	header := &types.Header{Number: *uint256.NewInt(7), GasUsed: 21_000}
+	hash := header.Hash()
+
+	sd.AddCommitmentTime(5 * time.Millisecond)
+	fv.recordBlockMetrics(sd, header, &types.RawBody{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
+
+	rec := fv.TakeBlockMetrics(hash)
+	require.NotNil(t, rec)
+	require.Equal(t, 5*time.Millisecond, rec.StateHash)
+	require.Equal(t, 7*time.Millisecond, rec.Execution)
+	require.Equal(t, 20*time.Millisecond, rec.Validation)
+	require.Zero(t, sd.TakeCommitmentTime(), "a commitment time left behind is reported again by the next block")
 }
