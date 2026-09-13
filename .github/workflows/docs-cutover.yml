@@ -1,0 +1,1191 @@
+name: Docs - Release-series cutover
+
+run-name: "Docs cutover${{ inputs.dry_run && ' (dry run)' || '' }}"
+
+# Moves the published docs to a new release series when one goes stable.
+#
+# A PATCH release needs nothing: docs-deploy-cron.yml dispatches a build daily,
+# and that build resolves its install version with `stableInSeries`, so the
+# newest patch of the series already being published goes live on its own.
+#
+# A new SERIES is the gap. Making it live takes two edits in two places:
+#
+#   1. `on.push.branches` in docs-deploy.yml ON THE NEW RELEASE BRANCH, which
+#      arrives wrong in one of two ways. Cut from the previous release branch,
+#      it inherits that branch's name and never fires for itself. Cut from
+#      `main` — create-release-branch.yml's default base — docs-deploy.yml is
+#      not there at all: `main` has never carried it, and PR #23283 ADDED it to
+#      release/3.6 (+84/-0) rather than inheriting it. This workflow handles
+#      both: it repoints an inherited copy, and seeds a missing one from the
+#      branch currently publishing.
+#   2. The DOCS_DEPLOY_BRANCH repository variable, read by docs-deploy.yml's
+#      job gate and by docs-deploy-cron.yml.
+#
+# Doing neither is what happens by default, and it fails silently: the daily
+# cron keeps republishing the PREVIOUS series' docs, every run green. The
+# cron's fail-if-unset guard catches an absent variable, not a stale one.
+#
+# WHY A SCHEDULE AND NOT `release: published`
+# A release event's ref is the tag, so the workflow file is resolved from the
+# tagged tree — a workflow added today does not exist in tags cut before it, and
+# a tag cut from a branch that lacks the file silently runs nothing. A schedule
+# resolves from the default branch, which is where this file lives. Latency is
+# bounded by the daily run and `workflow_dispatch` forces it immediately.
+#
+# WHY A STATE MACHINE AND NOT ONE LINEAR RUN
+# The cutover spans several human merges. Rather than tracking pull requests
+# across runs — which breaks the moment someone renames or recreates one — each
+# run reads the DESIRED END STATE off the target branch and advances at most one
+# step. Runs are idempotent: when there is nothing to do, the workflow no-ops.
+#
+#   detect      -> is the deploy variable behind the newest stable series?
+#   prepare     -> archive the previous series, repoint the push trigger (PRs)
+#   switch      -> both landed on the branch: flip the variable
+#
+# WHY THE SWITCH IS ENVIRONMENT-GATED
+# create-release-branch.yml puts privileged release-namespace operations behind
+# the `release-branch-management` environment and its required reviewers,
+# deliberately. Publishing a different docs series is that kind of operation:
+# the docs for a new series should go live when they are ready, not the instant
+# a tag appears. The gate keeps detection and preparation fully automatic while
+# the last step stays a click. The `switch` job reuses that same environment —
+# naming a NEW one would be worse than no gate at all, because GitHub creates a
+# referenced-but-missing environment on demand with no protection rules, and the
+# run would go green having approved nothing. To make the cutover zero-touch,
+# delete the `environment:` line and the gate assertion on the `switch` job.
+
+on:
+  schedule:
+    # 06:50 UTC — after docs-deploy-cron (06:20) so a cutover lands on a site
+    # that has already refreshed, and clear of the 04:00 QA cron block.
+    - cron: '50 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would happen, change nothing"
+        required: false
+        type: boolean
+        default: true
+
+# NOTE: concurrency is deliberately NOT set at workflow level. A `switch` job
+# parked on environment approval would hold the group for up to the 30-day
+# approval timeout, and every later scheduled run would queue behind it — the
+# read-only detector would go silent for exactly as long as the cutover is
+# half-applied, which is the state this workflow exists to surface. The acting
+# jobs carry their own group instead.
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------- detect --
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      diverged: ${{ steps.compare.outputs.diverged }}
+      current_branch: ${{ steps.compare.outputs.current_branch }}
+      target_branch: ${{ steps.compare.outputs.target_branch }}
+      target_series: ${{ steps.compare.outputs.target_series }}
+    steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
+      - name: Ensure the trigger parser has a YAML library
+        run: |
+          set -euo pipefail
+          # docs-deploy-trigger.py reads on.push.branches with PyYAML instead of
+          # matching it with regexes, so that every shape GitHub accepts is read
+          # the way GitHub reads it. `import yaml` is not a safe assumption on
+          # the runner: the image installs yamllint and ansible-core through
+          # pipx, into their own virtualenvs, and lists no python3-yaml of its
+          # own. Install the distro package rather than the PyPI one — same
+          # library, already signed by a repository the runner trusts, and no
+          # escape hatch needed for Ubuntu's externally-managed environment.
+          if python3 -c 'import yaml' 2>/dev/null; then
+            echo "PyYAML already present: $(python3 -c 'import yaml; print(yaml.__version__)')"
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-yaml
+          python3 -c 'import yaml; print("PyYAML installed:", yaml.__version__)'
+
+      - name: Resolve the newest stable series and compare with the deploy variable
+        id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # No default on purpose: a hardcoded fallback would let this workflow
+          # "succeed" while pointing at a branch nobody chose.
+          DEPLOY_BRANCH: ${{ vars.DOCS_DEPLOY_BRANCH }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DEPLOY_BRANCH" ]; then
+            echo "::error::Repository variable DOCS_DEPLOY_BRANCH is not set."
+            echo "Set it (Settings -> Actions -> Variables) to the branch the docs site publishes from."
+            exit 1
+          fi
+
+          # The backwards-move guard below compares series numerically, which is
+          # meaningless if the variable is not a release branch at all. Refuse
+          # rather than compare "main" against "3.6".
+          if ! echo "$DEPLOY_BRANCH" | grep -qE '^release/[0-9]+\.[0-9]+$'; then
+            echo "::error::DOCS_DEPLOY_BRANCH is '${DEPLOY_BRANCH}', which is not a release/N.N branch."
+            echo "This workflow only understands release-series branches. Fix the variable or disable this workflow."
+            exit 1
+          fi
+
+          # Selection must agree with docs/site/src/releases.js, which drives the
+          # {ERIGON_VERSION} the site renders. Two rules from there matter here:
+          #   - the API orders by publish date, which is wrong the moment a
+          #     back-port ships after a newer series (v3.2.4 after v3.3.0), so
+          #     sort by semantic version;
+          #   - tag SHAPE decides pre-release, because releases do not reliably
+          #     set the API's `prerelease` flag; any hyphen disqualifies a tag.
+          # NOT --paginate, and majors are bounded. Both matter:
+          #
+          # Erigon shipped CALENDAR-versioned releases in 2022 (v2022.07.02 ...
+          # v2022.10.01). They are real releases, not drafts, not pre-releases,
+          # and they match the semver shape — so a paginated numeric sort picks
+          # 2022.10.01 as "newest" (2022 > 3) and this workflow would chase
+          # release/2022.10 forever. Verified against the live release list.
+          #
+          # The API returns releases newest-first by publish date, so the first
+          # page is the recent window the docs site itself looks at
+          # (docs/site/src/releases.js reads one page too). The major bound is
+          # the belt to that braces: a docs cutover advances at most one major,
+          # so anything outside [current, current+1] is not a candidate however
+          # it got tagged.
+          current_series="${DEPLOY_BRANCH#release/}"
+          major_now="${current_series%%.*}"
+          minor_now="${current_series#*.}"
+
+          # Every stable SERIES in the window, de-duplicated and ascending. The
+          # patch level is dropped here on purpose: a cutover targets a series,
+          # and v3.7.0 and v3.7.3 are the same target.
+          series="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 >= m && $1 <= m + 1' \
+            | cut -d. -f1-2 \
+            | sort -t. -k1,1n -k2,2n -u || true)"
+          # `|| true`: with no match `grep`/`awk` exit non-zero and pipefail would
+          # abort the assignment, killing the step before the diagnostic prints.
+
+          # The NEXT series after the published one, not the newest one. A
+          # cutover ARCHIVES the series it replaces, so advancing two at once
+          # would archive 3.6, publish 3.8, and drop 3.7's docs from the site
+          # with no version-picker entry and nothing to say it happened. The
+          # major bound alone did not prevent this: 3.6 -> 3.8 sits inside
+          # [m, m+1], so it passed silently, and the loss detector further down
+          # compares inventories rather than counting series, so it passed too.
+          #
+          # A series that never shipped is not skipped: with no 3.7 release,
+          # 3.8 IS the next series and there is nothing to archive in between.
+          target_series="$(echo "$series" \
+            | awk -F. -v M="$major_now" -v N="$minor_now" \
+                '($1 > M) || ($1 == M && $2 > N)' \
+            | head -n1 || true)"
+          newest="$(echo "$series" | tail -n1 || true)"
+
+          if [ -z "$newest" ]; then
+            echo "::error::No stable release in the cutover window (majors ${major_now}-$((major_now + 1)))."
+            echo "Either the newest series has only pre-releases, or DOCS_DEPLOY_BRANCH is ahead of every stable release."
+            echo "Refusing to guess a target series."
+            exit 1
+          fi
+
+          # Nothing above the published series. Two very different reasons, and
+          # only one of them is benign:
+          if [ -z "$target_series" ]; then
+            if [ "$current_series" = "$newest" ]; then
+              # Published series IS the newest. The branch compare below reports
+              # "nothing to do".
+              target_series="$current_series"
+            else
+              # The variable names a series with no stable release at all, so
+              # there is nothing above it AND nothing at it. Falling through as
+              # "nothing to do" would make that a green run, which is the silent
+              # failure this whole workflow exists to remove.
+              echo "::error::DOCS_DEPLOY_BRANCH (${DEPLOY_BRANCH}) is AHEAD of every stable series (newest is ${newest})."
+              echo "Refusing to move the published docs backwards, and refusing to call this nothing to do."
+              echo "Investigate before changing anything: a yanked release or a hand-edited variable both look like this."
+              exit 1
+            fi
+          fi
+
+          # Being more than one series behind is normal-but-notable: the cutover
+          # walks there one series per run, archiving each. Say so, or a reader
+          # comparing the target against the release list sees a stale-looking
+          # answer and has no way to tell it is deliberate.
+          # `target_series` is the smallest series above the published one, so it
+          # is always <= newest and `!=` would do. Compared explicitly anyway:
+          # relying on that invariant means a reader has to re-derive it from the
+          # selection twenty lines up, and the ahead-of-everything case that used
+          # to reach here with target > newest now exits before it.
+          if [ "$target_series" != "$newest" ] \
+             && [ "$(printf '%s\n%s\n' "$target_series" "$newest" \
+                     | sort -t. -k1,1n -k2,2n | tail -n1)" = "$newest" ]; then
+            echo "::warning::${DEPLOY_BRANCH} is more than one series behind: newest stable is ${newest}."
+            echo "::warning::This run advances one series, to ${target_series}, so each intermediate series is archived. Re-run after it lands."
+          fi
+
+          # The major bound advances one major at a time by design. A stable
+          # release ABOVE that window is excluded by the bound, not overlooked —
+          # say so, rather than going quiet about a whole major.
+          higher="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 > m + 1' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1 || true)"
+          if [ -n "$higher" ]; then
+            echo "::warning::Stable v${higher} is above the one-major cutover window from ${DEPLOY_BRANCH}."
+            echo "::warning::This run targets the next major only. If no release exists in between, the window never advances — cut the intermediate series or widen the bound."
+          fi
+
+          target_branch="release/${target_series}"
+
+          echo "newest stable release : v${newest}"
+          echo "target series         : ${target_series} (${target_branch})"
+          echo "DOCS_DEPLOY_BRANCH    : ${DEPLOY_BRANCH}"
+
+          {
+            echo "current_branch=${DEPLOY_BRANCH}"
+            echo "target_branch=${target_branch}"
+            echo "target_series=${target_series}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$DEPLOY_BRANCH" = "$target_branch" ]; then
+            echo "diverged=false" >> "$GITHUB_OUTPUT"
+
+            # "Variable is current" is not the same as "the cutover finished".
+            # If someone flipped the variable by hand without repointing the
+            # push trigger, merges to this branch never publish and only the
+            # 06:20 cron does — quietly, for as long as nobody notices. The
+            # state machine below never looks at the branch in this case, so
+            # check it here.
+            # Same absent-vs-unreadable distinction as `prepare`'s Condition B,
+            # which explains it in full. Nothing is written from this branch, so
+            # an unreadable file is reported rather than fatal — but it must not
+            # be reported as "carries no docs-deploy.yml", which is a different
+            # fact and sends the reader to the wrong fix.
+            read_err="${RUNNER_TEMP}/detect-deploy-yml.err"
+            present=no
+            unreadable=no
+            deploy_yml=''
+            if content="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${target_branch}" \
+                 --jq '.content' 2>"$read_err")"; then
+              present=yes
+              deploy_yml="$(printf '%s' "$content" | base64 -d)"
+            elif grep -q 'No commit found for the ref' "$read_err"; then
+              # Both 404 shapes say "HTTP 404", so this one has to be matched
+              # FIRST: a deploy branch that does not resolve is a fault, and
+              # calling it "carries no docs-deploy.yml" sends the reader to seed
+              # a file onto a branch that is not there.
+              unreadable=yes
+            elif grep -q 'HTTP 404' "$read_err"; then
+              : # genuinely absent
+            else
+              unreadable=yes
+            fi
+            # Parse only when there is something to parse: running the script on
+            # an empty file logs "the file is empty" just above the accurate
+            # "carries no docs-deploy.yml" warning, which reads like two faults.
+            pinned=no
+            if [ -n "$deploy_yml" ]; then
+              printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+              if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+                 python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+                 | grep -Fxq "$target_branch"; then
+                pinned=yes
+              fi
+            fi
+
+            half=""
+            if [ "$unreadable" = yes ]; then
+              echo "::warning::Could not read docs-deploy.yml on ${target_branch}: $(tr '\n' ' ' < "$read_err")"
+              echo "::warning::Cannot confirm whether the push trigger pins it. Nothing was changed."
+              half="Could not read \`docs-deploy.yml\` on \`${target_branch}\`, so the push trigger is unconfirmed."
+            elif [ "$present" = yes ] && [ -z "$deploy_yml" ]; then
+              echo "::warning::docs-deploy.yml exists on ${target_branch} but is empty; nothing publishes from it."
+              half="\`docs-deploy.yml\` on \`${target_branch}\` exists but is empty, so merges never publish — only the 06:20 cron does."
+            elif [ "$present" = no ]; then
+              echo "::warning::${target_branch} is the deploy branch but carries no docs-deploy.yml."
+              half="\`${target_branch}\` carries no \`docs-deploy.yml\`, so merges to it never publish — only the 06:20 cron does."
+            elif [ "$pinned" = no ]; then
+              echo "::warning::${target_branch} is the deploy branch, but its docs-deploy.yml push trigger does not pin it."
+              echo "::warning::Merges to ${target_branch} will not publish; only the 06:20 cron will. Repoint the trigger."
+              half="\`${target_branch}\`'s \`docs-deploy.yml\` push trigger does not pin it, so merges never publish — only the 06:20 cron does."
+            else
+              # The trigger is right; the label can still be wrong if a hand-flip
+              # skipped the version bump, which publishes the site under the
+              # previous series' label.
+              cfg="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${target_branch}" \
+                --jq '.content' 2>/dev/null | base64 -d || echo '')"
+              lbl="$(echo "$cfg" | grep -A3 'const currentDocsVersion' \
+                | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+              if [ -z "$lbl" ]; then
+                echo "::warning::Could not read currentDocsVersion.label on ${target_branch}; cannot confirm the published series."
+                half="Could not read \`currentDocsVersion.label\` on \`${target_branch}\`; the published series is unconfirmed."
+              elif [ "$lbl" != "v${target_series}" ]; then
+                echo "::warning::${target_branch} publishes under label ${lbl}, expected v${target_series} — the version bump never ran."
+                half="\`${target_branch}\` publishes under label \`${lbl}\`, expected \`v${target_series}\` — the version bump never ran."
+              else
+                echo "Docs deploy branch is current, pins itself, and publishes as ${lbl}. Nothing to do."
+              fi
+            fi
+
+            # A half-applied cutover is exactly the silent failure this workflow
+            # exists to convert into a visible one, so it goes in the summary
+            # like divergence does. Without this the run list shows a green
+            # check with nothing under it and the warnings scroll past in a log
+            # nobody opens.
+            if [ -n "$half" ]; then
+              {
+                echo "### Docs cutover is half applied"
+                echo ""
+                echo "$half"
+                echo ""
+                echo "\`DOCS_DEPLOY_BRANCH\` already reads \`${target_branch}\`, so this workflow's state machine will not act — the remaining step is manual."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          # No backwards guard is needed here any more: the selection above
+          # yields only a series strictly ABOVE the published one, and the one
+          # case that used to reach this point — the variable being ahead of
+          # every stable release — is refused where it is detected, by name.
+
+          echo "diverged=true" >> "$GITHUB_OUTPUT"
+          echo "::warning::Docs deploy branch is stale: ${DEPLOY_BRANCH} published, ${target_branch} is the next stable series."
+          {
+            echo "### Docs cutover needed"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Published now | \`${DEPLOY_BRANCH}\` |"
+            echo "| Newest stable | \`${target_branch}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------- prepare --
+  prepare:
+    needs: detect
+    if: needs.detect.outputs.diverged == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: docs-cutover-prepare
+      cancel-in-progress: false
+    outputs:
+      ready: ${{ steps.state.outputs.ready }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
+      - name: Ensure the trigger parser has a YAML library
+        run: |
+          set -euo pipefail
+          # Same reason as in `detect`: the runner carries no importable PyYAML
+          # of its own, and the parser needs one.
+          if python3 -c 'import yaml' 2>/dev/null; then
+            echo "PyYAML already present: $(python3 -c 'import yaml; print(yaml.__version__)')"
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-yaml
+          python3 -c 'import yaml; print("PyYAML installed:", yaml.__version__)'
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          # `client-id`, matching every other consumer of this App in the repo;
+          # `app-id` is the deprecated alias and warns on each run.
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          # Least privilege, as in update-disk-sizes.yml: push a branch, open a
+          # PR, dispatch docs-version-bump.yml. Nothing else.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
+          # The repoint commit modifies .github/workflows/docs-deploy.yml, and
+          # GitHub rejects a workflow-file push from an App token without this
+          # (release.yml requests it for the same reason). Scoping the token
+          # without it would break the push that scoping was applied to.
+          permission-workflows: write
+
+      - name: Read the desired end state off the target branch
+        id: state
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
+        run: |
+          set -euo pipefail
+
+          if ! gh api "repos/{owner}/{repo}/branches/${TARGET_BRANCH}" --silent 2>/dev/null; then
+            echo "::error::Target branch ${TARGET_BRANCH} does not exist yet."
+            echo "Create it with the 'Create release branch' workflow, then re-run this one."
+            exit 1
+          fi
+
+          # Condition A — has this branch been versioned for its own series yet?
+          #
+          # The label to archive is read from the branch itself, not inferred
+          # from release history: docusaurus.config.ts carries
+          # `currentDocsVersion.label`, rewritten at each cutover, and that is
+          # exactly what docs-version-bump.yml freezes ("the CURRENT docs").
+          # Guessing "the highest series below the target" would archive the
+          # wrong label whenever a cutover was skipped.
+          config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          if [ -z "$config" ]; then
+            echo "::error::${TARGET_BRANCH} carries no docs/site/docusaurus.config.ts."
+            exit 1
+          fi
+          current_label="$(echo "$config" \
+            | grep -A3 'const currentDocsVersion' \
+            | grep -oE "label: *'v[0-9]+\.[0-9]+'" \
+            | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+          if [ -z "$current_label" ]; then
+            echo "::error::Could not read currentDocsVersion.label from docusaurus.config.ts on ${TARGET_BRANCH}."
+            echo "The literal is rewritten at each cutover; if its shape changed, this workflow must be updated."
+            exit 1
+          fi
+
+          if [ "$current_label" = "v${TARGET_SERIES}" ]; then
+            archived=true
+          else
+            archived=false
+          fi
+          echo "archive_label=${current_label}" >> "$GITHUB_OUTPUT"
+
+          # What this proves, precisely: publishing the target branch loses no
+          # docs version — every version archived on the branch currently
+          # publishing is archived on the target too, and that branch's LIVE
+          # series either is the target's current label (so the bump will
+          # archive it) or is already archived there.
+          #
+          # What it does NOT prove: that the branch was cut from the right
+          # place. The archived `versioned_docs` trees are byte-identical across
+          # main, release/3.5 and release/3.6, and the live docs tree differs on
+          # all three, so no cheap structural test separates "cut from main"
+          # from "cut from the previous release and edited since". This is a
+          # loss detector, not a provenance detector.
+          #
+          # It runs UNCONDITIONALLY. Gating it on "a bump is pending" skipped it
+          # in the worst case: main today carries label v3.6 with versions.json
+          # ["v3.4","v3.3"], so a branch cut from main reads as already
+          # versioned, and the check that would notice v3.5 vanishing is exactly
+          # the code the gate skipped.
+          # (unconditional — see above)
+          tgt_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+          cur_versions="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${CURRENT_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d | tr -d ' \n' || echo '')"
+          cur_config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${CURRENT_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          cur_label="$(echo "$cur_config" | grep -A3 'const currentDocsVersion' \
+            | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+
+          # Fail CLOSED. An unreadable inventory is indistinguishable from an
+          # empty one, and an empty one makes every comparison below pass —
+          # admitting exactly the branch this refuses.
+          if [ -z "$tgt_versions" ] || [ -z "$cur_versions" ] || [ -z "$cur_label" ]; then
+            echo "::error::Could not read the docs inventory needed to validate ${TARGET_BRANCH}:"
+            [ -z "$tgt_versions" ] && echo "  - versions.json on ${TARGET_BRANCH}"
+            [ -z "$cur_versions" ] && echo "  - versions.json on ${CURRENT_BRANCH}"
+            [ -z "$cur_label" ] && echo "  - currentDocsVersion.label on ${CURRENT_BRANCH}"
+            echo "Refusing to dispatch a version bump without confirming the branch holds the published docs."
+            exit 1
+          fi
+
+          missing=""
+          for v in $(echo "$cur_versions" | tr -d '[]"' | tr ',' ' '); do
+            case "$tgt_versions" in
+              *"\"${v}\""*) ;;
+              *) missing="${missing} ${v}" ;;
+            esac
+          done
+          # The LIVE series on the publishing branch must survive too: either
+          # it is still the target's current label (the bump will archive it)
+          # or it is already archived there. Archived-superset alone misses
+          # this — after a skipped cutover both inventories can match while the
+          # live label is archived nowhere and simply disappears.
+          if [ "$cur_label" != "$current_label" ]; then
+            case "$tgt_versions" in
+              *"\"${cur_label}\""*) ;;
+              *) missing="${missing} ${cur_label}(live)" ;;
+            esac
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "::error::${TARGET_BRANCH} does not carry the published docs versions present on ${CURRENT_BRANCH}:${missing}"
+            echo "Its docs tree is not the published one — most likely it was cut from 'main' rather than from ${CURRENT_BRANCH}."
+            echo "Versioning it would archive the wrong content and drop those versions from the site."
+            echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
+            exit 1
+          fi
+          echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
+
+          # Condition B — does docs-deploy.yml on the target branch pin itself?
+          #
+          # "Absent" and "could not read" MUST be told apart here, because
+          # absent means seed, and seeding overwrites whatever is on the branch.
+          # `gh api | base64 -d || echo ''` cannot tell them apart: gh writes the
+          # error body to stdout, base64 rejects it, and `||` swallows the whole
+          # pipeline — so a 500, a rate-limit or a network blip all arrive as the
+          # empty string, exactly like a file that is not there.
+          #
+          # Two 404 shapes, both measured against the live API: a genuinely
+          # absent file gives `gh: Not Found (HTTP 404)`, while a ref that does
+          # not resolve gives `gh: No commit found for the ref <x> (HTTP 404)`.
+          # Only the first is "absent"; a vanished target branch is a fault.
+          read_err="${RUNNER_TEMP}/deploy-yml-read.err"
+          present=no
+          if content="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
+               --jq '.content' 2>"$read_err")"; then
+            # Presence comes from the read SUCCEEDING, never from the decoded
+            # bytes being non-empty: a zero-byte or newline-only file decodes to
+            # the empty string, and inferring absence from that would seed over
+            # a file that is really there.
+            present=yes
+            deploy_yml="$(printf '%s' "$content" | base64 -d)"
+          elif grep -q 'No commit found for the ref' "$read_err"; then
+            echo "::error::${TARGET_BRANCH} does not resolve: $(tr '\n' ' ' < "$read_err")"
+            exit 1
+          elif grep -q 'HTTP 404' "$read_err"; then
+            deploy_yml=''
+          else
+            echo "::error::Could not read docs-deploy.yml on ${TARGET_BRANCH}: $(tr '\n' ' ' < "$read_err")"
+            echo "An unreadable file is not an absent file, and treating it as absent would seed"
+            echo "over a docs-deploy.yml that may well exist. Refusing until the read succeeds."
+            exit 1
+          fi
+
+          # Present but empty is a broken file, not an absent one: seeding would
+          # overwrite it and repointing cannot read it. Neither guess is right,
+          # so say which it is and stop.
+          if [ "$present" = yes ] && [ -z "$deploy_yml" ]; then
+            echo "::error::docs-deploy.yml exists on ${TARGET_BRANCH} but is empty."
+            echo "Fix or delete it, then re-run: this workflow will neither seed over a file that"
+            echo "exists nor repoint one it cannot read."
+            exit 1
+          fi
+
+          # A missing file is NOT an error. docs-deploy.yml lives only on the
+          # deploy branch — `main` has never carried it, and PR #23283 ADDED it
+          # to release/3.6 rather than inheriting it. So a release branch cut
+          # from `main` (create-release-branch.yml's default base) legitimately
+          # arrives without it, and the repoint step seeds it from the branch
+          # currently publishing.
+          if [ "$present" = no ]; then
+            echo "${TARGET_BRANCH} carries no docs-deploy.yml — it will be seeded from ${CURRENT_BRANCH}."
+            {
+              echo "seed=true"
+              echo "repointed=false"
+              # Emitted here too: an early exit that omits it leaves the Archive
+              # step's `archived == 'false'` gate reading '' and silently skips
+              # the version bump for the whole run.
+              echo "archived=${archived}"
+              echo "ready=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "seed=false" >> "$GITHUB_OUTPUT"
+          # Only the push-trigger block matters; workflow_dispatch ignores it.
+          printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+          if DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+             python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+             | grep -Fxq "$TARGET_BRANCH"; then
+            repointed=true
+          else
+            repointed=false
+          fi
+
+          echo "docs label on ${TARGET_BRANCH}: ${current_label} (target v${TARGET_SERIES}) -> versioned=${archived}"
+          echo "docs-deploy.yml push trigger pins ${TARGET_BRANCH}              : ${repointed}"
+
+          {
+            echo "archived=${archived}"
+            echo "repointed=${repointed}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$archived" = true ] && [ "$repointed" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Archive the previous series
+        if: steps.state.outputs.archived == 'false' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+          ARCHIVE_LABEL: ${{ steps.state.outputs.archive_label }}
+        run: |
+          set -euo pipefail
+
+          # docs-version-bump.yml names its branch docs/version-bump-<label>-<run id>,
+          # so an existing proposal can only be found by head prefix. --limit is
+          # explicit: the default page is 30, and release branches accumulate
+          # back-port PRs, which would push the match off the page and make this
+          # dispatch a duplicate every single day.
+          existing="$(gh pr list --state open --base "$TARGET_BRANCH" --limit 100 \
+            --json number,headRefName \
+            --jq "[.[] | select(.headRefName | startswith(\"docs/version-bump-v${TARGET_SERIES}-\"))] | .[0].number // empty")"
+          if [ -n "$existing" ]; then
+            echo "Version-bump PR #${existing} is already open against ${TARGET_BRANCH}. Waiting for it to merge."
+            exit 0
+          fi
+
+          # A bump PR CLOSED without merging is a human decision, not an absent
+          # proposal — and `--state open` cannot see it. Without this the next
+          # run finds no open PR, nothing in flight, and a *successful* last run
+          # (it did open a PR; someone closed it), so it dispatches another one.
+          # Every day, one PR per day against a release branch, all green.
+          closed="$(gh pr list --state closed --base "$TARGET_BRANCH" --limit 100 \
+            --json number,headRefName,mergedAt \
+            --jq "[.[] | select((.headRefName | startswith(\"docs/version-bump-v${TARGET_SERIES}-\")) and .mergedAt == null)] | .[0].number // empty")"
+          if [ -n "$closed" ]; then
+            echo "::error::Version-bump PR #${closed} for v${TARGET_SERIES} was closed without merging."
+            echo "The cutover cannot continue until ${ARCHIVE_LABEL} is archived on ${TARGET_BRANCH}."
+            echo "Re-open #${closed}, or land the archive by hand, then re-run. Re-dispatching daily would"
+            echo "only open another PR beside the one that was deliberately closed."
+            exit 1
+          fi
+
+          # A dispatched run takes minutes to build before it opens its PR. Without
+          # this, a re-run inside that window sees no PR and dispatches a second
+          # version bump, and both race to open competing PRs from the same base.
+          inflight="$(gh run list --workflow docs-version-bump.yml --branch "$TARGET_BRANCH" \
+            --limit 20 --json status,databaseId \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "requested" or .status == "waiting" or .status == "pending")] | length' || echo 0)"
+          if [ "$inflight" != "0" ]; then
+            echo "A docs-version-bump run is already in flight on ${TARGET_BRANCH}. Waiting for it."
+            exit 0
+          fi
+
+          # If the last attempt failed and left no PR, re-dispatching daily just
+          # produces a stream of identical failures. Stop and say why.
+          last="$(gh run list --workflow docs-version-bump.yml --branch "$TARGET_BRANCH" \
+            --limit 1 --json conclusion --jq '.[0].conclusion // empty' || true)"
+          if [ "$last" = "failure" ]; then
+            echo "::error::The last docs-version-bump run on ${TARGET_BRANCH} failed and opened no PR."
+            echo "Fix that run before the cutover can continue — re-dispatching it daily would only repeat the failure."
+            echo "A common cause: ${ARCHIVE_LABEL} is already present in versions.json from a partial manual archive."
+            exit 1
+          fi
+
+          echo "Dispatching docs-version-bump.yml on ${TARGET_BRANCH}: archive ${ARCHIVE_LABEL}, publish v${TARGET_SERIES}"
+          gh workflow run docs-version-bump.yml \
+            --ref "$TARGET_BRANCH" \
+            -f "archive_version=${ARCHIVE_LABEL}" \
+            -f "new_label=v${TARGET_SERIES}"
+
+      - name: Repoint the deploy push trigger
+        # Archiving the previous series and repointing the push trigger are
+        # independent prerequisites of the same cutover, so a transient failure
+        # in the archive step must not make this one unreachable until a human
+        # re-dispatches. Hence `!cancelled()` in place of the implicit
+        # `success()` — the job still ends red on the archive's failure.
+        #
+        # But `state` is required, not independent: it is what computes the
+        # outputs read here, and it writes them one at a time, so a failure
+        # part-way leaves a truthful `repointed` beside an empty `seed`. That
+        # combination would repoint a file this step was supposed to seed first.
+        # So tolerate a failed Archive, never a failed state.
+        if: ${{ !cancelled() && steps.state.outcome == 'success' && steps.state.outputs.repointed == 'false' && !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
+          RUN_ID: ${{ github.run_id }}
+          SEED: ${{ steps.state.outputs.seed }}
+        run: |
+          set -euo pipefail
+
+          head="docs/cutover-repoint-${TARGET_BRANCH#release/}"
+          open_count="$(gh pr list --state open --base "$TARGET_BRANCH" --head "$head" --json number --jq 'length')"
+          if [ "$open_count" != "0" ]; then
+            echo "Repoint PR is already open against ${TARGET_BRANCH}. Waiting for it to merge."
+            exit 0
+          fi
+
+          # The remote branch can outlive its PR: closed-without-merging keeps it,
+          # and a push that lands before a failed `gh pr create` leaves it with no
+          # PR at all. A plain push would then be rejected non-fast-forward on
+          # every subsequent run, with only git's rejection text as a diagnostic.
+          # Re-point it at the current target tip instead, guarded by the SHA we
+          # actually observed so a concurrent writer is never clobbered.
+          # The token goes in a credential file, not in a URL on the command
+          # line: an argv token is readable in the process table and survives in
+          # any git error output that is not redacted. Plain URLs from here on.
+          creds="${RUNNER_TEMP}/git-credentials"
+          install -m 600 /dev/null "$creds"
+          printf 'https://x-access-token:%s@github.com\n' "$GH_TOKEN" > "$creds"
+          git config --global credential.helper "store --file=${creds}"
+          repo_url="https://github.com/${GITHUB_REPOSITORY}.git"
+
+          # ls-remote's exit status, kept separate from "the ref is not there".
+          # `| cut -f1 || true` covered the whole pipeline, so an auth failure or
+          # a network blip produced the same empty string as an absent branch —
+          # and absent takes the plain-push path below, dropping the
+          # --force-with-lease guard that keeps a concurrent writer safe.
+          ls_out="${RUNNER_TEMP}/ls-remote.out"
+          ls_err="${RUNNER_TEMP}/ls-remote.err"
+          if ! git ls-remote "$repo_url" "refs/heads/${head}" > "$ls_out" 2>"$ls_err"; then
+            echo "::error::Could not list refs on ${GITHUB_REPOSITORY}: $(tr '\n' ' ' < "$ls_err")"
+            echo "Whether ${head} already exists is what decides between a guarded force-push and a"
+            echo "plain one. Refusing to guess: either wrong answer clobbers a writer or wedges the push."
+            exit 1
+          fi
+          remote_sha="$(cut -f1 < "$ls_out")"
+          if [ -n "$remote_sha" ]; then
+            echo "::warning::Branch ${head} already exists (${remote_sha:0:10}) with no open PR — recreating it from the ${TARGET_BRANCH} tip."
+          fi
+
+          workdir="${RUNNER_TEMP}/cutover-repo"
+          rm -rf "$workdir"
+          git clone --depth 1 --branch "$TARGET_BRANCH" "$repo_url" "$workdir"
+          cd "$workdir"
+
+          # Seed the file when the branch never had one (cut from `main`).
+          # Taken from the branch currently publishing, so the copy is the one
+          # in production, then repointed below like any inherited copy.
+          if [ "${SEED}" = "true" ]; then
+            # Staged through a temp file, then moved. A direct `> target` is the
+            # wrong shape twice over: the shell truncates the destination before
+            # `gh` runs, so a failed read leaves an empty file where the real one
+            # was, and the destination here is a clone of TARGET_BRANCH, which
+            # holds the real file whenever seed was decided on a bad read.
+            seeded="${RUNNER_TEMP}/seed-docs-deploy.yml"
+            gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${CURRENT_BRANCH}" \
+              --jq '.content' | base64 -d > "$seeded"
+            if [ ! -s "$seeded" ]; then
+              echo "::error::Read an empty docs-deploy.yml from ${CURRENT_BRANCH}; refusing to seed with it."
+              exit 1
+            fi
+            # Belt to that braces: seed means the file was absent, so finding one
+            # here says the decision was made on a read that lied.
+            if [ -e .github/workflows/docs-deploy.yml ]; then
+              echo "::error::seed=true, but ${TARGET_BRANCH} already has .github/workflows/docs-deploy.yml."
+              echo "That contradicts the state read earlier in this run — most likely a transient API"
+              echo "failure was read as 'absent'. Refusing to overwrite it. Re-run to re-read the state."
+              exit 1
+            fi
+            mkdir -p .github/workflows
+            mv "$seeded" .github/workflows/docs-deploy.yml
+            echo "Seeded docs-deploy.yml from ${CURRENT_BRANCH}."
+          fi
+
+          # One parser for both the check above and this rewrite. Two parsers of
+          # the same list disagreeing is a daily-failing job: the check says
+          # "not pinned", the rewrite says "already pinned" and exits non-zero,
+          # and the cutover never advances. The script comes from GITHUB_WORKSPACE
+          # (this workflow's own ref), never from the branch being edited, so a
+          # release branch cannot supply code that runs against a write token.
+          DEPLOY_YML="${workdir}/.github/workflows/docs-deploy.yml" \
+            python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" \
+            --repoint "$TARGET_BRANCH"
+
+          # The script treats "already pinned" as a no-op, but the commit below
+          # would then fail with "nothing to commit" and turn the whole step red.
+          # That happens whenever a human lands the repoint between the state
+          # step's API read and this clone. Use `status --porcelain` rather than
+          # `diff --quiet`: on the seed path the file is new and untracked, which
+          # `diff` cannot see.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Nothing to repoint — ${TARGET_BRANCH} already pins itself. Done by someone else."
+            exit 0
+          fi
+
+          git config user.name "erigon-release-bot[bot]"
+          git config user.email "erigon-release-bot[bot]@users.noreply.github.com"
+          git checkout -b "$head"
+          git add .github/workflows/docs-deploy.yml
+
+          if [ "${SEED}" = "true" ]; then
+            why="This branch had no docs-deploy.yml at all, so it was seeded from
+          ${CURRENT_BRANCH} and pointed at itself."
+            subject="add the docs deploy workflow to ${TARGET_BRANCH}"
+          else
+            why="A release branch is cut from the previous one, so it inherits that
+          branch in its own push trigger and never fires for itself."
+            subject="repoint the docs deploy trigger to ${TARGET_BRANCH}"
+          fi
+
+          cat > "${RUNNER_TEMP}/commit-msg.txt" <<MSG
+          ci(docs): ${subject}
+
+          ${why}
+
+          Opened automatically by the docs cutover workflow (run ${RUN_ID}).
+          MSG
+          git commit -F "${RUNNER_TEMP}/commit-msg.txt"
+
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="refs/heads/${head}:${remote_sha}" \
+              origin "HEAD:refs/heads/${head}"
+          else
+            git push origin "HEAD:refs/heads/${head}"
+          fi
+
+          # Quoted delimiter: the body is markdown full of backticks, which an
+          # interpolating heredoc would run as command substitution. Placeholders
+          # are substituted afterwards from the environment, never from the body.
+          cat > "${RUNNER_TEMP}/pr-body.md" <<'MD'
+          Step 1 of 2 of the docs cutover to `__TARGET__`.
+
+          __WHY__
+
+          Merging this changes nothing on its own: `docs-deploy.yml`'s job gate
+          also checks the `DOCS_DEPLOY_BRANCH` variable, which still reads
+          `__CURRENT__`. The cutover workflow flips that variable once this PR
+          and the version-bump PR have both landed.
+
+          Opened automatically by run __RUN__.
+          MD
+          TARGET_BRANCH="$TARGET_BRANCH" CURRENT_BRANCH="$CURRENT_BRANCH" RUN_ID="$RUN_ID" \
+            WHY="$why" python3 -c 'import os,sys; p=sys.argv[1]; s=open(p).read(); \
+          s=s.replace("__TARGET__",os.environ["TARGET_BRANCH"]).replace("__CURRENT__",os.environ["CURRENT_BRANCH"]).replace("__RUN__",os.environ["RUN_ID"]).replace("__WHY__",os.environ["WHY"]); \
+          open(p,"w").write(s)' "${RUNNER_TEMP}/pr-body.md"
+
+          # Push succeeded, so the branch exists even if this fails; the guard
+          # above is what lets the next run recover instead of wedging.
+          gh pr create \
+            --base "$TARGET_BRANCH" \
+            --head "$head" \
+            --title "ci(docs): ${subject}" \
+            --label docs \
+            --body-file "${RUNNER_TEMP}/pr-body.md"
+
+      - name: Report remaining work
+        if: steps.state.outputs.ready == 'false'
+        env:
+          ARCHIVED: ${{ steps.state.outputs.archived }}
+          REPOINTED: ${{ steps.state.outputs.repointed }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+        run: |
+          {
+            echo "### Cutover to \`${TARGET_BRANCH}\` in progress"
+            echo ""
+            echo "| Step | Done |"
+            echo "|---|---|"
+            echo "| Previous series versioned | ${ARCHIVED} |"
+            echo "| Deploy trigger repointed | ${REPOINTED} |"
+            echo "| Variable flipped | waiting on the two above |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------- switch --
+  switch:
+    needs: [detect, prepare]
+    if: needs.detect.outputs.diverged == 'true' && needs.prepare.outputs.ready == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: docs-cutover-switch
+      cancel-in-progress: false
+    # Approval gate. This reuses release-branch-management — the environment
+    # create-release-branch.yml already gates on, which carries a
+    # required_reviewers rule today — rather than naming a fresh environment.
+    # A referenced environment that does not exist is CREATED ON DEMAND with no
+    # protection rules at all, so an invented name would look like a gate while
+    # approving nothing. The pre-flight step below asserts the rule is really
+    # there, because that property lives in repo settings and can be removed
+    # without touching this file.
+    environment: release-branch-management
+    steps:
+      - name: Check out the trigger parser
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
+      - name: Ensure the trigger parser has a YAML library
+        run: |
+          set -euo pipefail
+          # Same reason as in `detect`: the runner carries no importable PyYAML
+          # of its own, and the parser needs one.
+          if python3 -c 'import yaml' 2>/dev/null; then
+            echo "PyYAML already present: $(python3 -c 'import yaml; print(yaml.__version__)')"
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-yaml
+          python3 -c 'import yaml; print("PyYAML installed:", yaml.__version__)'
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          # Deliberately unscoped on the PERMISSION axis, unlike every other
+          # consumer of this App. Writing a repository variable needs the App's
+          # `variables` permission, and this action version exposes no
+          # `permission-variables` input (v3.2.0 is the newest release and its
+          # action.yml has no such key) — so listing any permission-* here would
+          # mint a token that is *missing* the one permission this job exists to
+          # use. Revisit when the action gains that input.
+          #
+          # The REPOSITORY axis is scoped regardless: unavoidable on one axis is
+          # not a reason to be unscoped on both. `.github/zizmor.yml` records the
+          # `github-app` exception this leaves behind.
+
+      - name: Assert the approval gate is real
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rules="$(gh api "repos/{owner}/{repo}/environments/release-branch-management" \
+            --jq '[.protection_rules[]?.type] | join(",")' 2>/dev/null || echo "__unreadable__")"
+          if [ "$rules" = "__unreadable__" ]; then
+            # Fail CLOSED. The unreadable case and the unprotected case look the
+            # same from here, and proceeding would flip the published docs with
+            # no approval in exactly the misconfiguration this asserts against.
+            echo "::error::Could not read protection rules for release-branch-management."
+            echo "Refusing to flip the published docs series without confirming the approval gate."
+            echo "Two things look identical from here and both are refused on purpose: an"
+            echo "environment with no protection rules, and an environment this token cannot read."
+            echo "GitHub documents this endpoint as needing only repository read access, so if it"
+            echo "is returning 403, check what the release App is actually installed with."
+            exit 1
+          elif ! echo "$rules" | grep -q 'required_reviewers'; then
+            echo "::error::Environment release-branch-management has no required_reviewers rule (rules: ${rules:-none})."
+            echo "This job would flip the published docs series with no human approval. Refusing."
+            exit 1
+          else
+            echo "Approval gate present (rules: ${rules})."
+          fi
+
+      - name: Re-validate before flipping
+        id: revalidate
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          TARGET_SERIES: ${{ needs.detect.outputs.target_series }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
+        run: |
+          set -euo pipefail
+
+          # Read the variable from the API, not from the `vars` context: whether
+          # that context is materialised before or after the approval wait is a
+          # runner detail, and this guarantee must not depend on it. (An
+          # environment-scoped variable of the same name would also shadow the
+          # repository one in the context, but not here.)
+          if ! DEPLOY_BRANCH="$(gh api "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" --jq '.value')"; then
+            echo "::error::Could not read DOCS_DEPLOY_BRANCH through the API."
+            echo "Grant the release App the repository 'Variables: read and write' permission, or set the variable by hand."
+            exit 1
+          fi
+
+          # Everything in `needs.*` was computed BEFORE the approval wait, which
+          # can last up to the 30-day environment timeout. Approving a stale run
+          # would publish a series that is no longer the newest, or re-apply a
+          # cutover somebody already did by hand. Re-read the world instead of
+          # trusting the snapshot.
+          #
+          # Selection duplicated from the `detect` job on purpose: the two must
+          # agree, and a shared step would need a composite action for three lines.
+          # detect's guards do not carry across the approval wait, and the
+          # variable can have been edited by hand meanwhile. Re-apply both.
+          if ! echo "$DEPLOY_BRANCH" | grep -qE '^release/[0-9]+\.[0-9]+$'; then
+            echo "::error::DOCS_DEPLOY_BRANCH now reads '${DEPLOY_BRANCH}', which is not a release/N.N branch."
+            exit 1
+          fi
+          current_series="${DEPLOY_BRANCH#release/}"
+          if [ "$(printf '%s\n%s\n' "$current_series" "$TARGET_SERIES" \
+                  | sort -t. -k1,1n -k2,2n | tail -n1)" = "$current_series" ] \
+             && [ "$current_series" != "$TARGET_SERIES" ]; then
+            echo "::error::DOCS_DEPLOY_BRANCH is now ${DEPLOY_BRANCH}, ahead of this run's target ${TARGET_BRANCH}."
+            echo "Approving would move the published docs backwards. Refusing."
+            exit 1
+          fi
+
+          # Same bounded NEXT-series selection as `detect` — see the comment
+          # there for why --paginate and an unbounded major are both wrong, and
+          # why the target is the next series rather than the newest.
+          #
+          # This must agree with detect's rule, not merely resemble it. Checking
+          # "is the target the NEWEST series" here while detect answers "the NEXT
+          # one" deadlocks the case that rule exists for: two series behind,
+          # detect prepares 3.7 on every run and this gate rejects 3.7 as
+          # superseded by 3.8, so the cutover can never complete.
+          # Evaluated from the branch this run was PREPARED against, not from
+          # the variable's current value. Someone flipping the variable to
+          # TARGET while this job waits for approval is a supported case, handled
+          # at the end of this step — but deriving the next series from the
+          # flipped value makes TARGET look already-past, so the "nothing to flip
+          # to" refusal below fires and that supported case never reaches its
+          # handler. The question here is "is TARGET still the next step from
+          # where this run started", which is what CURRENT_BRANCH answers.
+          base_series="${CURRENT_BRANCH#release/}"
+          minor_now="${base_series#*.}"
+          major_now="${base_series%%.*}"
+          series="$(gh api 'repos/{owner}/{repo}/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sed 's/^v//' \
+            | awk -F. -v m="$major_now" '$1 >= m && $1 <= m + 1' \
+            | cut -d. -f1-2 \
+            | sort -t. -k1,1n -k2,2n -u || true)"
+          if [ -z "$series" ]; then
+            echo "::error::No stable release visible at approval time. Refusing to flip."
+            exit 1
+          fi
+          next_series="$(echo "$series" \
+            | awk -F. -v M="$major_now" -v N="$minor_now" \
+                '($1 > M) || ($1 == M && $2 > N)' \
+            | head -n1 || true)"
+          if [ -z "$next_series" ]; then
+            echo "::error::No stable series above ${CURRENT_BRANCH} is visible at approval time."
+            echo "This run was prepared to publish ${TARGET_BRANCH}; there is now nothing above the"
+            echo "branch it started from, so the release it was prepared for has gone. Refusing."
+            exit 1
+          fi
+          next_branch="release/${next_series}"
+
+          if [ "$next_branch" != "$TARGET_BRANCH" ]; then
+            echo "::error::The next series to publish is now ${next_branch}, but this run was prepared for ${TARGET_BRANCH}."
+            echo "Refusing to flip to a series that is no longer the next step. Re-run the workflow to prepare ${next_branch}."
+            exit 1
+          fi
+
+          # The two preparation steps must STILL be satisfied: a merged PR can be
+          # reverted while this job waits for approval.
+          config="$(gh api "repos/{owner}/{repo}/contents/docs/site/docusaurus.config.ts?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+          label="$(echo "$config" | grep -A3 'const currentDocsVersion' \
+            | grep -oE "label: *'v[0-9]+\.[0-9]+'" | grep -oE "v[0-9]+\.[0-9]+" | head -n1 || true)"
+          deploy_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-deploy.yml?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d || echo '')"
+
+          if [ "$label" != "v${TARGET_SERIES}" ]; then
+            echo "::error::${TARGET_BRANCH} docs label reads '${label:-unreadable}', expected v${TARGET_SERIES}. The version bump is no longer in place."
+            exit 1
+          fi
+          printf '%s' "$deploy_yml" > "${RUNNER_TEMP}/deploy.yml"
+          if ! DEPLOY_YML="${RUNNER_TEMP}/deploy.yml" \
+               python3 "${GITHUB_WORKSPACE}/.github/workflows/scripts/docs-deploy-trigger.py" --list \
+               | grep -Fxq "$TARGET_BRANCH"; then
+            echo "::error::${TARGET_BRANCH} docs-deploy.yml no longer pins itself. The repoint is no longer in place."
+            exit 1
+          fi
+
+          # Only now, with both prerequisites re-confirmed, is it safe to notice
+          # that someone flipped the variable by hand while this waited. Taking
+          # this exit any earlier would skip the checks above and then dispatch
+          # a deploy of a branch whose version bump may have been reverted.
+          if [ "$DEPLOY_BRANCH" = "$TARGET_BRANCH" ]; then
+            echo "::warning::DOCS_DEPLOY_BRANCH already reads ${TARGET_BRANCH} — flipped outside this run."
+            echo "The branch is versioned and repointed, so a deploy is dispatched below."
+            echo "already_done=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Re-validated: ${TARGET_BRANCH} is the next stable series, versioned and repointed."
+          echo "already_done=false" >> "$GITHUB_OUTPUT"
+
+      - name: Flip DOCS_DEPLOY_BRANCH
+        if: steps.revalidate.outputs.already_done == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+          CURRENT_BRANCH: ${{ needs.detect.outputs.current_branch }}
+        run: |
+          set -euo pipefail
+
+          # Repository variables need the App's "Variables: read and write"
+          # permission. That is NOT administration:write — create-release-branch.yml
+          # keeps administration out of automation tokens on purpose, and this
+          # stays within that rule. If the App lacks it, say exactly what to grant.
+          if ! gh api -X PATCH "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" \
+                 -f "name=DOCS_DEPLOY_BRANCH" -f "value=${TARGET_BRANCH}" --silent; then
+            echo "::error::Could not update DOCS_DEPLOY_BRANCH (${CURRENT_BRANCH} -> ${TARGET_BRANCH})."
+            echo "Grant the release App the repository 'Variables: read and write' permission, or set it by hand."
+            exit 1
+          fi
+
+          # The PATCH already succeeded, so the cutover HAS happened. A failing
+          # read-back is not evidence against it, and failing the job here would
+          # tell the operator the opposite of the truth while the site changes at
+          # the next cron — the same argument the dispatch step below makes for
+          # itself. Only a read that succeeds and DISAGREES is a real fault.
+          # Branch on the GET's exit status, not on a sentinel value: any
+          # sentinel is also a legal value for a repository variable, so one
+          # written concurrently would read as "unreadable" and hide exactly the
+          # mismatch this check exists to catch.
+          if actual="$(gh api "repos/{owner}/{repo}/actions/variables/DOCS_DEPLOY_BRANCH" \
+               --jq '.value' 2>/dev/null)"; then
+            if [ "$actual" != "$TARGET_BRANCH" ]; then
+              echo "::error::Variable reads '${actual}' after the update, expected '${TARGET_BRANCH}'."
+              exit 1
+            fi
+          else
+            echo "::warning::DOCS_DEPLOY_BRANCH was set to ${TARGET_BRANCH}, but reading it back failed."
+            echo "::warning::Not failing the job: the update itself succeeded. Confirm the variable by hand."
+          fi
+          echo "DOCS_DEPLOY_BRANCH: ${CURRENT_BRANCH} -> ${TARGET_BRANCH}"
+
+      - name: Publish the new series
+        # Runs on the already-flipped path too: a variable set by hand publishes
+        # nothing on its own, so skipping this would leave the site on the old
+        # series until the 06:20 cron while this run reported success.
+        if: steps.revalidate.outputs.already_done != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ needs.detect.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+
+          # The variable is already flipped, so the site is going to change either
+          # way: this only decides whether it changes now or at the 06:20 cron.
+          # A dispatch failure must therefore NOT fail the job and imply the
+          # cutover did not happen — it did.
+          if gh workflow run docs-deploy.yml --ref "$TARGET_BRANCH"; then
+            dispatched="dispatched"
+          else
+            dispatched="NOT dispatched"
+            echo "::warning::Variable flipped, but dispatching docs-deploy.yml failed (the App may lack actions:write)."
+            echo "::warning::The 06:20 UTC docs-deploy-cron will publish ${TARGET_BRANCH} within 24h."
+          fi
+
+          # Deliberately not claiming the site is live: accepting a dispatch is
+          # not a successful build, and a Pages failure would make that a lie.
+          {
+            echo "### Docs cutover applied"
+            echo ""
+            echo "\`DOCS_DEPLOY_BRANCH\` now reads \`${TARGET_BRANCH}\`. Deploy ${dispatched}."
+            echo ""
+            echo "The site serves the new series once that deploy run succeeds — check the"
+            echo "\`Deploy Docs\` workflow on \`${TARGET_BRANCH}\`, not this run."
+          } >> "$GITHUB_STEP_SUMMARY"
