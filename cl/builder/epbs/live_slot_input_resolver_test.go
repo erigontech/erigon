@@ -59,6 +59,7 @@ type resolverForkchoice struct {
 	envelopeErr    error
 	hasEnvelope    bool
 	buildOnFull    bool
+	verifiedRoots  map[common.Hash]bool
 	gasLimits      map[common.Hash]uint64
 	recentStatuses map[common.Hash]execution_client.PayloadStatus
 	readEnvelope   func() (*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -85,6 +86,7 @@ func (f *resolverForkchoice) HasEnvelope(common.Hash) bool { return f.hasEnvelop
 func (f *resolverForkchoice) ShouldBuildOnFull(forkchoice.ForkChoiceNode, uint64) bool {
 	return f.buildOnFull
 }
+func (f *resolverForkchoice) IsPayloadVerified(root common.Hash) bool { return f.verifiedRoots[root] }
 func (f *resolverForkchoice) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if f.readEnvelope != nil {
 		return f.readEnvelope()
@@ -236,7 +238,10 @@ func TestLiveSlotInputResolverResolvesFullHeadFromEnvelope(t *testing.T) {
 		envelope:    envelope,
 		hasEnvelope: true,
 		buildOnFull: true,
-		gasLimits:   map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
+		verifiedRoots: map[common.Hash]bool{
+			headRoot: true,
+		},
+		gasLimits: map[common.Hash]uint64{parentBid.BlockHash: 30_000_000},
 		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
 			parentBid.BlockHash: execution_client.PayloadStatusValidated,
 		},
@@ -356,7 +361,10 @@ func TestLiveSlotInputResolverRejectsBuilderExitedByFullParent(t *testing.T) {
 		envelope:    envelope,
 		hasEnvelope: true,
 		buildOnFull: true,
-		gasLimits:   map[common.Hash]uint64{parentHash: 30_000_000},
+		verifiedRoots: map[common.Hash]bool{
+			headRoot: true,
+		},
+		gasLimits: map[common.Hash]uint64{parentHash: 30_000_000},
 		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
 			parentHash: execution_client.PayloadStatusValidated,
 		},
@@ -383,7 +391,10 @@ func TestLiveSlotInputResolverStopsAfterEnvelopeReadCancellation(t *testing.T) {
 		headNode:    forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull},
 		hasEnvelope: true,
 		buildOnFull: true,
-		gasLimits:   map[common.Hash]uint64{parentHash: 30_000_000},
+		verifiedRoots: map[common.Hash]bool{
+			headRoot: true,
+		},
+		gasLimits: map[common.Hash]uint64{parentHash: 30_000_000},
 		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
 			parentHash: execution_client.PayloadStatusValidated,
 		},

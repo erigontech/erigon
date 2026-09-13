@@ -46,6 +46,7 @@ type LiveForkchoiceSource interface {
 	GetHeadNode() (forkchoice.ForkChoiceNode, error)
 	HasEnvelope(common.Hash) bool
 	ShouldBuildOnFull(forkchoice.ForkChoiceNode, uint64) bool
+	IsPayloadVerified(common.Hash) bool
 	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetExecutionPayloadGasLimit(common.Hash) (uint64, bool)
 	GetRecentExecutionPayloadStatus(common.Hash) (execution_client.PayloadStatus, bool)
@@ -184,6 +185,9 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 	if buildOnFull != input.freshness.buildOnFull {
 		return ErrSlotInputStale
 	}
+	if buildOnFull && !r.forkchoice.IsPayloadVerified(input.ParentBlockRoot) {
+		return ErrSlotInputStale
+	}
 	parentHash := parentBid.ParentBlockHash
 	if preGloasParent || buildOnFull {
 		parentHash = parentBid.BlockHash
@@ -192,7 +196,7 @@ func (r *LiveSlotInputResolver) ValidateCurrent(ctx context.Context, input SlotI
 		return ErrSlotInputStale
 	}
 	status, ok := r.forkchoice.GetRecentExecutionPayloadStatus(parentHash)
-	if !ok || status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusInvalidated {
+	if !ok || status != execution_client.PayloadStatusValidated {
 		return ErrSlotInputStale
 	}
 	gasLimit, ok := r.forkchoice.GetExecutionPayloadGasLimit(parentHash)
@@ -302,6 +306,9 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 	preGloasParent := header.Slot/r.beaconCfg.SlotsPerEpoch < r.beaconCfg.GloasForkEpoch
 	buildOnFull := !preGloasParent && headNode.PayloadStatus == cltypes.PayloadStatusFull &&
 		r.forkchoice.HasEnvelope(headRoot) && r.forkchoice.ShouldBuildOnFull(headNode, targetSlot)
+	if buildOnFull && !r.forkchoice.IsPayloadVerified(headRoot) {
+		return SlotInput{}, fmt.Errorf("%w: full execution parent is not verified", ErrSlotInputUnavailable)
+	}
 	parentHash := parentBid.ParentBlockHash
 	if preGloasParent || buildOnFull {
 		parentHash = parentBid.BlockHash
@@ -310,8 +317,8 @@ func (r *LiveSlotInputResolver) resolveCurrent(
 		return SlotInput{}, fmt.Errorf("%w: execution parent is unavailable", ErrSlotInputUnavailable)
 	}
 	parentStatus, ok := r.forkchoice.GetRecentExecutionPayloadStatus(parentHash)
-	if !ok || parentStatus == execution_client.PayloadStatusNone || parentStatus == execution_client.PayloadStatusInvalidated {
-		return SlotInput{}, fmt.Errorf("%w: execution parent status is unavailable", ErrSlotInputUnavailable)
+	if !ok || parentStatus != execution_client.PayloadStatusValidated {
+		return SlotInput{}, fmt.Errorf("%w: execution parent is not validated", ErrSlotInputUnavailable)
 	}
 	parentGasLimit, ok := r.forkchoice.GetExecutionPayloadGasLimit(parentHash)
 	if !ok || parentGasLimit == 0 {
