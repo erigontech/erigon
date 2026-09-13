@@ -2134,6 +2134,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 }
 
+// DevGenesisProvidedByEmbedder tells PoS dev mode that something else owns the dev chains' genesis.
+//
+// Set it before building the eth config. Standalone `--chain dev` leaves it false and is unchanged;
+// an embedder running several dev chains in one process sets it so dev mode configures the chain but
+// does not write a genesis of its own.
+var DevGenesisProvidedByEmbedder bool
+
 // setDevnetEthConfig configures PoS dev mode (--chain dev): embedded Caplin with
 // dev validators producing Fusaka blocks from genesis.
 func setDevnetEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
@@ -2195,6 +2202,17 @@ func setDevnetEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logg
 	}
 	beaconCfg.SecondsPerSlot = slotTime
 	beaconCfg.InitializeForkSchedule()
+	// An embedder that prepares and starts the dev chains itself supplies the genesis state and
+	// beacon config, and would immediately overwrite anything written here. Building a
+	// 64-validator state and writing it twice is not only wasted work: this copy is stamped with
+	// time.Now() AT CONFIG TIME, which is precisely the skew the embedder is avoiding by stamping
+	// genesis when the node is up, so leaving it behind means a second, wrong genesis on disk for
+	// whatever reads first.
+	if DevGenesisProvidedByEmbedder {
+		logger.Info("Dev genesis is provided by the embedder — not writing one here")
+		return
+	}
+
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
