@@ -76,8 +76,8 @@ export default async function createConfig(): Promise<Config> {
     markdown: {mermaid: true},
     themes: ['@docusaurus/theme-mermaid'],
 
-    // Both lists reach src/theme/Root.tsx, which uses them to keep the llms.txt
-    // descriptor off the routes the index does not cover.
+    // archivedVersions reaches src/theme/Root.tsx, which uses it to keep the
+    // llms.txt descriptor off versions the current index does not cover.
     customFields: {latestVersion, archivedVersions},
 
     headTags: [

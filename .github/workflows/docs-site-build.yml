@@ -41,12 +41,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Verify llms.txt artifacts are up to date
-        if: steps.guard.outputs.present == 'true'
-        run: |
-          python3 docs/site/scripts/generate-llms.py --check
-          python3 -m unittest discover docs/site/scripts -v
-
       - name: Verify disk-size markers are in sync
         if: steps.guard.outputs.present == 'true'
         run: python3 docs/site/scripts/render-disk-sizes.py --check
@@ -115,3 +109,14 @@ jobs:
           # Version resolution fails the build rather than publishing a
           # placeholder, so it must not run against the anonymous rate limit.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both require docs/site/build, so they have to follow the build rather
+      # than precede it: the built-site tests raise a setup error without it,
+      # and the artifact check regenerates from the built pages.
+      - name: Run documentation script tests
+        if: steps.guard.outputs.present == 'true'
+        run: python3 -m unittest discover docs/site/scripts -v
+
+      - name: Verify llms.txt artifacts are up to date
+        if: steps.guard.outputs.present == 'true'
+        run: python3 docs/site/scripts/generate-llms.py --check
