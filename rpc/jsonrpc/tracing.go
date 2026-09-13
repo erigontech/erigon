@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -357,6 +359,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	defer ibs.Close()
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
+	// The override below replaces the caller's blob fee cap, so read the predicate first.
+	unpricedBlobs := args.BlobsUnpriced()
 	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
 		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
@@ -391,6 +395,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		}
 	}
 
+	if unpricedBlobs {
+		blockCtx.BlobBaseFee = uint256.Int{}
+	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	// Trace the transaction and return
 	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, nil, common.Hash{}, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
