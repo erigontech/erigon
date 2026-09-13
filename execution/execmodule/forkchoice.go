@@ -779,6 +779,11 @@ func (e *ExecModule) updateForkChoice(
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, outcomeSentEarly)
 		}
+		if hasOverlay {
+			if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: restore inserted block overlay: %w", err), outcomeSentEarly)
+			}
+		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice.

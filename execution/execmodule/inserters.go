@@ -25,6 +25,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -161,8 +163,35 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
+		bodyWritten, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body)
+		if err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
+		}
+		if !bodyWritten {
+			storedBody, err := rawdb.ReadBodyWithTransactions(blockOverlay, blockHash, height)
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: read existing body: %w", err)
+			}
+			if storedBody == nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: existing body metadata is unreadable for block %d", height)
+			}
+			if err := storedBody.MatchesHeader(header); err != nil {
+				incomingBody := block.Body()
+				if incomingErr := incomingBody.MatchesHeader(header); incomingErr != nil {
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: incoming body mismatch for block %d: %w", height, incomingErr)
+				}
+				e.logger.Warn("Repairing mismatched stored block body", "block", height, "hash", blockHash, "err", err)
+				if _, err := rawdb.WriteRawBody(blockOverlay, blockHash, height, body); err != nil {
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: repair body: %w", err)
+				}
+				if err := blockOverlay.Delete(kv.Senders, dbutils.BlockBodyKey(height, blockHash)); err != nil {
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: invalidate repaired body senders: %w", err)
+				}
+				if e.readAheader != nil {
+					e.readAheader.AddHeaderAndBody(ctx, nil, nil, header, incomingBody)
+					e.readAheader.AddSenders(nil, blockHash)
+				}
+			}
 		}
 		if blockAccessList != nil {
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessListBytes); err != nil {

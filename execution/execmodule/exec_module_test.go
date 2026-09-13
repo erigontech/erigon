@@ -1583,7 +1583,7 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
 		require.NoError(t, err)
 		b.AddTx(txn)
@@ -2620,6 +2620,142 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.NotNil(t, td)
 		return nil
 	}))
+}
+
+func TestValidatedHeadMergePreservesLaterInsertedBodyTransactions(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	require.Eventually(t, func() bool {
+		var funded bool
+		err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			value, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
+			funded = len(value) > 0
+			return err
+		})
+		return err == nil && funded
+	}, 15*time.Second, 10*time.Millisecond)
+
+	chainPack, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(uint64(i+1)), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	status, err := m.InsertBlocks(ctx, chainPack.Blocks[:1])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(ctx, chainPack.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	status, err = m.InsertBlocks(ctx, chainPack.Blocks[1:2])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(ctx, chainPack.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+
+	status, err = m.InsertBlocks(ctx, chainPack.Blocks[2:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(ctx, chainPack.Blocks[2].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status, "validationError=%q", fcu.ValidationError)
+}
+
+func TestInsertBlocksRepairsStoredBodyTransactionMismatch(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	require.Eventually(t, func() bool {
+		var funded bool
+		err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			value, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
+			funded = len(value) > 0
+			return err
+		})
+		return err == nil && funded
+	}, 15*time.Second, 10*time.Millisecond)
+
+	chainPack, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(uint64(i+1)), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	status, err := m.InsertBlocks(ctx, chainPack.Blocks[:1])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(ctx, chainPack.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	fcu, err := m.UpdateForkChoice(ctx, chainPack.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+
+	target := chainPack.Blocks[1]
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		if _, err := rawdb.WriteRawBody(tx, target.Hash(), target.NumberU64(), chainPack.Blocks[2].RawBody()); err != nil {
+			return err
+		}
+		return rawdb.WriteSenders(tx, target.Hash(), target.NumberU64(), []common.Address{{0xff}})
+	}))
+
+	status, err = m.InsertBlocks(ctx, []*types.Block{target})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(ctx, target.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	require.Eventually(t, func() bool {
+		matched := false
+		err := m.DB.View(ctx, func(tx kv.Tx) error {
+			body, err := rawdb.ReadBodyWithTransactions(tx, target.Hash(), target.NumberU64())
+			if err != nil || body == nil {
+				return err
+			}
+			senders, err := rawdb.ReadSenders(tx, target.Hash(), target.NumberU64())
+			if err != nil {
+				return err
+			}
+			matched = body.MatchesHeader(target.HeaderNoCopy()) == nil && len(senders) == 1 && senders[0] == senderAddr
+			return nil
+		})
+		return err == nil && matched
+	}, 15*time.Second, 10*time.Millisecond)
 }
 
 // transferGen returns a deterministic per-block tx generator so tests can
