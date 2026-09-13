@@ -56,6 +56,11 @@ jobs:
     needs: [changes]
     uses: ./.github/workflows/test-all-erigon.yml
 
+  next-toolchain:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
+    uses: ./.github/workflows/test-go-next.yml
+
   race-tests:
     if: needs.changes.outputs.code != 'false'
     needs: [changes]
