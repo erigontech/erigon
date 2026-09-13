@@ -453,6 +453,93 @@ func TestEstimateGasMissingValueCountsAsZero(t *testing.T) {
 	require.EqualError(t, err, "insufficient funds for transfer")
 }
 
+// TestEstimateGasBlobFeeChargedBeforeAllowance verifies the balance recap pays
+// for the blobs before dividing what is left by the gas fee cap.
+func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.TestChainOsakaConfig)
+	api := newTestEthAPIWithFilters(t, m)
+
+	const feePerGas = 1e9
+	const allowance = 25_000 // below what the contract call needs
+	blobFee := new(big.Int).Mul(big.NewInt(feePerGas), new(big.Int).SetUint64(params.GasPerBlob))
+
+	for _, tc := range []struct {
+		name    string
+		balance *big.Int
+		wantErr string
+	}{
+		{
+			name:    "funds left over cap the allowance",
+			balance: new(big.Int).Add(blobFee, big.NewInt(feePerGas*allowance)),
+			wantErr: fmt.Sprintf("gas required exceeds allowance (%d)", allowance),
+		},
+		{
+			name:    "funds swallowed by the blobs leave nothing",
+			balance: blobFee,
+			wantErr: protocol.ErrInsufficientFunds.Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			callData := hexutil.Bytes(contractInvocationData(1))
+			balance := (*hexutil.Big)(tc.balance)
+			_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+				From:                &bankAddr,
+				To:                  &contractAddr,
+				Data:                &callData,
+				MaxFeePerGas:        (*hexutil.U256)(uint256.NewInt(feePerGas)),
+				MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(feePerGas)),
+				BlobVersionedHashes: []common.Hash{{1}},
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(bankAddr): {Balance: &balance},
+			}, nil)
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
+}
+
+// TestCallBlobBaseFee verifies BLOBBASEFEE is zeroed exactly when the caller
+// named blob fields without pricing them, the way BASEFEE is zeroed for a call
+// with no gas price. The test chain sits at the 1 wei minimum blob gas price.
+func TestCallBlobBaseFee(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.TestChainOsakaConfig)
+	api := newTestEthAPIWithFilters(t, m)
+
+	const zeroWord = "0x0000000000000000000000000000000000000000000000000000000000000000"
+	const oneWord = "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+	for _, tc := range []struct {
+		name   string
+		feeCap *hexutil.U256
+		hashes []common.Hash
+		want   string
+	}{
+		{"blob hashes, no fee cap", nil, []common.Hash{{1}}, zeroWord},
+		{"blob hashes, priced", (*hexutil.U256)(uint256.NewInt(1e9)), []common.Hash{{1}}, oneWord},
+		{"zero fee cap, no hashes", (*hexutil.U256)(new(uint256.Int)), nil, zeroWord},
+		{"no blob fields", nil, nil, oneWord},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(runtimeReturningOpcode(opBlobbasefee))
+			result, err := api.Call(context.Background(), ethapi.CallArgs{
+				From:                &bankAddr,
+				To:                  &contractAddr,
+				MaxFeePerBlobGas:    tc.feeCap,
+				BlobVersionedHashes: tc.hashes,
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &code},
+			}, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, result.String())
+		})
+	}
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
