@@ -1220,6 +1220,35 @@ func TestCapabilitiesFollowTheResolvedBlocksBoundary(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, pruneGatingMergeHeight, uint64(*caps.Blocks.OldestBlock))
 	})
+
+	t.Run("expiry_starting_mid_chain", func(t *testing.T) {
+		t.Parallel()
+		apis, _ := setupPruneGating(t, cfg)
+		ctx := t.Context()
+
+		rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		for num := uint64(1); num <= 2; num++ {
+			hash, ok, err := apis.eth._blockReader.CanonicalHash(ctx, rwTx, num)
+			require.NoError(t, err)
+			require.True(t, ok)
+			rawdb.DeleteBody(rwTx, hash, num)
+		}
+		require.NoError(t, rwTx.Commit())
+
+		tx, err := apis.eth.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
+		require.NoError(t, err)
+		require.Less(t, oldest, pruneGatingMergeHeight)
+
+		caps, err := apis.eth.Capabilities(ctx)
+		require.NoError(t, err)
+		require.Equal(t, oldest, uint64(*caps.Blocks.OldestBlock),
+			"what is advertised is the block the gate serves from, not the merge point above it")
+	})
 }
 
 // TestCapabilitiesOmitTheStrategyForKeptReceipts pins that an explicit keep-all
@@ -1245,8 +1274,8 @@ func TestCapabilitiesOmitTheStrategyForKeptReceipts(t *testing.T) {
 // TestBlocksGateAppliesExpiryWhenOldestIsMidChain pins the settled expiry shape: the
 // transaction segment spanning the merge point starts below it, so the oldest fully
 // available block lands mid-chain while older bodies are still on disk. Data starting
-// mid-chain is not evidence of an archive datadir, and the gate must refuse below the
-// merge point.
+// mid-chain is not evidence of an archive datadir, and the boundary the gate serves from
+// is that oldest block, not the merge point above it.
 func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
 	t.Parallel()
 
@@ -1282,11 +1311,12 @@ func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
 		"the oldest available block must land strictly inside the pre-merge range")
 	require.Less(t, oldest, chainInfo.old.num, "the probed block's body must still be on disk")
 
-	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	err = apis.eth.checkPruneBlocks(ctx, tx, oldest-1)
 	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", oldest))
 
-	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, oldest))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num))
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
 }
 

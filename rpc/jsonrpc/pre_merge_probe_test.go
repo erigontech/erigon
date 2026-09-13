@@ -83,8 +83,8 @@ type probeResult struct {
 
 func callProbe(api *BaseAPI, ctx context.Context, out chan<- probeResult) {
 	go func() {
-		holds, err := api.holdsPreMergeBlockData(ctx, nil, probeMergeHeight)
-		out <- probeResult{holds: holds, err: err}
+		data, err := api.holdsPreMergeBlockData(ctx, nil, probeMergeHeight)
+		out <- probeResult{holds: data.holds, err: err}
 	}()
 }
 
@@ -383,10 +383,10 @@ func TestPreMergeVerdictFindsATransactionOffTheSampledPath(t *testing.T) {
 	reader := &chainProbeBlockReader{userTxns: sparsePreMergeChain()}
 	api := newProbeAPI(reader)
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
 	require.True(t, decided, "a chain that holds an early transaction answers the question")
-	require.True(t, holds, "the datadir holds pre-merge transactions, sampled or not")
+	require.True(t, data.holds, "the datadir holds pre-merge transactions, sampled or not")
 }
 
 // TestPreMergeVerdictReadsASparseExpiryAsExpiry pins the other side of the same chain:
@@ -398,10 +398,10 @@ func TestPreMergeVerdictReadsASparseExpiryAsExpiry(t *testing.T) {
 	reader := &chainProbeBlockReader{userTxns: sparsePreMergeChain(), unreadable: true}
 	api := newProbeAPI(reader)
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
 	require.True(t, decided, "bodies on disk without their transactions answer the question")
-	require.False(t, holds)
+	require.False(t, data.holds)
 }
 
 // TestPreMergeVerdictStopsAtTheFirstSampledTransaction pins that the search for a
@@ -417,10 +417,10 @@ func TestPreMergeVerdictStopsAtTheFirstSampledTransaction(t *testing.T) {
 	reader := &chainProbeBlockReader{userTxns: dense}
 	api := newProbeAPI(reader)
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, uint64(len(dense)))
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, uint64(len(dense)))
 	require.NoError(t, err)
 	require.True(t, decided)
-	require.True(t, holds)
+	require.True(t, data.holds)
 	require.LessOrEqual(t, reader.bodyReads.Load(), int64(2), "the count and the first sampled block answer")
 }
 
@@ -433,9 +433,9 @@ func TestPreMergeVerdictSearchesPastAnInflatedBound(t *testing.T) {
 
 	api := newProbeAPI(inflatedCountArchive())
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
-	require.True(t, holds, "the search reaches the transaction the bound points below")
+	require.True(t, data.holds, "the search reaches the transaction the bound points below")
 	require.True(t, decided)
 }
 
@@ -504,10 +504,10 @@ func TestPreMergeSearchStopsAtItsReadBudget(t *testing.T) {
 	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: slices.Repeat([]int{1}, length)}
 	api := newProbeAPI(reader)
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
 	require.NoError(t, err)
-	require.False(t, holds, "a search that stopped short has not observed an archive")
-	require.False(t, decided, "and has nothing to remember")
+	require.False(t, data.holds, "a search that stopped short has not observed an archive")
+	require.True(t, decided, "what spent the budget is the chain shape it read, which a second walk reads again")
 	require.LessOrEqual(t, reader.bodyReads.Load(), int64(earlyTxnSearchBudget+16), "the budget bounds the walk")
 }
 
@@ -521,9 +521,9 @@ func TestPreMergeVerdictReadsAnInflationOnlyCountAsArchive(t *testing.T) {
 	reader.userTxns[6] = 0
 	api := newProbeAPI(reader)
 
-	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
-	require.True(t, holds, "a chain with no pre-merge transaction has none the datadir could be missing")
+	require.True(t, data.holds, "a chain with no pre-merge transaction has none the datadir could be missing")
 	require.True(t, decided, "every body the count pointed into was read")
 }
 
@@ -556,18 +556,18 @@ func TestPreMergeVerdictHoldsAcrossChainShapes(t *testing.T) {
 			missing:    missing,
 			unreadable: rng.Intn(2) == 0,
 		}
-		holds, decided, err := newProbeAPI(reader).probePreMergeBlockData(t.Context(), nil, uint64(length))
+		data, decided, err := newProbeAPI(reader).probePreMergeBlockData(t.Context(), nil, uint64(length))
 		require.NoError(t, err)
 		shape := func() string {
 			return fmt.Sprintf("user=%v inflation=%v missing=%v unreadable=%v", userTxns, inflation, missing, reader.unreadable)
 		}
 
 		anyTxn := slices.ContainsFunc(userTxns, func(txns int) bool { return txns > 0 })
-		if reader.unreadable && anyTxn && holds {
+		if reader.unreadable && anyTxn && data.holds {
 			t.Fatalf("expired transaction data read as an archive: %s", shape())
 		}
 		if len(missing) == 0 && !reader.unreadable {
-			if !holds {
+			if !data.holds {
 				t.Fatalf("a datadir holding every block refused: %s", shape())
 			}
 			if !decided {
@@ -575,4 +575,69 @@ func TestPreMergeVerdictHoldsAcrossChainShapes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestPreMergeVerdictRemembersASpentSearch pins what a search that ran out of budget
+// costs the requests behind it: it is the most expensive walk there is, and every one
+// of them reaches the same place until the datadir holds different blocks.
+func TestPreMergeVerdictRemembersASpentSearch(t *testing.T) {
+	t.Parallel()
+
+	const length = 1024
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: slices.Repeat([]int{1}, length)}
+	api := newProbeAPI(reader)
+
+	first, err := api.holdsPreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.False(t, first.holds)
+	walk := reader.bodyReads.Load()
+	require.NotZero(t, walk)
+
+	second, err := api.holdsPreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.Equal(t, first, second, "the answer behind a spent search does not change")
+	require.Equal(t, walk, reader.bodyReads.Load(), "the walk is not repeated within the TTL")
+}
+
+// TestPreMergeSearchKeepsTheBoundsItRead measures the walk on the shape that costs the
+// most: a count inflated block after block, each one excluded in a pass of its own. The
+// blocks a pass reads bound the next one, so the chain is descended once, not per pass.
+func TestPreMergeSearchKeepsTheBoundsItRead(t *testing.T) {
+	t.Parallel()
+
+	const length = 4096
+	inflation := make([]int, length)
+	for block := 1; block <= 10; block++ {
+		inflation[block] = 1
+	}
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: inflation}
+	api := newProbeAPI(reader)
+
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.True(t, decided)
+	require.True(t, data.holds, "no block records a user transaction, so none is missing")
+	require.Less(t, reader.bodyReads.Load(), int64(60),
+		"the chain is descended once, not once per block the count makes the search exclude")
+}
+
+// TestPreMergeSamplingBracketsTheSearch measures a chain whose count is inflated just
+// above genesis: every sampled block already says where the transaction the count
+// records can be, so the search starts from what the sampling read instead of the whole
+// chain.
+func TestPreMergeSamplingBracketsTheSearch(t *testing.T) {
+	t.Parallel()
+
+	const length = 4096
+	inflation := make([]int, length)
+	inflation[0] = 1
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: inflation}
+	api := newProbeAPI(reader)
+
+	data, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.True(t, decided)
+	require.True(t, data.holds, "the count is inflation alone, so no transaction is missing")
+	require.Less(t, reader.bodyReads.Load(), int64(20),
+		"the sampled counts bracket the search instead of being read and dropped")
 }
