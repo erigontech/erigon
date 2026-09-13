@@ -1237,6 +1237,7 @@ func TestDrainPendingGloasPayloadsValidatesSyncFrontierWithBacklog(t *testing.T)
 	})
 
 	require.Equal(t, maxPendingGloasPayloadsPerCycle, engine.newPayloadCalls)
+	require.Equal(t, common.Hash{maxPendingGloasPayloadsPerCycle + 65}, engine.newPayloadHashes[0])
 	require.Contains(t, engine.newPayloadHashes, common.Hash{maxPendingGloasPayloadsPerCycle + 65})
 	require.NotContains(t, engine.newPayloadHashes, common.Hash{maxPendingGloasPayloadsPerCycle + 64})
 	remaining := fc.DrainPendingELPayloads()

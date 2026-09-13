@@ -1314,7 +1314,7 @@ func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayl
 	return f.drainPendingELPayloads(limit, false)
 }
 
-// DrainPendingELPayloadsPrioritizingHighestSlot reserves one limited-batch slot for the sync frontier.
+// DrainPendingELPayloadsPrioritizingHighestSlot processes the sync frontier before older queued payloads.
 func (f *ForkChoiceStore) DrainPendingELPayloadsPrioritizingHighestSlot(limit int) []PendingELPayload {
 	return f.drainPendingELPayloads(limit, true)
 }
@@ -1328,28 +1328,45 @@ func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeHighestSlo
 	if len(f.pendingELPayloads) == 0 {
 		return nil
 	}
-	if len(f.pendingELPayloads) > limit {
-		if prioritizeHighestSlot {
-			highestSlotIndex := 0
-			for i := 1; i < len(f.pendingELPayloads); i++ {
-				if f.pendingELPayloads[i].Slot > f.pendingELPayloads[highestSlotIndex].Slot {
-					highestSlotIndex = i
-				}
+	if prioritizeHighestSlot {
+		drainCount := min(limit, len(f.pendingELPayloads))
+		highestSlotIndex := 0
+		for i := 1; i < len(f.pendingELPayloads); i++ {
+			if f.pendingELPayloads[i].Slot > f.pendingELPayloads[highestSlotIndex].Slot {
+				highestSlotIndex = i
 			}
-			if highestSlotIndex < limit {
-				return f.drainPendingELPayloadsFIFO(limit)
-			}
-			result := make([]PendingELPayload, limit)
-			oldestCount := limit - 1
-			copy(result, f.pendingELPayloads[:oldestCount])
-			result[oldestCount] = f.pendingELPayloads[highestSlotIndex]
-			remaining := len(f.pendingELPayloads) - limit
-			copy(f.pendingELPayloads, f.pendingELPayloads[oldestCount:highestSlotIndex])
-			copy(f.pendingELPayloads[highestSlotIndex-oldestCount:], f.pendingELPayloads[highestSlotIndex+1:])
-			clear(f.pendingELPayloads[remaining:])
-			f.pendingELPayloads = f.pendingELPayloads[:remaining]
-			return result
 		}
+		result := make([]PendingELPayload, drainCount)
+		result[0] = f.pendingELPayloads[highestSlotIndex]
+		oldestBoundary := drainCount - 1
+		if highestSlotIndex < oldestBoundary {
+			oldestBoundary++
+		}
+		resultIndex := 1
+		for i := 0; i < oldestBoundary; i++ {
+			if i == highestSlotIndex {
+				continue
+			}
+			result[resultIndex] = f.pendingELPayloads[i]
+			resultIndex++
+		}
+		remainingIndex := 0
+		for i := oldestBoundary; i < len(f.pendingELPayloads); i++ {
+			if i == highestSlotIndex {
+				continue
+			}
+			f.pendingELPayloads[remainingIndex] = f.pendingELPayloads[i]
+			remainingIndex++
+		}
+		clear(f.pendingELPayloads[remainingIndex:])
+		if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap && remainingIndex == 0 {
+			f.pendingELPayloads = nil
+		} else {
+			f.pendingELPayloads = f.pendingELPayloads[:remainingIndex]
+		}
+		return result
+	}
+	if len(f.pendingELPayloads) > limit {
 		return f.drainPendingELPayloadsFIFO(limit)
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {

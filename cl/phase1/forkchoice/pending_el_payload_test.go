@@ -111,7 +111,7 @@ func TestDrainPendingELPayloadsPrioritizingHighestSlotPreservesOldestProgress(t 
 	}
 
 	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
-	require.Equal(t, []uint64{1, 2, 5}, []uint64{
+	require.Equal(t, []uint64{5, 1, 2}, []uint64{
 		drained[0].Block.Block.Slot,
 		drained[1].Block.Block.Slot,
 		drained[2].Block.Block.Slot,
@@ -155,6 +155,23 @@ func TestDrainPendingELPayloadsPrioritizingHighestSlotBoundaries(t *testing.T) {
 	require.Empty(t, f.DrainPendingELPayloads())
 }
 
+func TestDrainPendingELPayloadsPrioritizesHighestSlotWhenQueueFitsLimit(t *testing.T) {
+	f := &ForkChoiceStore{}
+	for _, slot := range []uint64{1, 3, 2} {
+		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
+			Block: &cltypes.BeaconBlock{Slot: slot},
+		}, nil)
+	}
+
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
+	require.Equal(t, []uint64{3, 1, 2}, []uint64{
+		drained[0].Block.Block.Slot,
+		drained[1].Block.Block.Slot,
+		drained[2].Block.Block.Slot,
+	})
+	require.Empty(t, f.DrainPendingELPayloads())
+}
+
 func TestDrainPendingELPayloadsPrioritizesHighestSlotAfterRequeue(t *testing.T) {
 	f := &ForkChoiceStore{}
 	queueSlot := func(slot byte) {
@@ -174,7 +191,7 @@ func TestDrainPendingELPayloadsPrioritizesHighestSlotAfterRequeue(t *testing.T) 
 	}
 
 	drained = f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
-	require.Equal(t, []uint64{3, 4, 6}, []uint64{
+	require.Equal(t, []uint64{6, 3, 4}, []uint64{
 		drained[0].Block.Block.Slot,
 		drained[1].Block.Block.Slot,
 		drained[2].Block.Block.Slot,
@@ -190,7 +207,7 @@ func TestDrainPendingELPayloadsPrioritizingHighestSlotPreservesMiddleOrder(t *te
 	}
 
 	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
-	require.Equal(t, []uint64{1, 2, 9}, []uint64{
+	require.Equal(t, []uint64{9, 1, 2}, []uint64{
 		drained[0].Block.Block.Slot,
 		drained[1].Block.Block.Slot,
 		drained[2].Block.Block.Slot,
