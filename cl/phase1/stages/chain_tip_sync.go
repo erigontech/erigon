@@ -966,7 +966,7 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 }
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
-	pending := cfg.forkChoice.DrainPendingELPayloadsPrioritizingNewest(maxPendingGloasPayloadsPerCycle)
+	pending := cfg.forkChoice.DrainPendingELPayloadsPrioritizingHighestSlot(maxPendingGloasPayloadsPerCycle)
 	for i, p := range pending {
 		if ctx.Err() != nil {
 			for _, deferred := range pending[i:] {

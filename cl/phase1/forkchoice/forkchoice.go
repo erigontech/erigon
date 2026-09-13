@@ -243,6 +243,7 @@ type executionPayloadArrival struct {
 // PendingELPayload identifies an execution payload that still needs EL validation.
 type PendingELPayload struct {
 	Root     common.Hash
+	Slot     uint64
 	Block    *cltypes.SignedBeaconBlock
 	Envelope *cltypes.SignedExecutionPayloadEnvelope
 }
@@ -1218,9 +1219,9 @@ func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorS
 // addPendingELPayload queues an execution block whose CL transition succeeded
 // but whose EL newPayload failed (EL behind).  Thread-safe.
 func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	pending := PendingELPayload{Block: block, Envelope: envelope}
+	pending := PendingELPayload{Slot: pendingELPayloadSlot(block), Block: block, Envelope: envelope}
 	if root, ok := pendingELPayloadRoot(pending); ok && f.forkGraph != nil && f.forkGraph.HasEnvelope(root) {
-		pending = PendingELPayload{Root: root}
+		pending = PendingELPayload{Root: root, Slot: pending.Slot}
 	}
 	f.queuePendingELPayload(pending)
 }
@@ -1230,8 +1231,11 @@ func (f *ForkChoiceStore) queuePendingELPayload(pending PendingELPayload) {
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(pending)
 	if ok {
-		for _, p := range f.pendingELPayloads {
+		for i, p := range f.pendingELPayloads {
 			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
+				if p.Slot == 0 && pending.Slot != 0 {
+					f.pendingELPayloads[i].Slot = pending.Slot
+				}
 				return
 			}
 		}
@@ -1255,6 +1259,13 @@ func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
 	return common.Hash{}, false
 }
 
+func pendingELPayloadSlot(block *cltypes.SignedBeaconBlock) uint64 {
+	if block == nil || block.Block == nil {
+		return 0
+	}
+	return block.Block.Slot
+}
+
 // RequeuePendingELPayload queues a drained execution payload for another EL validation attempt.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
@@ -1262,12 +1273,15 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 	if !ok {
 		return
 	}
+	if p.Block != nil && p.Block.Block != nil {
+		p.Slot = p.Block.Block.Slot
+	}
 	if guard, guarded := f.forkGraph.(retainedBlockGuard); guarded {
-		guard.WithRetainedBlock(root, func() { f.queuePendingELPayload(PendingELPayload{Root: root}) })
+		guard.WithRetainedBlock(root, func() { f.queuePendingELPayload(PendingELPayload{Root: root, Slot: p.Slot}) })
 		return
 	}
 	if p.Root != (common.Hash{}) {
-		p = PendingELPayload{Root: root}
+		p = PendingELPayload{Root: root, Slot: p.Slot}
 	}
 	f.queuePendingELPayload(p)
 }
@@ -1288,7 +1302,7 @@ func (f *ForkChoiceStore) ResolvePendingELPayload(p PendingELPayload) (PendingEL
 	if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
 		return PendingELPayload{}, false
 	}
-	return PendingELPayload{Root: root, Block: block, Envelope: envelope}, true
+	return PendingELPayload{Root: root, Slot: pendingELPayloadSlot(block), Block: block, Envelope: envelope}, true
 }
 
 // DrainPendingELPayloads returns and clears all queued EL payloads.
@@ -1300,12 +1314,12 @@ func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayl
 	return f.drainPendingELPayloads(limit, false)
 }
 
-// DrainPendingELPayloadsPrioritizingNewest reserves one limited-batch slot for the sync frontier.
-func (f *ForkChoiceStore) DrainPendingELPayloadsPrioritizingNewest(limit int) []PendingELPayload {
+// DrainPendingELPayloadsPrioritizingHighestSlot reserves one limited-batch slot for the sync frontier.
+func (f *ForkChoiceStore) DrainPendingELPayloadsPrioritizingHighestSlot(limit int) []PendingELPayload {
 	return f.drainPendingELPayloads(limit, true)
 }
 
-func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeNewest bool) []PendingELPayload {
+func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeHighestSlot bool) []PendingELPayload {
 	if limit <= 0 {
 		return nil
 	}
@@ -1315,23 +1329,28 @@ func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeNewest boo
 		return nil
 	}
 	if len(f.pendingELPayloads) > limit {
-		if prioritizeNewest {
+		if prioritizeHighestSlot {
+			highestSlotIndex := 0
+			for i := 1; i < len(f.pendingELPayloads); i++ {
+				if f.pendingELPayloads[i].Slot > f.pendingELPayloads[highestSlotIndex].Slot {
+					highestSlotIndex = i
+				}
+			}
+			if highestSlotIndex < limit {
+				return f.drainPendingELPayloadsFIFO(limit)
+			}
 			result := make([]PendingELPayload, limit)
 			oldestCount := limit - 1
 			copy(result, f.pendingELPayloads[:oldestCount])
-			result[oldestCount] = f.pendingELPayloads[len(f.pendingELPayloads)-1]
+			result[oldestCount] = f.pendingELPayloads[highestSlotIndex]
 			remaining := len(f.pendingELPayloads) - limit
-			copy(f.pendingELPayloads[:remaining], f.pendingELPayloads[oldestCount:len(f.pendingELPayloads)-1])
+			copy(f.pendingELPayloads, f.pendingELPayloads[oldestCount:highestSlotIndex])
+			copy(f.pendingELPayloads[highestSlotIndex-oldestCount:], f.pendingELPayloads[highestSlotIndex+1:])
 			clear(f.pendingELPayloads[remaining:])
 			f.pendingELPayloads = f.pendingELPayloads[:remaining]
 			return result
 		}
-		result := make([]PendingELPayload, limit)
-		copy(result, f.pendingELPayloads[:limit])
-		copy(f.pendingELPayloads, f.pendingELPayloads[limit:])
-		clear(f.pendingELPayloads[len(f.pendingELPayloads)-limit:])
-		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-limit]
-		return result
+		return f.drainPendingELPayloadsFIFO(limit)
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads
@@ -1342,5 +1361,14 @@ func (f *ForkChoiceStore) drainPendingELPayloads(limit int, prioritizeNewest boo
 	copy(result, f.pendingELPayloads)
 	clear(f.pendingELPayloads)
 	f.pendingELPayloads = f.pendingELPayloads[:0]
+	return result
+}
+
+func (f *ForkChoiceStore) drainPendingELPayloadsFIFO(limit int) []PendingELPayload {
+	result := make([]PendingELPayload, limit)
+	copy(result, f.pendingELPayloads[:limit])
+	copy(f.pendingELPayloads, f.pendingELPayloads[limit:])
+	clear(f.pendingELPayloads[len(f.pendingELPayloads)-limit:])
+	f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-limit]
 	return result
 }

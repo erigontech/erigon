@@ -38,6 +38,7 @@ func TestRequeuePendingELPayloadDoesNotRecheckEnvelopeWhileRootIsRetained(t *tes
 	pending := f.DrainPendingELPayloads()
 	require.Len(t, pending, 1)
 	require.Equal(t, root, pending[0].Root)
+	require.Equal(t, uint64(1), pending[0].Slot)
 	require.Nil(t, pending[0].Block)
 	require.Nil(t, pending[0].Envelope)
 }
@@ -101,7 +102,7 @@ func TestDrainPendingELPayloadsLimitPreservesRemainingOrder(t *testing.T) {
 	})
 }
 
-func TestDrainPendingELPayloadsPrioritizingNewestPreservesOldestProgress(t *testing.T) {
+func TestDrainPendingELPayloadsPrioritizingHighestSlotPreservesOldestProgress(t *testing.T) {
 	f := &ForkChoiceStore{}
 	for i := range 5 {
 		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
@@ -109,7 +110,7 @@ func TestDrainPendingELPayloadsPrioritizingNewestPreservesOldestProgress(t *test
 		}, nil)
 	}
 
-	drained := f.DrainPendingELPayloadsPrioritizingNewest(3)
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
 	require.Equal(t, []uint64{1, 2, 5}, []uint64{
 		drained[0].Block.Block.Slot,
 		drained[1].Block.Block.Slot,
@@ -122,7 +123,7 @@ func TestDrainPendingELPayloadsPrioritizingNewestPreservesOldestProgress(t *test
 	})
 }
 
-func TestDrainPendingELPayloadsPrioritizingNewestWithLimitOne(t *testing.T) {
+func TestDrainPendingELPayloadsPrioritizingHighestSlotWithLimitOne(t *testing.T) {
 	f := &ForkChoiceStore{}
 	for i := range 3 {
 		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
@@ -130,7 +131,7 @@ func TestDrainPendingELPayloadsPrioritizingNewestWithLimitOne(t *testing.T) {
 		}, nil)
 	}
 
-	drained := f.DrainPendingELPayloadsPrioritizingNewest(1)
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(1)
 	require.Equal(t, uint64(3), drained[0].Block.Block.Slot)
 	remaining := f.DrainPendingELPayloads()
 	require.Equal(t, []uint64{1, 2}, []uint64{
@@ -139,19 +140,67 @@ func TestDrainPendingELPayloadsPrioritizingNewestWithLimitOne(t *testing.T) {
 	})
 }
 
-func TestDrainPendingELPayloadsPrioritizingNewestBoundaries(t *testing.T) {
+func TestDrainPendingELPayloadsPrioritizingHighestSlotBoundaries(t *testing.T) {
 	f := &ForkChoiceStore{}
-	require.Nil(t, f.DrainPendingELPayloadsPrioritizingNewest(1))
+	require.Nil(t, f.DrainPendingELPayloadsPrioritizingHighestSlot(1))
 
 	f.addPendingELPayload(&cltypes.SignedBeaconBlock{
 		Block: &cltypes.BeaconBlock{Slot: 1},
 	}, nil)
-	require.Nil(t, f.DrainPendingELPayloadsPrioritizingNewest(0))
+	require.Nil(t, f.DrainPendingELPayloadsPrioritizingHighestSlot(0))
 
-	drained := f.DrainPendingELPayloadsPrioritizingNewest(2)
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(2)
 	require.Len(t, drained, 1)
 	require.Equal(t, uint64(1), drained[0].Block.Block.Slot)
 	require.Empty(t, f.DrainPendingELPayloads())
+}
+
+func TestDrainPendingELPayloadsPrioritizesHighestSlotAfterRequeue(t *testing.T) {
+	f := &ForkChoiceStore{}
+	queueSlot := func(slot byte) {
+		f.addPendingELPayload(
+			&cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: uint64(slot)}},
+			&cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{slot}}},
+		)
+	}
+	for slot := byte(1); slot <= 5; slot++ {
+		queueSlot(slot)
+	}
+
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
+	queueSlot(6)
+	for _, pending := range drained {
+		f.RequeuePendingELPayload(pending)
+	}
+
+	drained = f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
+	require.Equal(t, []uint64{3, 4, 6}, []uint64{
+		drained[0].Block.Block.Slot,
+		drained[1].Block.Block.Slot,
+		drained[2].Block.Block.Slot,
+	})
+}
+
+func TestDrainPendingELPayloadsPrioritizingHighestSlotPreservesMiddleOrder(t *testing.T) {
+	f := &ForkChoiceStore{}
+	for _, slot := range []uint64{1, 2, 3, 9, 4, 5} {
+		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
+			Block: &cltypes.BeaconBlock{Slot: slot},
+		}, nil)
+	}
+
+	drained := f.DrainPendingELPayloadsPrioritizingHighestSlot(3)
+	require.Equal(t, []uint64{1, 2, 9}, []uint64{
+		drained[0].Block.Block.Slot,
+		drained[1].Block.Block.Slot,
+		drained[2].Block.Block.Slot,
+	})
+	remaining := f.DrainPendingELPayloads()
+	require.Equal(t, []uint64{3, 4, 5}, []uint64{
+		remaining[0].Block.Block.Slot,
+		remaining[1].Block.Block.Slot,
+		remaining[2].Block.Block.Slot,
+	})
 }
 
 func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
@@ -169,4 +218,29 @@ func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
 	payloads := f.DrainPendingELPayloads()
 	require.Len(t, payloads, 1)
 	require.Equal(t, uint64(1), payloads[0].Block.Block.Slot)
+}
+
+func TestPendingELPayloadDeduplicationRetainsKnownSlot(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+	f.queuePendingELPayload(PendingELPayload{Root: root})
+	f.queuePendingELPayload(PendingELPayload{Root: root, Slot: 9})
+
+	payloads := f.DrainPendingELPayloads()
+	require.Len(t, payloads, 1)
+	require.Equal(t, uint64(9), payloads[0].Slot)
+}
+
+func TestRequeuePendingELPayloadUsesBlockSlot(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+	f.RequeuePendingELPayload(PendingELPayload{
+		Root:  root,
+		Slot:  99,
+		Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 7}},
+	})
+
+	payloads := f.DrainPendingELPayloads()
+	require.Len(t, payloads, 1)
+	require.Equal(t, uint64(7), payloads[0].Slot)
 }
