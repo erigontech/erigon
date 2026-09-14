@@ -304,7 +304,17 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 				res.ComputedRoot = common.BytesToHash(root)
 			}
 		}
-		res.FlashblockReceiptCount = len(doms.FlashblockReceipts())
+		receipts := doms.FlashblockReceipts()
+		res.FlashblockReceiptCount = len(receipts)
+		// The body's gas so far, measured. The driver needs it to decide what else the block can still
+		// hold: a per-tx gas ESTIMATE cannot make that decision, because it is as free to be under as
+		// over, and under means a body that exceeds the gas limit — which is only discovered at the fork
+		// choice, by which point the transaction is already in the body exec maintains.
+		// Summed, not taken from the last receipt's CumulativeGasUsed: that counts from the start of the
+		// ROUND that produced it, not the start of the block, so it reports only the final round's gas.
+		for _, r := range receipts {
+			res.GasUsed += r.GasUsed
+		}
 	}
 	return res, nil
 }
