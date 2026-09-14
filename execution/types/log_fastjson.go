@@ -45,6 +45,9 @@ func (l *RPCLog) fastJSONLen() int {
 	n := len(`{"address":,"topics":[],"data":,"blockNumber":,"transactionHash":,`) +
 		len(`"transactionIndex":,"blockHash":,"logIndex":,"removed":false,"blockTimestamp":}`)
 	n += quotedHexLen(length.Addr)
+	if l.Topics == nil {
+		n += len("null") - len("[]")
+	}
 	n += len(l.Topics) * (quotedHexLen(length.Hash) + 1)
 	n += quotedHexLen(len(l.Data))
 	n += 2 * quotedHexLen(length.Hash) // transactionHash, blockHash

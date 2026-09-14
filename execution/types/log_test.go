@@ -562,3 +562,42 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		})
 	}
 }
+
+// A short fastJSONLen makes append regrow the buffer. Malloc size-class slack can hide a
+// small miss from the allocation count, so the bound is checked directly as well.
+func TestRPCLogsMarshalFastJSONAllocatesOnce(t *testing.T) {
+	maxed := func(topics []common.Hash, data []byte) *RPCLog {
+		return &RPCLog{
+			Log: Log{
+				Topics:      topics,
+				Data:        data,
+				BlockNumber: hexutil.Uint64(^uint64(0)),
+				TxIndex:     hexutil.Uint(^uint(0)),
+				Index:       hexutil.Uint(^uint(0)),
+			},
+			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+		}
+	}
+	removed := maxed(nil, nil)
+	removed.Removed = true
+
+	for name, logs := range map[string]RPCLogs{
+		"nil":                nil,
+		"empty":              {},
+		"nil-topics":         {maxed(nil, nil)},
+		"empty-topics":       {maxed([]common.Hash{}, nil)},
+		"many-topics":        {maxed(make([]common.Hash, 4), make([]byte, 4096))},
+		"nil-entries":        {nil, maxed(nil, nil), nil},
+		"many-nil-topics":    {maxed(nil, nil), maxed(nil, nil), maxed(nil, nil)},
+		"removed-nil-topics": {removed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, l := range logs {
+				if l != nil {
+					require.LessOrEqual(t, len(l.appendFastJSON(nil)), l.fastJSONLen())
+				}
+			}
+			require.InDelta(t, 1, testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }), 0)
+		})
+	}
+}
