@@ -62,8 +62,8 @@ import (
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
 	// Block related (proposed file: ./eth_blocks.go)
-	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error)
-	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (map[string]any, error)
+	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (*ethapi.RPCBlock, error)
+	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (*ethapi.RPCBlock, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 
@@ -84,8 +84,8 @@ type EthAPI interface {
 	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
 
 	// Uncle related (see ./eth_uncles.go)
-	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]any, error)
-	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]any, error)
+	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (*ethapi.RPCBlock, error)
+	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (*ethapi.RPCBlock, error)
 	GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error)
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
