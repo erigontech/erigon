@@ -481,6 +481,10 @@ check-kurtosis:
 test-kurtosis-setup:
 	@bash .github/actions/setup-kurtosis/setup.test.sh
 
+## test-kurtosis-gloas-poll:        test Gloas Beacon API polling
+test-kurtosis-gloas-poll:
+	@bash .github/workflows/scripts/check_gloas_payload_attestations.test.sh
+
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
