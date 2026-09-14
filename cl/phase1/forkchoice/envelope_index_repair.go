@@ -24,6 +24,7 @@ import (
 
 type envelopeIndexRepairEntry struct {
 	generation  uint64
+	notify      bool
 	valuesKnown bool
 	blockNumber uint64
 	blockHash   common.Hash
@@ -34,6 +35,7 @@ const envelopeIndexRepairCapacity = queueCacheSize * 2
 type envelopeIndexRepairToken struct {
 	root        common.Hash
 	generation  uint64
+	notify      bool
 	valuesKnown bool
 	blockNumber uint64
 	blockHash   common.Hash
@@ -89,6 +91,18 @@ func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, b
 	return tokenForEnvelopeIndexRepair(token.root, entry)
 }
 
+func (t *envelopeIndexRepairTracker) markNotify(token envelopeIndexRepairToken) envelopeIndexRepairToken {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, ok := t.entries[token.root]
+	if !ok || entry.generation != token.generation {
+		return envelopeIndexRepairToken{}
+	}
+	entry.notify = true
+	t.entries[token.root] = entry
+	return tokenForEnvelopeIndexRepair(token.root, entry)
+}
+
 func (t *envelopeIndexRepairTracker) complete(token envelopeIndexRepairToken) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -116,6 +130,7 @@ func tokenForEnvelopeIndexRepair(root common.Hash, entry envelopeIndexRepairEntr
 	return envelopeIndexRepairToken{
 		root:        root,
 		generation:  entry.generation,
+		notify:      entry.notify,
 		valuesKnown: entry.valuesKnown,
 		blockNumber: entry.blockNumber,
 		blockHash:   entry.blockHash,

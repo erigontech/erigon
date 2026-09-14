@@ -842,7 +842,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.removeValidatedChildren(validatedRootsByParent)
 
 	for _, root := range oldRoots {
-		f.stateDumpLock.Lock()
 		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
 		}
@@ -852,7 +851,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
 		}
-		f.stateDumpLock.Unlock()
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

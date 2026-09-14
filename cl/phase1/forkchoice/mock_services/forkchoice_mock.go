@@ -436,8 +436,10 @@ func (f *ForkChoiceStorageMock) ValidateBlockForPublishing(block *cltypes.Signed
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	f.envelopesMu.Lock()
 	f.OnExecutionPayloadCalled = true
 	f.OnExecutionPayloadCheckBlobData = checkBlobData
+	f.envelopesMu.Unlock()
 	if f.OnExecutionPayloadFn != nil {
 		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
 	}
@@ -496,7 +498,7 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 			}
 		} else if envelope.Message.BuilderIndex == builderIndex {
 			f.EnvelopeGossipAdmissions.Finish(token, true)
-			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.NewExecutionPayloadEnvelopeAlreadySeenError(envelope)
 		}
 	}
 	if err := ctx.Err(); err != nil {

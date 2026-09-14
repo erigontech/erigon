@@ -693,8 +693,12 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 		if limit <= 0 || ctx.Err() != nil {
 			return
 		}
-		persisted, readErr := f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+		var persisted *cltypes.SignedExecutionPayloadEnvelope
+		var readErr error
+		readAttempted := false
 		if !repair.valuesKnown {
+			persisted, readErr = f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+			readAttempted = true
 			if readErr != nil || persisted == nil || persisted.Message == nil || persisted.Message.Payload == nil {
 				if readErr == nil {
 					readErr = errors.New("persisted execution payload envelope is incomplete")
@@ -714,13 +718,28 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 				continue
 			}
 		}
-		_, notify, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, repair.root, envelopeForIndexRepair(repair), true)
+		_, indexed, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, repair.root, envelopeForIndexRepair(repair), true)
+		if indexed {
+			repair = f.envelopeIndexRepairs.markNotify(repair)
+		}
 		if err != nil {
 			f.envelopeIndexRepairs.retryFailed(repair)
 			log.Warn("Failed to repair execution payload envelope indices", "blockRoot", repair.root, "err", err)
 		} else {
+			if repair.notify && !readAttempted {
+				persisted, readErr = f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+			}
+			if repair.notify && (readErr != nil || persisted == nil || persisted.Message == nil || persisted.Message.Payload == nil) {
+				if f.forkGraph.HasEnvelope(repair.root) {
+					f.envelopeIndexRepairs.retryFailed(repair)
+				} else {
+					f.envelopeIndexRepairs.complete(repair)
+				}
+				limit--
+				continue
+			}
 			f.envelopeIndexRepairs.complete(repair)
-			if notify && readErr == nil && persisted != nil && persisted.Message != nil && persisted.Message.Payload != nil {
+			if repair.notify {
 				f.emitExecutionPayloadIntegrationEvents(repair.root, persisted)
 			}
 		}

@@ -75,6 +75,13 @@ func TestBlobHistoryDownloadStartsOnlyAfterBlockHistoryFinishes(t *testing.T) {
 	require.NotNil(t, downloader.notify)
 }
 
+func TestBlobHistoryDownloadIgnoresNilConfiguredDownloader(t *testing.T) {
+	var downloader *network.BlobHistoryDownloader
+	require.NotPanics(t, func() {
+		startBlobHistoryDownload(true, downloader, 99, func(bool) {})
+	})
+}
+
 type failingHistoryDownloader struct {
 	err      error
 	finished bool

@@ -293,6 +293,10 @@ func (s *envelopeResponseSentinel) PeersInfo(context.Context, *sentinelproto.Pee
 	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
+func (s *envelopeResponseSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
 func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 	requestedRoot := common.Hash{1}
 	unsolicitedRoot := common.Hash{2}
@@ -357,12 +361,34 @@ func TestAcceptEnvelopeResponsesRejectsInvalidCandidateBeforeProgress(t *testing
 		return nil
 	}
 
-	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, requested, received, validate)
+	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, requested, received, validate))
 	require.Equal(t, [][32]byte{root}, filterReceived([][32]byte{root}, received))
 
-	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, requested, received, validate)
+	require.False(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, requested, received, validate))
+	require.Same(t, valid, received[root])
+
+	delete(received, root)
+	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid}, requested, received, validate))
 	require.Same(t, valid, received[root])
 }
+
+func TestRequestEnvelopesByRangeReportsInvalidCandidate(t *testing.T) {
+	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+
+	rejected := requestEnvelopesByRangeWithValidator(
+		context.Background(),
+		client,
+		[]*cltypes.SignedBeaconBlock{block},
+		map[common.Hash]struct{}{requestedRoot: {}},
+		received,
+		func(*cltypes.SignedExecutionPayloadEnvelope) error { return errors.New("invalid candidate") },
+	)
+
+	require.True(t, rejected)
+	require.Empty(t, received)
+}
+
 func TestRequestEnvelopesByRangeBoundsCallsForSparseRequestedSlots(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

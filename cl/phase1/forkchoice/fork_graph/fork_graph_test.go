@@ -381,7 +381,7 @@ func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
 	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
 	root := common.Hash{1}
 	f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: 1})
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
 
 	err := f.DumpEnvelopeOnDisk(root, envelope)
 	require.ErrorIs(t, err, errPartialEnvelopeWrite)
@@ -394,7 +394,7 @@ func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestHasEnvelopeCachesMissAndDumpInvalidatesMiss(t *testing.T) {
+func TestHasEnvelopeUsesValidatedEnvelopeCache(t *testing.T) {
 	fs := &countingStatFs{Fs: afero.NewMemMapFs()}
 	cfg := clparams.MainnetBeaconConfig
 	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
@@ -404,10 +404,10 @@ func TestHasEnvelopeCachesMissAndDumpInvalidatesMiss(t *testing.T) {
 	require.False(t, f.HasEnvelope(root))
 	require.False(t, f.HasEnvelope(root))
 	fs.mu.Lock()
-	require.Equal(t, 1, fs.stats)
+	require.Zero(t, fs.stats)
 	fs.mu.Unlock()
 
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
 	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
 	require.True(t, f.HasEnvelope(root))
 }
@@ -433,7 +433,7 @@ func TestDumpEnvelopeBeforePruneDoesNotSurvivePrune(t *testing.T) {
 	f.headers.Store(newerRoot, &cltypes.BeaconBlockHeader{Slot: newerBlock.Block.Slot})
 	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope := testEnvelopeWithTransaction(oldRoot, []byte{1})
 
 	dumpDone := make(chan error, 1)
 	go func() { dumpDone <- f.DumpEnvelopeOnDisk(oldRoot, envelope) }()
@@ -515,7 +515,7 @@ func TestNewForkGraphDiskKeepsAnchorHeaderVisibleAcrossSkippedSlots(t *testing.T
 	_, ok := graph.GetHeader(anchorRoot)
 	require.True(t, ok)
 	require.Equal(t, uint64(64), graph.LowestAvailableSlot())
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope := testEnvelopeWithTransaction(anchorRoot, []byte{1})
 	require.NoError(t, graph.DumpEnvelopeOnDisk(anchorRoot, envelope))
 	require.True(t, graph.HasEnvelope(anchorRoot))
 	_, err = graph.ReadEnvelopeFromDisk(anchorRoot)
@@ -1497,6 +1497,7 @@ func TestDumpEnvelopeAllowsAnchorRoot(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	root := common.HexToHash("0x1234")
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig, anchorRoot: root}
+	f.headers.Store(root, &cltypes.BeaconBlockHeader{})
 
 	require.NoError(t, f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1})))
 }
@@ -1537,6 +1538,7 @@ func TestPruneDoesNotRaceEnvelopeReplacement(t *testing.T) {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 		block.Block.Slot = slot
 		f.blocks.Store(root, block)
+		f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: slot})
 		require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(root), []byte{1}, 0o644))
 	}
 	require.NoError(t, f.DumpEnvelopeOnDisk(oldRoot, testEnvelopeWithTransaction(oldRoot, []byte{1})))
@@ -1884,6 +1886,7 @@ func addEnvelopeTestBlock(f *forkGraphDisk, root common.Hash, slot uint64) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = slot
 	f.blocks.Store(root, block)
+	f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: slot})
 }
 
 func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version clparams.StateVersion, encoded []byte) {

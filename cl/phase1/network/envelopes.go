@@ -87,8 +87,11 @@ func requestEnvelopesFranticallyWithValidator(
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
 			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
-			requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate)
+			rejected := requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate)
 			cancelRange()
+			if rejected {
+				return received, errors.New("invalid execution payload envelope response")
+			}
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
@@ -99,7 +102,9 @@ func requestEnvelopesFranticallyWithValidator(
 		responses, err := requestEnvelopesByRoot(attemptCtx, r, needed)
 		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
 		cancelAttempt()
-		acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate)
+		if acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate) {
+			return received, errors.New("invalid execution payload envelope response")
+		}
 		needed = filterReceived(needed, received)
 		if len(needed) == 0 {
 			break
@@ -156,7 +161,8 @@ func acceptEnvelopeResponsesWithValidator(
 	requestedRoots map[common.Hash]struct{},
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	validate envelopeCandidateValidator,
-) {
+) bool {
+	rejected := false
 	for _, env := range responses {
 		if env == nil || env.Message == nil {
 			continue
@@ -168,11 +174,13 @@ func acceptEnvelopeResponsesWithValidator(
 		if validate != nil {
 			if err := validate(env); err != nil {
 				log.Debug("RequestEnvelopesFrantically: ignoring invalid envelope", "root", env.Message.BeaconBlockRoot, "err", err)
+				rejected = true
 				continue
 			}
 		}
 		received[env.Message.BeaconBlockRoot] = env
 	}
+	return rejected
 }
 
 func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) [][32]byte {
@@ -192,28 +200,31 @@ func requestEnvelopesByRangeWithValidator(
 	requestedRoots map[common.Hash]struct{},
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	validate envelopeCandidateValidator,
-) {
+) bool {
 	maxCount := r.MaxRequestPayloads()
 	if maxCount == 0 {
 		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
-		return
+		return false
 	}
 	ranges := envelopeRequestSlotRanges(blocks, requestedRoots, maxCount)
 	if len(ranges) == 0 {
-		return
+		return false
 	}
 	log.Debug("envelope fetch: falling back to by-range", "ranges", len(ranges))
 	for _, slotRange := range ranges {
 		if ctx.Err() != nil || len(received) == len(requestedRoots) {
-			return
+			return false
 		}
 		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
-		acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate)
+		if acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate) {
+			return true
+		}
 		if err != nil {
 			log.Debug("envelope fetch: by-range error", "err", err)
-			return
+			return false
 		}
 	}
+	return false
 }
 
 type envelopeSlotRange struct {

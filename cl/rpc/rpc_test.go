@@ -471,6 +471,65 @@ func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *tes
 	}
 }
 
+func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+
+	for _, request := range []func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error){
+		func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), 1, 1)
+		},
+		func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}})
+		},
+	} {
+		sentinel := &blockResponseSentinel{response: response.Bytes()}
+		client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+		envelopes, pid, err := request(client)
+		require.ErrorContains(t, err, "more chunks than requested")
+		require.Len(t, envelopes, 1)
+		require.NotNil(t, envelopes[0].Message)
+		require.Equal(t, "malicious-peer", pid)
+		require.Equal(t, pid, sentinel.bannedPeer)
+	}
+}
+
+func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+
+	for _, request := range []func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error){
+		func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), 1, 0)
+		},
+		func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), nil)
+		},
+	} {
+		sentinel := &blockResponseSentinel{response: response.Bytes()}
+		client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+		envelopes, pid, err := request(client)
+		require.ErrorContains(t, err, "more chunks than requested")
+		require.Empty(t, envelopes)
+		require.Equal(t, pid, sentinel.bannedPeer)
+	}
+}
+
 type rawSSZ []byte
 
 func (r rawSSZ) EncodeSSZ(dst []byte) ([]byte, error) {

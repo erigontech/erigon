@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -35,6 +36,30 @@ var (
 	ErrExecutionPayloadEnvelopeAdmissionBusy = errors.New("execution payload envelope admission busy")
 	ErrExecutionPayloadEnvelopeAlreadySeen   = errors.New("execution payload envelope already seen")
 )
+
+type executionPayloadEnvelopeAlreadySeenError struct {
+	persisted *cltypes.SignedExecutionPayloadEnvelope
+}
+
+func (e *executionPayloadEnvelopeAlreadySeenError) Error() string {
+	return ErrExecutionPayloadEnvelopeAlreadySeen.Error()
+}
+
+func (e *executionPayloadEnvelopeAlreadySeenError) Unwrap() error {
+	return ErrExecutionPayloadEnvelopeAlreadySeen
+}
+
+func NewExecutionPayloadEnvelopeAlreadySeenError(persisted *cltypes.SignedExecutionPayloadEnvelope) error {
+	return &executionPayloadEnvelopeAlreadySeenError{persisted: persisted}
+}
+
+func PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err error) (*cltypes.SignedExecutionPayloadEnvelope, bool) {
+	var persistedErr *executionPayloadEnvelopeAlreadySeenError
+	if !errors.As(err, &persistedErr) {
+		return nil, false
+	}
+	return persistedErr.persisted, true
+}
 
 type executionPayloadEnvelopeIdentity struct {
 	beaconBlockRoot common.Hash

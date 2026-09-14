@@ -454,6 +454,9 @@ func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryD
 	if !blockHistoryFinished || downloader == nil {
 		return
 	}
+	if configured, ok := downloader.(*network.BlobHistoryDownloader); ok && configured == nil {
+		return
+	}
 	downloader.SetHeadSlot(headSlot)
 	downloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(notify))
 	downloader.Start()

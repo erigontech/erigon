@@ -104,6 +104,9 @@ func (f *ForkChoiceStore) claimEnvelopeIndexRepairWith(
 			return token, true, errors.New("persisted execution payload envelope is incomplete")
 		}
 	}
+	if applied {
+		token = f.envelopeIndexRepairs.markNotify(token)
+	}
 	return token, true, nil
 }
 
@@ -129,7 +132,8 @@ func (f *ForkChoiceStore) ensureClaimedEnvelopeIndexRepair(
 	applied bool,
 ) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	if tracked && token.valuesKnown {
-		return f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, token.root, envelopeForIndexRepair(token), true)
+		envelope, indexed, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, token.root, envelopeForIndexRepair(token), false)
+		return envelope, token.notify || indexed, err
 	}
 	return f.ensureExecutionPayloadEnvelopeIndices(ctx, blockRoot, signedEnvelope, applied)
 }
@@ -688,7 +692,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	if !ok || block == nil || block.Block == nil {
 		return fmt.Errorf("beacon block %v is unavailable", root)
 	}
-	finalizedSlot := f.FinalizedSlot()
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
@@ -723,7 +727,7 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 			}
 		} else {
 			f.envelopeGossipAdmissions.Finish(token, true)
-			return ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+			return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(envelope)
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -750,7 +754,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 		return fmt.Errorf("beacon block state %v is unavailable", root)
 	}
 	block, ok := f.forkGraph.GetBlock(root)
-	finalizedSlot := f.FinalizedSlot()
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	f.mu.RUnlock()
 	if !ok || block == nil || block.Block == nil {
 		return fmt.Errorf("beacon block %v is unavailable", root)
@@ -1129,13 +1133,20 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
-	applied := false
-	if !f.forkGraph.HasEnvelope(blockRoot) {
+	applied := true
+	if f.forkGraph.HasEnvelope(blockRoot) {
+		persisted, readErr := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+		if readErr == nil && persisted != nil && persisted.Message != nil && persisted.Message.Payload != nil {
+			signedEnvelope = persisted
+			envelope = persisted.Message
+			applied = false
+		}
+	}
+	if applied {
 		if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
 			f.mu.Unlock()
 			return fmt.Errorf("%w: StoreAnchorEnvelope failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 		}
-		applied = true
 	}
 	if f.engine == nil {
 		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {

@@ -161,23 +161,25 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
-	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
-		return fmt.Errorf("invalid execution payload envelope: %w", err)
-	}
-
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
+	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 
 	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
-	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 	if err := validateEnvelopeLimits(s.beaconCfg, envelope); err != nil {
 		if !blockKnown || block == nil {
 			return fmt.Errorf("%w: invalid execution payload envelope for unknown block: %w", ErrIgnore, err)
 		}
 		return err
+	}
+	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
+		if !blockKnown || block == nil {
+			return fmt.Errorf("%w: invalid execution payload envelope for unknown block: %w", ErrIgnore, err)
+		}
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 	if envelope.Payload == nil {
 		return errors.New("nil execution payload")
