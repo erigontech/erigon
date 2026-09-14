@@ -30,6 +30,9 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // legacyMarshalReceipt is the map[string]any builder this package used before
@@ -222,5 +225,138 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// legacyMarshalSubscribeReceipt is the map-based MarshalSubscribeReceipt, kept as the JSON oracle.
+func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]any {
+	receipt := make(map[string]any)
+
+	// Basic metadata - convert to proper hex strings
+	blockHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.BlockHash))
+	receipt["blockHash"] = blockHash
+	receipt["blockNumber"] = hexutil.Uint64(protoReceipt.BlockNumber)
+	txHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.TransactionHash))
+	receipt["transactionHash"] = txHash
+	receipt["transactionIndex"] = hexutil.Uint64(protoReceipt.TransactionIndex)
+
+	// From address as hex string
+	from := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From))
+	receipt["from"] = from
+
+	// To can be null for contract creation
+	if protoReceipt.To != nil {
+		toAddr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
+		if toAddr != (common.Address{}) {
+			receipt["to"] = toAddr
+		} else {
+			receipt["to"] = nil
+		}
+	} else {
+		receipt["to"] = nil
+	}
+
+	receipt["type"] = hexutil.Uint64(protoReceipt.Type)
+	receipt["status"] = hexutil.Uint64(protoReceipt.Status)
+	receipt["cumulativeGasUsed"] = hexutil.Uint64(protoReceipt.CumulativeGasUsed)
+	receipt["gasUsed"] = hexutil.Uint64(protoReceipt.GasUsed)
+
+	if protoReceipt.ContractAddress != nil {
+		addr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
+		if addr != (common.Address{}) {
+			receipt["contractAddress"] = addr
+		} else {
+			receipt["contractAddress"] = nil
+		}
+	} else {
+		receipt["contractAddress"] = nil
+	}
+
+	if len(protoReceipt.LogsBloom) > 0 {
+		receipt["logsBloom"] = hexutil.Bytes(protoReceipt.LogsBloom)
+	}
+
+	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
+	for _, protoLog := range protoReceipt.Logs {
+		logEntry := make(map[string]any)
+
+		if protoLog.Address != nil {
+			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
+		}
+
+		topics := make([]common.Hash, len(protoLog.Topics))
+		for i, topic := range protoLog.Topics {
+			topics[i] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
+		}
+		logEntry["topics"] = topics
+		logEntry["data"] = hexutil.Bytes(protoLog.Data)
+		logEntry["transactionHash"] = txHash
+
+		logs = append(logs, logEntry)
+	}
+	receipt["logs"] = logs
+
+	if protoReceipt.BaseFee != nil {
+		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
+	}
+
+	if protoReceipt.BlobGasUsed > 0 {
+		receipt["blobGasUsed"] = hexutil.Uint64(protoReceipt.BlobGasUsed)
+	}
+	if protoReceipt.BlobGasPrice != nil {
+		blobGasPrice := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BlobGasPrice)
+		receipt["blobGasPrice"] = (*hexutil.U256)(blobGasPrice)
+	}
+
+	return receipt
+}
+
+func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	full := func() *remoteproto.SubscribeReceiptsReply {
+		bloom := make([]byte, 256)
+		bloom[3] = 0x10
+		return &remoteproto.SubscribeReceiptsReply{
+			BlockHash:         gointerfaces.ConvertHashToH256(common.HexToHash("0x01")),
+			BlockNumber:       25_000_000,
+			TransactionHash:   gointerfaces.ConvertHashToH256(common.HexToHash("0x02")),
+			TransactionIndex:  7,
+			Type:              3,
+			Status:            1,
+			CumulativeGasUsed: 900_000,
+			GasUsed:           21_000,
+			ContractAddress:   gointerfaces.ConvertAddressToH160(addr),
+			LogsBloom:         bloom,
+			Logs: []*remoteproto.SubscribeLogsReply{
+				{Address: gointerfaces.ConvertAddressToH160(addr), Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(topic)}, Data: []byte{1, 2}},
+				{},
+			},
+			From:         gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
+			To:           gointerfaces.ConvertAddressToH160(addr),
+			BaseFee:      gointerfaces.ConvertUint256IntToH256(uint256.NewInt(7_000_000_000)),
+			BlobGasUsed:  131072,
+			BlobGasPrice: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(1)),
+		}
+	}
+	zero := gointerfaces.ConvertAddressToH160(common.Address{})
+	for name, mutate := range map[string]func(r *remoteproto.SubscribeReceiptsReply){
+		"full":                  func(*remoteproto.SubscribeReceiptsReply) {},
+		"contract creation":     func(r *remoteproto.SubscribeReceiptsReply) { r.To = nil },
+		"zero to and contract":  func(r *remoteproto.SubscribeReceiptsReply) { r.To, r.ContractAddress = zero, zero },
+		"no contract address":   func(r *remoteproto.SubscribeReceiptsReply) { r.ContractAddress = nil },
+		"failed without logs":   func(r *remoteproto.SubscribeReceiptsReply) { r.Status, r.Logs, r.LogsBloom = 0, nil, nil },
+		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) { r.BaseFee, r.BlobGasUsed, r.BlobGasPrice = nil, 0, nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := full()
+			mutate(r)
+			want, err := json.Marshal(legacyMarshalSubscribeReceipt(r))
+			require.NoError(t, err)
+			got, err := json.Marshal(MarshalSubscribeReceipt(r))
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(got))
+		})
 	}
 }
