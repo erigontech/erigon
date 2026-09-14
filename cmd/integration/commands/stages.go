@@ -252,11 +252,9 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		if chaindata == filepath.Join(datadirCli, "chaindata") {
-			if err := backup.AutoCompactDatadir(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
-				logger.Error("Auto-compact", "error", err)
-				return
-			}
+		if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
+			logger.Error("Apply migrations", "error", err)
+			return
 		}
 		migrateDB := func(label kv.Label, path string) {
 			if err := runMigrationsForDB(label, path, logger); err != nil {

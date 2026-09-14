@@ -279,7 +279,7 @@ func TestAutoCompactDatadir(t *testing.T) {
 	writeTestDB(t, dirs.TxPool, 2_000)
 	bloated, healthy := dataFileStat(t, dirs.Chaindata), dataFileStat(t, dirs.TxPool)
 
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
 	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
@@ -296,7 +296,7 @@ func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
 	unlock, err := dirs.TryFlock()
 	require.NoError(t, err)
 	defer unlock()
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }
@@ -316,7 +316,7 @@ func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
 	writeTestDB(t, dirs.Chaindata, 18_000)
 	before := dataFileStat(t, dirs.Chaindata)
 
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }

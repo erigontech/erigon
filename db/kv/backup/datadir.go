@@ -101,10 +101,9 @@ const bloatRatio = 3
 // pages, and the growth step pads its compacted file back to the same size.
 var autoCompactMinFree uint64 = 1 << 30
 
-// AutoCompactDatadir compacts each db of the datadir whose free pages exceed
-// bloatRatio times its data and are at least autoCompactMinFree. A db that fails
-// to compact is left as it was, and a datadir locked by another process is skipped.
-func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+// ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
+// datadir locked by another process is skipped.
+func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {
 		return nil
@@ -114,6 +113,28 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 	}
 	defer unlock()
 
+	if err := downloaderV2Migration(dirs); err != nil {
+		return err
+	}
+	return autoCompactDatadir(ctx, dirs, logger)
+}
+
+// downloaderV2Migration moves the downloader db from snapshots/db to downloader/.
+func downloaderV2Migration(dirs datadir.Dirs) error {
+	from, to := filepath.Join(dirs.Snap, "db", dataFileName), filepath.Join(dirs.Downloader, dataFileName)
+	if exists, err := dir.FileExist(from); err != nil || !exists {
+		return err
+	}
+	if err := os.Rename(from, to); err != nil {
+		return datadir.CopyFile(from, to) // the dirs may be on different disks
+	}
+	return nil
+}
+
+// autoCompactDatadir compacts each db of the datadir whose free pages exceed
+// bloatRatio times its data and are at least autoCompactMinFree. A db that fails
+// to compact is left as it was. The caller holds the datadir lock.
+func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	dbs, err := datadirDBs(dirs)
 	if err != nil {
 		return err
