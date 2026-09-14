@@ -29,6 +29,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func Test_SplitTagsFlag(t *testing.T) {
@@ -255,4 +256,25 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		run("--exec.no-background-maintenance=true")
 		require.True(t, dbg.NoBackgroundMaintenance())
 	})
+}
+
+// The spec states column retention in epochs, so its slot count depends on SLOTS_PER_EPOCH.
+// Zero is the pruner's signal to derive the window from the active chain config, so an unset
+// flag must stay zero rather than pin one chain's slot count.
+func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
+	parse := func(args ...string) uint64 {
+		keepSlots := CaplinColumnKeepSlotsFlag
+		cfg := ethconfig.Config{}
+		app := cli.NewApp()
+		app.Flags = []cli.Flag{&keepSlots}
+		app.Action = func(ctx *cli.Context) error {
+			setCaplin(ctx, &cfg)
+			return nil
+		}
+		require.NoError(t, app.Run(append([]string{"test"}, args...)))
+		return cfg.CaplinConfig.ColumnKeepSlots
+	}
+
+	require.Zero(t, parse(), "unset must defer to the chain config, not pin mainnet's slot count")
+	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }

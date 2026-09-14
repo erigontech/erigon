@@ -27,8 +27,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -317,9 +319,16 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if block.Version() < clparams.DenebVersion {
 			break
 		}
-		blockRoot, err := block.Block.HashSSZ()
+		// The canonical root from the index, never block.Block.HashSSZ(): ReadBeaconBlockBodyBySlot
+		// returns a block without its execution payload, so hashing it yields a root that never
+		// existed on chain and the store lookup always misses. Every blob-bearing block would
+		// then look incomplete forever, and the blob dump waits on a pass that cannot finish.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-visited)
 		if err != nil {
 			return nil, 0, err
+		}
+		if blockRoot == (common.Hash{}) {
+			continue
 		}
 		blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
 		if err != nil {
@@ -333,11 +342,38 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			continue
 		}
 		if commitments.Len() == int(blobsCount) {
-			continue
+			available, err := b.storedSidecarsAvailable(blockRoot, currentSlot-visited, commitments.Len())
+			if err != nil {
+				return nil, 0, err
+			}
+			if available {
+				continue
+			}
 		}
 		batch = append(batch, block)
 	}
 	return batch, visited, nil
+}
+
+// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. Pruning
+// removes sidecar files but leaves their count rows, and a rewrite can fail partway, so on an
+// archive node a matching count alone is not evidence the store can serve the slot.
+//
+// Non-archive nodes prune on purpose, so a missing file there is expected and must not be re-queued.
+func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, slot uint64, commitments int) (bool, error) {
+	if !b.archiveBlobs {
+		return true, nil
+	}
+	for idx := range commitments {
+		exists, err := b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, uint64(idx))
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // processBatch best-effort recovers each block's blobs: Deneb by-root, Fulu from
