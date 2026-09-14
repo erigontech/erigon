@@ -68,7 +68,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, nil
 		}
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}

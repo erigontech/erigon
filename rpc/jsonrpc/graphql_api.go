@@ -100,7 +100,13 @@ func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.
 	defer tx.Rollback()
 
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
-	return blockNum, ok, err
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return 0, false, err
+	}
+	return blockNum, true, nil
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error) {

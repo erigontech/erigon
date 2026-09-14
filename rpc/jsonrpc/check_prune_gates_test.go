@@ -88,6 +88,27 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+// TestWitnessBlockResolutionGates pins the block a witness is built from against the
+// retention that covers it: the witness re-executes the block, so it reads the body and
+// the state history preceding it.
+func TestWitnessBlockResolutionGates(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	tx, err := apis.debug.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	_, err = apis.debug.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
+	require.ErrorIs(t, err, state.PrunedError)
+
+	_, err = apis.debug.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.recent.num)))
+	require.NoError(t, err)
+}
+
 // TestPruneGateArchive pins that an archive node never gates, including at
 // genesis: its distances are sentinels that report themselves as disabled.
 func TestPruneGateArchive(t *testing.T) {
