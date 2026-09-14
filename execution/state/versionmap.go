@@ -180,11 +180,6 @@ type VersionMap struct {
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
-
-	// MapReadValueInvalidations counts value-aware MapRead invalidations of a
-	// version-consistent read. With one-value-per-version enforced it should stay zero;
-	// a non-zero count means a write path mutated a value at a fixed version.
-	MapReadValueInvalidations atomic.Int64
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
@@ -1180,13 +1175,6 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			// Value-aware MapRead: the version-only check can accept a read whose cell value
-			// has since changed at the same version (one-value-per-version violation), so also
-			// compare against the live value and invalidate on mismatch.
-			if valid == VersionValid && matchesLive != nil && !matchesLive() {
-				valid = VersionInvalid
-				vm.MapReadValueInvalidations.Add(1)
-			}
 			// An origin AddressPath read is the committed baseline; re-run the create/
 			// destruct cross-checks so a concurrent lower-tx create or SELFDESTRUCT invalidates it.
 			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {

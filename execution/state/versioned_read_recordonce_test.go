@@ -16,9 +16,9 @@ import (
 // recorded on first access and is NOT re-recorded on a repeat read just because
 // the account went dirty from an *unrelated* write. Overwriting the recorded
 // read with the value re-resolved on the second read is the B1 consumed!=recorded
-// gap — the reader acts on the first value but records the second, so the
-// value-aware final check compares (second == current) and passes, letting a
-// diverged read commit stale.
+// gap — the reader acts on the first version but records the second, so seal-time
+// re-validation compares (second == current) and passes, letting a diverged read
+// commit stale.
 //
 // Reader consumes v1 first; the writer then diverges to v2; the repeat read must
 // still return v1 (record-once), and the final dep check must see v1 != v2.

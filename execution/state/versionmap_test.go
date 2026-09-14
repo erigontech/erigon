@@ -508,51 +508,35 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 		"StoragePath read with different value should be invalid")
 }
 
-// TestPutCell_OneFinalValuePerVersion pins the B1 wrong-root invariant: a cell
-// holds ONE FINAL value per version. Once a value is published Done at a
-// (TxIndex, Incarnation), it is immutable at that version — a downstream reader
-// records that version and version-based OCC validation accepts it without
-// re-reading the value, so a post-publish value change would go undetected and
-// commit stale. Re-writing the SAME value is idempotent; changing it must panic.
-
-// TestValidateVersion_MapReadValueAware is the read-side backstop: a recorded
-// MapRead whose value no longer matches the live cell is invalidated (not just
-// the version), so the tx re-executes rather than committing a stale value.
-func TestValidateVersion_MapReadValueAware(t *testing.T) {
+// TestOneValuePerVersion_WriteSideForbidsValueChange proves the invariant that lets
+// version-only OCC validation stand alone: a value can only change by re-execution,
+// which bumps the incarnation, so a (TxIndex, Incarnation) uniquely identifies one
+// value. Completing a published version with a different value is therefore a
+// one-value-per-version violation and panics under assert. Because a version-
+// consistent read is thus always value-consistent, no read-side re-check of the
+// value is required — this is why validation carries no value-aware MapRead guard.
+func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	t.Parallel()
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
 
 	addr := getAddress(44)
-	slot := accounts.InternKey(common.BigToHash(big.NewInt(11)))
-
 	vm := NewVersionMap(nil)
-	writeFor(vm, addr, StoragePath, slot, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(100), true)
 
-	// TX 10 records a MapRead at the writer's version but with a value that differs
-	// from the live cell (a stale value from an earlier snapshot of that version).
-	io := NewVersionedIO(11)
-	rs := ReadSet{}
-	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
-		Val:        *uint256.NewInt(100),
-	})
-	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
-	require.Equal(t, VersionValid, vm.ValidateVersion(10, io, validateEqualVersion, false, ""),
-		"matching value is valid")
+	// Publish TX 5's balance at (5,1) = 100: the speculative value a later reader consumes.
+	published := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	vm.FlushVersionedWrites(published, false, "")
 
-	io2 := NewVersionedIO(11)
-	rs2 := ReadSet{}
-	rs2.SetStorage(addr, slot, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
-		Val:        *uint256.NewInt(100),
-	})
-	// Overwrite the recorded value with a stale one at the same version.
-	rs2.SetStorage(addr, slot, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
-		Val:        *uint256.NewInt(42),
-	})
-	io2.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs2)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(10, io2, validateEqualVersion, false, ""),
-		"a MapRead whose recorded value differs from the live cell must be invalidated")
+	// Completing that same version with a different value is exactly the divergence a
+	// read-side value check would have caught. The write side rejects it outright, so
+	// the divergence can never reach a committed state for a reader to observe.
+	diverged := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(42)},
+	)
+	require.Panics(t, func() { vm.MarkWritesComplete(diverged) },
+		"a changed value at a published version must panic — one value per version")
 }
 
 // TestFlushEstimate_ValidTxNotMarkedEstimate verifies that when

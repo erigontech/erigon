@@ -299,9 +299,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 	// Block-STM read-once: a value already recorded for (addr, path, key) this attempt
 	// must be returned unchanged. Re-resolving and re-recording would let a later-diverged
-	// writer overwrite the recorded read, so the value-aware final check would compare the
-	// new value against itself and miss the divergence. Per-cell, not per-address: only the
-	// tx's own write to this exact cell takes precedence (via versionedWriteHit below).
+	// writer overwrite the recorded read, so seal-time re-validation would compare the
+	// re-resolved version against itself and miss the divergence. Per-cell, not per-address:
+	// only the tx's own write to this exact cell takes precedence (via versionedWriteHit below).
 	if !commited {
 		if !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
