@@ -50,6 +50,9 @@ type PipelineExecutor struct {
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
 	logger                  log.Logger
+	// roundCtx is how a per-round deadline reaches execution at all; see RoundContext. Nil where the
+	// validation pipeline was built without one, and then a round simply runs to completion.
+	roundCtx *RoundContext
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -80,6 +83,19 @@ func NewPipelineExecutor(
 		logger:                  logger,
 	}
 }
+
+// SetRoundContext attaches the swappable context the validation stages were built with, so a pre-exec
+// round's deadline can reach execution. Without it a round runs to completion whatever deadline it was
+// given, and the seal waits for all of it.
+func (pe *PipelineExecutor) SetRoundContext(rc *RoundContext) { pe.roundCtx = rc }
+
+// EnterRound points the validation stage pipeline at ctx until the returned function is called.
+//
+// Only the PRODUCER's path uses this (ExecuteInto). Validation driven by newPayload keeps running under
+// the node's context as it always has: a request timeout there is about the caller waiting, not about
+// whether the block should finish being validated, and cutting execution on it would turn a slow request
+// into an invalid block.
+func (pe *PipelineExecutor) EnterRound(ctx context.Context) func() { return pe.roundCtx.Enter(ctx) }
 
 // ValidationNotifications returns the notifications object used by the
 // validation pipeline. The ForkValidator uses this as extendingForkNotifications

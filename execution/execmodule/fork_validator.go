@@ -430,6 +430,11 @@ func (fv *ForkValidator) ExecuteInto(ctx context.Context, sd *execctx.SharedDoma
 	hash := header.Hash()
 	number := header.Number.Uint64()
 
+	// A pre-exec round may be given a deadline, and this is where it becomes real: the validation stages
+	// closed over the node's context when they were built, so without this swap execution cannot see the
+	// round's deadline and runs to completion however long that takes.
+	defer fv.executor.EnterRound(ctx)()
+
 	// Use the pipeline's own notifications object so the state changes exec3 accumulates are visible here,
 	// reset per round to match a fresh Sync's behaviour.
 	notifications = fv.executor.ValidationNotifications()

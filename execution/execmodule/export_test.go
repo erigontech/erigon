@@ -38,3 +38,7 @@ func (e *ExecModule) ResetFlashBodyForTest(num uint64) {
 	e.flash.resetLocked(num)
 	e.flash.mu.Unlock()
 }
+
+// FlashBodyForTest returns the in-progress block's accumulated tx RLPs, so a test can assert what a failed
+// or abandoned round left behind. Test-only.
+func (e *ExecModule) FlashBodyForTest() [][]byte { return e.flashBodyCopy() }

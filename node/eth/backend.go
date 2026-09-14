@@ -948,10 +948,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
-	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
+	// The validation stages bake in whatever context they are built with, so build them on a swappable one:
+	// that is what lets a pre-exec round impose a deadline on execution (see execmodule.RoundContext).
+	roundCtx := execmodule.NewRoundContext(backend.sentryCtx)
+	validationSync := stageloop.NewInMemoryExecution(roundCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
+	pipelineExecutor.SetRoundContext(roundCtx)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 

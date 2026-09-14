@@ -2,6 +2,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -224,9 +225,20 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		e.flash.mu.Unlock()
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: ExecutionStatusBusy}, err
 	}
+	// The round's transactions join the MAINTAINED body here, before they have executed — the header this
+	// round builds and inserts has to carry them. So every path out of this function that does not commit
+	// the round has to put the body back: the seal reads e.flash.body, and a body still carrying a round
+	// that never executed seals transactions the state knows nothing about.
+	roundBase := len(e.flash.body)
 	e.flash.body = append(e.flash.body, kept...)
 	body := append([][]byte(nil), e.flash.body...)
 	e.flash.mu.Unlock()
+	committed := false
+	defer func() {
+		if !committed {
+			e.rollbackRound(inputs.Number, roundBase)
+		}
+	}()
 	// Record this round's per-tx cost on EVERY path, including the ones that fail. The batch sizer's time
 	// bound exists to predict precisely the rounds that overrun their budget, so those must be sampled —
 	// recording only rounds that went on to seal left the window able to learn from the fast ones alone.
@@ -240,6 +252,18 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("PreExecuteFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(body), status, err)
 	}
 	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
+	// The round ran out of the time its caller gave it. That is a DROP, not a failure, and it has to be
+	// recognised BEFORE the verdict below: execution cut off mid-round reports the block as INVALID, which
+	// is true of the half-executed body and says nothing about the transactions. Treating it as a bad block
+	// would condemn transactions whose only fault is that the clock ran out while they were being executed.
+	//
+	// Nothing is left behind either way: the deferred rollback takes the round's transactions back out of
+	// the body and the staged state was closed rather than merged, so the block is exactly what it was
+	// before the round began and the seal may proceed at once.
+	if ctx.Err() != nil {
+		return nil, common.Hash{}, ValidationResult{}, fmt.Errorf("%w: num=%d roundTxs=%d after=%s", ErrRoundAbandoned,
+			inputs.Number, len(kept), time.Since(roundStart).Round(time.Millisecond))
+	}
 	if err != nil {
 		return nil, common.Hash{}, vr, err
 	}
@@ -274,7 +298,28 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		e.flash.receipts = vr.FlashblockReceiptCount
 	}
 	e.flash.mu.Unlock()
+	committed = true
 	return &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}, hash, vr, nil
+}
+
+// ErrRoundAbandoned reports a pre-execution round cut short because the deadline its caller gave it
+// passed. The block is left exactly as it was before the round began — the round's transactions are out
+// of the maintained body again and its staged state was closed, not merged — so the caller may seal
+// immediately. The transactions themselves are the caller's to dispose of: they were not executed here
+// and this module does not know whether they are worth trying again.
+var ErrRoundAbandoned = errors.New("pre-exec round abandoned on deadline")
+
+// rollbackRound returns the maintained body to `base`, undoing this round's append. Guarded on the block
+// number so a round that outlived its block cannot truncate its successor's body.
+func (e *ExecModule) rollbackRound(number uint64, base int) {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	if e.flash.num != number || len(e.flash.body) <= base {
+		return
+	}
+	dropped := len(e.flash.body) - base
+	e.flash.body = e.flash.body[:base]
+	e.logger.Debug("[intra-block] round rolled back out of the body", "block", number, "dropped", dropped, "bodyLen", base)
 }
 
 // reopenFlashblockLocked re-opens the CURRENT block under corrected attributes, restoring a body that was
