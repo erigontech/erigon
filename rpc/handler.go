@@ -217,7 +217,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				}
 
 				// A non-nil res is an error answer that still has to be written. On nil the answer
-				// is already in the stream, or the call is a notification and buf stays empty.
+				// is already in the stream, or the message needs none.
 				buf := bytes.NewBuffer(nil)
 				stream := jsonstream.Get(buf)
 				defer jsonstream.Put(stream)
