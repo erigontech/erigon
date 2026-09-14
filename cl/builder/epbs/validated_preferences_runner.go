@@ -74,7 +74,10 @@ type ValidatedPreferencesRunner struct {
 	clock          SlotClock
 	maxPending     int
 	retryInterval  time.Duration
+	bidDelay       time.Duration
 	newTicker      func(time.Duration) runnerTicker
+	now            func() time.Time
+	slotTime       func(uint64) time.Time
 	observeFailure func(uint64, common.Hash, error)
 
 	mu              sync.Mutex
@@ -117,8 +120,26 @@ func newValidatedPreferencesRunner(
 	retryInterval time.Duration,
 	newTicker func(time.Duration) runnerTicker,
 ) (*ValidatedPreferencesRunner, error) {
+	return newValidatedPreferencesRunnerWithTiming(
+		coordinator, clock, maxPending, retryInterval, 0, newTicker, time.Now, nil,
+	)
+}
+
+func newValidatedPreferencesRunnerWithTiming(
+	coordinator ValidatedPreferencesCoordinator,
+	clock SlotClock,
+	maxPending int,
+	retryInterval time.Duration,
+	bidDelay time.Duration,
+	newTicker func(time.Duration) runnerTicker,
+	now func() time.Time,
+	slotTime func(uint64) time.Time,
+) (*ValidatedPreferencesRunner, error) {
 	if isNilDependency(coordinator) || isNilDependency(clock) || newTicker == nil {
 		return nil, errors.New("epbs/preferences runner: missing dependency")
+	}
+	if now == nil {
+		return nil, errors.New("epbs/preferences runner: missing clock source")
 	}
 	if maxPending <= 0 {
 		return nil, errors.New("epbs/preferences runner: max pending must be positive")
@@ -126,12 +147,21 @@ func newValidatedPreferencesRunner(
 	if retryInterval < minValidatedPreferencesRetryInterval {
 		return nil, errors.New("epbs/preferences runner: retry interval is too short")
 	}
+	if bidDelay < 0 {
+		return nil, errors.New("epbs/preferences runner: bid delay must not be negative")
+	}
+	if bidDelay > 0 && slotTime == nil {
+		return nil, errors.New("epbs/preferences runner: missing slot time source")
+	}
 	return &ValidatedPreferencesRunner{
 		coordinator:    coordinator,
 		clock:          clock,
 		maxPending:     maxPending,
 		retryInterval:  retryInterval,
+		bidDelay:       bidDelay,
 		newTicker:      newTicker,
+		now:            now,
+		slotTime:       slotTime,
 		observeFailure: logValidatedPreferencesFailure,
 		pending:        make(map[preferencesKey]pendingPreferences),
 		blocked:        make(map[preferencesKey]struct{}),
@@ -271,14 +301,18 @@ func (r *ValidatedPreferencesRunner) startNext(ctx context.Context, currentSlot 
 		return
 	}
 	r.mu.Lock()
-	if r.active != nil || !r.attemptPermit || r.stopping || ctx.Err() != nil {
+	if r.active != nil || !r.attemptPermit || r.stopping || ctx.Err() != nil || len(r.pending) == 0 {
 		r.mu.Unlock()
 		return
+	}
+	now := time.Time{}
+	if r.bidDelay > 0 {
+		now = r.now()
 	}
 	if r.haveSlot && r.observedSlot > currentSlot {
 		currentSlot = r.observedSlot
 	}
-	key, pending, ok := r.nextEligibleLocked(currentSlot)
+	key, pending, ok := r.nextEligibleLocked(currentSlot, now)
 	if !ok {
 		r.mu.Unlock()
 		return
@@ -309,11 +343,18 @@ func (r *ValidatedPreferencesRunner) startNext(ctx context.Context, currentSlot 
 	}()
 }
 
-func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64) (preferencesKey, pendingPreferences, bool) {
+func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64, now time.Time) (preferencesKey, pendingPreferences, bool) {
 	var earliestSlot uint64
 	foundSlot := false
 	for key := range r.pending {
 		if !slotEligible(currentSlot, key.slot) || (foundSlot && key.slot >= earliestSlot) {
+			continue
+		}
+		precedingSlot := key.slot
+		if precedingSlot > 0 {
+			precedingSlot--
+		}
+		if r.bidDelay > 0 && now.Before(r.slotTime(precedingSlot).Add(r.bidDelay)) {
 			continue
 		}
 		earliestSlot = key.slot

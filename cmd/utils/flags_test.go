@@ -24,6 +24,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -333,20 +334,22 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	enabled := EpbsBuilderFlag
 	key := EpbsBuilderKeyFlag
 	margin := EpbsBuilderBidMarginFlag
+	delay := EpbsBuilderBidDelayFlag
 	cfg := ethconfig.Config{}
 	app := &cli.Command{
-		Flags: []cli.Flag{&enabled, &key, &margin},
+		Flags: []cli.Flag{&enabled, &key, &margin, &delay},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			setCaplin(cmd, &cfg)
 			return nil
 		},
 	}
 	require.NoError(t, app.Run(context.Background(), []string{
-		"erigon", "--builder", "--builder.key=/secure/builder.key", "--builder.bid-margin=0.9",
+		"erigon", "--builder", "--builder.key=/secure/builder.key", "--builder.bid-margin=0.9", "--builder.bid-delay=1.2s",
 	}))
 	require.True(t, cfg.CaplinConfig.EpbsBuilder.Enabled)
 	require.Equal(t, "/secure/builder.key", cfg.CaplinConfig.EpbsBuilder.KeyPath)
 	require.Equal(t, 0.9, cfg.CaplinConfig.EpbsBuilder.BidMargin)
+	require.Equal(t, 1200*time.Millisecond, cfg.CaplinConfig.EpbsBuilder.BidDelay)
 	require.Zero(t, cfg.CaplinConfig.EpbsBuilder.MaxPending)
 	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxRetained)
 	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.RetryInterval)

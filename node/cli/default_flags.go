@@ -194,6 +194,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.EpbsBuilderFlag,
 	&utils.EpbsBuilderKeyFlag,
 	&utils.EpbsBuilderBidMarginFlag,
+	&utils.EpbsBuilderBidDelayFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,

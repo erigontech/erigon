@@ -67,7 +67,16 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	)
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
 	live := NewLiveCoordinator(coordinator, resolver, resolver)
-	runner, err := NewValidatedPreferencesRunner(live, deps.Clock, cfg.MaxPending, cfg.RetryInterval)
+	runner, err := newValidatedPreferencesRunnerWithTiming(
+		live,
+		deps.Clock,
+		cfg.MaxPending,
+		cfg.RetryInterval,
+		cfg.BidDelay,
+		func(interval time.Duration) runnerTicker { return systemRunnerTicker{Ticker: time.NewTicker(interval)} },
+		time.Now,
+		deps.Clock.GetSlotTime,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("epbs/runtime: create preferences runner: %w", err)
 	}
@@ -114,6 +123,13 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	}
 	if beaconCfg.SecondsPerSlot == 0 || beaconCfg.SecondsPerSlot > uint64(math.MaxInt64/int64(time.Second)) {
 		return cfg, nil, errors.New("epbs/runtime: slot duration is outside the supported range")
+	}
+	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+	if cfg.BidDelay < 0 || cfg.BidDelay >= slotDuration {
+		return cfg, nil, errors.New("epbs/runtime: bid delay must be within the preceding slot")
+	}
+	if cfg.BidDelay > 0 && (cfg.RetryInterval >= slotDuration || cfg.BidDelay >= slotDuration-cfg.RetryInterval) {
+		return cfg, nil, errors.New("epbs/runtime: bid delay and retry cadence must fit within the preceding slot")
 	}
 	if cfg.MaxPending == 0 {
 		if beaconCfg.SlotsPerEpoch > uint64(^uint(0)>>1) {

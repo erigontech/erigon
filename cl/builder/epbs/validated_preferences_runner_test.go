@@ -26,6 +26,10 @@ func (c *manualRunnerClock) GetCurrentSlot() uint64 {
 	return c.slot
 }
 
+func (c *manualRunnerClock) GetSlotTime(slot uint64) time.Time {
+	return time.Unix(0, 0).Add(time.Duration(slot) * 12 * time.Second)
+}
+
 func (c *manualRunnerClock) set(slot uint64) {
 	c.mu.Lock()
 	c.slot = slot
@@ -198,6 +202,51 @@ func TestValidatedPreferencesRunnerRetainsOwnedFuturePreferenceUntilEligible(t *
 	ticker.tick()
 	calls = waitForRunnerCalls(t, coordinator, 1)
 	require.Equal(t, runnerCall{slot: 12, root: root}, calls[0])
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
+func TestValidatedPreferencesRunnerDefersFirstAttemptUntilBidDelay(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	coordinator := &recordingPreferencesCoordinator{
+		outcomes: map[runnerCall][]runnerOutcome{
+			{slot: 11, root: common.HexToHash("0x11")}: {{bid: new(cltypes.SignedExecutionPayloadBid)}},
+		},
+		started: make(chan runnerCall, 1),
+	}
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time)}
+	nowRequests := make(chan chan time.Time)
+	runner, err := newValidatedPreferencesRunnerWithTiming(
+		coordinator,
+		clock,
+		1,
+		time.Second,
+		time.Second,
+		func(time.Duration) runnerTicker { return ticker },
+		func() time.Time {
+			response := make(chan time.Time)
+			nowRequests <- response
+			return <-response
+		},
+		clock.GetSlotTime,
+	)
+	require.NoError(t, err)
+	runner.SubmitValidatedPreferences(runnerPreferences(11, common.HexToHash("0x11")))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	beforeDelay := <-nowRequests
+	beforeDelay <- clock.GetSlotTime(10).Add(time.Second - time.Nanosecond)
+	tickSent := make(chan struct{})
+	go func() {
+		ticker.tick()
+		close(tickSent)
+	}()
+	atDelay := <-nowRequests
+	require.Empty(t, coordinator.started)
+	atDelay <- clock.GetSlotTime(10).Add(time.Second)
+	<-tickSent
+	require.Equal(t, runnerCall{slot: 11, root: common.HexToHash("0x11")}, <-coordinator.started)
 	stopTestPreferencesRunner(t, cancel, done)
 }
 

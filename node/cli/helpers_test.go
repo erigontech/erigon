@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,6 +48,15 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 	}
 	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
 	return result
+}
+
+func TestDefaultFlagsIncludeEmbeddedBuilderBidDelay(t *testing.T) {
+	for _, flag := range DefaultFlags {
+		if slices.Contains(flag.Names(), "builder.bid-delay") {
+			return
+		}
+	}
+	require.Fail(t, "builder.bid-delay is not registered")
 }
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler

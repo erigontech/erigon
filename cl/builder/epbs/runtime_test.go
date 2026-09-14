@@ -534,6 +534,18 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		{name: "retry cadence too short", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.RetryInterval = minValidatedPreferencesRetryInterval - time.Nanosecond
 		}},
+		{name: "negative bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
+			cfg.BidDelay = -time.Nanosecond
+		}},
+		{name: "bid delay reaches target slot", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot) * time.Second
+		}},
+		{name: "bid delay leaves no retry cadence", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval
+		}},
+		{name: "bid delay exceeds retry cadence boundary", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval + time.Nanosecond
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testCfg := valid
@@ -546,7 +558,22 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 	}
 }
 
-func TestRuntimeDefaultPendingCapacityTracksChain(t *testing.T) {
+func TestRuntimeAcceptsBidDelayBeforeRetryCadenceBoundary(t *testing.T) {
+	beaconCfg := gloasCoordinatorConfig()
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
+	cfg := epbscfg.DefaultConfig()
+	cfg.Enabled = true
+	cfg.KeyPath = keyPath
+	cfg.BidDelay = time.Duration(beaconCfg.SecondsPerSlot)*time.Second - cfg.RetryInterval - time.Nanosecond
+
+	_, _, err = prepareRuntimeConfig(cfg, &beaconCfg)
+	require.NoError(t, err)
+}
+
+func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	cfg := gloasCoordinatorConfig()
 	cfg.SlotsPerEpoch = 64
 	keyPath := filepath.Join(t.TempDir(), "builder.key")
@@ -556,6 +583,7 @@ func TestRuntimeDefaultPendingCapacityTracksChain(t *testing.T) {
 	runtimeCfg := epbscfg.DefaultConfig()
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
+	runtimeCfg.BidDelay = 1200 * time.Millisecond
 	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
 		BeaconConfig:     &cfg,
 		Clock:            eth_clock.NewMockEthereumClock(gomock.NewController(t)),
@@ -571,4 +599,5 @@ func TestRuntimeDefaultPendingCapacityTracksChain(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
+	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
 }

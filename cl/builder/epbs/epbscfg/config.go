@@ -14,6 +14,7 @@ type Config struct {
 	Enabled       bool
 	KeyPath       string
 	BidMargin     float64
+	BidDelay      time.Duration
 	MaxPending    int
 	MaxRetained   int
 	RetryInterval time.Duration
