@@ -53,9 +53,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
 	base.resetFoldFrontier()
-	if len(base.branchEncoder.deferred) > 0 {
-		base.branchEncoder.ClearDeferred()
-	}
+	base.branchEncoder.ClearDeferred()
 	base.metrics.Reset()
 
 	concurrency := parallelMountConcurrency(p.numWorkers)
