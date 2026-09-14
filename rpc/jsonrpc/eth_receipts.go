@@ -402,7 +402,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
+		r, err := api.receiptsGenerator.GetReceiptWithoutBloom(ctx, chainConfig, tx, header, txn, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}

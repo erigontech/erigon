@@ -346,14 +346,16 @@ func TestGetBlockReceipts(t *testing.T) {
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen), opts ...execmoduletester.Option) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(
 		t,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
-			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-		}),
-		execmoduletester.WithKey(testKey),
+		append([]execmoduletester.Option{
+			execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainBerlinConfig,
+				Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+			}),
+			execmoduletester.WithKey(testKey),
+		}, opts...)...,
 	)
 	if blocks > 0 {
 		chain, _ := m.GenerateChain(blocks, generator)

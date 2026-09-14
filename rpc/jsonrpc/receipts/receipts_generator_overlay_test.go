@@ -23,8 +23,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -81,4 +83,41 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, overlayLogIdx, receipt.FirstLogIndexWithinBlock,
 		"GetReceipt must resolve the log index through the block overlay")
+}
+
+// TestGetReceiptWithoutBloomKeepsCacheComplete pins that a receipt read only for its logs
+// does not reach the receipt cache: GetReceipt callers serve its Bloom as logsBloom.
+func TestGetReceiptWithoutBloomKeepsCacheComplete(t *testing.T) {
+	signer := types.LatestSignerForChainID(nil)
+	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
+	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate),
+			*signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	}, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(1)
+	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	txNum := minTxNum + 1
+	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
+
+	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+	logsOnly, err := gen.GetReceiptWithoutBloom(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum)
+	require.NoError(t, err)
+	require.Len(t, logsOnly.Logs, 1)
+	require.Equal(t, types.Bloom{}, logsOnly.Bloom, "the receipt must come from the persistent cache")
+
+	full, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, types.Bloom{}, full.Bloom)
+	require.Equal(t, types.CreateBloom(types.Receipts{full}), full.Bloom)
 }

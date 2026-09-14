@@ -215,7 +215,17 @@ type PostStateInfo struct {
 	CommitmentHistory bool
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (_ *types.Receipt, err error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (*types.Receipt, error) {
+	return g.getReceipt(ctx, cfg, tx, header, txn, index, txNum, postState, true)
+}
+
+// GetReceiptWithoutBloom is GetReceipt for callers that read only logs: a receipt served
+// from the persistent cache has an empty Bloom.
+func (g *Generator) GetReceiptWithoutBloom(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
+	return g.getReceipt(ctx, cfg, tx, header, txn, index, txNum, nil, false)
+}
+
+func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo, withBloom bool) (_ *types.Receipt, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
@@ -264,16 +274,19 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var ok bool
 		var err error
 		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:     txNum,
-			BlockNum:  blockNum,
-			BlockHash: blockHash,
-			TxnHash:   txnHash,
+			TxNum:         txNum,
+			BlockNum:      blockNum,
+			BlockHash:     blockHash,
+			TxnHash:       txnHash,
+			DontCalcBloom: !withBloom,
 		})
 		if err != nil {
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && PersistedReceiptsServed() {
-			g.addToCacheReceipt(txNum, receiptFromDB)
+			if withBloom {
+				g.addToCacheReceipt(txNum, receiptFromDB)
+			}
 			return receiptFromDB, nil
 		}
 	}
