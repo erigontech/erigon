@@ -303,9 +303,6 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if !defer_ {
-		be.callerOwnsDeferred = false
-	}
 	if defer_ && be.deferred == nil {
 		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
@@ -480,6 +477,9 @@ func (be *BranchEncoder) CollectUpdate(
 	cells *[16]cellEncodeData,
 	prev []byte,
 ) error {
+	if be.deferUpdates {
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
+	}
 	if prev == nil {
 		prev = []byte{}
 	}

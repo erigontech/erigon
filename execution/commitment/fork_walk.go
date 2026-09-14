@@ -204,7 +204,6 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	fw.forks.Add(1)
 
 	cells := &w.stitchScratch
-	var deferredByChild [16][]*DeferredBranchUpdate
 	var touched, present [16]bool
 	var nibs [16]byte
 	n := 0
@@ -235,18 +234,14 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 				if i >= n {
 					return nil
 				}
-				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &touched, &present, &deferredByChild); cerr != nil {
+				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &touched, &present); cerr != nil {
 					return cerr
 				}
 			}
 		})
 	}
 
-	werr := g.Wait()
-	for _, d := range deferredByChild {
-		fw.pu.appendDeferred(d)
-	}
-	if werr != nil {
+	if werr := g.Wait(); werr != nil {
 		return werr
 	}
 	if aerr := fw.attach(ctx, wk); aerr != nil {
@@ -275,7 +270,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 }
 
 func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
-	idx, nib int, path []byte, cells *[16]cell, touched, present *[16]bool, deferred *[16][]*DeferredBranchUpdate) error {
+	idx, nib int, path []byte, cells *[16]cell, touched, present *[16]bool) error {
 	child := node.children[idx]
 	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
 	childPath = append(childPath, path...)
@@ -286,11 +281,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	defer fw.checkin(cw)
 	cw.trie.mountTo(base, nib)
 	if err := fw.walk(ctx, cw, child, childPath); err != nil {
-		deferred[nib] = cw.trie.TakeDeferredUpdates()
 		return fmt.Errorf("fork[%x]: child %x: %w", path, nib, err)
 	}
 	c, ferr := cw.trie.foldMounted(ctx, nib)
-	deferred[nib] = cw.trie.TakeDeferredUpdates()
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
@@ -324,5 +317,6 @@ func (fw *forkWalk) checkin(wk *walker) {
 	wk.trie = nil
 	w.ResetContext(nil)
 	fw.metrics.Merge(w.metrics)
+	fw.pu.appendDeferred(w.TakeDeferredUpdates())
 	w.Release()
 }

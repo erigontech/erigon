@@ -308,12 +308,11 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 	held := &walker{lease: l, bindsCtx: true}
 
 	var cells [16]cell
-	var deferred [16][]*DeferredBranchUpdate
 	func() {
 		defer func() {
 			require.Equal(t, "injected account panic", recover(), "the child must panic inside the walk")
 		}()
-		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &[16]bool{}, &[16]bool{}, &deferred)
+		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &[16]bool{}, &[16]bool{})
 	}()
 
 	require.Nil(t, held.trie, "checkin must return the child trie even when the walk panics")
