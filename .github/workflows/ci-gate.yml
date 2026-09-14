@@ -132,6 +132,7 @@ jobs:
       - changes
       - lint
       - tests
+      - next-toolchain
       - race-tests
       - eest-spec-tests
       - hive
