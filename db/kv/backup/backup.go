@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"slices"
 	"time"
 
@@ -139,8 +140,17 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
 	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
-	if err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger); err != nil {
+	src, err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger)
+	if err != nil {
 		return err
+	}
+	// The exclusive src stays open until the rename, so a process that doesn't take
+	// the datadir lock can't open the file that is being replaced. Windows can't
+	// rename over a file mdbx opened in exclusive mode.
+	closeSrc := sync.OnceFunc(src.Close)
+	defer closeSrc()
+	if runtime.GOOS == "windows" {
+		closeSrc()
 	}
 
 	// Mode and owner are applied before the rename, the last step that may fail.
@@ -154,6 +164,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := os.Rename(copied, dataFile); err != nil {
 		return err
 	}
+	closeSrc()
 
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
@@ -174,16 +185,21 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	return nil
 }
 
-// copyToDir closes both databases before it returns: the caller moves the copy,
-// which must not happen while mdbx still holds the file open.
-func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) error {
+// copyToDir closes the copy before it returns: the caller moves it, which must not
+// happen while mdbx still holds it open. On success the exclusive src is returned
+// open, and the caller closes it.
+func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) (kv.RoDB, error) {
 	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, nil, logger)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer src.Close()
-	defer dst.Close()
-	return Kv2kv(ctx, src, dst, nil, logger)
+	err = Kv2kv(ctx, src, dst, nil, logger)
+	dst.Close()
+	if err != nil {
+		src.Close()
+		return nil, err
+	}
+	return src, nil
 }
 
 // tablesOnDisk opens every table the file actually holds and reads back the flags
