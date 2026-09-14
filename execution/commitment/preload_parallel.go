@@ -30,6 +30,9 @@ import (
 // callers can supply a fresh tx-scoped resolver each block.
 type BatchBranchResolver func(keys [][]byte) (vals [][]byte, err error)
 
+// 168 = branchCacheEntry (~80B) + maphash slot/hash (~40B) + prefix/value slice headers (~24B each).
+const estimatedEntryOverheadBytes = 168
+
 func estimatedEntryCost(key, value []byte) int {
 	return estimatedEntryOverheadBytes + len(key) + len(value)
 }
