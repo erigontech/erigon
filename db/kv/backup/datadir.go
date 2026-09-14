@@ -95,11 +95,11 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 
 // bloatRatio is how many times the free pages of a db must outweigh its data
 // before AutoCompactDatadir rewrites it.
-const bloatRatio = 3
+const bloatRatio = 4
 
 // autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
 // pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree = datasize.GB
+var autoCompactMinFree = 1 * datasize.GB
 
 // ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
 // datadir locked by another process is skipped.
