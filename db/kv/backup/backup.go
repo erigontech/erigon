@@ -143,6 +143,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err != nil {
 		return err
 	}
+	closeBeforeRename(src)
 	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before) // exclusive src stays open, so nobody opens the file being replaced
 	src.Close()
 	if err != nil {
