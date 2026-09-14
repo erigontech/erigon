@@ -516,42 +516,38 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// MarshalFastJSON must be byte-identical to reflection-based json.Marshal,
-// since it replaces it on the eth_getLogs response path.
+// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
+// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
+// so the bound is checked directly as well.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
-	t.Parallel()
-	mk := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
+	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
 			Log: Log{
 				Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
 				Topics:      topics,
 				Data:        data,
-				BlockNumber: hexutil.Uint64(25880000),
+				BlockNumber: hexutil.Uint64(^uint64(0)),
 				TxHash:      common.HexToHash("0xaabb"),
-				TxIndex:     hexutil.Uint(7),
+				TxIndex:     hexutil.Uint(^uint(0)),
 				BlockHash:   common.HexToHash("0xccdd"),
-				Index:       hexutil.Uint(3),
+				Index:       hexutil.Uint(^uint(0)),
 				Removed:     removed,
 			},
-			BlockTimestamp: hexutil.Uint64(1700000000),
+			BlockTimestamp: hexutil.Uint64(^uint64(0)),
 		}
 	}
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	maxed := mk(nil, nil, true)
-	maxed.BlockNumber = hexutil.Uint64(^uint64(0))
-	maxed.BlockTimestamp = hexutil.Uint64(^uint64(0))
-	maxed.Index = hexutil.Uint(^uint(0))
 
 	for name, logs := range map[string]RPCLogs{
-		"nil":          nil,
-		"empty":        {},
-		"nil-topics":   {mk(nil, []byte{1, 2, 3}, false)},
-		"empty-topics": {mk([]common.Hash{}, nil, false)},
-		"topics":       {mk([]common.Hash{topic, {}}, []byte{0xff}, false)},
-		"removed":      {mk([]common.Hash{topic}, nil, true)},
-		"maxed":        {maxed},
-		"nil-entry":    {nil, mk([]common.Hash{topic}, []byte{9}, false), nil},
-		"many":         {mk([]common.Hash{topic}, []byte{1}, false), mk(nil, nil, true)},
+		"nil":                nil,
+		"empty":              {},
+		"zero":               {{}},
+		"nil-topics":         {maxed(nil, []byte{1, 2, 3}, false)},
+		"empty-topics":       {maxed([]common.Hash{}, nil, false)},
+		"many-topics":        {maxed([]common.Hash{topic, {}, topic, {}}, make([]byte, 4096), false)},
+		"removed-nil-topics": {maxed(nil, nil, true)},
+		"nil-entries":        {nil, maxed([]common.Hash{topic}, []byte{9}, false), nil},
+		"many-nil-topics":    {maxed(nil, nil, false), maxed(nil, nil, true), maxed(nil, nil, false)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
@@ -559,6 +555,7 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 			got, err := logs.MarshalFastJSON()
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+			require.InDelta(t, 1, testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }), 0)
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
@@ -566,46 +563,8 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 				got, err := l.MarshalFastJSON()
 				require.NoError(t, err)
 				require.Equal(t, string(want), string(got))
+				require.LessOrEqual(t, len(got), l.fastJSONLen())
 			}
-		})
-	}
-}
-
-// A short fastJSONLen makes append regrow the buffer. Malloc size-class slack can hide a
-// small miss from the allocation count, so the bound is checked directly as well.
-func TestRPCLogsMarshalFastJSONAllocatesOnce(t *testing.T) {
-	maxed := func(topics []common.Hash, data []byte) *RPCLog {
-		return &RPCLog{
-			Log: Log{
-				Topics:      topics,
-				Data:        data,
-				BlockNumber: hexutil.Uint64(^uint64(0)),
-				TxIndex:     hexutil.Uint(^uint(0)),
-				Index:       hexutil.Uint(^uint(0)),
-			},
-			BlockTimestamp: hexutil.Uint64(^uint64(0)),
-		}
-	}
-	removed := maxed(nil, nil)
-	removed.Removed = true
-
-	for name, logs := range map[string]RPCLogs{
-		"nil":                nil,
-		"empty":              {},
-		"nil-topics":         {maxed(nil, nil)},
-		"empty-topics":       {maxed([]common.Hash{}, nil)},
-		"many-topics":        {maxed(make([]common.Hash, 4), make([]byte, 4096))},
-		"nil-entries":        {nil, maxed(nil, nil), nil},
-		"many-nil-topics":    {maxed(nil, nil), maxed(nil, nil), maxed(nil, nil)},
-		"removed-nil-topics": {removed},
-	} {
-		t.Run(name, func(t *testing.T) {
-			for _, l := range logs {
-				if l != nil {
-					require.LessOrEqual(t, len(l.appendFastJSON(nil)), l.fastJSONLen())
-				}
-			}
-			require.InDelta(t, 1, testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }), 0)
 		})
 	}
 }

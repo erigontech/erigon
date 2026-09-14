@@ -17,14 +17,14 @@
 package types
 
 import (
+	"strconv"
+
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
 
-// quotedHexLen is the encoded size of n bytes as a quoted 0x-prefixed hex string.
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
 
-// maxQuotedUintLen bounds a quoted 0x-prefixed hex uint64.
 const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
 
 func appendQuotedHex(dst []byte, b []byte) []byte {
@@ -42,6 +42,9 @@ func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 // fastJSONLen is an upper bound on the encoded size, so the buffer is allocated
 // once instead of doubling.
 func (l *RPCLog) fastJSONLen() int {
+	if l == nil {
+		return len("null")
+	}
 	n := len(`{"address":,"topics":[],"data":,"blockNumber":,"transactionHash":,`) +
 		len(`"transactionIndex":,"blockHash":,"logIndex":,"removed":false,"blockTimestamp":}`)
 	n += quotedHexLen(length.Addr)
@@ -58,6 +61,9 @@ func (l *RPCLog) fastJSONLen() int {
 // appendFastJSON writes the log in the field order encoding/json uses for the
 // struct, so the output is byte-identical to reflection-based marshalling.
 func (l *RPCLog) appendFastJSON(dst []byte) []byte {
+	if l == nil {
+		return append(dst, "null"...)
+	}
 	dst = append(dst, `{"address":`...)
 	dst = appendQuotedHex(dst, l.Address[:])
 
@@ -87,49 +93,30 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 	dst = appendQuotedHex(dst, l.BlockHash[:])
 	dst = append(dst, `,"logIndex":`...)
 	dst = appendQuotedUint64(dst, hexutil.Uint64(l.Index))
-	if l.Removed {
-		dst = append(dst, `,"removed":true`...)
-	} else {
-		dst = append(dst, `,"removed":false`...)
-	}
+	dst = strconv.AppendBool(append(dst, `,"removed":`...), l.Removed)
 	dst = append(dst, `,"blockTimestamp":`...)
 	dst = appendQuotedUint64(dst, l.BlockTimestamp)
 	return append(dst, '}')
 }
 
-// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON, used for log subscriptions.
+// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON.
 func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	if l == nil {
-		return []byte("null"), nil
-	}
 	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
 }
 
-// MarshalFastJSON serializes the eth_getLogs result into one pre-sized buffer
-// (direct hex encoding) instead of reflection. The count and each log's data
-// length are known up front, so the size is exact enough to allocate once.
-// Byte-identical to json.Marshal of the same value.
+// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
 func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 	if logs == nil {
 		return []byte("null"), nil
 	}
-	size := len("[]")
+	size := len("[]") + len(logs)
 	for _, l := range logs {
-		if l == nil {
-			size += len("null,")
-			continue
-		}
-		size += l.fastJSONLen() + 1
+		size += l.fastJSONLen()
 	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
+	out := append(make([]byte, 0, size), '[')
 	for i, l := range logs {
 		if i > 0 {
 			out = append(out, ',')
-		}
-		if l == nil {
-			out = append(out, "null"...)
-			continue
 		}
 		out = l.appendFastJSON(out)
 	}
