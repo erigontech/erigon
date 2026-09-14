@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"cmp"
 	"context"
 	"encoding/hex"
 	"sync"
@@ -69,12 +68,24 @@ type adaptiveContractState struct {
 
 func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfig, logger log.Logger) *AdaptivePinController {
 	def := DefaultAdaptivePinControllerConfig()
-	cfg.InitialViewBudgetBytes = cmp.Or(cfg.InitialViewBudgetBytes, def.InitialViewBudgetBytes)
-	cfg.ExtensionBudgetBytes = cmp.Or(cfg.ExtensionBudgetBytes, def.ExtensionBudgetBytes)
-	cfg.PerContractMaxBudgetBytes = cmp.Or(cfg.PerContractMaxBudgetBytes, def.PerContractMaxBudgetBytes)
-	cfg.MaxPromotedContracts = cmp.Or(cfg.MaxPromotedContracts, def.MaxPromotedContracts)
-	cfg.DemoteCooldownBlocks = cmp.Or(cfg.DemoteCooldownBlocks, def.DemoteCooldownBlocks)
-	cfg.PromoteThresholdMisses = cmp.Or(cfg.PromoteThresholdMisses, def.PromoteThresholdMisses)
+	if cfg.InitialViewBudgetBytes <= 0 {
+		cfg.InitialViewBudgetBytes = def.InitialViewBudgetBytes
+	}
+	if cfg.ExtensionBudgetBytes <= 0 {
+		cfg.ExtensionBudgetBytes = def.ExtensionBudgetBytes
+	}
+	if cfg.PerContractMaxBudgetBytes <= 0 {
+		cfg.PerContractMaxBudgetBytes = def.PerContractMaxBudgetBytes
+	}
+	if cfg.MaxPromotedContracts <= 0 {
+		cfg.MaxPromotedContracts = def.MaxPromotedContracts
+	}
+	if cfg.DemoteCooldownBlocks <= 0 {
+		cfg.DemoteCooldownBlocks = def.DemoteCooldownBlocks
+	}
+	if cfg.PromoteThresholdMisses == 0 {
+		cfg.PromoteThresholdMisses = def.PromoteThresholdMisses
+	}
 	return &AdaptivePinController{
 		cache:  cache,
 		cfg:    cfg,
