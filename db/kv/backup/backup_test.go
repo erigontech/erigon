@@ -165,6 +165,8 @@ func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
 	t.Helper()
 	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
 	require.NoError(t, err)
+	// Windows reads the file id lazily, from whatever file is at the path by then.
+	require.True(t, os.SameFile(st, st))
 	return st
 }
 
