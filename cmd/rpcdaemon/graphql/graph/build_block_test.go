@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,13 +26,20 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 		Root:        common.HexToHash("0x22"),
 		TxHash:      common.HexToHash("0x33"),
 		ReceiptHash: common.HexToHash("0x44"),
+		UncleHash:   common.HexToHash("0x66"),
 		GasLimit:    36_000_000,
 		GasUsed:     17_000_000,
 		Time:        1_750_000_000,
 		Extra:       []byte("erigon"),
 		BaseFee:     uint256.NewInt(1_234_567_890),
+		Coinbase:    common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01"),
+		Difficulty:  *uint256.NewInt(0x2a),
+		MixDigest:   common.HexToHash("0x55"),
+		Nonce:       types.EncodeNonce(0x1234),
 	}
-	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+	header.Bloom[0], header.Bloom[types.BloomByteLength-1] = 0xab, 0x01
+	uncle := &types.Header{Number: *uint256.NewInt(20_999_999)}
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, []*types.Header{uncle}, nil, nil)
 
 	marshalled := ethapi.RPCMarshalBlock(block, true, false)
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
@@ -50,9 +58,23 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	require.Equal(t, uint64(17_000_000), got.GasUsed)
 	require.Equal(t, header.Root.Hex(), got.StateRoot)
 	require.Equal(t, header.ParentHash.Hex(), got.Parent.Hash)
+	require.Equal(t, header.TxHash.Hex(), got.TransactionsRoot)
+	require.Equal(t, header.ReceiptHash.Hex(), got.ReceiptsRoot)
+	require.Equal(t, header.MixDigest.Hex(), got.MixHash)
+	require.Equal(t, header.UncleHash.Hex(), got.OmmerHash)
+	require.Equal(t, "0x2a", got.Difficulty)
+	require.Equal(t, "0x63", got.TotalDifficulty)
+	require.Equal(t, "0x657269676f6e", got.ExtraData)
+	require.Equal(t, "0x684ee180", got.Timestamp)
+	require.Equal(t, "0x0000000000001234", got.Nonce)
+	require.Equal(t, "0xab"+strings.Repeat("00", types.BloomByteLength-2)+"01", got.LogsBloom)
+	require.Equal(t, "0xabcdef0123456789abcdef0123456789abcdef01", got.Miner.Address)
 	require.NotNil(t, got.BaseFeePerGas)
+	require.Equal(t, "0x499602d2", *got.BaseFeePerGas)
 	require.NotNil(t, got.TransactionCount)
 	require.Equal(t, uint64(0), *got.TransactionCount)
+	require.Len(t, got.Ommers, 1)
+	require.Equal(t, uncle.Hash().Hex(), got.Ommers[0].Hash)
 }
 
 // A pending block has no hash, miner or nonce, and buildBlock must not deref them.
@@ -71,6 +93,7 @@ func TestBuildBlockHandlesPendingBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.Hash)
 	require.Empty(t, got.Nonce)
+	require.Empty(t, got.Miner.Address)
 }
 
 // An unexpected type must be an error, not a panic.

@@ -66,19 +66,19 @@ func TestConvertDataToUint64P_Nil(t *testing.T) {
 	}
 }
 
-// buildBlockDetailsResponse puts maxFeePerBlobGas into each blob transaction's
-// receipt map as *hexutil.U256, so the conversion must handle that type.
-// Without a case for it the type switch falls through to "unhandled" (strings)
-// or 0 (uint64s), which GraphQL then serves as the block's number.
+// MarshalReceipt emits effectiveGasPrice and blobGasPrice, and
+// buildBlockDetailsResponse adds maxFeePerBlobGas, as *hexutil.U256. Without a
+// case for it the type switch returns "unhandled", which GraphQL serves as the
+// transaction's gas price fields.
 func TestConvertDataU256(t *testing.T) {
 	m := map[string]any{
-		"number":   (*hexutil.U256)(uint256.NewInt(0x1a2b)),
+		"value":    (*hexutil.U256)(uint256.NewInt(0x1a2b)),
 		"zero":     (*hexutil.U256)(uint256.NewInt(0)),
 		"typedNil": (*hexutil.U256)(nil),
 	}
 
-	if got := convertDataToStringP(m, "number"); got == nil || *got != "0x1a2b" {
-		t.Errorf("string of number: expected 0x1a2b, got %v", got)
+	if got := convertDataToStringP(m, "value"); got == nil || *got != "0x1a2b" {
+		t.Errorf("string of value: expected 0x1a2b, got %v", got)
 	}
 	if got := convertDataToStringP(m, "zero"); got == nil || *got != "0x0" {
 		t.Errorf("string of zero: expected 0x0, got %v", got)
@@ -87,8 +87,8 @@ func TestConvertDataU256(t *testing.T) {
 		t.Errorf("string of typed nil: expected nil, got %q", *got)
 	}
 
-	if got := convertDataToUint64P(m, "number"); got == nil || *got != 0x1a2b {
-		t.Errorf("uint64 of number: expected 6699, got %v", got)
+	if got := convertDataToUint64P(m, "value"); got == nil || *got != 0x1a2b {
+		t.Errorf("uint64 of value: expected 6699, got %v", got)
 	}
 	if got := convertDataToUint64P(m, "zero"); got == nil || *got != 0 {
 		t.Errorf("uint64 of zero: expected 0, got %v", got)
