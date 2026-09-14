@@ -107,6 +107,8 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 	}
 }
 
+// Net-zero changes leave no BAL cells, so only the worker flush exposes the
+// destruct marker. The retained reads must reject a later preserved balance.
 func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(8247)
@@ -160,4 +162,11 @@ func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	io := NewVersionedIO(2)
 	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
+
+	reexecuted := Version{TxIndex: 0, Incarnation: 1}
+	vm.WriteSelfDestruct(addr, reexecuted, true, true)
+	vm.WriteBalance(addr, reexecuted, *uint256.NewInt(1), true)
+	vm.WriteIncarnation(addr, reexecuted, 0, true)
+	vm.WriteCreateContract(addr, reexecuted, true, true)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 }
