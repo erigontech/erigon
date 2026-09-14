@@ -105,7 +105,7 @@ func (a *ReceiptsFilterAggregator) removeReceiptsFilter(filterId ReceiptsSubID) 
 func (a *ReceiptsFilterAggregator) addReceiptsFilters(f *ReceiptsFilter) {
 	a.aggReceiptsFilter.allTxHashes += f.allTxHashes
 
-	f.transactionHashes.Range(func(txHash common.Hash, count int) error {
+	_ = f.transactionHashes.Range(func(txHash common.Hash, count int) error {
 		a.aggReceiptsFilter.transactionHashes.DoAndStore(txHash, func(value int, exists bool) int {
 			return value + count
 		})
@@ -117,7 +117,7 @@ func (a *ReceiptsFilterAggregator) addReceiptsFilters(f *ReceiptsFilter) {
 func (a *ReceiptsFilterAggregator) subtractReceiptsFilters(f *ReceiptsFilter) {
 	a.aggReceiptsFilter.allTxHashes -= f.allTxHashes
 
-	f.transactionHashes.Range(func(txHash common.Hash, count int) error {
+	_ = f.transactionHashes.Range(func(txHash common.Hash, count int) error {
 		a.aggReceiptsFilter.transactionHashes.Do(txHash, func(value int, exists bool) (int, bool) {
 			if exists {
 				newValue := value - count
@@ -143,7 +143,7 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 
 	// Always add specific transaction hashes (even if also subscribing to all)
 	// Backend will use OR logic: send if (AllTransactions OR hash matches)
-	a.aggReceiptsFilter.transactionHashes.Range(func(txHash common.Hash, count int) error {
+	_ = a.aggReceiptsFilter.transactionHashes.Range(func(txHash common.Hash, count int) error {
 		if count > 0 {
 			req.TransactionHashes = append(req.TransactionHashes, gointerfaces.ConvertHashToH256(txHash))
 		}
@@ -154,13 +154,13 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 }
 
 // distributeReceipt processes a receipt and distributes it to matching filters
-func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) error {
+func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) {
 	a.receiptsFilterLock.RLock()
 	defer a.receiptsFilterLock.RUnlock()
 
 	txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
 
-	a.receiptsFilters.Range(func(k ReceiptsSubID, filter *ReceiptsFilter) error {
+	_ = a.receiptsFilters.Range(func(k ReceiptsSubID, filter *ReceiptsFilter) error {
 		// Check if this filter matches the receipt
 		if filter.allTxHashes == 0 {
 			// Filter has specific transaction hashes
@@ -174,6 +174,4 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 		filter.sender.Send(receipt)
 		return nil
 	})
-
-	return nil
 }

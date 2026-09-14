@@ -53,7 +53,9 @@ func listenSignalsInner(handle func(), logger log.Logger, shutdown []os.Signal, 
 			Exit() // ensure trace and CPU profile data is flushed.
 			LoudPanic("boom")
 		case <-usr1:
-			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+			if err := pprof.Lookup("goroutine").WriteTo(os.Stdout, 1); err != nil {
+				logger.Warn("Failed to write goroutine profile", "err", err)
+			}
 		}
 	}
 }

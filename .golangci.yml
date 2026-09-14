@@ -210,33 +210,6 @@ linters:
           |db/test/domains_restart_test\\.go\
           |db/test/lifecycle_bench_test\\.go\
           )$"
-      # Bootstrap exclusion for #22538: baseline errcheck findings, migrated
-      # one package per PR. Remove a package's alternative once it's clean.
-      - linters:
-          - errcheck
-        path: "^(\
-          node\
-          |node/app/component\
-          |node/debug\
-          |node/nodecfg\
-          |node/privateapi\
-          |p2p\
-          |p2p/discover\
-          |p2p/discover/v5wire\
-          |p2p/dnsdisc\
-          |p2p/enode\
-          |p2p/enr\
-          |p2p/nat\
-          |p2p/netutil\
-          |p2p/rlpx\
-          |p2p/sentry\
-          |p2p/sentry/libsentry\
-          |rpc\
-          |rpc/jsonrpc\
-          |rpc/rpchelper\
-          |txnprovider/txpool\
-          |txnprovider/txpool/tests\
-          )/[^/]+\\.go$"
       - linters:
           - gosec
           - perfsprint
