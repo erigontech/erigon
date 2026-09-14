@@ -279,6 +279,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		available.Sub(available, value)
 
+		if blobGas := msg.BlobGas(); blobGas > 0 && chainConfig.IsCancun(effectiveHeader.Time) {
+			blobFee := new(big.Int).Mul(msg.MaxFeePerBlobGas().ToBig(), new(big.Int).SetUint64(blobGas))
+			if blobFee.Cmp(available) >= 0 {
+				return 0, protocol.ErrInsufficientFunds
+			}
+			available.Sub(available, blobFee)
+		}
+
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
@@ -989,6 +997,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
 	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
