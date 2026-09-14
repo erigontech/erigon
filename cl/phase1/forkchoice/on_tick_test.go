@@ -101,6 +101,33 @@ func TestTickBuildsUnrealizedJustifiedCheckpointState(t *testing.T) {
 	}, 10*time.Second, 10*time.Millisecond)
 }
 
+func TestTickSkipsCheckpointStateBuild(t *testing.T) {
+	tests := []struct {
+		name string
+		tick func(f *ForkChoiceStore) uint64
+	}{
+		{name: "slot not advanced", tick: func(f *ForkChoiceStore) uint64 { return f.time.Load() }},
+		{name: "not synced", tick: func(f *ForkChoiceStore) uint64 {
+			return (f.highestSeen.Load() + 2*f.beaconCfg.SlotsPerEpoch + 1) * f.beaconCfg.SecondsPerSlot
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildExAnteStore(t)
+			_, root := decodeDiffBlock(t, diffBlockc2Enc)
+			next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+			f.unrealizedJustifiedCheckpoint.Store(next)
+
+			f.OnTick(tt.tick(f))
+
+			require.Never(t, func() bool {
+				_, ok := f.checkpointStates.Load(next)
+				return ok
+			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
 type blockingPruneForkGraph struct {
 	fork_graph.ForkGraph
 	started chan uint64
