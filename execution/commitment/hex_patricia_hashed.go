@@ -127,11 +127,12 @@ type HexPatriciaHashed struct {
 	// Rows of the grid correspond to the level of depth in the patricia tree
 	// Columns of the grid correspond to pointers to the nodes further from the root
 	grid          [128][16]cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
-	currentKey    [128]byte     // For each row indicates which column is currently selected
-	depths        [128]int16    // For each row, the depth of cells in that row
-	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
+	stitchScratch [16]cell
+	currentKey    [128]byte   // For each row indicates which column is currently selected
+	depths        [128]int16  // For each row, the depth of cells in that row
+	branchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	touchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	afterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -186,11 +187,7 @@ type HexPatriciaHashed struct {
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 
-	// lastUpdateCellWasEmpty reports whether the most recent updateCell stamped a key
-	// into an empty cell — i.e. the key is absent from the pre-state trie, so nothing
-	// can exist on disk beneath it.
-	lastUpdateCellWasEmpty bool
-	hadToLoadL             map[uint64]skipStat
+	hadToLoadL map[uint64]skipStat
 }
 
 var hphPool sync.Pool
@@ -567,6 +564,10 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	}
 }
 
+func (cell *cell) keylessInPlane(depth int16) bool {
+	return (cell.accountAddrLen == 0 && depth < 64) || (cell.storageAddrLen == 0 && depth > 64)
+}
+
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
 func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension []byte, nibble int) {
 	if lowCell.accountAddrLen > 0 || lowDepth < 64 {
@@ -587,7 +588,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 		}
 	}
 	if lowCell.hashLen > 0 {
-		if (lowCell.accountAddrLen == 0 && lowDepth < 64) || (lowCell.storageAddrLen == 0 && lowDepth > 64) {
+		if lowCell.keylessInPlane(lowDepth) {
 			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble
 			if len(preExtension) > 0 {
 				copy(cell.extension[:], preExtension)
@@ -2299,7 +2300,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		}
 
 		hph.deleteCell(hashedKey)
-		hph.lastUpdateCellWasEmpty = false
 		return nil
 	}
 
@@ -2320,7 +2320,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 			fmt.Fprintf(hph.traceW, "updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
 		}
 	}
-	hph.lastUpdateCellWasEmpty = cell.IsEmpty()
 	if cell.hashedExtLen == 0 {
 		copy(cell.hashedExtension[:], hashedKey[depth:])
 		cell.hashedExtLen = int16(len(hashedKey)) - depth

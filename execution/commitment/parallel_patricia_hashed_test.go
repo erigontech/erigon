@@ -21,7 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"math/bits"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,10 +45,9 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 }
 
 func TestParallelCommitmentReadTxs(t *testing.T) {
-	foldWorkers := maxFoldConcurrency()
-	mountedWorkers := parallelMountConcurrency(defaultParallelCommitmentWorkers)
+	concurrency := parallelMountConcurrency(defaultParallelCommitmentWorkers)
 
-	require.Equal(t, 2*mountedWorkers+foldWorkers, ParallelCommitmentReadTxs())
+	require.Equal(t, concurrency+1, ParallelCommitmentReadTxs())
 }
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
@@ -257,6 +259,35 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	_, err := p.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ModeParallel")
+}
+
+// hashedKey passed to fn is mutated in place and must not be retained.
+func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
+	if node == nil {
+		return nil
+	}
+	if node.plainKey != nil {
+		if err := fn(path, node.plainKey, node.update); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
+	}
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.ext...)
+		if err := dfsSubtree(child, path, fn); err != nil {
+			return err
+		}
+		path = path[:base]
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
 }
 
 func TestDFSSubtree(t *testing.T) {
@@ -1057,4 +1088,78 @@ func Test_ModeParallel_SiblingConsistency(t *testing.T) {
 
 	require.Equal(t, wantRoot, gotRoot,
 		"a carried balance-only update must not zero the account's untouched nonce")
+}
+
+type ctxLeaseCounter struct {
+	live atomic.Int64
+	peak atomic.Int64
+	made atomic.Int64
+}
+
+func (c *ctxLeaseCounter) wrap(inner TrieContextFactory) TrieContextFactory {
+	return func(ctx context.Context) (PatriciaContext, func()) {
+		pc, cleanup := inner(ctx)
+		c.made.Add(1)
+		for n := c.live.Add(1); ; {
+			peak := c.peak.Load()
+			if n <= peak || c.peak.CompareAndSwap(peak, n) {
+				break
+			}
+		}
+		return pc, func() {
+			if cleanup != nil {
+				cleanup()
+			}
+			c.live.Add(-1)
+		}
+	}
+}
+
+func TestParallelCommitment_ConcurrentReadContextsStayInReserve(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, k2, u2 := collapseCorpus()
+
+	for _, grain := range []struct {
+		name string
+		g    uint32
+	}{{"auto", 0}, {"G2", 2}} {
+		for _, workers := range []int{1, 4, 8, 18} {
+			t.Run(fmt.Sprintf("%s/w%d", grain.name, workers), func(t *testing.T) {
+				t.Parallel()
+				ms := NewMockState(t)
+				ms.SetConcurrentCommitment(true)
+
+				lease := &ctxLeaseCounter{}
+				tr := NewParallelPatriciaHashed(lease.wrap(mockTrieCtxFactory(ms)), length.Addr, DefaultTrieConfig())
+				tr.SetNumWorkers(workers)
+				tr.SetForkGrain(grain.g)
+				tr.ResetContext(ms)
+				defer tr.Release()
+
+				var forks uint64
+				for _, batch := range []struct {
+					keys [][]byte
+					upds []Update
+				}{{k1, u1}, {k2, u2}} {
+					require.NoError(t, ms.applyPlainUpdates(batch.keys, batch.upds))
+					ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+					for _, k := range batch.keys {
+						ut.TouchPlainKey(string(k), nil, nil)
+					}
+					_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+					ut.Close()
+					require.NoError(t, err)
+					forks += tr.Forks()
+				}
+
+				require.Zero(t, lease.live.Load(), "every read context must be released")
+				reserve := parallelMountConcurrency(workers) + 1
+				require.LessOrEqual(t, int(lease.peak.Load()), reserve,
+					"peak concurrent read contexts must fit the reserve ParallelCommitmentReadTxs sizes for this worker count")
+				t.Logf("grain %s workers %d: reserve %d, peak %d, opened %d, forks %d",
+					grain.name, workers, reserve, lease.peak.Load(), lease.made.Load(), forks)
+			})
+		}
+	}
 }

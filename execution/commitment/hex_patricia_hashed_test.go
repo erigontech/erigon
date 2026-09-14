@@ -1200,6 +1200,7 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 
 	for _, nibble := range []int{1, 5, 10} {
 		cell := &hph.grid[row][nibble]
+		cell.reset()
 		cell.hashLen = 32
 		for i := range cell.hash {
 			cell.hash[i] = byte(nibble*17 + i) // unique per nibble
