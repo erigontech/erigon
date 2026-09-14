@@ -460,7 +460,7 @@ func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, e
 
 func splitEndpoints(in string) []string {
 	var out []string
-	for _, e := range strings.Split(in, ",") {
+	for e := range strings.SplitSeq(in, ",") {
 		if e = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(e), "/")); e != "" {
 			out = append(out, e)
 		}
