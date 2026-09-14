@@ -385,7 +385,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				// mismatches. Skip the wrong-root rejection (and its unwind) so exec COMPLETES
 				// and its per-tx OnTx notifications flow to the settle observer. Temporary — see
 				// FlashblockSkipPostValidation.
-				if pe.isForkValidation && dbg.FlashblockSkipPostValidation {
+				// Same structural test as the post-validation check below: an in-progress flashblock
+				// header carries an all-zero output side, and no real header does. Executing it is how
+				// the root gets computed, so comparing against it compares with a placeholder.
+				inProgressHeader := lastHeader != nil && lastHeader.ReceiptHash == (common.Hash{})
+				if pe.isForkValidation && (inProgressHeader || dbg.FlashblockSkipPostValidation) {
 					pe.logger.Debug("[flashblock] skip wrong-trie-root", "block", cr.blockNum, "computed", cr.rootHash)
 					// The frontier block WAS executed (only its root is deferred to the seal). Advance the
 					// Execution stage progress WITH it — the stage progress tracks the pre-exec frontier, split
@@ -634,7 +638,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// gas/receipts/bloom check necessarily fails. Skip it here so exec still
 						// COMPLETES and its per-tx execobserver.OnTx notifications flow to the settle
 						// observer. Temporary — see FlashblockSkipPostValidation.
-						if pe.isForkValidation && dbg.FlashblockSkipPostValidation {
+						// A flashblock's IN-PROGRESS header is recognisable without a flag: its output side
+						// is all-zero because the block is still being assembled, and a real header never
+						// carries a zero receipt root — an empty block carries EmptyRootHash. Executing
+						// such a header is how the output side gets COMPUTED, so checking the result
+						// against it asks the block to already be what this execution is producing.
+						//
+						// This only began to matter when the close started executing again: before that it
+						// short-circuited, so nothing ever post-validated an in-progress header and the
+						// contradiction stayed hidden behind the missing block-end.
+						inProgressHeader := lastHeader != nil && lastHeader.ReceiptHash == (common.Hash{})
+						if pe.isForkValidation && (inProgressHeader || dbg.FlashblockSkipPostValidation) {
 							pe.logger.Debug("[flashblock] skip post-validation error", "block", applyResult.BlockNum, "err", err)
 						} else {
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err)

@@ -45,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -200,8 +200,8 @@ type ExecModule struct {
 	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
 	// (retried by the CL) or block, and the background FCU commit/prune
 	// goroutines inherit the semaphore, releasing it only when their work is done.
-	semaphore        *semaphore.Weighted
-	forkValidator    *ForkValidator
+	semaphore     *semaphore.Weighted
+	forkValidator *ForkValidator
 	// preExec is the PRODUCER's pre-executed block chain — separate from the fork validator's candidate
 	// slot, which is validation space (see preexec_frontier.go).
 	preExec          *preExecFrontier
@@ -330,7 +330,7 @@ func NewExecModule(
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
-		pendingBlock:         make(map[uint64]*builder.Parameters),
+		pendingBlock:            make(map[uint64]*builder.Parameters),
 		preconfirmedByParent:    make(map[common.Hash]*types.BlockWithReceipts),
 		sealedByHash:            make(map[common.Hash]*types.Header),
 		builderFunc:             builderFunc,
@@ -653,7 +653,18 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 			// system keys re-folds the commitment and, for some account/trie layouts, yields a root that diverges
 			// from the pre-exec (open) root — the empty-successor seal flake. (For a non-empty block PrefixLen>=1
 			// pushed the resume past block-start, so the bug only surfaced on empty blocks.)
-			doms.SetPreExecStart(minTxNum + 1 + uint64(flashUpdate.PrefixLen))
+			// The resume point is the LAST ALREADY-EXECUTED txNum, not the first one to run: the skip loop
+			// in exec3 drops every task with inputTxNum <= this, so execution begins one past it. The
+			// block's txNums are [minTxNum]=block-start, [minTxNum+1 .. minTxNum+PrefixLen]=the regular
+			// body, [minTxNum+PrefixLen+1]=block-end. So minTxNum+PrefixLen resumes AT the block-end, which
+			// is the whole point of the close.
+			//
+			// It was minTxNum+1+PrefixLen, which is the block-end's own txNum — and being <= the resume
+			// point, the block-end was skipped along with the body. Finalize therefore never ran at the
+			// close on the flashblock path, and withdrawals, which are credited there and nowhere else,
+			// were never applied: every venue block declared a withdrawals list in its header and credited
+			// none of it, so the state did not match what the header committed to.
+			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
 			defer doms.ClearPreExecStart()
 		}
 		tx = doms.BlockOverlay()
@@ -705,7 +716,28 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		return ValidationResult{}, err
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	// A flashblock CLOSE is the PRODUCER finishing its own block, so it runs the producer's execution
+	// primitive. ValidatePayload is validation: it asks whether a block it is being shown is valid, and
+	// answers from validHashes and the canonical index — both of which already say yes, because the
+	// accumulation rounds put this very hash there. Routed through it, the close short-circuited as
+	// "already validated" and never executed, so block-end never ran and withdrawals were never credited.
+	//
+	// The previous guard against that short-circuit tested `sd == fv.sharedDom` — true while the producer's
+	// maintained SD sat in the validation slot, and never true once pre-exec moved into its own space. The
+	// answer is not to teach validation about pre-exec's SD. It is that the close was never a validation
+	// question: pre-exec has its own close, and it executes through its own path.
+	var (
+		status          engine_types.EngineStatus
+		lvh             common.Hash
+		validationError error
+		criticalError   error
+	)
+	if reuseClose {
+		status, _, validationError, criticalError = e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
+		lvh = header.Hash()
+	} else {
+		status, lvh, validationError, criticalError = e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	}
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
