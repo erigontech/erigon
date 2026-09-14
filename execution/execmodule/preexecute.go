@@ -120,15 +120,41 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	defer roTx.Rollback()
 
 	var doms *execctx.SharedDomains
+	var stagingBase *execctx.SharedDomains
 	var frontierExtension bool // set when this fresh block extends a LIVE frontier parent (parenting)
 	if reuse {
-		// CARRY FORWARD: reuse the in-progress flashblock SD. Refresh its overlay's backing tx
-		// (the prior round's roTx is gone) while keeping the accumulated in-memory state, so the
-		// committed txNum still marks the executed prefix and exec3 resumes at the new txs only.
-		doms = flashUpdate.SD
-		doms.BlockOverlay().UpdateTxn(roTx)
-		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf) —
-		// enable them on the carried-forward SD.
+		// CARRY FORWARD: the in-progress flashblock SD holds everything this block has executed so far, so its
+		// committed txNum still marks the executed prefix and exec3 resumes at the new txs only. Refresh its
+		// overlay's backing tx — the prior round's roTx is gone.
+		flashUpdate.SD.BlockOverlay().UpdateTxn(roTx)
+
+		// STAGE an INCREMENTAL round rather than executing into that SD directly. The round runs into a child
+		// parented on it: reads fall through, so the block stays cumulative and nothing is copied, but the
+		// round's domain WRITES land only in the child. MERGE is then the single commit point — a round that
+		// overruns its budget or fails is dropped by closing the child, and the block is exactly what it was
+		// before the round started.
+		//
+		// prefixLen==0 with a live SD is NOT incremental: the body does not extend what this SD has already
+		// executed (the re-open / corrected-attrs case), so staging it would re-execute the whole body into a
+		// child whose parent already holds that state. That round executes in place, as before.
+		if flashUpdate.PrefixLen > 0 {
+			stagingBase = flashUpdate.SD
+		}
+		if stagingBase != nil {
+			if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(stagingBase)); err != nil {
+				return ValidationResult{}, err
+			}
+			// The overlay and the COMMITMENT belong to the BLOCK, not the round. Execution advances the
+			// commitment trie as it runs, cumulatively across the block's rounds, so the child adopts the
+			// block's context — a child with its own context would advance a fresh trie seeded at the parent's
+			// root and hand that same root straight back, the round's work invisible. The overlay likewise
+			// carries block metadata written by the insert, identical whether the round is kept or dropped.
+			doms.BorrowBlockOverlay(stagingBase)
+			doms.AdoptCommitmentContext(stagingBase)
+		} else {
+			doms = flashUpdate.SD
+		}
+		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf).
 		doms.SetInMemHistoryReads(true)
 		// PRE-EXEC start: tell exec to resume PAST the already-executed prefix instead of at the block
 		// start (which SeekCommitment would report, since fork-validation never commits). resume =
@@ -263,7 +289,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	// A round that does not go on to register its SD in the frontier owns it, and has to close it. Only the
 	// fresh-SD path can reach here holding one nobody else knows about: the carry-forward path is executing
 	// into the frontier's own generation, which the frontier closes.
-	registered := reuse
+	registered := false
 	defer func() {
 		if !registered {
 			doms.Close()
@@ -277,7 +303,12 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	// Record the block in the pre-exec frontier — its own space, keyed by the hash it currently carries
 	// (the header re-hashes every round as the body grows, and the seal re-keys it again).
 	if status == engine_types.ValidStatus {
-		if reuse {
+		if stagingBase != nil {
+			if merr := stagingBase.Merge(ctx, stagingBase.TxNum(), doms, doms.TxNum(), true); merr != nil {
+				return ValidationResult{}, fmt.Errorf("commit pre-exec round num=%d: %w", blockNumber, merr)
+			}
+			registered = true
+			doms = stagingBase
 			e.preExec.SetActiveHead(lvh, blockNumber)
 			e.preExec.SetActiveNotifications(notifications)
 		} else {

@@ -104,18 +104,20 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
+	// borrowedSdCtx marks sdCtx as another SD's — see AdoptCommitmentContext. Close leaves it to its owner.
+	borrowedSdCtx bool
 
 	stepSize uint64
 
 	logger log.Logger
 
-	txNum             uint64
+	txNum uint64
 	// preExecStart, when set, makes SeekStart return this txNum as the execution START point instead
 	// of the persisted commitment — the PRE-EXEC start model (flashblock resume past the already-
 	// executed prefix in a maintained SD, whose advance SeekCommitment cannot recover because fork-
 	// validation never commits). SeekCommitment (the commitment start model) is left untouched.
-	preExecStart      uint64
-	preExecStartSet   bool
+	preExecStart    uint64
+	preExecStartSet bool
 	// flashblockReceipts accumulates, in body order, the per-round receipts of the in-progress
 	// flashblock block. The SD is the natural home: it is fresh per block (auto-reset) and carried
 	// forward across rounds, exactly matching the accumulation lifecycle — so the seal derives
@@ -127,9 +129,9 @@ type SharedDomains struct {
 	// block-end runs). This is the clean discriminator between the two isForkValidation entry points
 	// (PreExecute accumulation vs ValidateChain close), replacing the global FlashblockSkipBlockEnd.
 	flashblockAccumulating bool
-	currentStep       kv.Step
-	trace             bool //nolint
-	commitmentCapture bool
+	currentStep            kv.Step
+	trace                  bool //nolint
+	commitmentCapture      bool
 	// disableInlineTouchKey when true, DomainPut skips the TouchKey call.
 	// Used when the commitment calculator goroutine owns the Updates buffer
 	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
@@ -143,7 +145,8 @@ type SharedDomains struct {
 	// alongside domain state via Flush().
 	// Atomic because concurrent readers (RPC via LatestSD) may call BlockOverlay()
 	// while Close() nils the pointer.
-	blockOverlay atomic.Pointer[membatchwithdb.MemoryMutation]
+	blockOverlay    atomic.Pointer[membatchwithdb.MemoryMutation]
+	borrowedOverlay bool
 
 	// parent is an optional parent SD for read-through chaining. When set,
 	// domain reads that miss in the local mem batch fall through to the parent's
@@ -290,7 +293,7 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 
 	// Merge block-level metadata from other's overlay into ours by flushing
 	// other's overlay writes directly into our overlay (which implements kv.RwTx).
-	if otherOverlay, sdOverlay := other.blockOverlay.Load(), sd.blockOverlay.Load(); otherOverlay != nil && sdOverlay != nil {
+	if otherOverlay, sdOverlay := other.blockOverlay.Load(), sd.blockOverlay.Load(); otherOverlay != nil && sdOverlay != nil && otherOverlay != sdOverlay {
 		if err := otherOverlay.Flush(ctx, sdOverlay); err != nil {
 			return fmt.Errorf("blockOverlay merge: %w", err)
 		}
@@ -304,6 +307,10 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 			sd.sdCtx.SetPendingUpdate(otherUpd)
 		}
 	}
+
+	// Receipts accumulate in BODY ORDER across rounds and the seal derives gas, receipt count and receipt
+	// root from them, so a staged round's receipts must fold with its state.
+	sd.flashblockReceipts = append(sd.flashblockReceipts, other.flashblockReceipts...)
 
 	sd.txNum = otherTxNum
 	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
@@ -584,9 +591,25 @@ func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
 func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay.Load() }
 
 func (sd *SharedDomains) CloseBlockOverlay() {
+	if sd.borrowedOverlay {
+		sd.blockOverlay.Store(nil)
+		return
+	}
 	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
 		overlay.Close()
 	}
+}
+
+// BorrowBlockOverlay points this SD at another's block overlay WITHOUT taking ownership: the block metadata
+// in it is written by the insert, not by execution, and is identical whether a round is kept or dropped.
+func (sd *SharedDomains) BorrowBlockOverlay(owner *SharedDomains) {
+	if owner == nil {
+		return
+	}
+	if old := sd.blockOverlay.Swap(owner.blockOverlay.Load()); old != nil && !sd.borrowedOverlay {
+		old.Close()
+	}
+	sd.borrowedOverlay = true
 }
 
 // BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
@@ -634,8 +657,8 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 
 func (sd *SharedDomains) SetVersionedIO(v VersionedIO) { sd.versionedIO = v }
 func (sd *SharedDomains) GetVersionedIO() VersionedIO  { return sd.versionedIO }
-func (sd *SharedDomains) SetVersionMap(v VersionMap)    { sd.versionMap = v }
-func (sd *SharedDomains) GetVersionMap() VersionMap     { return sd.versionMap }
+func (sd *SharedDomains) SetVersionMap(v VersionMap)   { sd.versionMap = v }
+func (sd *SharedDomains) GetVersionMap() VersionMap    { return sd.versionMap }
 func (sd *SharedDomains) ResetParallelExecState() {
 	sd.versionedIO = nil
 	sd.versionMap = nil
@@ -749,8 +772,29 @@ func (sd *SharedDomains) Close() {
 
 	sd.CloseBlockOverlay()
 
-	sd.sdCtx.Close()
+	if !sd.borrowedSdCtx {
+		sd.sdCtx.Close()
+	}
 	sd.sdCtx = nil
+}
+
+// AdoptCommitmentContext points this SD's commitment at another's, without taking ownership: closing this SD
+// leaves the context to its owner.
+//
+// The commitment trie belongs to the BLOCK, not to a round. Execution advances it as it runs, cumulatively
+// across the block's rounds, so a staging SD that built its OWN context would advance a fresh trie seeded at
+// the parent's root and hand back that same root — the round's work invisible, looking exactly like a merge
+// that dropped the commitment. Adopting the block's context means the round advances the block's trie, which
+// is what makes a staged round's root correct.
+func (sd *SharedDomains) AdoptCommitmentContext(owner *SharedDomains) {
+	if owner == nil || owner.sdCtx == nil {
+		return
+	}
+	if sd.sdCtx != nil && !sd.borrowedSdCtx {
+		sd.sdCtx.Close()
+	}
+	sd.sdCtx = owner.sdCtx
+	sd.borrowedSdCtx = true
 }
 
 // Flush writes the batch to tx without committing and does not refresh the BranchCache.
