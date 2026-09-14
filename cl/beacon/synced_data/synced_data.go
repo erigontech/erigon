@@ -109,11 +109,9 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 
 	next := s.previousHeadState
 	if next == nil {
-		next, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(next)
+		next = state.New(newState.BeaconConfig())
 	}
-	if err != nil {
+	if err = newState.CopyInto(next); err != nil {
 		s.previousHeadState = nil
 		return err
 	}
