@@ -111,15 +111,15 @@ func TestGetReceiptFillsBloomOfLogsOnlyCacheEntry(t *testing.T) {
 	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
 
 	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
-	logsOnly, err := gen.GetReceiptWithoutBloom(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum)
+	logsOnly, ok, err := gen.PersistedReceiptWithoutBloom(tx, header, txn.Hash(), txNum)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Len(t, logsOnly.Logs, 1)
-	require.Equal(t, types.Bloom{}, logsOnly.Bloom, "the receipt must come from the persistent cache")
+	require.Equal(t, types.Bloom{}, logsOnly.Bloom)
 	_, cached := gen.TryGetCachedReceipt(header.Hash(), txNum, 0)
-	require.True(t, cached, "a logs-only read must still fill the receipt cache")
+	require.True(t, cached, "a logs-only read must fill the receipt cache")
 
 	full, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
 	require.NoError(t, err)
-	require.NotEqual(t, types.Bloom{}, full.Bloom)
 	require.Equal(t, types.CreateBloom(types.Receipts{full}), full.Bloom)
 }

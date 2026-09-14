@@ -155,6 +155,26 @@ func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txI
 	return nil, false
 }
 
+// PersistedReceiptWithoutBloom reads a receipt only from the persistent cache and caches it with an empty
+// Bloom, which GetReceipt fills in when it serves the receipt; ok is false when the receipt has to be generated.
+func (g *Generator) PersistedReceiptWithoutBloom(tx kv.TemporalTx, header *types.Header, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	if !PersistedReceiptsServed() {
+		return nil, false, nil
+	}
+	receipt, ok, err := rawdb.ReadReceiptCacheV2(g.filters.WithTemporalOverlay(tx), rawdb.RCacheV2Query{
+		TxNum:         txNum,
+		BlockNum:      header.Number.Uint64(),
+		BlockHash:     header.Hash(),
+		TxnHash:       txnHash,
+		DontCalcBloom: true,
+	})
+	if err != nil || !ok || receipt == nil {
+		return nil, false, err
+	}
+	g.addToCacheReceipt(txNum, receipt)
+	return receipt, true, nil
+}
+
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
 
 // PersistedReceiptsServed reports whether a receipt found in the persistent cache is
@@ -210,31 +230,12 @@ func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	g.receiptCache.Add(txNum, receipt)
 }
 
-// cacheReceiptWithBloom replaces a receipt cached by a logs-only read with a copy that has its Bloom:
-// cached receipts are shared between callers, so they are never changed in place.
-func (g *Generator) cacheReceiptWithBloom(txNum uint64, receipt *types.Receipt) *types.Receipt {
-	withBloom := *receipt
-	withBloom.Bloom = types.CreateBloom(types.Receipts{&withBloom})
-	g.addToCacheReceipt(txNum, &withBloom)
-	return &withBloom
-}
-
 type PostStateInfo struct {
 	Txns              types.Transactions
 	CommitmentHistory bool
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (*types.Receipt, error) {
-	return g.getReceipt(ctx, cfg, tx, header, txn, index, txNum, postState, true)
-}
-
-// GetReceiptWithoutBloom is GetReceipt for callers that read only logs: a receipt served
-// from the persistent cache has an empty Bloom, which GetReceipt fills in when it serves it later.
-func (g *Generator) GetReceiptWithoutBloom(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
-	return g.getReceipt(ctx, cfg, tx, header, txn, index, txNum, nil, false)
-}
-
-func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo, withBloom bool) (_ *types.Receipt, err error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (_ *types.Receipt, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
@@ -269,8 +270,11 @@ func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipt, ok := g.receiptCache.Get(txNum); ok {
 		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
 			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
-			if withBloom && receipt.Bloom == (types.Bloom{}) && len(receipt.Logs) > 0 {
-				receipt = g.cacheReceiptWithBloom(txNum, receipt)
+			if receipt.Bloom == (types.Bloom{}) && len(receipt.Logs) > 0 {
+				filled := *receipt // cached by PersistedReceiptWithoutBloom; cached receipts are shared, never change them in place
+				filled.Bloom = types.CreateBloom(types.Receipts{&filled})
+				g.addToCacheReceipt(txNum, &filled)
+				receipt = &filled
 			}
 			return receipt, nil
 		}
@@ -286,11 +290,10 @@ func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var ok bool
 		var err error
 		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:         txNum,
-			BlockNum:      blockNum,
-			BlockHash:     blockHash,
-			TxnHash:       txnHash,
-			DontCalcBloom: !withBloom,
+			TxNum:     txNum,
+			BlockNum:  blockNum,
+			BlockHash: blockHash,
+			TxnHash:   txnHash,
 		})
 		if err != nil {
 			return nil, err
