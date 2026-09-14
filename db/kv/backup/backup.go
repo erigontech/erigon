@@ -17,6 +17,7 @@
 package backup
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -44,7 +45,8 @@ const (
 	// put a single db on its own volume (a symlink or mount at <datadir>/chaindata),
 	// where a sibling directory would land on the parent's filesystem and make the
 	// final rename cross-device.
-	compactDirName = "compacting"
+	compactDirName       = "compacting"
+	copyReadAheadWorkers = 256
 )
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
@@ -281,9 +283,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		return 0, err
 	}
 	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
-	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
+	// copy cursor: the live pages of a bloated db are scattered over the file.
 	var ra *kv.ReadAhead
-	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
+	if workers := int(cmp.Or(dbg.WarmupTableWorkers, copyReadAheadWorkers)); total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
 		if err != nil {
 			logger.Warn("[db-copy] read-ahead disabled", "table", table, "err", err)
