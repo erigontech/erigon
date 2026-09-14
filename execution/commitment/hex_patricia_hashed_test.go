@@ -1860,7 +1860,6 @@ func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
 	counter := &branchReadCounter{PatriciaContext: ms, reads: map[string]int{}}
 
 	cfg := DefaultTrieConfig()
-	cfg.DeferBranchUpdates = true
 	trie := NewHexPatriciaHashed(length.Addr, counter, cfg)
 	defer trie.Release()
 	trie.SetLeaveDeferredForCaller(true)
