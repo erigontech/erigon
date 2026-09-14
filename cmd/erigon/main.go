@@ -81,6 +81,9 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
 		return err
 	}
+	if err := erigonapp.RetireStateIfStepsInDB(ctx, nodeCfg.Dirs, 3, logger); err != nil {
+		return err
+	}
 	if err := backup.AutoCompactDatadir(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}

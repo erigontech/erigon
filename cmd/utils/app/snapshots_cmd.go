@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/estimate"
@@ -68,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
@@ -3554,6 +3556,80 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
+	return nil
+}
+
+// RetireStateIfStepsInDB builds the state files of the steps chaindata holds and
+// prunes them from chaindata, when it holds more than maxStepsInDB steps. It
+// never merges files, and skips a datadir locked by another process.
+func RetireStateIfStepsInDB(ctx context.Context, dirs datadir.Dirs, maxStepsInDB float64, logger log.Logger) error {
+	unlock, err := dirs.TryFlock()
+	if errors.Is(err, datadir.ErrDataDirLocked) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")); err != nil || !exists {
+		return err
+	}
+
+	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	chainConfig := fromdb.ChainConfig(db)
+	if chainConfig == nil {
+		return nil
+	}
+	res, clean, err := openSnaps(ctx, ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName), dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	agg, tdb := res.Aggregator, res.TemporalDB
+	blockReader, _ := res.BlockRetire.IO()
+	txNumsReader := blockReader.TxnumReader()
+
+	var stepsInDB float64
+	var execProgress, finalized, lastTxNum uint64
+	if err := tdb.View(ctx, func(tx kv.Tx) error {
+		stepsInDB = rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize())
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+		finalized = rawdb.ReadForkchoiceFinalizedNum(tx)
+		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
+		return err
+	}); err != nil {
+		return err
+	}
+	if stepsInDB <= maxStepsInDB {
+		return nil
+	}
+
+	fromStep, toStep := kv.Step(agg.EndTxNumMinimax()/agg.StepSize()), kv.Step(lastTxNum/agg.StepSize())
+	logger.Info("[retire] state", "stepsInDB", fmt.Sprintf("%.2f", stepsInDB), "fromStep", fromStep, "toStep", toStep)
+	start := time.Now()
+	finalityCtx := execfinality.NewContext(execProgress, finalized, ethconfig.Defaults.MaxReorgDepth, false, txNumsReader)
+	if err := tdb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+		return err
+	}
+	agg.WaitForFiles()
+	logger.Info("[retire] state files built", "took", time.Since(start))
+
+	start = time.Now()
+	for hasMore := true; hasMore; {
+		if err := tdb.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			hasMore, err = tx.PruneSmallBatches(ctx, time.Minute)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	logger.Info("[retire] state pruned", "took", time.Since(start))
 	return nil
 }
 

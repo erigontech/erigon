@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -109,7 +110,11 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	if applyMigrations {
-		if err := backup.AutoCompactDatadir(ctx, datadir.New(datadirCli), logger); err != nil {
+		dirs := datadir.New(datadirCli)
+		if err := app.RetireStateIfStepsInDB(ctx, dirs, 3, logger); err != nil {
+			return nil, err
+		}
+		if err := backup.AutoCompactDatadir(ctx, dirs, logger); err != nil {
 			return nil, err
 		}
 	}
