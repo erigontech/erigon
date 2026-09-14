@@ -102,8 +102,8 @@ const bloatRatio = 3
 var autoCompactMinFree uint64 = 1 << 30
 
 // AutoCompactDatadir compacts each db of the datadir whose free pages exceed
-// bloatRatio times its data. A db that fails to compact is left as it was, and
-// a datadir locked by another process is skipped.
+// bloatRatio times its data and are at least autoCompactMinFree. A db that fails
+// to compact is left as it was, and a datadir locked by another process is skipped.
 func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {

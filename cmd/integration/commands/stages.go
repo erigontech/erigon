@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -251,6 +252,12 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		if chaindata == filepath.Join(datadirCli, "chaindata") {
+			if err := backup.AutoCompactDatadir(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
+				logger.Error("Auto-compact", "error", err)
+				return
+			}
+		}
 		migrateDB := func(label kv.Label, path string) {
 			if err := runMigrationsForDB(label, path, logger); err != nil {
 				logger.Error("Opening DB", "error", err)
