@@ -1028,8 +1028,32 @@ type gloasVerificationItem struct {
 	block *cltypes.SignedBeaconBlock
 }
 
+func gloasVerificationGroupOrder(priority uint8, available [3]bool) ([3]int, int, uint8) {
+	var order [3]int
+	firstGroup := -1
+	for offset := range len(available) {
+		group := (int(priority) + offset) % len(available)
+		if available[group] {
+			firstGroup = group
+			break
+		}
+	}
+	if firstGroup < 0 {
+		return order, 0, priority
+	}
+	count := 0
+	for offset := range len(available) {
+		group := (firstGroup + offset) % len(available)
+		if available[group] {
+			order[count] = group
+			count++
+		}
+	}
+	return order, count, uint8((firstGroup + 1) % len(available))
+}
+
 func processImmediateGloasVerificationItems(selectedHead, immediateHead *gloasVerificationItem, process func(gloasVerificationItem) bool, completeBatch *bool) {
-	for _, item := range []*gloasVerificationItem{selectedHead, immediateHead} {
+	for _, item := range []*gloasVerificationItem{immediateHead, selectedHead} {
 		if item != nil && !process(*item) {
 			*completeBatch = false
 			return
@@ -1073,7 +1097,6 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	if immediateHead != nil {
 		visitLimit--
 	}
-	var selectedHead *gloasVerificationItem
 	if root == (common.Hash{}) {
 		if directExtensionParentRoot != (common.Hash{}) {
 			oldHeadBlock, ok := cfg.forkChoice.GetBlock(directExtensionParentRoot)
@@ -1087,10 +1110,13 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 	} else if _, ok := cfg.forkChoice.GetBlock(root); !ok {
 		root = headRoot
-	} else if root != headRoot {
-		headBlock, headOK := cfg.forkChoice.GetBlock(headRoot)
-		if headOK && headBlock != nil && cfg.forkChoice.HasEnvelope(headRoot) && !cfg.forkChoice.IsPayloadVerified(headRoot) {
-			selectedHead = &gloasVerificationItem{root: headRoot, block: headBlock}
+	}
+	var selectedHead *gloasVerificationItem
+	headBlock, headOK := cfg.forkChoice.GetBlock(headRoot)
+	if headOK && headBlock != nil && headBlock.Block != nil && cfg.forkChoice.HasEnvelope(headRoot) && !cfg.forkChoice.IsPayloadVerified(headRoot) {
+		selectedHead = &gloasVerificationItem{root: headRoot, block: headBlock}
+		if root == headRoot {
+			root = common.Hash(headBlock.Block.ParentRoot)
 		}
 		visitLimit--
 	}
@@ -1156,11 +1182,32 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		swept++
 		return true
 	}
-	processImmediateGloasVerificationItems(selectedHead, immediateHead, processItem, &completeBatch)
-	for _, item := range slices.Backward(blocks) {
-		if !processItem(item) {
-			completeBatch = false
-			break
+	processAncestors := func() {
+		for _, item := range slices.Backward(blocks) {
+			if !processItem(item) {
+				completeBatch = false
+				break
+			}
+		}
+	}
+	groups := [...]struct {
+		available bool
+		process   func()
+	}{
+		{immediateHead != nil, func() {
+			processImmediateGloasVerificationItems(nil, immediateHead, processItem, &completeBatch)
+		}},
+		{selectedHead != nil, func() {
+			processImmediateGloasVerificationItems(selectedHead, nil, processItem, &completeBatch)
+		}},
+		{len(blocks) > 0, processAncestors},
+	}
+	available := [3]bool{groups[0].available, groups[1].available, groups[2].available}
+	order, count, nextPriority := gloasVerificationGroupOrder(cfg.gloasVerificationPriority, available)
+	cfg.gloasVerificationPriority = nextPriority
+	for _, group := range order[:count] {
+		if completeBatch {
+			groups[group].process()
 		}
 	}
 	if completeBatch {
@@ -1238,7 +1285,7 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 	}
 }
 
-func prepareGloasPayloadRetries(ctx context.Context, cfg *Cfg) {
+func prepareGloasPayloadRetries(ctx context.Context, cfg *Cfg, includeVerificationSweep bool) {
 	if cfg.executionClient.SupportInsertion() {
 		flushCtx, cancelFlush := context.WithTimeout(ctx, gloasCollectorFlushBudget)
 		if err := cfg.blockCollector.Flush(flushCtx); err != nil {
@@ -1247,7 +1294,7 @@ func prepareGloasPayloadRetries(ctx context.Context, cfg *Cfg) {
 		cancelFlush()
 	}
 	offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
-	runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset,
+	phases := []func(context.Context){
 		func(retryCtx context.Context) {
 			cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
 		},
@@ -1257,7 +1304,13 @@ func prepareGloasPayloadRetries(ctx context.Context, cfg *Cfg) {
 		func(retryCtx context.Context) {
 			retryUnverifiedAnchorPayload(retryCtx, cfg)
 		},
-	)
+		func(retryCtx context.Context) {
+			if includeVerificationSweep {
+				verifyUnverifiedGloasPayloads(retryCtx, cfg)
+			}
+		},
+	}
+	runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset, phases...)
 }
 
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
@@ -1267,11 +1320,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		recoverMissingEnvelopes(ctx, cfg)
 	}
 
+	caughtUp := args.seenSlot >= args.targetSlot
 	if canValidateGloasPayloads(cfg) {
-		prepareGloasPayloadRetries(ctx, cfg)
+		prepareGloasPayloadRetries(ctx, cfg, !caughtUp)
 	}
 
-	if args.seenSlot >= args.targetSlot {
+	if caughtUp {
 		// [GLOAS] Wait for the head's execution payload envelope before proceeding to ForkChoice.
 		// The block was already processed by gossip during SleepForSlot, but the envelope
 		// may still be in-flight. Without this, FCU sends the parent's execution hash.

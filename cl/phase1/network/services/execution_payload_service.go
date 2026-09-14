@@ -41,6 +41,11 @@ type seenEnvelopeKey struct {
 	builderIndex    uint64
 }
 
+type seenEnvelope struct {
+	root      common.Hash
+	signature common.Bytes96
+}
+
 // pendingEnvelopeKey tracks envelopes waiting for their block to arrive.
 // We use (blockRoot, envelopeHash) as key instead of just blockRoot because:
 //   - Multiple envelopes (including forged ones) may arrive before the block
@@ -74,8 +79,8 @@ type executionPayloadService struct {
 	beaconCfg       *clparams.BeaconChainConfig
 	emitters        *beaconevents.EventEmitter
 
-	// Cache to track seen envelopes: (beaconBlockRoot, builderIndex) -> struct{}
-	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
+	// Cache validated envelope identities by (beaconBlockRoot, builderIndex).
+	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, seenEnvelope]
 
 	// Pending envelopes waiting for block to arrive
 	pending      *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
@@ -91,7 +96,7 @@ func NewExecutionPayloadService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitters *beaconevents.EventEmitter,
 ) ExecutionPayloadService {
-	seenEnvelopesCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenEnvelopesCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -202,13 +207,22 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		beaconBlockRoot: beaconBlockRoot,
 		builderIndex:    builderIndex,
 	}
-	if s.seenEnvelopesCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
+	var err error
+	var envelopeRoot [32]byte
+	hashedEnvelope := false
+	if seen, ok := s.seenEnvelopesCache.Get(seenKey); ok {
+		if s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
+			return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
+		}
+		if seen.signature != signedEnvelope.Signature {
+			return fmt.Errorf("%w: already seen a different envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
+		}
+		envelopeRoot = seen.root
+		hashedEnvelope = true
 	}
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	var err error
 	if store, ok := s.forkchoiceStore.(interface {
 		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	}); ok {
@@ -216,18 +230,25 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	} else {
 		err = s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
 	}
-	if err != nil {
-		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			s.emitExecutionPayloadGossip(block, envelope)
-			s.seenEnvelopesCache.Add(seenKey, struct{}{})
-			return nil
-		}
+	acceptedWithoutColumns := errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	if err != nil && !acceptedWithoutColumns {
 		return fmt.Errorf("failed to process execution payload: %w", err)
+	}
+	if !hashedEnvelope {
+		envelopeRoot, err = signedEnvelope.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("hash execution payload envelope: %w", err)
+		}
+	}
+	if acceptedWithoutColumns {
+		s.emitExecutionPayloadGossip(block, envelope)
+		s.seenEnvelopesCache.Add(seenKey, seenEnvelope{root: common.Hash(envelopeRoot), signature: signedEnvelope.Signature})
+		return nil
 	}
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
-	s.seenEnvelopesCache.Add(seenKey, struct{}{})
+	s.seenEnvelopesCache.Add(seenKey, seenEnvelope{root: common.Hash(envelopeRoot), signature: signedEnvelope.Signature})
 
 	s.emitExecutionPayloadGossip(block, envelope)
 	log.Trace("Processed execution payload via gossip",
@@ -236,6 +257,27 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		"builderIndex", builderIndex)
 
 	return nil
+}
+
+func (s *executionPayloadService) HasProcessedPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if s == nil || s.seenEnvelopesCache == nil || signedEnvelope == nil || signedEnvelope.Message == nil {
+		return false
+	}
+	if validateEnvelopeLimits(s.beaconCfg, signedEnvelope.Message) != nil {
+		return false
+	}
+	if !s.forkchoiceStore.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+		return false
+	}
+	envelopeRoot, err := signedEnvelope.HashSSZ()
+	if err != nil {
+		return false
+	}
+	seen, ok := s.seenEnvelopesCache.Get(seenEnvelopeKey{
+		beaconBlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+		builderIndex:    signedEnvelope.Message.BuilderIndex,
+	})
+	return ok && seen.signature == signedEnvelope.Signature && seen.root == common.Hash(envelopeRoot)
 }
 
 func validateEnvelopeLimits(cfg *clparams.BeaconChainConfig, envelope *cltypes.ExecutionPayloadEnvelope) error {
@@ -247,6 +289,12 @@ func validateEnvelopeLimits(cfg *clparams.BeaconChainConfig, envelope *cltypes.E
 	}
 	if envelope.Payload.Withdrawals == nil {
 		return errors.New("missing payload withdrawals")
+	}
+	if envelope.Payload.Extra == nil || envelope.Payload.Transactions == nil {
+		return errors.New("missing execution payload list fields")
+	}
+	if envelope.Payload.Version() >= clparams.GloasVersion && envelope.Payload.BlockAccessList == nil {
+		return errors.New("missing payload block access list")
 	}
 	if uint64(envelope.Payload.Withdrawals.Len()) > cfg.MaxWithdrawalsPerPayload {
 		return fmt.Errorf("payload withdrawals count %d exceeds limit %d", envelope.Payload.Withdrawals.Len(), cfg.MaxWithdrawalsPerPayload)

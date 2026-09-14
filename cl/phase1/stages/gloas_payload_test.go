@@ -58,30 +58,65 @@ func (s *recoveryEnvelopeTestStore) OnExecutionPayload(ctx context.Context, enve
 
 type flakyRootOnlyPendingForkGraph struct {
 	fork_graph.ForkGraph
-	root      common.Hash
-	block     *cltypes.SignedBeaconBlock
-	envelope  *cltypes.SignedExecutionPayloadEnvelope
-	readCalls int
-	accepted  bool
+	anchorRoot     common.Hash
+	root           common.Hash
+	block          *cltypes.SignedBeaconBlock
+	envelope       *cltypes.SignedExecutionPayloadEnvelope
+	blocks         map[common.Hash]*cltypes.SignedBeaconBlock
+	envelopes      map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	acceptedByRoot map[common.Hash]bool
+	readFailures   int
+	readCalls      int
+	accepted       bool
 }
 
+func (f *flakyRootOnlyPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return nil, false
+}
+
+func (f *flakyRootOnlyPendingForkGraph) AnchorRoot() common.Hash { return f.anchorRoot }
+
+func (f *flakyRootOnlyPendingForkGraph) AnchorSlot() uint64 { return 64 }
+
 func (f *flakyRootOnlyPendingForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	return f.block, root == f.root
+	if f.blocks != nil {
+		block, ok := f.blocks[root]
+		return block, ok
+	}
+	if root != f.root {
+		return nil, false
+	}
+	return f.block, true
 }
 
 func (f *flakyRootOnlyPendingForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	f.readCalls++
-	if root != f.root || f.readCalls == 1 {
+	if f.envelopes != nil {
+		envelope, ok := f.envelopes[root]
+		if !ok {
+			return nil, errors.New("envelope not found")
+		}
+		return envelope, nil
+	}
+	if root != f.root || f.readCalls <= f.readFailures {
 		return nil, errors.New("temporary envelope read failure")
 	}
 	return f.envelope, nil
 }
 
 func (f *flakyRootOnlyPendingForkGraph) HasEnvelope(root common.Hash) bool {
+	if f.envelopes != nil {
+		_, ok := f.envelopes[root]
+		return ok
+	}
 	return root == f.root
 }
 
 func (f *flakyRootOnlyPendingForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {
+	if f.acceptedByRoot != nil {
+		accepted, ok := f.acceptedByRoot[root]
+		return accepted, ok && accepted
+	}
 	return f.accepted, root == f.root && f.accepted
 }
 
@@ -90,11 +125,19 @@ func (*flakyRootOnlyPendingForkGraph) IsPayloadUnavailable(common.Hash) bool { r
 func (*flakyRootOnlyPendingForkGraph) MarkPayloadAvailable(common.Hash)      {}
 func (*flakyRootOnlyPendingForkGraph) MarkPayloadUnavailable(common.Hash)    {}
 func (f *flakyRootOnlyPendingForkGraph) MarkPayloadAccepted(root common.Hash, verified bool) {
+	if f.acceptedByRoot != nil {
+		f.acceptedByRoot[root] = verified
+		return
+	}
 	if root == f.root {
 		f.accepted = verified
 	}
 }
 func (f *flakyRootOnlyPendingForkGraph) ClearPayloadAccepted(root common.Hash) {
+	if f.acceptedByRoot != nil {
+		delete(f.acceptedByRoot, root)
+		return
+	}
 	if root == f.root {
 		f.accepted = false
 	}
@@ -854,6 +897,31 @@ func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
 	require.True(t, completeBatch)
 }
 
+func TestGloasVerificationGroupOrderCoversAvailableGroups(t *testing.T) {
+	for mask := 1; mask < 1<<3; mask++ {
+		available := [3]bool{}
+		availableCount := 0
+		for group := range len(available) {
+			available[group] = mask&(1<<group) != 0
+			if available[group] {
+				availableCount++
+			}
+		}
+
+		priority := uint8(0)
+		first := [3]bool{}
+		for range availableCount {
+			order, count, next := gloasVerificationGroupOrder(priority, available)
+			require.Equal(t, availableCount, count)
+			first[order[0]] = true
+			priority = next
+		}
+		for group := range len(available) {
+			require.Equal(t, available[group], first[group], "mask %03b group %d", mask, group)
+		}
+	}
+}
+
 func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
 	require.False(t, blockSupportsExecutionPayloadEnvelope(nil))
 	require.False(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{}))
@@ -1252,7 +1320,7 @@ func TestDrainPendingGloasPayloadsRetriesRootOnlyAfterTransientDiskFailure(t *te
 	block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
 	block.Block.Slot = envelope.Message.Payload.SlotNumber
 	block.Block.Body.SignedExecutionPayloadBid.Message = bid
-	graph := &flakyRootOnlyPendingForkGraph{root: root, block: block, envelope: envelope}
+	graph := &flakyRootOnlyPendingForkGraph{root: root, block: block, envelope: envelope, readFailures: 1}
 	store, err := forkchoice.NewForkChoiceStore(
 		nil,
 		anchorState,
@@ -1350,7 +1418,7 @@ func TestPrepareGloasPayloadRetriesFlushesCollectorBeforeValidation(t *testing.T
 		gloasPayloadValidator: engine,
 		forkChoice:            fc,
 		blockCollector:        collector,
-	})
+	}, true)
 
 	require.True(t, flushed)
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -1369,7 +1437,7 @@ func TestPrepareGloasPayloadRetriesPropagatesCancellationToCollector(t *testing.
 		executionClient: &testExecutionEngine{supportInsertion: true},
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 		blockCollector:  collector,
-	})
+	}, true)
 
 	require.ErrorIs(t, flushErr, context.Canceled)
 }
@@ -1389,15 +1457,328 @@ func TestPrepareGloasPayloadRetriesAllowsBatchFlushBudget(t *testing.T) {
 		executionClient: &testExecutionEngine{supportInsertion: true},
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 		blockCollector:  collector,
-	})
+	}, true)
 
 	require.Greater(t, remaining, 20*time.Second)
 }
 
+func TestPrepareGloasPayloadRetriesContinuesVerificationSweepWhileBehind(t *testing.T) {
+	beaconCfg, anchorState, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	anchorBlockRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	anchorRoot := common.Hash(anchorBlockRoot)
+	root := common.HexToHash("0x9876")
+	envelope.Message.BeaconBlockRoot = root
+	block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = 96
+	block.Block.Body.SignedExecutionPayloadBid.Message = bid
+	graph := &flakyRootOnlyPendingForkGraph{
+		anchorRoot: anchorRoot,
+		root:       root,
+		block:      block,
+		envelope:   envelope,
+	}
+	store, err := forkchoice.NewForkChoiceStore(
+		nil,
+		anchorState,
+		nil,
+		pool.NewOperationsPool(beaconCfg),
+		graph,
+		beaconevents.NewEventEmitter(),
+		nil,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+	selectedHead, err := gloasVerificationHeadRoot(store)
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, selectedHead)
+	require.True(t, store.HasEnvelope(root))
+	require.False(t, store.IsPayloadVerified(root))
+	storedBlock, ok := store.GetBlock(root)
+	require.True(t, ok)
+	require.Same(t, block, storedBlock)
+	require.Greater(t, block.Block.Slot, store.FinalizedSlot())
+	require.GreaterOrEqual(t, beaconCfg.GetCurrentStateVersion(block.Block.Slot/beaconCfg.SlotsPerEpoch), clparams.GloasVersion)
+
+	stageCfg := &Cfg{
+		beaconCfg:               beaconCfg,
+		executionClient:         engine,
+		gloasPayloadValidator:   engine,
+		forkChoice:              store,
+		gloasVerificationCursor: root,
+		gloasVerificationHead:   anchorRoot,
+	}
+	stageCfg.gloasPayloadRetryOffset.Store(3)
+	prepareGloasPayloadRetries(t.Context(), stageCfg, true)
+
+	require.Equal(t, 1, graph.readCalls)
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.True(t, store.IsPayloadVerified(root))
+}
+
+func TestChainTipSyncRunsOneVerificationSweepWhenCaughtUp(t *testing.T) {
+	beaconCfg, anchorState, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	anchorBlockRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	anchorRoot := common.Hash(anchorBlockRoot)
+	root := common.HexToHash("0x9876")
+	envelope.Message.BeaconBlockRoot = root
+	block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = 96
+	block.Block.Body.SignedExecutionPayloadBid.Message = bid
+	graph := &flakyRootOnlyPendingForkGraph{anchorRoot: anchorRoot, root: root, block: block, envelope: envelope}
+	store, err := forkchoice.NewForkChoiceStore(
+		nil, anchorState, nil, pool.NewOperationsPool(beaconCfg), graph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+	)
+	require.NoError(t, err)
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusNotValidated}
+	cfg := &Cfg{
+		beaconCfg:               beaconCfg,
+		executionClient:         engine,
+		gloasPayloadValidator:   engine,
+		forkChoice:              store,
+		gloasVerificationCursor: root,
+		gloasVerificationHead:   anchorRoot,
+	}
+	cfg.gloasPayloadRetryOffset.Store(3)
+
+	require.NoError(t, chainTipSync(t.Context(), log.Root(), cfg, Args{seenSlot: 96, targetSlot: 96}))
+	require.Equal(t, 1, engine.newPayloadCalls)
+}
+
+func TestVerificationSweepPrioritizesSelectedHeadBeforeSlowAncestor(t *testing.T) {
+	beaconCfg, anchorState, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	anchorBlockRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	headRoot := common.Hash(anchorBlockRoot)
+	ancestorRoot := common.HexToHash("0x9876")
+	headHash := common.HexToHash("0x1111")
+	ancestorHash := common.HexToHash("0x2222")
+
+	encodedEnvelope, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	cloneEnvelope := func() *cltypes.SignedExecutionPayloadEnvelope {
+		cloned := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg)}
+		require.NoError(t, cloned.DecodeSSZStrict(encodedEnvelope, int(clparams.GloasVersion)))
+		return cloned
+	}
+	headEnvelope := cloneEnvelope()
+	headEnvelope.Message.BeaconBlockRoot = headRoot
+	headEnvelope.Message.Payload.BlockHash = headHash
+	ancestorEnvelope := cloneEnvelope()
+	ancestorEnvelope.Message.BeaconBlockRoot = ancestorRoot
+	ancestorEnvelope.Message.Payload.BlockHash = ancestorHash
+	headBid := *bid
+	headBid.BlockHash = headHash
+	ancestorBid := *bid
+	ancestorBid.BlockHash = ancestorHash
+	headBlock := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	headBlock.Block.Slot = 96
+	headBlock.Block.ParentRoot = ancestorRoot
+	headBlock.Block.Body.SignedExecutionPayloadBid.Message = &headBid
+	ancestorBlock := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	ancestorBlock.Block.Slot = 95
+	ancestorBlock.Block.Body.SignedExecutionPayloadBid.Message = &ancestorBid
+	graph := &flakyRootOnlyPendingForkGraph{
+		anchorRoot: headRoot,
+		blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+			headRoot: headBlock, ancestorRoot: ancestorBlock,
+		},
+		envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+			headRoot: headEnvelope, ancestorRoot: ancestorEnvelope,
+		},
+		acceptedByRoot: make(map[common.Hash]bool),
+	}
+	store, err := forkchoice.NewForkChoiceStore(
+		nil, anchorState, nil, pool.NewOperationsPool(beaconCfg), graph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+	)
+	require.NoError(t, err)
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		if engine.newPayloadHashes[len(engine.newPayloadHashes)-1] == ancestorHash {
+			<-ctx.Done()
+			return execution_client.PayloadStatusNone, ctx.Err()
+		}
+		return execution_client.PayloadStatusValidated, nil
+	}
+	cfg := &Cfg{beaconCfg: beaconCfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: store}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	verifyUnverifiedGloasPayloads(ctx, cfg)
+	require.NotEmpty(t, engine.newPayloadHashes)
+	require.Equal(t, headHash, engine.newPayloadHashes[0])
+	require.True(t, store.IsPayloadVerified(headRoot))
+
+	graph.acceptedByRoot[headRoot] = false
+	engine.newPayloadHashes = nil
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		if engine.newPayloadHashes[len(engine.newPayloadHashes)-1] == headHash {
+			<-ctx.Done()
+			return execution_client.PayloadStatusNone, ctx.Err()
+		}
+		return execution_client.PayloadStatusValidated, nil
+	}
+	cfg = &Cfg{beaconCfg: beaconCfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: store}
+	for range 2 {
+		attemptCtx, attemptCancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		verifyUnverifiedGloasPayloads(attemptCtx, cfg)
+		attemptCancel()
+	}
+	require.Contains(t, engine.newPayloadHashes, ancestorHash)
+	require.True(t, store.IsPayloadVerified(ancestorRoot))
+}
+
+func TestVerificationSweepRotatesDirectExtensionHeadsWithinLimit(t *testing.T) {
+	beaconCfg, anchorState, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.InitializeForkSchedule()
+
+	const chainLength = maxGloasAncestorVisitsPerCycle + 8
+	roots := make([]common.Hash, chainLength)
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, chainLength)
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, chainLength)
+	payloadHashes := make([]common.Hash, chainLength)
+	encodedEnvelope, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	for i := range chainLength {
+		roots[i] = common.Hash{byte(i + 1), 0xa5}
+		payloadHashes[i] = common.Hash{byte(i + 1), 0x5a}
+	}
+	for i := range chainLength {
+		cloned := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg)}
+		require.NoError(t, cloned.DecodeSSZStrict(encodedEnvelope, int(clparams.GloasVersion)))
+		cloned.Message.BeaconBlockRoot = roots[i]
+		cloned.Message.Payload.BlockHash = payloadHashes[i]
+		blockBid := *bid
+		blockBid.BlockHash = payloadHashes[i]
+		block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = uint64(200 - i)
+		block.Block.Body.SignedExecutionPayloadBid.Message = &blockBid
+		if i+1 < chainLength {
+			block.Block.ParentRoot = roots[i+1]
+		}
+		blocks[roots[i]] = block
+		envelopes[roots[i]] = cloned
+	}
+	graph := &flakyRootOnlyPendingForkGraph{
+		anchorRoot:     roots[0],
+		blocks:         blocks,
+		envelopes:      envelopes,
+		acceptedByRoot: make(map[common.Hash]bool),
+	}
+	newStore := func() *forkchoice.ForkChoiceStore {
+		store, err := forkchoice.NewForkChoiceStore(
+			nil, anchorState, nil, pool.NewOperationsPool(beaconCfg), graph, beaconevents.NewEventEmitter(), nil, nil,
+			public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+		)
+		require.NoError(t, err)
+		return store
+	}
+	store := newStore()
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusNotValidated}
+	cfg := &Cfg{
+		beaconCfg:             beaconCfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            store,
+		gloasVerificationHead: roots[3],
+	}
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	limitCfg := &Cfg{
+		beaconCfg:             beaconCfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            store,
+	}
+	graph.anchorRoot = roots[0]
+	engine.newPayloadFn = nil
+	engine.newPayloadHashes = nil
+	verifyUnverifiedGloasPayloads(t.Context(), limitCfg)
+	require.Len(t, engine.newPayloadHashes, maxGloasVerificationSweepPerCycle)
+	distinctAttempts := make(map[common.Hash]struct{}, len(engine.newPayloadHashes))
+	for _, hash := range engine.newPayloadHashes {
+		distinctAttempts[hash] = struct{}{}
+	}
+	require.Len(t, distinctAttempts, maxGloasVerificationSweepPerCycle)
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+
+	firstAttempts := make([]common.Hash, 0, 3)
+	for _, head := range []common.Hash{roots[2], roots[1], roots[0]} {
+		graph.anchorRoot = head
+		cfg.forkChoice = newStore()
+		engine.newPayloadHashes = nil
+		engine.newPayloadCalls = 0
+		attemptCtx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		verifyUnverifiedGloasPayloads(attemptCtx, cfg)
+		cancel()
+		require.NotEmpty(t, engine.newPayloadHashes)
+		require.LessOrEqual(t, len(engine.newPayloadHashes), maxGloasVerificationSweepPerCycle)
+		firstAttempts = append(firstAttempts, engine.newPayloadHashes[0])
+	}
+	require.Equal(t, []common.Hash{payloadHashes[3], payloadHashes[1], payloadHashes[maxGloasAncestorVisitsPerCycle-1]}, firstAttempts)
+}
+
+func TestGloasPayloadRetryPhaseIdentitySurvivesCaughtUpTransitions(t *testing.T) {
+	calls := [4]int{}
+	for invocation := range uint32(12) {
+		includeVerification := invocation%4 == 3
+		phases := make([]func(context.Context), 4)
+		for i := range phases {
+			index := i
+			phases[i] = func(ctx context.Context) {
+				if index == 3 && !includeVerification {
+					return
+				}
+				calls[index]++
+				<-ctx.Done()
+			}
+		}
+		runGloasPayloadRetryPhases(context.Background(), 5*time.Millisecond, invocation, phases...)
+	}
+	require.Equal(t, [4]int{3, 3, 3, 3}, calls)
+}
+
 func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {
-	calls := [3]int{}
-	for offset := range uint32(3) {
-		phases := make([]func(context.Context), 3)
+	calls := [4]int{}
+	for offset := range uint32(4) {
+		phases := make([]func(context.Context), 4)
 		for i := range phases {
 			index := i
 			phases[i] = func(ctx context.Context) {
@@ -1407,7 +1788,7 @@ func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {
 		}
 		runGloasPayloadRetryPhases(context.Background(), 20*time.Millisecond, offset, phases...)
 	}
-	require.Equal(t, [3]int{1, 1, 1}, calls)
+	require.Equal(t, [4]int{1, 1, 1, 1}, calls)
 }
 
 func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope, common.Hash) {

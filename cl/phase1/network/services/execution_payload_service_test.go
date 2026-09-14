@@ -62,6 +62,11 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 	}
 }
 
+func initializeRequiredPayloadLists(envelope *cltypes.ExecutionPayloadEnvelope) {
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = &solid.TransactionsSSZ{}
+}
+
 func TestExecutionPayloadServiceDecodeRejectsNonCanonicalOffsets(t *testing.T) {
 	service, _ := setupExecutionPayloadService(t)
 	encoded, err := newTestSignedEnvelope(100, common.Hash{1}, 1).EncodeSSZ(nil)
@@ -208,10 +213,16 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 
 	blockRoot := common.Hash{1}
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
-	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	var processCalls atomic.Int32
+	forkchoiceMock.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		processCalls.Add(1)
+		return forkchoice.ErrEIP7594ColumnDataNotAvailable
+	}
 	envelope := newTestSignedEnvelope(100, blockRoot, 7)
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, int32(2), processCalls.Load())
 	select {
 	case event := <-events:
 		require.Equal(t, beaconevents.OpExecutionPayloadGossip, event.Event)
@@ -219,6 +230,47 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	default:
 		t.Fatal("validated gossip envelope did not emit execution_payload_gossip while waiting for columns")
 	}
+	processed := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+	require.False(t, processed.HasProcessedPayloadEnvelope(envelope))
+}
+
+func TestExecutionPayloadServiceRejectsDifferentDAPendingSignatureBeforeForkchoice(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	var processCalls atomic.Int32
+	forkchoiceMock.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		processCalls.Add(1)
+		return forkchoice.ErrEIP7594ColumnDataNotAvailable
+	}
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+
+	impl := service.(*executionPayloadService)
+	seen, ok := impl.seenEnvelopesCache.Peek(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 7})
+	require.True(t, ok)
+	require.Equal(t, envelope.Signature, seen.signature)
+	envelopeRoot, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(envelopeRoot), seen.root)
+
+	forged := envelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	forged.Signature[0] ^= 0xff
+	err = service.ProcessMessage(t.Context(), nil, forged)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, int32(1), processCalls.Load())
+
+	processed := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+	require.False(t, processed.HasProcessedPayloadEnvelope(envelope))
+	forkchoiceMock.Envelopes[blockRoot] = envelope
+	require.True(t, processed.HasProcessedPayloadEnvelope(envelope))
 }
 
 func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
@@ -362,12 +414,89 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	// First call should succeed
 	err := service.ProcessMessage(context.Background(), nil, envelope)
 	require.NoError(t, err)
+	fcu.Envelopes[blockRoot] = envelope
 
 	// Second call with same (blockRoot, builderIndex) should be ignored
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
 	require.Contains(t, err.Error(), "already seen envelope")
+}
+
+func TestExecutionPayloadServiceReportsExactProcessedPayload(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	fcu.Envelopes[blockRoot] = envelope
+
+	processed, ok := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+	require.True(t, ok)
+	require.True(t, processed.HasProcessedPayloadEnvelope(envelope))
+}
+
+func TestExecutionPayloadServiceRejectsDifferentProcessedPayloadWithSameKey(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	fcu.Envelopes[blockRoot] = envelope
+
+	different := envelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	different.Signature[0] ^= 0xff
+	processed := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+	require.False(t, processed.HasProcessedPayloadEnvelope(different))
+}
+
+func TestExecutionPayloadServiceRejectsIncompleteProcessedPayloadLookup(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	processed := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+
+	require.False(t, processed.HasProcessedPayloadEnvelope(nil))
+	require.False(t, processed.HasProcessedPayloadEnvelope(&cltypes.SignedExecutionPayloadEnvelope{}))
+	require.NotPanics(t, func() {
+		require.False(t, processed.HasProcessedPayloadEnvelope(&cltypes.SignedExecutionPayloadEnvelope{
+			Message: &cltypes.ExecutionPayloadEnvelope{},
+		}))
+	})
+	blockRoot := common.HexToHash("0x1234")
+	incomplete := newTestSignedEnvelope(100, blockRoot, 1)
+	incomplete.Message.Payload.BlockAccessList = nil
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	require.NotPanics(t, func() {
+		require.False(t, processed.HasProcessedPayloadEnvelope(incomplete))
+	})
+	require.NotPanics(t, func() {
+		require.Error(t, service.ProcessMessage(t.Context(), nil, incomplete))
+	})
+}
+
+func TestExecutionPayloadServiceExactLookupRejectsAndPreservesNilLists(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	fcu.Envelopes[blockRoot] = envelope
+	processed := service.(interface {
+		HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+	})
+
+	envelope.Message.Payload.Extra = nil
+	require.False(t, processed.HasProcessedPayloadEnvelope(envelope))
+	require.Nil(t, envelope.Message.Payload.Extra)
+	envelope.Message.Payload.Extra = solid.NewExtraData()
+	envelope.Message.Payload.Transactions = nil
+	require.False(t, processed.HasProcessedPayloadEnvelope(envelope))
+	require.Nil(t, envelope.Message.Payload.Transactions)
 }
 
 func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
@@ -538,7 +667,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		emitters:        beaconevents.NewEventEmitter(),
 	}
 	impl.pending = impl.newPendingQueue()
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
 
@@ -581,7 +710,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		emitters:        beaconevents.NewEventEmitter(),
 	}
 	impl.pending = impl.newPendingQueue()
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
 
@@ -636,7 +765,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 		emitters:        beaconevents.NewEventEmitter(),
 	}
 	impl.pending = impl.newPendingQueue()
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
 
@@ -683,7 +812,7 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl := &executionPayloadService{
 		forkchoiceStore:    forkchoiceMock,
@@ -713,7 +842,7 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	seenCache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl := &executionPayloadService{
 		forkchoiceStore:    forkchoiceMock,
@@ -934,6 +1063,7 @@ func TestValidateEnvelopeLimitsDoesNotApplyLegacyDepositRequestMaximum(t *testin
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxDepositRequestsPerPayload = 1
 	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	initializeRequiredPayloadLists(envelope)
 	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
 	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
@@ -960,6 +1090,7 @@ func TestValidateEnvelopeLimitsRejectsOversizedRequestsAndWithdrawals(t *testing
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxWithdrawalsPerPayload = 1
 	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	initializeRequiredPayloadLists(envelope)
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](16, 44)
 	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})
 	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})
@@ -969,6 +1100,7 @@ func TestValidateEnvelopeLimitsRejectsOversizedRequestsAndWithdrawals(t *testing
 func TestValidateEnvelopeLimitsRequiresWithdrawalsList(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	initializeRequiredPayloadLists(envelope)
 	require.ErrorContains(t, validateEnvelopeLimits(&cfg, envelope), "missing payload withdrawals")
 
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)

@@ -38,7 +38,7 @@ import (
 
 func newPendingEnvelopeTestService(t *testing.T) (*executionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	t.Helper()
-	cache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	cache, err := lru.New[seenEnvelopeKey, seenEnvelope]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	service := &executionPayloadService{forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache}

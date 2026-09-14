@@ -36,6 +36,10 @@ type PayloadProcessor interface {
 	ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
+type exactProcessedPayloadReader interface {
+	HasProcessedPayloadEnvelope(*cltypes.SignedExecutionPayloadEnvelope) bool
+}
+
 type BlobDataPreparer interface {
 	Prepare(context.Context, uint64, common.Hash, *eladapter.BlobsBundle) (PreparedBlobData, error)
 }
@@ -568,7 +572,7 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 		attemptErr = nil
 		if !localAccepted {
 			err := r.processor.ProcessMessage(revealCtx, nil, localEnvelope)
-			localAccepted = err == nil
+			localAccepted = err == nil || hasProcessedPayloadEnvelope(r.processor, localEnvelope)
 			attemptErr = errors.Join(attemptErr, err)
 			if !localAccepted && r.persistedEnvelopeMatches(request.key.beaconBlockRoot, encoded) {
 				localAccepted = true
@@ -611,6 +615,11 @@ func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error 
 		case <-timer.C:
 		}
 	}
+}
+
+func hasProcessedPayloadEnvelope(processor PayloadProcessor, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	reader, ok := processor.(exactProcessedPayloadReader)
+	return ok && reader.HasProcessedPayloadEnvelope(envelope)
 }
 
 func revealContextError(parentCtx, revealCtx context.Context, deadline time.Time) error {

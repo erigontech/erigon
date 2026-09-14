@@ -143,6 +143,30 @@ func (p *successfulRevealProcessor) ProcessMessage(context.Context, *uint64, *cl
 	return nil
 }
 
+type exactDuplicateRevealProcessor struct {
+	calls      atomic.Int32
+	seenRoot   common.Hash
+	mismatched bool
+}
+
+func (p *exactDuplicateRevealProcessor) ProcessMessage(_ context.Context, _ *uint64, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	p.calls.Add(1)
+	seen := envelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	if p.mismatched {
+		seen.Signature[0] ^= 0xff
+	}
+	root, err := seen.HashSSZ()
+	if err == nil {
+		p.seenRoot = common.Hash(root)
+	}
+	return errors.New("exact envelope already processed")
+}
+
+func (p *exactDuplicateRevealProcessor) HasProcessedPayloadEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	root, err := envelope.HashSSZ()
+	return err == nil && p.seenRoot == common.Hash(root)
+}
+
 type failingRevealPublisher struct {
 	calls atomic.Int32
 }
@@ -600,6 +624,66 @@ func TestRevealRunnerContinuesAfterExactEnvelopeWasPersisted(t *testing.T) {
 	require.NoError(t, runner.reveal(ctx, request))
 	require.Equal(t, int32(1), processor.calls.Load())
 	require.Equal(t, int32(1), publisher.calls.Load())
+}
+
+func TestRevealRunnerContinuesBlobRevealAfterExactEnvelopeWasProcessed(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	processor := new(exactDuplicateRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		processor,
+		publisher,
+		store,
+		1,
+		time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	prepared := new(retryingPreparedBlobData)
+	runner.blobData = &retryingBlobDataPreparer{prepared: prepared}
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	require.NoError(t, runner.reveal(ctx, request))
+	require.Equal(t, int32(1), processor.calls.Load())
+	require.Equal(t, int32(1), publisher.calls.Load())
+	require.Equal(t, int32(1), prepared.publishCalls.Load())
+	require.Equal(t, int32(1), prepared.storeCalls.Load())
+}
+
+func TestRevealRunnerDoesNotContinueBlobRevealAfterDifferentEnvelopeWasProcessed(t *testing.T) {
+	store := &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
+	processor := &exactDuplicateRevealProcessor{mismatched: true}
+	publisher := new(recordingRevealPublisher)
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		processor,
+		publisher,
+		store,
+		1,
+		time.Millisecond,
+		validCoordinatorBlobsBundle(t, gloasCoordinatorConfig(), 1),
+	)
+	prepared := new(retryingPreparedBlobData)
+	runner.blobData = &retryingBlobDataPreparer{prepared: prepared}
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now()}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	require.ErrorIs(t, runner.reveal(ctx, request), context.DeadlineExceeded)
+	require.Positive(t, processor.calls.Load())
+	require.Zero(t, publisher.calls.Load())
+	require.Zero(t, prepared.publishCalls.Load())
+	require.Zero(t, prepared.storeCalls.Load())
 }
 
 func TestRevealRunnerDoesNotReconcileMismatchedPersistedEnvelope(t *testing.T) {

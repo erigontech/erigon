@@ -85,6 +85,7 @@ type Cfg struct {
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
+	gloasVerificationPriority    uint8
 }
 
 type Args struct {
