@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -147,10 +146,9 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	// The exclusive src stays open until the rename, so a process that doesn't take
 	// the datadir lock can't open the file that is being replaced. Windows can't
 	// rename over a file mdbx opened in exclusive mode.
-	closeSrc := sync.OnceFunc(src.Close)
-	defer closeSrc()
+	defer src.Close()
 	if runtime.GOOS == "windows" {
-		closeSrc()
+		src.Close()
 	}
 
 	// Mode and owner are applied before the rename, the last step that may fail.
@@ -164,7 +162,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := os.Rename(copied, dataFile); err != nil {
 		return err
 	}
-	closeSrc()
+	src.Close()
 
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
