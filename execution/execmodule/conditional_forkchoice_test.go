@@ -325,6 +325,30 @@ func TestUpdateForkChoiceIfHeadRetainsValidatedTargetAcrossDuplicateInsertion(t 
 	assertHead(t, m, child.Hash())
 }
 
+func TestUpdateForkChoiceIfHeadReexecutesValidatedTargetAfterRetentionMoves(t *testing.T) {
+	ctx := t.Context()
+	m, target := newValidatedChild(t)
+	siblingPack, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{0xff})
+	})
+	require.NoError(t, err)
+	sibling := siblingPack.TopBlock
+	require.NotEqual(t, target.Hash(), sibling.Hash())
+
+	status, err := m.InsertBlocks(ctx, []*types.Block{sibling})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(ctx, sibling.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, sibling.Hash(), m.ExecModule.ForkValidator().ExtendingForkHeadHash())
+
+	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), target.Hash())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, result.ValidationError)
+	assertHead(t, m, target.Hash())
+}
+
 func TestUpdateForkChoiceIfHeadDoesNotReuseRetainedStateForInsertedSibling(t *testing.T) {
 	ctx := t.Context()
 	m, validated := newValidatedChild(t)
