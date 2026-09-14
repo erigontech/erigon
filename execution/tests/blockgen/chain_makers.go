@@ -615,6 +615,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	for i := range n {
+		chainreader.current = parent
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
@@ -678,10 +679,15 @@ func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
 func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
-func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
-func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
-func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
-func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
-func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header  { return nil }
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header { return nil }
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.current != nil && cr.current.NumberU64() == number && cr.current.Hash() == hash {
+		return cr.current.Header()
+	}
+	return nil
+}
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block { return nil }
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool         { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int    { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                  { return 0 }
