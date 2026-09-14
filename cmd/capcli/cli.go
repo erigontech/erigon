@@ -341,6 +341,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
 	}
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -370,25 +373,8 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if c.Blobs && currentBlock.Block.Body.GetBlobKzgCommitments() != nil && currentBlock.Block.Body.GetBlobKzgCommitments().Len() > 0 {
-			ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{currentBlock}, beaconConfig)
-			if err != nil {
-				// Return an error if blob identifiers could not be retrieved
-				err = fmt.Errorf("failed to get blob identifiers: %w", err)
-				return false, err
-			}
-			blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, beaconConfig, baseUriBlob, currentBlock)
-			if err != nil {
-				return false, fmt.Errorf("failed to retrieve blobs: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUriBlob, stringifiedRoot))
-			}
-			if _, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
-				if header.Signature == currentBlock.Signature {
-					return nil
-				}
-				return errors.New("mismatched block header in blob sidecar")
-			}); err != nil {
-				return false, fmt.Errorf("failed to verify and store blobs: %w", err)
-			}
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+			return false, err
 		}
 
 		currentRoot = currentBlock.Block.ParentRoot

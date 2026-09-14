@@ -11,10 +11,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -67,58 +65,6 @@ func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
 	// }
 
 	return blobsExist
-}
-
-// downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
-// It takes highest slot processed, and a list of signed beacon blocks as input.
-// It returns the highest blob slot processed and an error if any.
-func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
-	var (
-		ids   *solid.ListSSZ[*cltypes.BlobIdentifier]
-		blobs *network2.PeerAndSidecars
-	)
-
-	// Retrieve blob identifiers from the given blocks
-	ids, err = network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
-	if err != nil {
-		// Return an error if blob identifiers could not be retrieved
-		err = fmt.Errorf("failed to get blob identifiers: %w", err)
-		return
-	}
-
-	// If there are no blobs to retrieve, return the highest slot processed
-	if ids.Len() == 0 {
-		return highestSlotProcessed, nil
-	}
-
-	// Request blobs from the network
-	blobs, err = network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-	if errors.Is(err, network2.ErrTimeout) {
-		log.Warn("Blob request timeout", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
-		return highestSlotProcessed, nil
-	}
-	if err != nil {
-		// Return an error if blobs could not be retrieved
-		err = fmt.Errorf("failed to get blobs: %w", err)
-		return
-	}
-
-	var highestProcessed, inserted uint64
-	// Verify and insert blobs into the blob store
-	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-		// Ban the peer if verification fails
-		cfg.rpc.BanPeer(blobs.Peer)
-		// Return an error if blobs could not be verified
-		err = fmt.Errorf("failed to verify blobs: %w", err)
-		return
-	}
-	// If all blobs were inserted successfully, return the highest processed slot
-	if inserted == uint64(ids.Len()) {
-		return highestProcessed, nil
-	}
-
-	// If not all blobs were inserted, return the highest processed slot minus one
-	return highestProcessed - 1, err
 }
 
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
