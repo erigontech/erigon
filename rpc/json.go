@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -108,21 +110,49 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
+// writeResponse encodes result straight into stream as the success response and returns nil.
+// If result does not encode, nothing is written and the error response is returned instead.
+// The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
+func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
+	w := &responseWriter{stream: stream, id: msg.ID}
 	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
-	}
-	if err != nil {
-		// TODO: wrap with 'internal server error'
+		enc, err := fm.MarshalFastJSON()
+		if err != nil {
+			return msg.errorResponse(err)
+		}
+		w.writeResult(enc)
+	} else if err := json.NewEncoder(w).Encode(result); err != nil {
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	stream.WriteObjectEnd()
+	return nil
+}
+
+// responseWriter receives json.Encoder output. Encode writes once, and only after the whole
+// value has encoded, so a result that fails leaves the stream untouched.
+type responseWriter struct {
+	stream jsonstream.Stream
+	id     json.RawMessage
+}
+
+func (w *responseWriter) Write(b []byte) (int, error) {
+	w.writeResult(bytes.TrimSuffix(b, []byte{'\n'}))
+	return len(b), nil
+}
+
+func (w *responseWriter) writeResult(enc []byte) {
+	if len(enc) == 0 {
+		enc = null
+	}
+	w.stream.WriteObjectStart()
+	w.stream.WriteObjectField("jsonrpc")
+	w.stream.WriteString(vsn)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("id")
+	w.stream.WriteRawBytes(w.id)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("result")
+	w.stream.WriteRawBytes(enc)
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -323,7 +353,9 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 	if !ok {
 		deadline = time.Now().Add(defaultWriteTimeout)
 	}
-	c.conn.SetWriteDeadline(deadline)
+	if err := c.conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
 	return c.encode(v)
 }
 
