@@ -1128,3 +1128,32 @@ func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, "null", string(encoded))
 }
+
+func TestTransactionHashFromEncoding(t *testing.T) {
+	t.Parallel()
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	dynFee := DynamicFeeTransaction{
+		CommonTx: CommonTx{Nonce: 1, To: &to, GasLimit: 21000, Data: []byte("abc")},
+		ChainID:  u256.Num1,
+		TipCap:   *uint256.NewInt(1),
+		FeeCap:   *uint256.NewInt(2),
+	}
+	for _, txn := range []Transaction{
+		rightvrsTx,
+		signedEip2718Tx,
+		signedDynFeeTx,
+		&BlobTx{DynamicFeeTransaction: dynFee, MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&SetCodeTransaction{DynamicFeeTransaction: dynFee, Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
+		&AccountAbstractionTransaction{ChainID: uint256.NewInt(1), NonceKey: uint256.NewInt(0), Nonce: 1, Tip: uint256.NewInt(1), FeeCap: uint256.NewInt(2), BuilderFee: uint256.NewInt(0), GasLimit: 21000},
+	} {
+		var binary bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&binary))
+		wrapped, err := rlp.EncodeToBytes(txn)
+		require.NoError(t, err)
+		for _, enc := range [][]byte{binary.Bytes(), wrapped} {
+			got, err := TransactionHashFromEncoding(enc)
+			require.NoError(t, err)
+			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+		}
+	}
+}

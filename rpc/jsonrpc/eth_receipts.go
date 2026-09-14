@@ -394,7 +394,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txnHash, ok, err := api._txnReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -402,11 +402,18 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		r, ok, err := api.receiptsGenerator.PersistedReceiptWithoutBloom(tx, header, txn.Hash(), txNum)
+		r, ok, err := api.receiptsGenerator.PersistedReceiptWithoutBloom(tx, header, txnHash, txNum)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
+			var txn types.Transaction
+			if txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex); err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
 			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
 				return nil, err
 			}

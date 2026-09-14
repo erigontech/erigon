@@ -481,26 +481,28 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 }
 
 func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
-	if err != nil {
+	txnRlp, err := TxnRlpByIdxInBlock(db, blockHash, blockNum, txIdxInBlock)
+	if err != nil || txnRlp == nil {
 		return nil, false, err
 	}
-	if b == nil {
-		return nil, false, nil
-	}
-
-	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
-	if err != nil {
-		return nil, false, err
-	}
-	if len(v) == 0 {
-		return nil, false, nil
-	}
-	txn, err := types.DecodeTransaction(v)
+	txn, err := types.DecodeTransaction(txnRlp)
 	if err != nil {
 		return nil, false, err
 	}
 	return txn, true, nil
+}
+
+// TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
+func TxnRlpByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) ([]byte, error) {
+	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
+	if err != nil || b == nil {
+		return nil, err
+	}
+	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
+	if err != nil || len(v) == 0 {
+		return nil, err
+	}
+	return v, nil
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
