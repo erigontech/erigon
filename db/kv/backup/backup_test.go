@@ -301,7 +301,7 @@ func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }
 
-func withAutoCompactMinFree(t *testing.T, v uint64) {
+func withAutoCompactMinFree(t *testing.T, v datasize.ByteSize) {
 	t.Helper()
 	prev := autoCompactMinFree
 	autoCompactMinFree = v
@@ -311,7 +311,7 @@ func withAutoCompactMinFree(t *testing.T, v uint64) {
 // TestAutoCompactDatadirSkipsLittleFreeSpace: a small db crosses bloatRatio with
 // a few free pages, and its rewrite gives back nothing the growth step keeps.
 func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
-	withAutoCompactMinFree(t, 1<<30)
+	withAutoCompactMinFree(t, datasize.GB)
 	dirs := datadir.New(t.TempDir())
 	writeTestDB(t, dirs.Chaindata, 18_000)
 	before := dataFileStat(t, dirs.Chaindata)

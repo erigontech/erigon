@@ -26,7 +26,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -100,7 +99,7 @@ const bloatRatio = 3
 
 // autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
 // pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree = datasize.GB.Bytes()
+var autoCompactMinFree = datasize.GB
 
 // ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
 // datadir locked by another process is skipped.
@@ -149,7 +148,7 @@ func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 		if free <= bloatRatio*data || free < autoCompactMinFree {
 			continue
 		}
-		logger.Info("[compact] auto-compact", "db", db.path, "data", common.ByteCount(data), "free", common.ByteCount(free))
+		logger.Info("[compact] auto-compact", "db", db.path, "data", data.HR(), "free", free.HR())
 		if err := CompactInPlace(ctx, db.path, db.label, logger); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -164,7 +163,7 @@ func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 // pages below its last used page. The unallocated tail of the file is not free
 // space: mdbx grows the file ahead of use, so counting it would compact a
 // freshly compacted db again.
-func pageUsage(dbDir string) (data, free uint64, err error) {
+func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return 0, 0, err
@@ -181,9 +180,9 @@ func pageUsage(dbDir string) (data, free uint64, err error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	pageSize := uint64(st.PSize)
-	data = (st.BranchPages + st.LeafPages + st.OverflowPages) * pageSize
-	used := (info.MiLastPgNo + 1) * pageSize
+	pageSize := datasize.ByteSize(st.PSize)
+	data = datasize.ByteSize(st.BranchPages+st.LeafPages+st.OverflowPages) * pageSize
+	used := datasize.ByteSize(info.MiLastPgNo+1) * pageSize
 	return data, used - min(used, data), nil
 }
 
