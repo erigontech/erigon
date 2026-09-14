@@ -13,7 +13,7 @@ Sections marked *(informative)* are non-normative.
 ## 1. Scope and cardinal requirement
 
 `ParallelPatriciaHashed` computes the state-commitment root across a pool of
-worker goroutines. It is one of three `commitment.Trie` implementations and
+worker goroutines. It is one of two `commitment.Trie` implementations and
 changes nothing in the on-disk format, branch encoding, or root definition.
 
 **R1 (cardinal).** For every input, the root hash produced by
@@ -94,9 +94,10 @@ Holds a configuration/base `template *HexPatriciaHashed`, a `TrieContextFactory`
 pooled workers, `numWorkers`, the published `rootHash`, and — for the deferred path
 — a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. Worker
 tries come from the package-wide `hphPool`. The `template`
-doubles as the **mount base** during `Process`: the fork walk positions it at each
-eligible split row, stitches the workers' folded cells into that row, and folds the
-completed walk to the root. (Outside `Process` it exposes ctx/cache/metrics/trace
+doubles as the **mount base** during `Process`: the fork walk starts on it, positions it
+at every eligible split row it reaches, stitches the children's folded cells into that
+row, and folds the completed walk to the root. A fork below a clone positions and
+stitches that clone the same way. (Outside `Process` it exposes ctx/cache/metrics/trace
 configuration only.)
 
 ## 4. Pipeline
@@ -104,13 +105,13 @@ configuration only.)
 | phase | site | action |
 | --- | --- | --- |
 | 1. Touch | `Updates.TouchPlainKey` (ModeParallel) | insert each hashed key into the prefix trie, carrying its `plainKey`/`update` on the terminating node; no ETL collectors are used |
-| 2. Walk + fork | `processMounted`, `forkWalk` | walk the prefix trie on the base trie; at every split point whose subtree reaches the round's grain, position the base on the row below the split prefix, mount one clone per child nibble, stitch the folded cells back into that row and carry on; fold the base to the root at the end |
+| 2. Walk + fork | `processMounted`, `forkWalk` | walk the prefix trie from the base trie; at every split point whose offload reaches the round's grain, position the walking trie on the row below the split prefix, mount one clone per child nibble, stitch the folded cells back into that row and carry on; fold the base to the root at the end |
 | 3. Commit | `Process` end | apply (or hand off) the merged deferred branch updates; publish the root |
 
 ### 4.1 Phase 2 — Fork the walk at every split point (`processMounted`, `fork_walk.go`)
 
-`forkWalk.walk` traverses the prefix trie on one trie (`template`) in nibble-ascending
-order, applying each terminating node's `plainKey`/`update` through `followAndUpdate`
+`forkWalk.walk` traverses the prefix trie on the walking trie — the base (`template`) at
+the top, a clone below a fork — in nibble-ascending order, applying each terminating node's `plainKey`/`update` through `followAndUpdate`
 before descending, so an account at depth 64 precedes its storage keys (I4). A
 terminating node with a nil `plainKey` and no children is an error.
 
@@ -270,7 +271,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | --- | --- |
 | empty update set | return the template's existing root (matches the sequential no-op) |
 | terminating node with nil `plainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
-| deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back — same caveat as the row below |
+| deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
 | any error after the walk began | restore the base trie's in-memory state from the snapshot taken before it — root cell and its three flags, no open rows, no queued branch updates |
 | branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; `ClearDeferred` on the abort path discards the whole round |
