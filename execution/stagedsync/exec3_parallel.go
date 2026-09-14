@@ -299,7 +299,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+			} else if err != nil && !(isCancellation(err) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
 				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
@@ -476,6 +476,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						return deferredRootErr
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+						// Carries WHY without changing WHAT: still ErrInvalidBlock, because a
+						// half-applied block is one and everything downstream depends on that, but
+						// tagged with the caller's deadline when that is what ended it, so the logger
+						// can tell a wrong block from a round the valve deliberately stopped.
+						if cause := context.Cause(ctx); errors.Is(cause, context.DeadlineExceeded) {
+							return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v: %w",
+								rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing, cause)
+						}
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
 					}
@@ -723,11 +731,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	if execErr != nil {
+		// Deliberately NOT isCancellation: this guard gates the ErrInvalidBlock HANDLING below, not only
+		// the log line. Widening it to cover deadlines skipped that handling for every round the pre-exec
+		// valve cut, and the backlog grew from 2 to 274 stuck transactions across three load runs. Only
+		// the log level may depend on the reason; what the code DOES must not.
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+			// The LEVEL reads the reason: a round the caller's deadline stopped did not fail, it was
+			// stopped, and reporting that as a failure is how an expected mechanism comes to look like a
+			// broken chain in the log. Everything below this runs exactly as before either way.
+			execLog := pe.logger.Warn
+			msg := "Execution failed"
+			if isCancellation(execErr) {
+				execLog, msg = pe.logger.Debug, "Execution stopped by its caller"
+			}
 			if lastHeader != nil {
-				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
+				execLog(fmt.Sprintf("[%s] %s", pe.logPrefix, msg), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
-				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+				execLog(fmt.Sprintf("[%s] %s", pe.logPrefix, msg), "err", execErr)
 			}
 			if errors.Is(execErr, rules.ErrInvalidBlock) {
 				if pe.cfg.badBlockHalt {
@@ -856,7 +876,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
-		} else if err != nil && !errors.Is(err, context.Canceled) {
+		} else if err != nil && !isCancellation(err) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
@@ -1392,6 +1412,14 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	}
 	pe.RUnlock()
 	if pendingBlocks > 0 {
+		// The error KEEPS its identity — everything downstream branches on ErrInvalidBlock and a
+		// half-executed block must go on being treated as one — but it also carries WHY, when the why is
+		// the caller's own deadline. That is what lets the logger tell a block that is wrong from a round
+		// the pre-exec valve deliberately stopped, without changing what either of them does.
+		if cause := context.Cause(ctx); errors.Is(cause, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s): %w",
+				rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason, cause)
+		}
 		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
 			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
 	}
@@ -1520,6 +1548,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	go func() {
 		if pe.execLoopGroup != nil {
 			err := pe.execLoopGroup.Wait()
+			// NOT isCancellation here: swallowing the error changes what wait() reports.
 			if err != nil && !errors.Is(err, context.Canceled) {
 				doneCh <- err
 				return
@@ -3680,4 +3709,12 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		filtered = append(filtered, w)
 	}
 	return filtered
+}
+
+// isCancellation reports whether err is the CALLER having stopped us, rather than anything wrong with the
+// work. A deadline counts: the pre-exec valve stops an overrunning round by giving it one, and a stop that
+// was asked for must not be logged as a failure — three WARN lines per firing is how a deliberate,
+// expected mechanism comes to look like a broken chain in the log.
+func isCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

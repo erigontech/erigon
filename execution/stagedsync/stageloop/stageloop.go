@@ -311,6 +311,12 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
 				return err
 			}
+			// Unless the caller's deadline ended it, in which case work being left over is exactly what
+			// was asked for. Say so in the error, so a round the pre-exec valve stopped is not reported
+			// as a block that would not validate.
+			if cause := context.Cause(ctx); errors.Is(cause, context.DeadlineExceeded) {
+				return fmt.Errorf("state step stopped with work left: %w", cause)
+			}
 			return errors.New("unexpected state step has more work")
 		}
 	}

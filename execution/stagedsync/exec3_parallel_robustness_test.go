@@ -1126,6 +1126,21 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
 		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
 	})
+
+	t.Run("pending blocks after the caller's deadline are the deadline, not an invalid block", func(t *testing.T) {
+		// The pre-exec valve stops an overrunning round by giving it a deadline. Blocks left pending are
+		// pending because the time ran out, and reporting them as invalid logs a deliberate, expected
+		// mechanism as a consensus failure every time it fires.
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		err := pe.execLoopExitCheck(ctx, "round-deadline")
+		// It stays an invalid block — downstream control flow depends on that — and ALSO carries the
+		// deadline, which is the part the logger reads.
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
 }
 
 // Pins wrapAsExecAbort: a real underlying err must survive as OriginError

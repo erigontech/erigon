@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -328,7 +329,13 @@ func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.Share
 	}
 
 	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
-		pe.logger.Warn("Could not validate block", "err", err)
+		// A round the caller cut short did not fail to validate — it was stopped, on purpose, by the
+		// deadline the caller gave it. Warn is for the block being wrong.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			pe.logger.Debug("Validation stopped by its caller", "err", err)
+		} else {
+			pe.logger.Warn("Could not validate block", "err", err)
+		}
 		return err
 	}
 
