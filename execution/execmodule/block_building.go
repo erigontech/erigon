@@ -231,7 +231,10 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	}
 	if nTx := len(body.Transactions); nTx > 0 {
 		el := time.Since(sealStart)
-		e.execCost.record(el, res.GasUsed, nTx)
+		// The SEAL contributes the block's authoritative per-tx GAS. It deliberately contributes NO time
+		// sample: this measures the close, not the execution. The per-tx time the driver sizes its rounds
+		// with comes from the pre-exec rounds themselves — see execCostWindow.
+		e.execCost.recordSealGas(res.GasUsed, nTx)
 		uqTime, uqGas := e.execCost.upperQuartile()
 		e.logger.Debug("[TPS-seal] close", "block", number, "txs", nTx, "ms", el.Milliseconds(),
 			"txPerSec", int(float64(nTx)/el.Seconds()),

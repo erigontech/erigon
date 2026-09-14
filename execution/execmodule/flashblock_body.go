@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -209,6 +210,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	if restore {
 		return e.reopenFlashblockLocked(ctx, inputs, newTxRLPs)
 	}
+	roundStart := time.Now()
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
@@ -225,6 +227,10 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	e.flash.body = append(e.flash.body, kept...)
 	body := append([][]byte(nil), e.flash.body...)
 	e.flash.mu.Unlock()
+	// Record this round's per-tx cost on EVERY path, including the ones that fail. The batch sizer's time
+	// bound exists to predict precisely the rounds that overrun their budget, so those must be sampled —
+	// recording only rounds that went on to seal left the window able to learn from the fast ones alone.
+	defer func() { e.execCost.recordRoundTime(time.Since(roundStart), len(kept)) }()
 
 	header := BuildFlashHeader(inputs, body, FlashblockOutputs{})
 	hash := header.Hash()
