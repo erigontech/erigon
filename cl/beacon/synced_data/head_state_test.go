@@ -39,9 +39,14 @@ func TestHeadUpdateKeepsPreviousHead(t *testing.T) {
 	for _, tc := range updates {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+			var headRoot [32]byte
 			for i := range 3 {
 				published := state.New(&clparams.MainnetBeaconConfig)
 				require.NoError(t, published.SetSlot(uint64(100+i)))
+				prevRoot := headRoot
+				var err error
+				headRoot, err = published.BlockRoot()
+				require.NoError(t, err)
 				require.NoError(t, tc.update(manager, published))
 
 				var head, prev *state.CachingBeaconState
@@ -61,7 +66,9 @@ func TestHeadUpdateKeepsPreviousHead(t *testing.T) {
 				}
 				require.NoError(t, prevErr)
 				require.NotSame(t, head, prev)
-				require.Equal(t, head.Slot()-1, prev.Slot())
+				root, err := prev.BlockRoot()
+				require.NoError(t, err)
+				require.Equal(t, prevRoot, root)
 			}
 		})
 	}
