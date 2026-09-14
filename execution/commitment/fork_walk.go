@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -136,13 +137,12 @@ func (fw *forkWalk) splits(node *prefixNode) bool {
 	if bits.OnesCount16(node.bitmap) < 2 {
 		return false
 	}
-	var largest uint32
+	var children, largest uint32
 	for _, c := range node.children {
-		if c.subtreeCount > largest {
-			largest = c.subtreeCount
-		}
+		children += c.subtreeCount
+		largest = max(largest, c.subtreeCount)
 	}
-	return node.subtreeCount-largest >= fw.grain
+	return children-largest >= fw.grain
 }
 
 func (fw *forkWalk) walk(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
@@ -196,7 +196,10 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		return fmt.Errorf("fork[%x]: position: %w", path, err)
 	}
 	var opened openedRow
-	if !positioned {
+	leafNib, leafKey := -1, []byte(nil)
+	if positioned {
+		leafNib, leafKey = unfoldedLeaf(w, path)
+	} else {
 		opened = openEmptyRow(w, path)
 	}
 	fw.forks.Add(1)
@@ -260,6 +263,14 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		}
 	}
 	stitchSplitCells(w, cells, touchedBits, presentBits)
+	if leafNib >= 0 {
+		bit := uint16(1) << leafNib
+		row := w.activeRows - 1
+		if touchedBits&^presentBits&bit != 0 && w.touchMap[row]&^bit != 0 && bytes.Equal(firstKeyUnder(node, path), leafKey) {
+			w.touchMap[row] &^= bit
+		}
+	}
+	opened.extendSingleSurvivor(w, path)
 	opened.closeIfEmpty(w)
 	return nil
 }
