@@ -18,7 +18,6 @@ package sszblocks
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -36,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-const executionPayloadFieldCount = 18
 
 type GasAmounts struct {
 	Regular uint64
@@ -70,7 +67,7 @@ type ExecutionPayload struct {
 	Miner                 common.Address
 	StateRoot             common.Hash
 	Transactions          [][]byte
-	Receipts              [][]byte
+	ReceiptsRoot          common.Hash
 	Number                uint64
 	GasLimits             GasAmounts
 	GasUsed               GasAmounts
@@ -173,6 +170,10 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 	if receiptCommitment != header.ReceiptHash {
 		return nil, fmt.Errorf("receipt hash mismatch: header %x, computed %x", header.ReceiptHash, receiptCommitment)
 	}
+	receiptsRoot, err := solid.NewTransactionsSSZFromTransactions(receipts).HashSSZProgressive()
+	if err != nil {
+		return nil, fmt.Errorf("hash receipts: %w", err)
+	}
 	withdrawals, err := encodeWithdrawals(block.Withdrawals())
 	if err != nil {
 		return nil, err
@@ -207,7 +208,7 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 		Miner:        header.Coinbase,
 		StateRoot:    header.Root,
 		Transactions: transactions,
-		Receipts:     receipts,
+		ReceiptsRoot: common.Hash(receiptsRoot),
 		Number:       header.Number.Uint64(),
 		GasLimits: GasAmounts{
 			Regular: header.GasLimit,
@@ -234,84 +235,46 @@ func ExecutionPayloadFromBlock(input *types.BlockWithReceipts, cfg BlockAdapterC
 }
 
 func (p *ExecutionPayload) HashSSZ() ([32]byte, error) {
-	roots, err := p.FieldRoots()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	schema := make([]any, len(roots))
-	for i := range roots {
-		schema[i] = roots[i][:]
-	}
-	return merkle_tree.ProgressiveContainerRootAll(schema...)
-}
-
-func (p *ExecutionPayload) FieldRoots() ([executionPayloadFieldCount][32]byte, error) {
-	var roots [executionPayloadFieldCount][32]byte
 	if p == nil {
-		return roots, errors.New("nil execution payload")
+		return [32]byte{}, errors.New("nil execution payload")
 	}
 	if len(p.ExtraData) > 32 {
-		return roots, fmt.Errorf("extra data length %d exceeds limit 32", len(p.ExtraData))
+		return [32]byte{}, fmt.Errorf("extra data length %d exceeds limit 32", len(p.ExtraData))
 	}
-
-	transactionsRoot, err := progressiveByteListListRoot(p.Transactions)
+	transactionsRoot, err := solid.NewTransactionsSSZFromTransactions(p.Transactions).HashSSZProgressive()
 	if err != nil {
-		return roots, fmt.Errorf("hash transactions: %w", err)
+		return [32]byte{}, fmt.Errorf("hash transactions: %w", err)
 	}
-	receiptsRoot, err := progressiveByteListListRoot(p.Receipts)
+	withdrawalsRoot, err := solid.NewTransactionsSSZFromTransactions(p.Withdrawals).HashSSZProgressive()
 	if err != nil {
-		return roots, fmt.Errorf("hash receipts: %w", err)
-	}
-	gasLimitsRoot, err := p.GasLimits.HashSSZ()
-	if err != nil {
-		return roots, fmt.Errorf("hash gas limits: %w", err)
-	}
-	gasUsedRoot, err := p.GasUsed.HashSSZ()
-	if err != nil {
-		return roots, fmt.Errorf("hash gas used: %w", err)
-	}
-	extraData := solid.NewExtraData()
-	extraData.SetBytes(p.ExtraData)
-	extraDataRoot, err := extraData.HashSSZ()
-	if err != nil {
-		return roots, fmt.Errorf("hash extra data: %w", err)
-	}
-	baseFeesRoot, err := p.BaseFeesPerGas.HashSSZ()
-	if err != nil {
-		return roots, fmt.Errorf("hash base fees per gas: %w", err)
-	}
-	withdrawalsRoot, err := progressiveByteListListRoot(p.Withdrawals)
-	if err != nil {
-		return roots, fmt.Errorf("hash withdrawals: %w", err)
-	}
-	excessGasRoot, err := p.ExcessGas.HashSSZ()
-	if err != nil {
-		return roots, fmt.Errorf("hash excess gas: %w", err)
+		return [32]byte{}, fmt.Errorf("hash withdrawals: %w", err)
 	}
 	blockAccessListRoot, err := merkle_tree.ProgressiveByteListRoot(p.BlockAccessList)
 	if err != nil {
-		return roots, fmt.Errorf("hash block access list: %w", err)
+		return [32]byte{}, fmt.Errorf("hash block access list: %w", err)
 	}
-
-	roots[0] = bytesRoot(p.ParentHash[:])
-	roots[1] = bytesRoot(p.Miner[:])
-	roots[2] = bytesRoot(p.StateRoot[:])
-	roots[3] = transactionsRoot
-	roots[4] = receiptsRoot
-	roots[5] = uint64Root(p.Number)
-	roots[6] = gasLimitsRoot
-	roots[7] = gasUsedRoot
-	roots[8] = uint64Root(p.Timestamp)
-	roots[9] = extraDataRoot
-	roots[10] = bytesRoot(p.MixHash[:])
-	roots[11] = baseFeesRoot
-	roots[12] = withdrawalsRoot
-	roots[13] = excessGasRoot
-	roots[14] = bytesRoot(p.ParentBeaconBlockRoot[:])
-	roots[15] = bytesRoot(p.RequestsHash[:])
-	roots[16] = blockAccessListRoot
-	roots[17] = uint64Root(p.SlotNumber)
-	return roots, nil
+	extraData := solid.NewExtraData()
+	extraData.SetBytes(p.ExtraData)
+	return merkle_tree.ProgressiveContainerRootAll(
+		p.ParentHash[:],
+		p.Miner[:],
+		p.StateRoot[:],
+		transactionsRoot[:],
+		p.ReceiptsRoot[:],
+		p.Number,
+		p.GasLimits,
+		p.GasUsed,
+		p.Timestamp,
+		extraData,
+		p.MixHash[:],
+		p.BaseFeesPerGas,
+		withdrawalsRoot[:],
+		p.ExcessGas,
+		p.ParentBeaconBlockRoot[:],
+		p.RequestsHash[:],
+		blockAccessListRoot[:],
+		p.SlotNumber,
+	)
 }
 
 func encodeTransactions(transactions types.Transactions) ([][]byte, error) {
@@ -362,7 +325,7 @@ func executionRequestsRoot(requests types.FlatRequests, cfg *clparams.BeaconChai
 	for i := range requests {
 		encoded[i] = requests[i].Encode()
 	}
-	decoded, err := cltypes.DecodeExecutionRequestsList(cfg, encoded, clparams.GloasVersion)
+	decoded, err := cltypes.DecodeExecutionRequestsList(cfg, encoded, clparams.ElectraVersion)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("decode execution requests: %w", err)
 	}
@@ -396,28 +359,4 @@ func blockAccessListBytes(input *types.BlockWithReceipts) ([]byte, error) {
 		return nil, errors.New("block access list result differs from block sidecar")
 	}
 	return fromResult, nil
-}
-
-func progressiveByteListListRoot(items [][]byte) ([32]byte, error) {
-	roots := make([][32]byte, len(items))
-	for i := range items {
-		root, err := merkle_tree.ProgressiveByteListRoot(items[i])
-		if err != nil {
-			return [32]byte{}, err
-		}
-		roots[i] = root
-	}
-	return merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
-}
-
-func bytesRoot(data []byte) [32]byte {
-	var root [32]byte
-	copy(root[:], data)
-	return root
-}
-
-func uint64Root(value uint64) [32]byte {
-	var root [32]byte
-	binary.LittleEndian.PutUint64(root[:], value)
-	return root
 }
