@@ -323,7 +323,9 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 	if !ok {
 		deadline = time.Now().Add(defaultWriteTimeout)
 	}
-	c.conn.SetWriteDeadline(deadline)
+	if err := c.conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
 	return c.encode(v)
 }
 

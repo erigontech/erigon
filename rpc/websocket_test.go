@@ -148,7 +148,7 @@ func TestClientWebsocketPing(t *testing.T) {
 		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	)
 	defer cancel()
-	defer server.Shutdown(ctx)
+	defer func() { _ = server.Shutdown(ctx) }()
 
 	client, err := DialContext(ctx, "ws://"+server.Addr, logger)
 	if err != nil {
@@ -232,7 +232,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 			t.Errorf("server WS upgrade error: %v", err)
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 
 		// Handle the connection.
 		wsPingTestHandler(t, conn, shutdown, sendPing)
@@ -244,7 +244,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 		t.Fatal("can't listen:", err)
 	}
 	srv.Addr = listener.Addr().String()
-	go srv.Serve(listener)
+	go func() { _ = srv.Serve(listener) }()
 	return &srv
 }
 
@@ -391,7 +391,7 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 		}
 		t.Fatalf("failed to dial: %v", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte("invalid json")); err != nil {
 		t.Fatalf("failed to write: %v", err)

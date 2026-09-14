@@ -92,6 +92,7 @@ func DoCall(
 			return nil, err
 		}
 	}
+	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 	// done is closed on return to stop the watcher goroutine before it can
@@ -309,6 +310,7 @@ func NewReusableCaller(
 			return nil, err
 		}
 	}
+	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vm.Config{NoBaseFee: true})

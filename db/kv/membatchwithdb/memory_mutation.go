@@ -389,16 +389,37 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 
+// Range merges the db side and the overlay by key, so on a DupSort table a db
+// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	cleared := m.isTableCleared(table)
+	// Hidden rows don't count against limit, so the db side must be free to
+	// look past them; the merge below still stops at limit.
+	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !cleared {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if _, err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -426,7 +447,7 @@ func (s *rangeIter) Close() {
 	}
 }
 func (s *rangeIter) init() (*rangeIter, error) {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -450,22 +471,25 @@ func (s *rangeIter) HasNext() bool {
 }
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextKdb, s.nextKmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		k = s.nextKdb
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextKdb, s.nextVdb = nil, nil
 		if s.hasNextDb {
-			k = s.nextKdb
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		k = s.nextKmem
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextKmem, s.nextVmem = nil, nil
 		if s.hasNextMem {
-			k = s.nextKmem
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -477,13 +501,30 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	skipDb := m.isTableCleared(table) || m.isEntryDeleted(table, key)
+	hidden := len(m.deletedDups[table][string(key)]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !skipDb {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isDupDeleted(table, key, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -513,7 +554,7 @@ func (s *rangeDupSortIter) Close() {
 }
 
 func (s *rangeDupSortIter) init() error {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -538,20 +579,23 @@ func (s *rangeDupSortIter) HasNext() bool {
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextVdb, s.nextVmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextVdb = nil
 		if s.hasNextDb {
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextVmem = nil
 		if s.hasNextMem {
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -573,6 +617,8 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
 		t = map[string]map[string]struct{}{}
