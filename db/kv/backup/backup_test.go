@@ -168,30 +168,29 @@ func mdbxFileSize(t *testing.T, dbDir string) int64 {
 	return st.Size()
 }
 
-// TestCompactInPlace pins the swap: compaction must leave the db openable at the
-// same path with every row intact — including tables the label's schema doesn't
-// name — and must give back the pages the deletes freed.
-func TestCompactInPlace(t *testing.T) {
-	const (
-		rows    = 20_000
-		deleted = 18_000
-		batch   = 2_000
-		dups    = 3 // >1, so a lost DupSort flag can't be copied into a plain table
-	)
-	dbDir := filepath.Join(t.TempDir(), "chaindata")
+const (
+	testRows = 20_000
+	testDups = 3 // >1, so a lost DupSort flag can't be copied into a plain table
+)
+
+var testVal = make([]byte, 1024)
+
+func openTestDB(dbDir string) kv.RwDB {
+	return mdbx.New(dbcfg.ChainDB, log.New()).Path(dbDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{testTable: {}, dupTestTable: {Flags: kv.DupSort}}
+		}).
+		GrowthStep(4 * datasize.MB).MapSize(1 * datasize.GB).WriteMap(true).MustOpen()
+}
+
+// writeTestDB fills a db at dbDir with testRows rows, then deletes the first deleted of them.
+func writeTestDB(t *testing.T, dbDir string, deleted int) {
+	t.Helper()
+	const batch = 2_000
 	require.NoError(t, os.MkdirAll(dbDir, 0755))
-
-	open := func() kv.RwDB {
-		return mdbx.New(dbcfg.ChainDB, log.New()).Path(dbDir).
-			WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-				return kv.TableCfg{testTable: {}, dupTestTable: {Flags: kv.DupSort}}
-			}).
-			GrowthStep(4 * datasize.MB).MapSize(1 * datasize.GB).WriteMap(true).MustOpen()
-	}
-
-	db := open()
-	val := make([]byte, 1024)
-	for from := 0; from < rows; from += batch {
+	db := openTestDB(dbDir)
+	defer db.Close()
+	for from := 0; from < testRows; from += batch {
 		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 			c, err := tx.RwCursor(testTable)
 			require.NoError(t, err)
@@ -200,9 +199,9 @@ func TestCompactInPlace(t *testing.T) {
 			require.NoError(t, err)
 			defer d.Close()
 			for i := from; i < from+batch; i++ {
-				require.NoError(t, c.Append(u64Key(uint64(i)), val))
-				for j := range dups {
-					require.NoError(t, d.AppendDup(u64Key(uint64(i)), u64Key(uint64(i*dups+j))))
+				require.NoError(t, c.Append(u64Key(uint64(i)), testVal))
+				for j := range testDups {
+					require.NoError(t, d.AppendDup(u64Key(uint64(i)), u64Key(uint64(i*testDups+j))))
 				}
 			}
 			return nil
@@ -217,7 +216,15 @@ func TestCompactInPlace(t *testing.T) {
 			return nil
 		}))
 	}
-	db.Close()
+}
+
+// TestCompactInPlace pins the swap: compaction must leave the db openable at the
+// same path with every row intact — including tables the label's schema doesn't
+// name — and must give back the pages the deletes freed.
+func TestCompactInPlace(t *testing.T) {
+	const deleted = 18_000
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	writeTestDB(t, dbDir, deleted)
 
 	dataFile := filepath.Join(dbDir, dataFileName)
 	require.NoError(t, os.Chmod(dataFile, 0600))
@@ -232,20 +239,20 @@ func TestCompactInPlace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, beforeStat.Mode().Perm(), afterStat.Mode().Perm())
 
-	db = open()
+	db := openTestDB(dbDir)
 	defer db.Close()
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		n, err := tx.Count(testTable)
 		require.NoError(t, err)
-		require.Equal(t, uint64(rows-deleted), n)
+		require.Equal(t, uint64(testRows-deleted), n)
 
 		nd, err := tx.Count(dupTestTable)
 		require.NoError(t, err)
-		require.Equal(t, uint64((rows-deleted)*dups), nd)
+		require.Equal(t, uint64((testRows-deleted)*testDups), nd)
 
 		v, err := tx.GetOne(testTable, u64Key(deleted))
 		require.NoError(t, err)
-		require.Len(t, v, len(val))
+		require.Len(t, v, len(testVal))
 
 		d, err := tx.CursorDupSort(dupTestTable)
 		require.NoError(t, err)
@@ -254,14 +261,50 @@ func TestCompactInPlace(t *testing.T) {
 		require.NoError(t, err)
 		nDups, err := d.CountDuplicates()
 		require.NoError(t, err)
-		require.Equal(t, uint64(dups), nDups)
-		for j := range dups {
-			got, err := d.SeekBothRange(u64Key(deleted), u64Key(uint64(deleted*dups+j)))
+		require.Equal(t, uint64(testDups), nDups)
+		for j := range testDups {
+			got, err := d.SeekBothRange(u64Key(deleted), u64Key(uint64(deleted*testDups+j)))
 			require.NoError(t, err)
-			require.Equal(t, u64Key(uint64(deleted*dups+j)), got)
+			require.Equal(t, u64Key(uint64(deleted*testDups+j)), got)
 		}
 		return nil
 	}))
+}
+
+func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
+	t.Helper()
+	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
+	require.NoError(t, err)
+	return st
+}
+
+// TestAutoCompactDatadir pins the threshold: only a db whose free pages exceed
+// bloatRatio times its data is rewritten.
+func TestAutoCompactDatadir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	writeTestDB(t, dirs.TxPool, 2_000)
+	bloated, healthy := dataFileStat(t, dirs.Chaindata), dataFileStat(t, dirs.TxPool)
+
+	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+
+	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
+	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
+}
+
+// TestAutoCompactDatadirSkipsLockedDatadir: integration opens a datadir while the
+// node that holds its lock keeps running, so the lock owner's dbs must stay untouched.
+func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	before := dataFileStat(t, dirs.Chaindata)
+
+	unlock, err := dirs.TryFlock()
+	require.NoError(t, err)
+	defer unlock()
+	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+
+	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }
 
 // TestDatadirDBs pins the three rules of the datadir scan: a db is found by its

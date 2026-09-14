@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
@@ -107,6 +108,11 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 }
 
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+	if applyMigrations {
+		if err := backup.AutoCompactDatadir(ctx, datadir.New(datadirCli), logger); err != nil {
+			return nil, err
+		}
+	}
 	rawDB, err := openRawDB(opts, applyMigrations, logger)
 	if err != nil {
 		return nil, err
