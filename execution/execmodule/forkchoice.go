@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -741,10 +742,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
+		persistStart := time.Now()
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		persist := time.Since(persistStart)
 		e.observeStateTransition(ctx, StateTransitionCommitComplete)
 
 		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
@@ -766,6 +769,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
+		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)
 	}
 
 	sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -984,4 +988,18 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		dbgLevel = log.LvlDebug
 	}
 	e.logger.Log(dbgLevel, msg, logArgs...)
+}
+
+func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration, headNum, finishProgressBefore uint64, mergedExtendingFork bool) {
+	if e.forkValidator == nil {
+		return
+	}
+	rec := e.forkValidator.TakeBlockMetrics(blockHash)
+	// Without the merge the block is re-executed by RunLoop, so the cached
+	// record describes a run whose state was discarded.
+	if rec == nil || !mergedExtendingFork || headNum != finishProgressBefore+1 {
+		return
+	}
+	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist
+	blockmetrics.Emit(e.logger, common.Deref(e.syncCfg.SlowBlockThreshold), rec)
 }

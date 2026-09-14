@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,15 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !disable_libutp
-
-package downloadercfg
+package caplinflags
 
 import (
-	utp "github.com/anacrolix/go-libutp"
-	lg "github.com/anacrolix/log"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
-func init() {
-	utp.Logger.Handlers = []lg.Handler{noopHandler{}}
+func TestPrivateBuilderURLFlagMatchesIntegratedCaplin(t *testing.T) {
+	for _, flag := range CliFlags {
+		if flag.Names()[0] == utils.CaplinAllowPrivateBuilderURLs.Name {
+			return
+		}
+	}
+	require.Fail(t, "private builder URL flag is not registered")
 }

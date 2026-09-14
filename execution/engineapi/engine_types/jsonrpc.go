@@ -57,7 +57,7 @@ type ExecutionPayload struct {
 	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
-// PayloadAttributes represent the attributes required to start assembling a payload
+// ForkChoiceState is the head/safe/finalized triple of engine_forkchoiceUpdated.
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"`
 	SafeBlockHash      common.Hash `json:"safeBlockHash"`
@@ -361,10 +361,10 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	out := make([]*typesproto.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &typesproto.Withdrawal{
-			Index:          w.Index,
-			ValidatorIndex: w.Validator,
+			Index:          uint64(w.Index),
+			ValidatorIndex: uint64(w.Validator),
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         w.Amount,
+			Amount:         uint64(w.Amount),
 		})
 	}
 	return out
@@ -377,10 +377,10 @@ func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal 
 	out := make([]*types.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types.Withdrawal{
-			Index:     w.Index,
-			Validator: w.ValidatorIndex,
+			Index:     hexutil.Uint64(w.Index),
+			Validator: hexutil.Uint64(w.ValidatorIndex),
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    w.Amount,
+			Amount:    hexutil.Uint64(w.Amount),
 		})
 	}
 	return out

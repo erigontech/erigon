@@ -225,3 +225,24 @@ func TestDeepFoldedStorageReachesRoundMetrics(t *testing.T) {
 	assert.GreaterOrEqual(t, v.AddressKeys+v.StorageKeys, uint64(len(keys)),
 		"every touched key is traversed at least once, deep-folded storage included")
 }
+
+func TestMountFoldsAreCounted(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	v := tr.metrics.AsValues()
+	require.Positive(t, v.Folds, "the round folded at all")
+	assert.EqualValues(t, v.Unfolds, v.Folds,
+		"the mount fold is counted, so a parallel round folds every row it unfolds")
+}

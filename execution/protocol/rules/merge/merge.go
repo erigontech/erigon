@@ -188,7 +188,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(uint64(w.Amount)), uint256.NewInt(common.GWei))
 				if err := state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal); err != nil {
 					return nil, fmt.Errorf("crediting withdrawal %d to %x: %w", w.Index, w.Address, err)
 				}
