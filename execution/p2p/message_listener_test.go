@@ -169,10 +169,10 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(message *RawBlockBodiesInboundMessage) {
+		observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 			require.Equal(t, peerId, message.PeerId)
-			require.Equal(t, uint64(23), message.RequestId)
-			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, 1)
+			require.Equal(t, uint64(23), message.Decoded.RequestId)
+			bodies, err := decodeBlockBodiesResponse(message.Decoded.EncodedBodies, 1)
 			require.NoError(t, err)
 			require.Len(t, bodies, 1)
 			done.Store(true)

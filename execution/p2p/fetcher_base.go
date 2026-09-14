@@ -377,8 +377,8 @@ func (f *FetcherBase) fetchBodies(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *RawBlockBodiesInboundMessage)
-	observer := func(message *RawBlockBodiesInboundMessage) {
+	messages := make(chan *DecodedInboundMessage[BlockBodiesEnvelope])
+	observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 		select {
 		case <-ctx.Done():
 			return
@@ -404,17 +404,13 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	bodies, messageSize, err := awaitBlockBodiesResponse(
-		ctx,
-		responseTimeout,
-		messages,
-		filterBlockBodies(peerId, requestId),
-		len(headers),
-	)
+	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, filterBlockBodies(peerId, requestId))
 	if err != nil {
-		if rlp.IsInvalidRLPError(err) {
-			err = handleInboundMessageDecodeError(ctx, f.logger, f.messageListener.peerPenalizer, peerId, err)
-		}
+		return nil, err
+	}
+
+	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, len(headers))
+	if err != nil {
 		return nil, err
 	}
 
@@ -446,33 +442,11 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	return data, nil
 }
 
-func awaitBlockBodiesResponse(
-	ctx context.Context,
-	timeout time.Duration,
-	messages chan *RawBlockBodiesInboundMessage,
-	filter func(*RawBlockBodiesInboundMessage) bool,
-	maxBodies int,
-) ([]*types.Body, int, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			var packet *eth.BlockBodiesPacket66
-			return nil, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(packet), ctx.Err())
-		case message := <-messages:
-			if filter(message) {
-				continue
-			}
-
-			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, maxBodies)
-			return bodies, len(message.Data), err
-		}
-	}
-}
-
 func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Body, error) {
+	if len(encodedBodies) == 0 {
+		return nil, nil
+	}
+
 	stream := rlp.NewBytesStream(encodedBodies)
 	defer rlp.PutStream(stream)
 
@@ -487,6 +461,9 @@ func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Bo
 
 		body := new(types.Body)
 		if err := stream.Decode(body); err != nil {
+			if rlp.IsInvalidRLPError(err) {
+				err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
+			}
 			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
 		}
 		bodies = append(bodies, body)
@@ -525,9 +502,9 @@ func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMe
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*RawBlockBodiesInboundMessage) bool {
-	return func(message *RawBlockBodiesInboundMessage) bool {
-		return filter(peerId, message.PeerId, requestId, message.RequestId)
+func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+	return func(message *DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
 
