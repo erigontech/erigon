@@ -85,6 +85,22 @@ func TestFinalizedCheckpointEmittedOutsideLock(t *testing.T) {
 	requireOperationPrunerIdle(t, f)
 }
 
+func TestTickBuildsUnrealizedJustifiedCheckpointState(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.JustifiedCheckpoint()
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: justified.Epoch + 1, Root: root}
+	f.unrealizedJustifiedCheckpoint.Store(next)
+
+	f.OnTick((f.beaconCfg.SlotsPerEpoch - 1) * f.beaconCfg.SecondsPerSlot)
+
+	require.Equal(t, justified, f.JustifiedCheckpoint())
+	require.Eventually(t, func() bool {
+		_, ok := f.checkpointStates.Load(next)
+		return ok
+	}, 10*time.Second, 10*time.Millisecond)
+}
+
 type blockingPruneForkGraph struct {
 	fork_graph.ForkGraph
 	started chan uint64
@@ -111,7 +127,6 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 		if !released {
 			close(pruneGraph.release)
 		}
-		f.forkGraph = base
 	}()
 
 	_, root := decodeDiffBlock(t, diffBlockc2Enc)
