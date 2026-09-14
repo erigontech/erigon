@@ -134,9 +134,16 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		// overruns its budget or fails is dropped by closing the child, and the block is exactly what it was
 		// before the round started.
 		//
-		// prefixLen==0 with a live SD is NOT incremental: the body does not extend what this SD has already
-		// executed (the re-open / corrected-attrs case), so staging it would re-execute the whole body into a
-		// child whose parent already holds that state. That round executes in place, as before.
+		// ⚠ KNOWN LIMITATION, not a design boundary. prefixLen==0 is the block's FIRST CONTENT ROUND — the
+		// atomic open creates the successor as an empty block at the close, and the first round carries into
+		// it with nothing executed yet (see CheckUpdate). A body that does not extend what this SD executed
+		// returns IsUpdate=false and never reaches here at all.
+		//
+		// So this excludes the commonest round in the system from staging, which is exactly the round the
+		// valve most needs to cover. Staging it currently fails three marker/tail-drain tests on the driver's
+		// sealed-hold accounting (inFlight.FilterFeed re-offers a sealed body tx) — receipts and body agree at
+		// the seal, so it is not the receipt fold. UNDIAGNOSED. Remove this guard once it is understood; do
+		// not treat it as correct.
 		if flashUpdate.PrefixLen > 0 {
 			stagingBase = flashUpdate.SD
 		}
