@@ -216,6 +216,10 @@ jobs:
           SHORT_COMMIT_ID: ${{ steps.getCommitId.outputs.short-commit-id }}
         run: |
           cd erigon;
+          # linux/amd64 below is compiled at the x86-64-v2 baseline (SSE4.2, POPCNT;
+          # see Dockerfile CPU_FLAGS) -- no separate amd64v2 platform/tag exists.
+          # Older CPUs, or hypervisor profiles that mask v2 features, fail with an
+          # illegal instruction (SIGILL) at startup, not at image pull time.
           docker buildx build \
             --no-cache \
             --output type=local,dest=${GITHUB_WORKSPACE}/docker-build-output \
