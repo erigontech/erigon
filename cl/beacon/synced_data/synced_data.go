@@ -94,14 +94,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 
 	// Save current state as previous state, if available.
 	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
+		s.previousHeadState, s.headState = s.headState, s.previousHeadState
 	}
 
 	var blkRoot common.Hash
@@ -139,14 +132,7 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 
 	// Save current state as previous state, if available.
 	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
+		s.previousHeadState, s.headState = s.headState, s.previousHeadState
 	}
 
 	// Update headState with the new state.
