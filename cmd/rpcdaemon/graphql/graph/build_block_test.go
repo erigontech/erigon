@@ -7,6 +7,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -20,22 +21,27 @@ import (
 func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	t.Parallel()
 
+	withdrawalsHash := common.HexToHash("0x77")
+	blobGasUsed, excessBlobGas := uint64(0x20000), uint64(0x40000)
 	header := &types.Header{
-		Number:      *uint256.NewInt(21_000_000),
-		ParentHash:  common.HexToHash("0x11"),
-		Root:        common.HexToHash("0x22"),
-		TxHash:      common.HexToHash("0x33"),
-		ReceiptHash: common.HexToHash("0x44"),
-		UncleHash:   common.HexToHash("0x66"),
-		GasLimit:    36_000_000,
-		GasUsed:     17_000_000,
-		Time:        1_750_000_000,
-		Extra:       []byte("erigon"),
-		BaseFee:     uint256.NewInt(1_234_567_890),
-		Coinbase:    common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01"),
-		Difficulty:  *uint256.NewInt(0x2a),
-		MixDigest:   common.HexToHash("0x55"),
-		Nonce:       types.EncodeNonce(0x1234),
+		Number:          *uint256.NewInt(21_000_000),
+		ParentHash:      common.HexToHash("0x11"),
+		Root:            common.HexToHash("0x22"),
+		TxHash:          common.HexToHash("0x33"),
+		ReceiptHash:     common.HexToHash("0x44"),
+		UncleHash:       common.HexToHash("0x66"),
+		GasLimit:        36_000_000,
+		GasUsed:         17_000_000,
+		Time:            1_750_000_000,
+		Extra:           []byte("erigon"),
+		BaseFee:         uint256.NewInt(1_234_567_890),
+		Coinbase:        common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01"),
+		Difficulty:      *uint256.NewInt(0x2a),
+		MixDigest:       common.HexToHash("0x55"),
+		Nonce:           types.EncodeNonce(0x1234),
+		WithdrawalsHash: &withdrawalsHash,
+		BlobGasUsed:     &blobGasUsed,
+		ExcessBlobGas:   &excessBlobGas,
 	}
 	header.Bloom[0], header.Bloom[types.BloomByteLength-1] = 0xab, 0x01
 	uncle := &types.Header{Number: *uint256.NewInt(20_999_999)}
@@ -45,10 +51,18 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
 	marshalled.TransactionCount = hexutil.Uint64(0)
 
+	withdrawal := &types.Withdrawal{Index: 7, Validator: 8, Address: common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf02"), Amount: 9}
+
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
 		"receipts": []map[string]any{},
+		"withdrawals": []map[string]any{{
+			"index":     withdrawal.Index,
+			"validator": withdrawal.Validator,
+			"address":   withdrawal.Address,
+			"amount":    withdrawal.Amount,
+		}},
 	})
 	require.NoError(t, err)
 
@@ -75,6 +89,16 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	require.Equal(t, uint64(0), *got.TransactionCount)
 	require.Len(t, got.Ommers, 1)
 	require.Equal(t, uncle.Hash().Hex(), got.Ommers[0].Hash)
+	require.NotNil(t, got.OmmerCount)
+	require.Equal(t, uint64(1), *got.OmmerCount)
+	require.Equal(t, uint64(21_000_000), got.Miner.BlockNum)
+	require.NotNil(t, got.WithdrawalsRoot)
+	require.Equal(t, withdrawalsHash.Hex(), *got.WithdrawalsRoot)
+	require.NotNil(t, got.BlobGasUsed)
+	require.Equal(t, blobGasUsed, *got.BlobGasUsed)
+	require.NotNil(t, got.ExcessBlobGas)
+	require.Equal(t, excessBlobGas, *got.ExcessBlobGas)
+	require.Equal(t, []*model.Withdrawal{{Index: 7, Validator: 8, Address: "0xabcdef0123456789abcdef0123456789abcdef02", Amount: "0x9"}}, got.Withdrawals)
 }
 
 // A pending block has no hash, miner or nonce, and buildBlock must not deref them.
