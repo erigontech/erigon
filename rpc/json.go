@@ -108,16 +108,15 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
-	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
+func marshalResult(v any) ([]byte, error) {
+	if fm, ok := v.(fastJSONResult); ok {
+		return fm.MarshalFastJSON()
 	}
+	return json.Marshal(v)
+}
+
+func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
+	enc, err := marshalResult(result)
 	if err != nil {
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)

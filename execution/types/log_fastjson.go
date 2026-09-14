@@ -97,6 +97,14 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
+// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON, used for log subscriptions.
+func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("null"), nil
+	}
+	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
+}
+
 // MarshalFastJSON serializes the eth_getLogs result into one pre-sized buffer
 // (direct hex encoding) instead of reflection. The count and each log's data
 // length are known up front, so the size is exact enough to allocate once.
