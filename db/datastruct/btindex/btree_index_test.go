@@ -807,7 +807,7 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
 
 	for _, key := range keys {
-		_, value, _, found, err := index.Get(key, getter)
+		_, value, _, found, err := index.Get(key, nil, getter)
 		require.NoError(t, err)
 		require.True(t, found)
 		size, found, err := index.GetValSize(key, getter)

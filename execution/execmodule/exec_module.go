@@ -175,11 +175,6 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 	return nil, false, nil
 }
 
-func (c *CacheView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.getter.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
-
 type ExecModule struct {
 	backgroundCtx context.Context
 	// Snapshots + MDBX
@@ -275,7 +270,7 @@ func NewExecModule(
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
 	}
-	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
+	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{
 		blockReader:             blockReader,

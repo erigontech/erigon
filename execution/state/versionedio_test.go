@@ -133,7 +133,6 @@ func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*ac
 func (r *minimalStateReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *minimalStateReader) HasStorage(addr accounts.Address) (bool, error) { return false, nil }
 func (r *minimalStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	return nil, nil
 }

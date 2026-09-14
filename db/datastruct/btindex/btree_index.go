@@ -662,7 +662,7 @@ func (b *BtIndex) Close() {
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
+func (b *BtIndex) Get(lookup, buf []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
@@ -681,7 +681,7 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	// weak assumption that k will be ignored and used lookup instead.
 	// since fetching k and v from data file is required to use Getter.
 	// Why to do Getter.Reset twice when we can get kv right there.
-	v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
+	v, found, offsetInFile, err = b.bplus.Get(gr, lookup, buf)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, offsetInFile, false, nil

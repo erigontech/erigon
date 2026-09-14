@@ -107,12 +107,18 @@ func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) 
 // GetHead returns the head of the fork choice store.
 // Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
+	head, slot, err := f.getHeadNode(auxilliaryState)
+	return head.Root, slot, err
+}
+
+func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
-		headHash, headSlot := f.headHash, f.headSlot
-		f.publishSelectedHead(headHash, headSlot)
+		head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
+		headSlot := f.headSlot
+		f.publishSelectedHead(head.Root, headSlot)
 		f.mu.RUnlock()
-		return headHash, headSlot, nil
+		return head, headSlot, nil
 	}
 	f.mu.RUnlock()
 
@@ -128,12 +134,16 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if f.headHash != (common.Hash{}) {
-			f.publishSelectedHead(f.headHash, f.headSlot)
-			return f.headHash, f.headSlot, nil
+			head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
+			f.publishSelectedHead(head.Root, f.headSlot)
+			return head, f.headSlot, nil
 		}
 		headRoot, headSlot := f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot()
-		f.publishSelectedHead(headRoot, headSlot)
-		return headRoot, headSlot, nil
+		f.headHash = headRoot
+		f.headSlot = headSlot
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+		f.publishSelectedHead(f.headHash, f.headSlot)
+		return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, nil
 	}
 
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
@@ -151,37 +161,42 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	return f.headPayloadStatus
 }
 
+func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, error) {
+	head, _, err := f.getHeadNode(nil)
+	return head, err
+}
+
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
 		// a nil state degrades to zero attestation weight, as before.
 		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-		headHash, headSlot, ok, err := func() (common.Hash, uint64, bool, error) {
+		head, headSlot, ok, err := func() (ForkChoiceNode, uint64, bool, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 
 			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
-				return common.Hash{}, 0, false, nil
+				return ForkChoiceNode{}, 0, false, nil
 			}
 			head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 			if err != nil {
-				return common.Hash{}, 0, false, err
+				return ForkChoiceNode{}, 0, false, err
 			}
 			f.headHash = head.Root
 			f.headSlot = slot
 			f.headPayloadStatus = head.PayloadStatus
 			f.publishSelectedHead(f.headHash, f.headSlot)
-			return f.headHash, f.headSlot, true, nil
+			return head, f.headSlot, true, nil
 		}()
 		if err != nil {
-			return common.Hash{}, 0, err
+			return ForkChoiceNode{}, 0, err
 		}
 		if ok {
-			return headHash, headSlot, nil
+			return head, headSlot, nil
 		}
 	}
 }
@@ -259,7 +274,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 }
 
 // getHead returns the head using pre-GLOAS fork choice rules.
-func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
+func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error
@@ -269,7 +284,7 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 		// goroutine if done under the lock.
 		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
 		if err != nil {
-			return common.Hash{}, 0, err
+			return ForkChoiceNode{}, 0, err
 		}
 	}
 	f.mu.Lock()
@@ -299,11 +314,11 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 		if len(children) == 0 {
 			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
-				return common.Hash{}, 0, errors.New("no slot for head is stored")
+				return ForkChoiceNode{}, 0, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
 			f.publishSelectedHead(f.headHash, f.headSlot)
-			return f.headHash, f.headSlot, nil
+			return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, nil
 		}
 
 		// Average case scenario.

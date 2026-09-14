@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
@@ -1047,15 +1048,15 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 	// create fake withdrawals
 	w := types.Withdrawal{
-		Index:     uint64(15),
-		Validator: uint64(5500),
+		Index:     15,
+		Validator: 5500,
 		Address:   common.Address{0: 0xff},
 		Amount:    1000,
 	}
 
 	w2 := types.Withdrawal{
-		Index:     uint64(16),
-		Validator: uint64(5501),
+		Index:     16,
+		Validator: 5501,
 		Address:   common.Address{0: 0xff},
 		Amount:    1001,
 	}
@@ -1124,16 +1125,16 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	rw2 := readWithdrawals[1]
 
 	require.NotNil(rw)
-	require.Equal(uint64(15), rw.Index)
-	require.Equal(uint64(5500), rw.Validator)
+	require.Equal(hexutil.Uint64(15), rw.Index)
+	require.Equal(hexutil.Uint64(5500), rw.Validator)
 	require.Equal(common.Address{0: 0xff}, rw.Address)
-	require.Equal(uint64(1000), rw.Amount)
+	require.Equal(hexutil.Uint64(1000), rw.Amount)
 
 	require.NotNil(rw2)
-	require.Equal(uint64(16), rw2.Index)
-	require.Equal(uint64(5501), rw2.Validator)
+	require.Equal(hexutil.Uint64(16), rw2.Index)
+	require.Equal(hexutil.Uint64(5501), rw2.Validator)
 	require.Equal(common.Address{0: 0xff}, rw2.Address)
-	require.Equal(uint64(1001), rw2.Amount)
+	require.Equal(hexutil.Uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
 	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {

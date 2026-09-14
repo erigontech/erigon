@@ -70,7 +70,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
-	// allows to collect reading metrics for kv by file level
+	// allows to collect reading metrics for kv by file level. Read
+	// unsynchronised on every domain read, so it may only be written before any
+	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// allow simultaneous build of multiple snapshot types.

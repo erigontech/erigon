@@ -33,7 +33,8 @@ import (
 // toward a byte-budget ceiling as it fills, funding each step from the shared
 // cachebudget envelope. It exists so a cache with a small working set never
 // pre-commits its full configured capacity — the same demand-growth the state
-// caches use — reused across the CodeCache's content and size layers.
+// caches use. The CodeCache's content layers moved to byteLRU; its size layer
+// still uses this.
 //
 // Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a
@@ -149,13 +150,14 @@ func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
 
-func (g *growLRU[V]) Add(key uint64, value V) {
+func (g *growLRU[V]) Add(key uint64, value V) bool {
 	lru := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
 		g.maybeGrow()
 		lru = g.cur.Load()
 	}
 	lru.Add(key, value)
+	return true
 }
 
 func (g *growLRU[V]) maybeGrow() {
@@ -174,7 +176,7 @@ func (g *growLRU[V]) maybeGrow() {
 	}
 	next := g.newShards(newCap)
 	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
+		if v, ok := old.Peek(k); ok {
 			next.Add(k, v)
 		}
 	}
