@@ -587,7 +587,20 @@ class _ArticleText(HTMLParser):
             # outside it. Keeping its spaces would be more faithful to the code's
             # own bytes, but they are trailing whitespace in a committed file and
             # `git diff --check` — a gate on this repo — rejects them.
-            out.append(prefix + clean if clean.strip() else "")
+            if not clean.strip():
+                out.append("")
+            else:
+                quote = _QUOTE_PREFIX_RE.match(clean)
+                if quote:
+                    # A list inside a blockquote nests the other way round: the
+                    # quote marker stays outermost and the item's indent goes
+                    # after it. Prefixing the whole line puts the indent in
+                    # front of the `>`, which ends the quote and the list.
+                    marker, rest = quote.group(0), clean[quote.end():]
+                    out.append(marker + prefix + rest if rest.strip()
+                               else marker.rstrip())
+                else:
+                    out.append(prefix + clean)
             for width in events:
                 if width == "":
                     if stack:
@@ -625,8 +638,11 @@ class _ArticleText(HTMLParser):
             else:
                 # A code span's interior is content, not layout: `NAME    TYPE`
                 # keeps its columns while the prose around it collapses.
-                out.append(re.match(r"[ \t]*", ln).group(0)
-                           + _collapse_outside_code(ln.strip()))
+                # The leading run includes any blockquote markers, so the indent
+                # of a list *inside* a quote sits after the `>` and survives —
+                # taken as spaces alone it collapses and the item is lost.
+                lead = re.match(r"[ \t]*(?:>[ \t]*)*", ln).group(0)
+                out.append(lead + _collapse_outside_code(ln[len(lead):].strip()))
         s = "\n".join(out)
         # Collapse blank runs outside fenced blocks only; inside one they are
         # part of the code.
@@ -757,6 +773,22 @@ def _dedent_to(line, base):
 _JSX_COMMENT_RE = re.compile(r"\{/\*.*?\*/\}", re.DOTALL)
 _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
 _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
+
+
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_EMPHASIS_RE = re.compile(r"\*\*|__|[*_]")
+
+
+def _anchor_key(text):
+    """Comparable form of an anchor line.
+
+    `preceding` is source Markdown while the rendered page has link targets
+    resolved to absolute URLs and emphasis normalised (`_x_` becomes `*x*`), so
+    the two only compare equal once the parts a build rewrites are reduced to
+    the text they carry. Both sides go through this, so a marker that was
+    literal content drops out of the comparison on both.
+    """
+    return _MD_EMPHASIS_RE.sub("", _MD_LINK_RE.sub(r"\1", text)).strip()
 
 
 _LIST_MARKER_RE = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=[`~])")
@@ -912,10 +944,12 @@ def _mask_jsx_comments(source):
 def mermaid_blocks(source):
     """Fenced mermaid diagrams in an MDX source, as fenced Markdown.
 
-    Returns (heading, occurrence, preceding, block) quadruples. `heading` is the
-    text of the nearest ATX heading above the fence, or "" at the top of a page,
-    `occurrence` says which sighting of that text it was, and `preceding` is the
-    line of prose the fence followed, "" when a heading is all there is above. The heading is what
+    Returns (heading, occurrence, preceding, container, block) quintuples.
+    `heading` is the text of the nearest ATX heading above the fence, or "" at
+    the top of a page, `occurrence` says which sighting of that text it was,
+    `preceding` is the prose paragraph the fence followed ("" when a heading is
+    all there is above), and `container` is the blockquote markers and indent
+    the fence itself opened under, "" at the top level. The heading is what
     lets the diagram go back where it belongs: prose around it says things like
     "every box above", which is false if the diagram is appended to the page.
     The occurrence is needed because the text alone is ambiguous — three pages
@@ -951,6 +985,11 @@ def mermaid_blocks(source):
         # info string stays an ordinary code block in the built HTML. Lowering
         # it here would splice a diagram beside the code block already there.
         marker, info, fence_indent = m[0], m[1], m[2]
+        # The container is the fence's own, read from the source line it opened
+        # on. Inferring it from the anchor paragraph instead pulls a top-level
+        # diagram into a list or blockquote that merely happened to precede it.
+        quote = _QUOTE_PREFIX_RE.match(lines[i])
+        at_container = (quote.group(0) if quote else "") + " " * fence_indent
         # The line of prose the fence followed, if any. A heading alone places
         # the diagram at the top of its section, which reorders
         # `heading -> prose -> diagram` into `heading -> diagram -> prose`.
@@ -1002,7 +1041,7 @@ def mermaid_blocks(source):
             # repeat a heading within themselves. The count must be of heading
             # sightings, not of diagrams — a section with no diagram still
             # advances the occurrence its successors are placed by.
-            blocks.append((at, at_occurrence, at_preceding,
+            blocks.append((at, at_occurrence, at_preceding, at_container,
                            _strip_markers(f"{fence}mermaid\n{text}\n{fence}")))
     return blocks
 
@@ -1043,7 +1082,7 @@ def _indent_block(block, prefix):
                      for ln in block.split("\n"))
 
 
-def _insert_after(body, preceding, start, block):
+def _insert_after(body, preceding, start, block, container=""):
     """Insert point just past `preceding`, searched from `start`, outside fences.
 
     Returns None when the line is not found there. Searching the whole page
@@ -1074,19 +1113,24 @@ def _insert_after(body, preceding, start, block):
         if open_fence is not None or offsets[n] < start:
             continue
         candidates.append((n, line))
+    want = _anchor_key(preceding)
     for n, line in candidates:
         # Peeled on both sides: a quote marker is the container the block goes
         # back into, not part of the text being matched.
-        if _peel_quote(line).strip() != preceding:
+        if _anchor_key(_peel_quote(line)) != want:
             continue
-        prefix = _continuation_prefix(line)
+        # Only a fence that was itself contained is indented back in, and the
+        # columns come from the rendered anchor rather than the source, which
+        # may have used a different continuation width.
+        prefix = _continuation_prefix(line) if container else ""
         cut = offsets[n] + len(line)
         return (body[:cut] + "\n" + _blank_in(prefix) + "\n"
                 + _indent_block(block, prefix) + body[cut:])
     return None
 
 
-def splice_diagram(body, heading, block, occurrence=0, preceding=""):
+def splice_diagram(body, heading, block, occurrence=0, preceding="",
+                   container=""):
     """Insert `block` where it sat in the source, as closely as can be told.
 
     The diagram is absent from the built page — Docusaurus draws it client-side
@@ -1100,7 +1144,7 @@ def splice_diagram(body, heading, block, occurrence=0, preceding=""):
     """
     if not heading:
         if preceding:
-            spliced = _insert_after(body, preceding, 0, block)
+            spliced = _insert_after(body, preceding, 0, block, container)
             if spliced is not None:
                 return spliced
         return body + "\n\n" + block
@@ -1134,7 +1178,8 @@ def splice_diagram(body, heading, block, occurrence=0, preceding=""):
     # anchor; the heading is only where that section begins.
     if preceding:
         section_start = sum(len(ln) + 1 for ln in lines[:idx])
-        spliced = _insert_after(body, preceding, section_start, block)
+        spliced = _insert_after(body, preceding, section_start, block,
+                                container)
         if spliced is not None:
             return spliced
 
@@ -1359,9 +1404,10 @@ def collect_pages(base_dir, route_prefix):
         # and a diagram whose text also appeared in a literal example was skipped
         # entirely. mermaid_blocks() is fence-accurate, so each block it yields is
         # a real diagram that belongs under its own heading.
-        for heading, occurrence, preceding, diagram in mermaid_blocks(text):
+        for heading, occurrence, preceding, container, diagram in \
+                mermaid_blocks(text):
             clean_body = splice_diagram(
-                clean_body, heading, diagram, occurrence, preceding)
+                clean_body, heading, diagram, occurrence, preceding, container)
 
         # The duplicate H1 comes off when llms-full.txt is assembled, so a page
         # holding nothing but its own heading is empty there while passing a
