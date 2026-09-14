@@ -99,7 +99,7 @@ const bloatRatio = 4
 
 // autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
 // pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree = 2 * datasize.GB
+var autoCompactMinFree = 10 * datasize.GB
 
 // ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
 // datadir locked by another process is skipped.
