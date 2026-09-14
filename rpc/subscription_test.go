@@ -243,11 +243,13 @@ func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
-	if err := n.Notify("0x1", fastJSONPayload{}); err != nil {
-		t.Fatal(err)
-	}
-	if len(n.buffer) != 1 || string(n.buffer[0]) != `"fast"` {
-		t.Fatalf("want the MarshalFastJSON encoding, got %q", n.buffer)
+	for payload, want := range map[fastJSONResult]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null"} {
+		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
+		if err := n.Notify("0x1", payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
+			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
+		}
 	}
 }

@@ -185,6 +185,9 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	if err != nil {
 		return err
 	}
+	if len(enc) == 0 {
+		enc = null
+	}
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
