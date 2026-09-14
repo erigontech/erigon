@@ -21,7 +21,7 @@ Before committing, always verify changes with: `make lint && make erigon integra
 - Data flow: `db -> snapshots`
 - `snapshots` are immutable
 - `Unwind` beyond data in snapshots not allowed
-- Parallel commitment walks the touched-key prefix trie, forks at grain-qualified split points, and stitches child cells back into the base trie. Its running and parked walkers require the `ParallelCommitmentReadTxs` read-transaction floor.
+- Parallel commitment walks the touched-key prefix trie, forks at grain-qualified split points, and stitches child cells back into the forking trie. Its leased execution contexts and the base trie are what the `ParallelCommitmentReadTxs` read-transaction floor counts.
 
 ## Key Directories
 

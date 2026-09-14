@@ -84,17 +84,16 @@ the mount fold DFS-walks it directly.
 
 Per-batch state: the `prefixTrie`, the `plainKeyArena`, and a mutex-guarded
 `deferredCombined` slice. `Insert` calls MUST be serialized by the caller;
-`deferredCombined` is the sole shared-mutable slice during the parallel phase and
-is guarded by `deferredMu` (`appendDeferred`).
+`deferredCombined` is guarded by `deferredMu` (`appendDeferred`). A fork's per-nibble
+cell and deferred-update slots are written by its children at distinct indices and read
+only after the join.
 
 ### 3.3 `ParallelPatriciaHashed` (`parallel_patricia_hashed.go`)
 
-Holds a configuration/base `template *HexPatriciaHashed`, a `sync.Pool` of worker
-tries, a `TrieContextFactory`, the `cfg TrieConfig` and `accountKeyLen` used to mint
+Holds a configuration/base `template *HexPatriciaHashed`, a `TrieContextFactory`, the `cfg TrieConfig` and `accountKeyLen` used to mint
 pooled workers, `numWorkers`, the published `rootHash`, and — for the deferred path
-— a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. An
-optional `streaming *StreamingCommitter`: when set, `Process` delegates to it
-(`processStreaming`, §10) and the mount path below is not used. The `template`
+— a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. Worker
+tries come from the package-wide `hphPool`. The `template`
 doubles as the **mount base** during `Process`: the fork walk positions it at each
 eligible split row, stitches the workers' folded cells into that row, and folds the
 completed walk to the root. (Outside `Process` it exposes ctx/cache/metrics/trace
@@ -117,10 +116,10 @@ terminating node with a nil `plainKey` and no children is an error.
 
 A node is a **fork point** when it has two or more children, the work below its
 non-largest children — `subtreeCount − max(child.subtreeCount)` — reaches the round's
-grain (§4.1.1), and a waiter permit is free. At a fork point with prefix `P` the walker:
+grain (§4.1.1). At a fork point with prefix `P` the walker:
 
 1. **Positions itself on the row at depth `len(P)+1`.** `unfoldToRow` folds while
-   `needFolding(P·0)`, then unfolds one nibble per step while `needUnfolding(P·0) > 0`.
+   `needFolding(P·0)`, then unfolds while `needUnfolding(P·0) > 0`, never past that depth.
    These are the serial engine's own `fold`/`unfold`, so an on-disk leaf below `P`, a
    stored branch inside the bridge above it, an extension and the account/storage seam
    are all handled by the paths every key already takes. `unfold` loads a stored branch
@@ -133,53 +132,49 @@ grain (§4.1.1), and a waiter permit is free. At a fork point with prefix `P` th
    its `grid[0]`, with `mountWall = len(P)+1`. The clone walks its own subtree, forking
    again where the grain allows, and `foldMounted(nibble)` folds back to the fork row and
    returns `grid[0][nibble]`.
-4. **Releases its worker slot across the wait** and re-acquires it after, so a waiting
-   walker occupies no slot and every slot holder is running. Slots are one
-   `semaphore.Weighted` of `min(numWorkers, GOMAXPROCS)`; the errgroup is unlimited. The
-   walker holds a **waiter permit** for the whole fork instead, taken by `TryAcquire`
-   before it commits to forking — see §4.1.1.
-5. **Stitches and continues.** `stitchSplitCells` overlays the returned cells onto the
-   fork row and the walk resumes; the walker's next `fold` of that row writes `P`'s branch
+4. **Returns its execution context across the wait** and takes one back after, so a
+   parked walker holds none and every held context belongs to a running walker. Contexts
+   are leases from the round's `ctxLeasePool` of `min(numWorkers, GOMAXPROCS)` entries,
+   each opened on first use and closed when the round ends. The fork starts
+   `min(children, leases)` goroutines; each takes a lease and claims unstarted children
+   until none are left.
+5. **Stitches and continues.** `stitchSplitCells` overlays the cells of the children
+   that touched their nibble onto the fork row, with the touch and presence bits each
+   child's own fold set, and the walk resumes; the walker's next `fold` of that row writes `P`'s branch
    record. A row opened in step 2 that ends with no present cell is closed again and the
    parent's bits restored: serial skips a delete below a shallower row without setting a
    touch bit, and folding the opened row would leave one in `P`'s parent record.
 
 Clones write only prefixes strictly below the fork row; the walker is the single writer
-of `P` and of every row above it. Each clone's deferred branch updates go to the shared
-accumulator, and its `Metrics` are merged on release.
+of `P` and of every row above it. Each child's deferred branch updates go to a per-nibble
+slot that the walker appends to the shared accumulator after the join; the clone's
+`Metrics` are merged on release.
 
-### 4.1.1 Grain and nesting
+### 4.1.1 Grain and read transactions
 
-`G = max(minForkGrain, roundKeys / (forkGrainPerWorker × numWorkers))` — 128 and 4 — is
+`G = max(minForkGrain, roundKeys / (forkGrainPerWorker × min(numWorkers, GOMAXPROCS)))` — 128 and 4 — is
 computed once per round. `SetForkGrain` overrides it: `1` forks at every split point (the
 correctness extreme) and `ForkGrainNever` keeps the whole walk on one trie (the serial
 control).
 
 The grain is measured on the work a fork *hands off*, not on the subtree it sits in. A
 node where one child holds nearly everything hands off nothing: the straggler child still
-sets the wall, and the fork costs a clone, a context and a nesting level. Along a whale's
+sets the wall, and the fork still costs a pooled clone per child and a hand-off. Along a whale's
 account path every node is that shape — the whale's subtree plus a handful of neighbours —
-so charging them the grain (or a nesting level) starves the fork that matters, the one at
+so charging them the grain starves the fork that matters, the one at
 the account's storage node. Under the offload rule a block round forks at the root and at
 any hot contract whose storage node spreads `G` or more touched slots over its nibbles,
 whether or not the account itself was touched; a bulk round of a million keys at 16 workers
 gets `G ≈ 15.6k`, so the root and every depth-1 node fork and depth-2 nodes do not.
 
-A second semaphore bounds the walkers parked on their children. A walker needs a slot only
-long enough to *reach* its fork point — it releases before `Wait` — so the slot semaphore
-bounds running walkers and says nothing about waiting ones, whose breadth per level is
-bounded only by the grain. Since a parked walker keeps its rows, its pooled trie and its
-`PatriciaContext` (a read transaction) for the whole subtree, that breadth is what the
-read-tx budget has to bound.
-
-Waiter permits are `min(numWorkers, GOMAXPROCS)`, taken with `TryAcquire`: a walker that
-cannot get one does not fork, it walks the subtree inline. That is always correct and only
-ever costs parallelism, and it makes the budget exact —
-`2 × min(numWorkers, GOMAXPROCS) + 1` (`ParallelCommitmentReadTxs`): one per running
-walker, one per parked walker, one for the base. Under-declaring it is not a slowdown but a
-hang: the production factory (`concurrentTrieContextFactory`) blocks in `beginWorkerRo`, so
-a child that cannot get a transaction blocks while holding a fork slot, and its parent holds
-a transaction while blocked in `Wait` on that child.
+No separate bound is needed for walkers parked on their children: a walker returns its
+lease before `Wait`, so the pool alone bounds the open read transactions —
+`min(numWorkers, GOMAXPROCS)` leases plus the base trie's own context, which
+`ParallelCommitmentReadTxs` declares as `parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1`.
+A fork needs no permit and never falls back to walking inline. Under-declaring the
+budget is not a slowdown but a hang: the production factory
+(`concurrentTrieContextFactory`) blocks in `beginWorkerRo`, so a child that cannot open a
+transaction blocks while holding a lease.
 
 ### 4.2 Phase 3 — Commit and root publication
 
@@ -266,9 +261,8 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | parameter | default | effect |
 | --- | --- | --- |
 | `--experimental.parallel-commitment` | on | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`); `=false`, or `COMMITMENT_PARALLEL=false`, selects `VariantHexPatriciaTrie` |
-| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
-| fork grain `G` | `max(128, roundKeys/(4·numWorkers))` | per-round minimum work a fork must hand to its non-largest children (§4.1.1); `SetForkGrain` overrides — `1` forks at every split point, `ForkGrainNever` disables forking |
-| `numWorkers` | `runtime.NumCPU()` | clamped to `GOMAXPROCS`, then sizes both semaphores and divides the grain; the errgroup itself is unlimited. Override via `SetNumWorkers` |
+| fork grain `G` | `max(128, roundKeys/(4·min(numWorkers, GOMAXPROCS)))` | per-round minimum work a fork must hand to its non-largest children (§4.1.1); `SetForkGrain` overrides — `1` forks at every split point, `ForkGrainNever` disables forking |
+| `numWorkers` | `GOMAXPROCS` | `min(numWorkers, GOMAXPROCS)` sizes the lease pool and divides the grain. Override via `SetNumWorkers` |
 
 ## 8. Failure modes
 
@@ -279,7 +273,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back — same caveat as the row below |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
 | any error after the walk began | restore the base trie's in-memory state from the snapshot taken before it — root cell and its three flags, no open rows, no queued branch updates |
-| branch records the aborted round already wrote | none, for the paths this engine takes. `processMounted` defers on the base and every worker, and `collectDeleteUpdate` now honours that flag too, so a collapsing row queues its deletion instead of writing it. `ClearDeferred` on the abort path therefore discards the whole round. Two escapes remain in `CollectDeferredUpdate` — a flush at `DefaultMaxDeferredUpdates` and one on a repeated prefix — neither of which fires on the collapse corpus; until they are removed a retry is still only sound where the caller discards the round's domain writes, which every production caller does by dropping the RwTx |
+| branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; `ClearDeferred` on the abort path discards the whole round |
 
 ## 9. Validation
 
@@ -290,9 +284,9 @@ substitution of the as-of reader is validated at runtime by the block-root check
 - `ErrWrongTrieRoot` — at block-apply time, the computed root is compared to the
   block header; the value-source substitution of §6.3 is proven here, not by the
   unit harness.
-- `TestModeParallel_MidWalkErrorRestoresBaseTrie` / `...RestoresTrieNotDomain` —
+- `TestModeParallel_MidWalkErrorRestoresBaseTrie` / `TestModeParallel_MidWalkErrorLeavesDomainUntouched` —
   the two halves of the §8 abort contract: the in-memory state that is restored,
-  and the branch records that are not.
+  and the domain that an aborted round does not write to.
 - `TestModeParallel_DeferredApplyErrorKeepsPreRoundRoot` — the snapshot reaches
   past the walk: a failed inline apply must not leave `RootHash` on the staged root.
 
@@ -312,16 +306,6 @@ in scheduling.
 | key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
 | applicability | always | any shape |
 
-A third variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
-`VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
-reuses the same prefix trie and fold engine and upholds R1 identically. It differs
-only in *when* the fold runs — touched keys are re-folded per top-nibble split in a
-background worker pool overlapping execution, so `Process` collapses to a merge of
-already-folded split cells. Folds are stateless (re-folded from the prefix-trie key
-set, never a persistent per-split hph mutated by touches — that would break the
-monotonic `followAndUpdate` contract). It uses the `streaming` flag on `Updates`
-(not a new `Mode`).
-
 ## 11. Performance characteristics *(informative)*
 
 Parallelism is bounded by the split points the grain admits, not by a fixed depth: a
@@ -331,8 +315,8 @@ hundreds of thousands of storage slots folds across its touched first-storage ni
 and again below them if each is still above the grain.
 
 At `numWorkers = NumCPU` the parallel commitment is effectively core-bound: worker budget
-beyond NumCPU buys little. The grain trades the per-fork fixed cost (a pooled trie, a
-fresh `PatriciaContext` with its read tx, an ETL collector and metrics) against the
+beyond NumCPU buys little. The grain trades the per-fork fixed cost (a pooled trie per child, a lease
+hand-off and a metrics merge) against the
 per-key fold cost it saves, and it is charged against the work a fork hands off so that a
 straggler-shaped node does not spend it; `minForkGrain` and `forkGrainPerWorker` are the
 two knobs and are set by measurement.
@@ -345,9 +329,9 @@ figures are for inspection, not a CI gate.
 
 | file | contents |
 | --- | --- |
-| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, deferred apply and hand-off |
+| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, deferred apply and hand-off |
 | `execution/commitment/parallel_mount.go` | `processMounted` — drive the fork walk over the whole prefix trie and fold the base to the root; `mountTo` re-basing a clone on the fork row |
-| `execution/commitment/fork_walk.go` | `forkWalk` — the walk, the fork predicate, the worker slots, the grain and nesting bounds; `newForkWorker` |
+| `execution/commitment/fork_walk.go` | `forkWalk` — the walk, the fork predicate, the grain, the `ctxLeasePool` and the sibling claim loop |
 | `execution/commitment/split_point.go` | depth-agnostic split-point primitives: `unfoldToRow`, `openEmptyRow`/`closeIfEmpty`, `stitchSplitCells`, `foldSplitRow` |
 | `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by both fold levels |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
@@ -355,4 +339,3 @@ figures are for inspection, not a CI gate.
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |
-| `execution/commitment/streaming_commitment.go` | `StreamingCommitter`, the prepare-on-touch variant layered on this one |
