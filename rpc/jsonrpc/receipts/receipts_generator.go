@@ -268,7 +268,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			BlockNum:  blockNum,
 			BlockHash: blockHash,
 			TxnHash:   txnHash,
-			// eth_getLogs reads only the logs; ethutils.MarshalReceipt derives the bloom for the callers that return it
+			// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
 			DontCalcBloom: true,
 		})
 		if err != nil {
