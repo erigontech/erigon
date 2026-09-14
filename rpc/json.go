@@ -243,6 +243,13 @@ func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
 // transport can stream them instead of first joining them into one buffer.
 type rawBatch [][]byte
 
+// MarshalJSON joins the answers so json.Marshal-based transports don't base64-encode them.
+func (b rawBatch) MarshalJSON() ([]byte, error) {
+	s := jsonstream.New(nil)
+	b.writeTo(s)
+	return s.Buffer(), nil
+}
+
 func (b rawBatch) writeTo(s jsonstream.Stream) {
 	s.WriteArrayStart()
 	for i, answer := range b {
