@@ -109,7 +109,7 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
-	if applyMigrations {
+	if applyMigrations && chaindata == filepath.Join(datadirCli, "chaindata") {
 		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 			return nil, err
 		}

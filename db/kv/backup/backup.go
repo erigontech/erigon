@@ -143,11 +143,9 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err != nil {
 		return err
 	}
-	// The exclusive src stays open until the rename, so a process that doesn't take
-	// the datadir lock can't open the file that is being replaced. Windows can't
-	// rename over a file mdbx opened in exclusive mode.
+	// Exclusive src stays open across the rename, so nobody opens the file being replaced.
 	defer src.Close()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" { // can't rename over an exclusively opened file
 		src.Close()
 	}
 
@@ -170,9 +168,6 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.FsyncDir(dbDir); err != nil {
 		logger.Warn("[compact] fsync dir", "db", dbDir, "err", err)
 	}
-	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
-		logger.Warn("[compact] stale lock file left behind", "db", dbDir, "err", err)
-	}
 	args := []any{"label", label, "db", dbDir, "took", time.Since(start), "before", common.ByteCount(uint64(before.Size()))}
 	if after, err := os.Stat(dataFile); err == nil {
 		args = append(args, "after", common.ByteCount(uint64(after.Size())))
@@ -183,9 +178,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	return nil
 }
 
-// copyToDir closes the copy before it returns: the caller moves it, which must not
-// happen while mdbx still holds it open. On success the exclusive src is returned
-// open, and the caller closes it.
+// copyToDir closes the copy before it returns and returns src still open.
 func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) (kv.RoDB, error) {
 	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, nil, logger)
 	if err != nil {
@@ -280,8 +273,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return 0, err
 	}
-	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
-	// copy cursor: the live pages of a bloated db are scattered over the file.
+	// Read-ahead warms pages (values too) just ahead of the copy cursor.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)

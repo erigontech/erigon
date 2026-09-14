@@ -93,16 +93,11 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 	return nil
 }
 
-// bloatRatio is how many times the free pages of a db must outweigh its data
-// before AutoCompactDatadir rewrites it.
-const bloatRatio = 4
+const bloatRatio = 4 // autoCompactDatadir rewrites a db whose free pages exceed its data this many times
 
-// autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
-// pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree = 10 * datasize.GB
+var autoCompactMinFree = 10 * datasize.GB // a small db crosses bloatRatio but gives back nothing
 
-// ApplyMigrations compacts bloated dbs of the datadir. A datadir locked by
-// another process is skipped.
+// ApplyMigrations compacts bloated dbs; a datadir locked by another process is skipped.
 func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {
@@ -116,9 +111,7 @@ func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) 
 	return autoCompactDatadir(ctx, dirs, logger)
 }
 
-// autoCompactDatadir compacts each db of the datadir whose free pages exceed
-// bloatRatio times its data and are at least autoCompactMinFree. A db that fails
-// to compact is left as it was. The caller holds the datadir lock.
+// autoCompactDatadir expects the datadir lock held. A db that fails to compact is left as it was.
 func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	dbs, err := datadirDBs(dirs)
 	if err != nil {
@@ -144,10 +137,8 @@ func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 	return nil
 }
 
-// pageUsage returns the bytes held by the tables of a db and the bytes of free
-// pages below its last used page. The unallocated tail of the file is not free
-// space: mdbx grows the file ahead of use, so counting it would compact a
-// freshly compacted db again.
+// pageUsage: free is the pages below the last used page minus table pages. The
+// unused file tail is not counted: mdbx grows the file ahead of use.
 func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
