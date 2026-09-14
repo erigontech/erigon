@@ -321,6 +321,11 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 	return &copy
 }
 
+// LookupInstructionSet returns a copy of the jump table active under rules.
+func LookupInstructionSet(rules *chain.Rules) JumpTable {
+	return *jumpTable(rules, Config{})
+}
+
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
