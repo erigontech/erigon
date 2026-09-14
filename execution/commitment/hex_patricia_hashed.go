@@ -2492,7 +2492,6 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
-	hph.resetFoldFrontier()
 	set := newWitnessNodeSet()
 	hph.witness.tracer = set
 	defer hph.witness.reset()
@@ -2596,9 +2595,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// A round owns its collection window. Anything already queued belongs to a walk
 	// that never applied it, and merging the two would put one prefix in the deferred
 	// set twice — two records with the same stale prev, one of them lost at apply.
-	if len(hph.branchEncoder.deferred) > 0 {
-		hph.branchEncoder.ClearDeferred()
-	}
+	hph.branchEncoder.ClearDeferred()
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
@@ -2790,7 +2787,6 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 // The aggregator-scope BranchCache is intentionally not cleared here;
 // SharedDomains.Unwind handles correctness via txN-tagged eviction.
 func (hph *HexPatriciaHashed) Reset() {
-	hph.resetFoldFrontier()
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
