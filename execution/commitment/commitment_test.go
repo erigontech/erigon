@@ -1233,3 +1233,17 @@ func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
 	require.Len(t, ctx.puts, 2, "inline collection still bounds its buffer by writing the batch through")
 	require.Len(t, be.deferred, 1)
 }
+
+func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
+	t.Parallel()
+	row, bm := generateCellRow(t, 4)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
+	require.Len(t, be.deferred, 1)
+	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
+	require.Empty(t, be.deferred[0].prev)
+	be.ClearDeferred()
+}

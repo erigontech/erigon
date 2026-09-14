@@ -512,6 +512,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
+	if prev == nil {
+		prev = []byte{}
+	}
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
