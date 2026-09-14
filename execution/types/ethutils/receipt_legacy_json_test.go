@@ -121,10 +121,7 @@ func legacyMarshalReceipt(
 
 	numBlobs := len(txn.GetBlobHashes())
 	if numBlobs > 0 && header.ExcessBlobGas != nil {
-		blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas, header.Time)
-		if err != nil {
-			panic(err)
-		}
+		blobGasPrice, _ := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas, header.Time)
 		fields["blobGasPrice"] = (*hexutil.U256)(&blobGasPrice)
 		fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 	}
