@@ -82,32 +82,12 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
-func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err error) {
-	if !s.enabled {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.accessLock.Lock()
-	defer s.accessLock.Unlock()
-
-	next := s.previousHeadState
-	if next == nil {
-		next, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(next)
-	}
-	if err != nil {
-		return err
-	}
+func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) error {
 	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
-	s.previousHeadState, s.headState = s.headState, next
-	s.stateHead.Store(&headIdentity{root: blkRoot, slot: newState.Slot()})
-	return nil
+	return s.OnHeadStateWithBlockRoot(newState, blkRoot)
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
@@ -131,6 +111,7 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 		err = newState.CopyInto(next)
 	}
 	if err != nil {
+		s.previousHeadState = nil
 		return err
 	}
 	s.previousHeadState, s.headState = s.headState, next
