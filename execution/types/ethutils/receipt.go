@@ -33,9 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC representation of a transaction receipt. Logs holds []*types.RPCLog when
-// the block timestamp is requested, []*types.Log otherwise, []map[string]any for a subscribed
-// receipt, and nil once Otterscan clears it.
+// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, []*types.Log, []map[string]any or nil.
 type RPCReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash"`
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`

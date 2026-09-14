@@ -370,8 +370,6 @@ func TestRPCReceiptKeepsNullLogsBloom(t *testing.T) {
 	require.Contains(t, string(b), `"logsBloom":null`)
 }
 
-// A subscribed receipt with an empty or malformed bloom leaves logsBloom null: BytesToBloom would panic on a long
-// one and zero-pad a short one.
 func TestMarshalSubscribeReceiptOddLogsBloom(t *testing.T) {
 	for name, bloom := range map[string][]byte{"empty": nil, "short": make([]byte, 10), "long": make([]byte, types.BloomByteLength+1)} {
 		t.Run(name, func(t *testing.T) {
