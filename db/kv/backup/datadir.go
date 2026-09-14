@@ -96,6 +96,10 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 // before AutoCompactDatadir rewrites it.
 const bloatRatio = 3
 
+// autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
+// pages, and the growth step pads its compacted file back to the same size.
+var autoCompactMinFree uint64 = 1 << 30
+
 // AutoCompactDatadir compacts each db of the datadir whose free pages exceed
 // bloatRatio times its data. A db that fails to compact is left as it was, and
 // a datadir locked by another process is skipped.
@@ -123,7 +127,7 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 			logger.Warn("[compact] can't read db page usage", "db", db.path, "err", err)
 			continue
 		}
-		if free <= bloatRatio*data {
+		if free <= bloatRatio*data || free < autoCompactMinFree {
 			continue
 		}
 		logger.Info("[compact] auto-compact", "db", db.path, "data", common.ByteCount(data), "free", common.ByteCount(free))

@@ -281,6 +281,7 @@ func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
 // TestAutoCompactDatadir pins the threshold: only a db whose free pages exceed
 // bloatRatio times its data is rewritten.
 func TestAutoCompactDatadir(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
 	dirs := datadir.New(t.TempDir())
 	writeTestDB(t, dirs.Chaindata, 18_000)
 	writeTestDB(t, dirs.TxPool, 2_000)
@@ -295,6 +296,7 @@ func TestAutoCompactDatadir(t *testing.T) {
 // TestAutoCompactDatadirSkipsLockedDatadir: integration opens a datadir while the
 // node that holds its lock keeps running, so the lock owner's dbs must stay untouched.
 func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
 	dirs := datadir.New(t.TempDir())
 	writeTestDB(t, dirs.Chaindata, 18_000)
 	before := dataFileStat(t, dirs.Chaindata)
@@ -302,6 +304,26 @@ func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
 	unlock, err := dirs.TryFlock()
 	require.NoError(t, err)
 	defer unlock()
+	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+
+	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
+}
+
+func withAutoCompactMinFree(t *testing.T, v uint64) {
+	t.Helper()
+	prev := autoCompactMinFree
+	autoCompactMinFree = v
+	t.Cleanup(func() { autoCompactMinFree = prev })
+}
+
+// TestAutoCompactDatadirSkipsLittleFreeSpace: a small db crosses bloatRatio with
+// a few free pages, and its rewrite gives back nothing the growth step keeps.
+func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
+	withAutoCompactMinFree(t, 1<<30)
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	before := dataFileStat(t, dirs.Chaindata)
+
 	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
