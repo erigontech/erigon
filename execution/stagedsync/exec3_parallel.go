@@ -908,6 +908,10 @@ func (pe *parallelExecutor) acquireWorker() *exec.WorkerContext {
 // releaseWorker returns a context to the pool for reuse. The pool buffer is sized
 // to the elastic peak, so this never blocks; excess is reclaimed at teardown.
 func (pe *parallelExecutor) releaseWorker(w *exec.WorkerContext) {
+	// Merge this run's reads into sd.metrics before the worker returns to the pool,
+	// so the slow-block emitter sees them. Off the critical path (the result is
+	// already sent) and safe: RunTxTask has returned, so readMetrics is quiescent.
+	w.PublishReadMetrics()
 	select {
 	case pe.runSem <- w:
 	default:

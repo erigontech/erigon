@@ -308,6 +308,19 @@ func (rw *WorkerContext) RunTxTask(txTask Task) (result *TxResult) {
 	return result
 }
 
+// PublishReadMetrics folds this worker's accumulated reads into the per-batch
+// sd.metrics that the slow-block emitter samples, then resets. The per-read
+// increments stay lock-free (single-owner readMetrics); only this boundary
+// merge takes sd.metrics' lock, and it runs off the critical path (after a run,
+// on worker release). No-op unless levelled read metrics are enabled.
+func (rw *WorkerContext) PublishReadMetrics() {
+	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
+		return
+	}
+	rw.rs.Domains().LogMergeMetrics(rw.readMetrics)
+	rw.readMetrics.Reset()
+}
+
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
 // like compute gas used for block and then to set state reader to continue processing on latest data.
 func (rw *WorkerContext) SetReader(reader state.StateReader) {
