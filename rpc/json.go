@@ -121,7 +121,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 			return msg.errorResponse(err)
 		}
 		w.writeResult(enc)
-	} else if err := json.NewEncoder(w).Encode(result); err != nil {
+	} else if err := encodeResult(w, result); err != nil {
 		return msg.errorResponse(err)
 	}
 	stream.WriteObjectEnd()
