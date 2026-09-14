@@ -1,0 +1,54 @@
+name: Next Go toolchain
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  # Files behind //go:build go1.27 are invisible to every other job, because
+  # setup-erigon takes its Go version from the go directive in go.mod. This job
+  # pins the next toolchain so those files are compiled and their tests run
+  # before go.mod moves. Drop it once the go directive reaches that version.
+  next-toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      NEXT_GO: '1.27.1'
+
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.NEXT_GO }}
+          cache: false
+
+      - name: Refuse to run once go.mod has caught up
+        run: |
+          modminor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
+          if [ "$(printf '%s\n%s\n' "$modminor" "${NEXT_GO%.*}" | sort -V | head -1)" != "$modminor" ] \
+             || [ "$modminor" = "${NEXT_GO%.*}" ]; then
+            echo "::error::go.mod is at $modminor; the regular test jobs now cover Go ${NEXT_GO%.*}. Delete this workflow."
+            exit 1
+          fi
+
+      - name: Build every package with Go ${{ env.NEXT_GO }}
+        run: go build ./...
+
+      # rpc is the only package with build-tagged files today; widen this list
+      # when that stops being true.
+      - name: Test the packages that carry build-tagged files
+        run: go test ./rpc/...
