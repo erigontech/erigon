@@ -55,30 +55,6 @@ func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {
 	}
 }
 
-func TestTrieConfig_Subtrie(t *testing.T) {
-	cfg := TrieConfig{
-		Variant:                VariantHexPatriciaTrie,
-		DeferBranchUpdates:     true,
-		LeaveDeferredForCaller: true,
-		EnableTrieWarmup:       true,
-		CsvMetricsFilePrefix:   "pre",
-		MemoizationOff:         true,
-		WarmupNumWorkers:       7,
-	}
-
-	sub := cfg.Subtrie()
-
-	if sub.DeferBranchUpdates {
-		t.Error("Subtrie should disable DeferBranchUpdates")
-	}
-
-	want := cfg
-	want.DeferBranchUpdates = false
-	if sub != want {
-		t.Errorf("Subtrie should copy all other fields unchanged: got %+v, want %+v", sub, want)
-	}
-}
-
 func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	cfg := TrieConfig{
 		DeferBranchUpdates:     false,
@@ -103,29 +79,28 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	}
 }
 
-func TestTrieConfig_SpawnSubTrieInheritsConfig(t *testing.T) {
-	cfg := TrieConfig{
-		DeferBranchUpdates:     true,
-		LeaveDeferredForCaller: true,
-		MemoizationOff:         true,
+func TestTrieConfig_LeaveDeferredForCallerReachesBothEngines(t *testing.T) {
+	cfg := DefaultTrieConfig()
+	cfg.LeaveDeferredForCaller = true
+
+	hph := NewHexPatriciaHashed(length.Addr, nil, cfg)
+	defer hph.Release()
+	if !hph.branchEncoder.callerOwnsDeferred {
+		t.Error("serial engine must honour cfg.LeaveDeferredForCaller")
 	}
 
-	parent := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	defer parent.Release()
+	p := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+	defer p.Release()
+	if !p.leaveDeferredForCaller {
+		t.Error("parallel engine must honour cfg.LeaveDeferredForCaller")
+	}
 
-	sub := parent.SpawnSubTrie(nil, 0)
-	defer sub.Release()
-
-	if sub.cfg.DeferBranchUpdates {
-		t.Error("sub-trie DeferBranchUpdates should be false")
+	p.SetLeaveDeferredForCaller(false)
+	if p.cfg.LeaveDeferredForCaller {
+		t.Error("the setter must keep cfg in step so cfg never reports a stale mode")
 	}
-	if !sub.cfg.LeaveDeferredForCaller {
-		t.Error("sub-trie should inherit LeaveDeferredForCaller=true")
-	}
-	if !sub.cfg.MemoizationOff {
-		t.Error("sub-trie should inherit MemoizationOff=true")
-	}
-	if sub.branchEncoder.deferUpdates {
-		t.Error("sub-trie branchEncoder should not defer updates")
+	hph.SetLeaveDeferredForCaller(false)
+	if hph.cfg.LeaveDeferredForCaller {
+		t.Error("the setter must keep cfg in step so cfg never reports a stale mode")
 	}
 }

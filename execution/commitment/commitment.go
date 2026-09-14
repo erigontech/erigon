@@ -223,10 +223,6 @@ func ResetDeferredUpdateMetrics() {
 	getDeferredUpdateCount.Store(0)
 }
 
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
@@ -1356,8 +1352,6 @@ func (t *Updates) IsConcurrentCommitment() bool {
 }
 
 type keyHasher func(key []byte) []byte
-
-func keyHasherNoop(key []byte) []byte { return key }
 
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
