@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -237,6 +239,21 @@ type rawResponse []byte
 // MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
 func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
 
+// rawBatch is a batch response kept as its already-encoded answers in request order, so a
+// transport can stream them instead of first joining them into one buffer.
+type rawBatch [][]byte
+
+func (b rawBatch) writeTo(s jsonstream.Stream) {
+	s.WriteArrayStart()
+	for i, answer := range b {
+		if i > 0 {
+			s.WriteMore()
+		}
+		s.WriteRawBytes(answer)
+	}
+	s.WriteArrayEnd()
+}
+
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
 func NewCodec(conn Conn) ServerCodec {
@@ -249,12 +266,19 @@ func NewCodec(conn Conn) ServerCodec {
 func newJSONEncoder(conn Conn) func(v any) error {
 	enc := json.NewEncoder(conn)
 	return func(v any) error {
-		raw, ok := v.(rawResponse)
-		if !ok {
+		switch r := v.(type) {
+		case rawResponse:
+			_, err := conn.Write(append(r, '\n'))
+			return err
+		case rawBatch:
+			s := jsonstream.Get(conn)
+			defer jsonstream.Put(s)
+			r.writeTo(s)
+			s.WriteRaw("\n")
+			return s.Flush()
+		default:
 			return enc.Encode(v)
 		}
-		_, err := conn.Write(append(raw, '\n'))
-		return err
 	}
 }
 
