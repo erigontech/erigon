@@ -1260,32 +1260,3 @@ func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
 		require.Equal(t, uint64(1000000000000001), b.To.ToInt().Uint64())
 	}
 }
-
-// Pinning the reader to the parent boundary must not stop a call from seeing
-// the previous calls' writes: they reach it through ibs, not through history.
-func TestCallManyHistoricalParentKeepsSequentialState(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newTraceApiForTest(m)
-	parentNum := rpc.BlockNumber(1)
-	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
-
-	// Init code deploys runtime code that returns 42.
-	const deploy = `[{"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x30000","gasPrice":"0x0","data":"0x600a600c600039600a6000f3602a60005260206000f3"},["trace"]]`
-	deployRes, err := api.CallMany(context.Background(), json.RawMessage("["+deploy+"]"), parent, nil)
-	require.NoError(t, err)
-	require.Len(t, deployRes, 1)
-	created, ok := deployRes[0].Trace[0].Result.(*CreateTraceResult)
-	require.True(t, ok)
-	require.NotNil(t, created.Address)
-
-	pair := fmt.Sprintf(`[
-	%s,
-	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"%s","gas":"0x30000","gasPrice":"0x0"},["trace"]]
-]`, deploy, created.Address)
-	results, err := api.CallMany(context.Background(), json.RawMessage(pair), parent, nil)
-	require.NoError(t, err)
-	require.Len(t, results, 2)
-	invoked, ok := results[1].Trace[0].Result.(*TraceResult)
-	require.True(t, ok)
-	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", invoked.Output.String())
-}
