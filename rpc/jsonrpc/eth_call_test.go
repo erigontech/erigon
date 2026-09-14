@@ -1758,6 +1758,67 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	})
 }
 
+// TestCreateAccessListAuthGasGuard pins the authorization-count guard to the same
+// per-authorization cost mdgas.IntrinsicGas charges for the block's fork. Amsterdam
+// prices an authorization at ExecutionPerAuthBaseCostEIP8038, so a gas limit that
+// covers the real intrinsic cost must be accepted even though it is below the
+// pre-Amsterdam per-auth price.
+func TestCreateAccessListAuthGasGuard(t *testing.T) {
+	const authCount = 9
+
+	authorizations := func(addr common.Address) []types.JsonAuthorization {
+		auths := make([]types.JsonAuthorization, authCount)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(types.Authorization{
+				ChainID: *uint256.NewInt(1337),
+				Address: addr,
+				Nonce:   uint64(i),
+				YParity: 1,
+				R:       *uint256.NewInt(0x1111),
+				S:       *uint256.NewInt(0x2222),
+			})
+		}
+		return auths
+	}
+
+	t.Run("amsterdam accepts the intrinsic-gas cost", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		args := ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: authorizations(receiverAddress),
+		}
+
+		estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+		require.NoError(t, err)
+		require.Less(t, uint64(estimate), authCount*uint64(params.CallNewAccountGas),
+			"estimate must sit below the stale per-auth price, else this proves nothing")
+
+		args.Gas = &estimate
+		_, err = api.CreateAccessList(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err, "eth_estimateGas result must be accepted by eth_createAccessList")
+	})
+
+	t.Run("pre-amsterdam keeps the empty-account price", func(t *testing.T) {
+		preAmsterdam := chain.AllProtocolChanges.Copy()
+		preAmsterdam.AmsterdamTime = nil
+
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, preAmsterdam)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		gas := hexutil.Uint64(authCount*params.PerEmptyAccountCost - 1)
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			Gas:               &gas,
+			AuthorizationList: authorizations(receiverAddress),
+		}, nil, nil, nil)
+		require.ErrorContains(t, err, "insufficient gas to process all authorizations")
+	})
+}
+
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
 // pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
 // meaningful concept there, regardless of whether the caller supplied one or
