@@ -2476,7 +2476,47 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 	writes := sdb.versionedWrites.Finalize()
 	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
+	sdb.encodeExistingEmptyRemovals(chainRules, writes)
 	return writes
+}
+
+// encodeExistingEmptyRemovals emits the EIP-161 delete for a pre-existing account
+// left empty (balance 0, nonce 0, empty code): its account-field writes are
+// dropped and replaced with a SelfDestructPath write, so the domain apply and the
+// commitment calculator both remove the leaf from the writes without re-deriving
+// emptiness. Created-empty accounts are already withheld by
+// withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
+func (sdb *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet) {
+	if sdb.blockNum == 0 || chainRules == nil || sdb.versionMap == nil {
+		return
+	}
+	for addr := range writes.addrs() {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
+			continue
+		}
+		view := NewVersionedAccountView(addr, sdb.txIndex, sdb.versionMap, sdb.stateReader)
+		bal, nonce, codeHash := view.GetBalance(), view.GetNonce(), view.GetCodeHash()
+		if w, ok := writes.GetBalance(addr); ok {
+			bal = w.Val
+		}
+		if w, ok := writes.GetNonce(addr); ok {
+			nonce = w.Val
+		}
+		if w, ok := writes.GetCodeHash(addr); ok {
+			codeHash = w.Val
+		}
+		if !bal.IsZero() || nonce != 0 || !codeHash.IsEmpty() {
+			continue
+		}
+		writes.DeleteAccountFields(addr)
+		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: sdb.Version()},
+			Val:         true,
+		})
+	}
 }
 
 // withholdCreatedEmptyAccounts drops writes for accounts the tx observed as

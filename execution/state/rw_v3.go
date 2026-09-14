@@ -245,25 +245,12 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
-				// EIP-161: an account left Balance=0, Nonce=0, empty-code is removed
-				// rather than written as a zero leaf. The Incarnation==0 guard spares
-				// a storage-bearing genesis account (empty fields but real state),
-				// which genesis commits under EIP-161-off rules.
-				if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:del empty account: %x\n", blockNum, addr)
-					}
-					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
-						return err
-					}
-				} else {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
-					}
-					enc := accounts.SerialiseV3(&acc)
-					if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
-						return err
-					}
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
+				}
+				enc := accounts.SerialiseV3(&acc)
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+					return err
 				}
 			}
 
