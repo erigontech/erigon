@@ -143,24 +143,11 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err != nil {
 		return err
 	}
-	// Exclusive src stays open across the rename, so nobody opens the file being replaced.
-	defer src.Close()
-	if runtime.GOOS == "windows" { // can't rename over an exclusively opened file
-		src.Close()
-	}
-
-	// Mode and owner are applied before the rename, the last step that may fail.
-	copied := filepath.Join(tmpDir, dataFileName)
-	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
-		return err
-	}
-	if err := restoreOwner(before, copied); err != nil {
-		return err
-	}
-	if err := os.Rename(copied, dataFile); err != nil {
-		return err
-	}
+	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before) // exclusive src stays open, so nobody opens the file being replaced
 	src.Close()
+	if err != nil {
+		return err
+	}
 
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
@@ -176,6 +163,17 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	logger.Info("[compact] compacted", args...)
 	return nil
+}
+
+// moveOver gives the copy the mode and owner of the original, then renames it over the original.
+func moveOver(copied, original string, before os.FileInfo) error {
+	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := restoreOwner(before, copied); err != nil {
+		return err
+	}
+	return os.Rename(copied, original)
 }
 
 // copyToDir closes the copy before it returns and returns src still open.
