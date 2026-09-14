@@ -664,19 +664,25 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 		return true
 	})
 
+	// pastDomainWriters is ordered NEWEST FIRST — flushWriters walks it backwards so the writers land
+	// oldest-to-newest and the newest write to a key is the one that survives. `other` is newer than
+	// everything already here, so its writers go in FRONT, not on the end. Appending instead puts the
+	// oldest writer last, which makes the FIRST round of a multi-round block the one that wins: the block
+	// commits as if only its first round had run, while its root — advanced cumulatively through the shared
+	// commitment context — says otherwise, so nothing catches it.
 	for domain, writer := range other.domainWriters {
 		// Skip a nil writer: an EMPTY block (heartbeat) touches no state, so its untouched domains have no
-		// writer (domainWriters are created lazily on first write). Appending nil here poisons
+		// writer (domainWriters are created lazily on first write). Putting nil in here poisons
 		// pastDomainWriters, which flushWriters/DiscardWrites deref WITHOUT the nil guard the domainWriters
 		// loop has — a nil-deref crash when an empty block's SD is merged/promoted (frontier run-ahead).
+		newer := other.pastDomainWriters[domain]
 		if writer != nil {
-			sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
+			newer = append([]*DomainBufferedWriter{writer}, newer...)
+		}
+		if len(newer) > 0 {
+			sd.pastDomainWriters[domain] = append(newer, sd.pastDomainWriters[domain]...)
 		}
 		other.domainWriters[domain] = nil
-	}
-
-	for domain, writers := range other.pastDomainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writers...)
 		other.pastDomainWriters[domain] = nil
 	}
 
