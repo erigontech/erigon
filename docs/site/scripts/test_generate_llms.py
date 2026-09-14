@@ -355,10 +355,15 @@ class RealMarkupTests(unittest.TestCase):
         # built site — which is what a Docusaurus rename actually changes.
         if not g.BUILD_DIR.is_dir():
             self.fail("setup: docs/site/build is absent. Run `npm run build` in docs/site before these tests; CI builds first for this reason.")
-        html = "".join(p.read_text(encoding="utf-8", errors="replace")
-                       for p in list(g.BUILD_DIR.rglob("*.html"))[:40])
-        tokens = set(re.findall(r'class="([^"]*)"', html))
-        seen = {t for group in tokens for t in group.split()}
+        # Every built page, not a slice of them: `rglob` has no defined order,
+        # and a class such as the version banner lives only on archived pages,
+        # which an arbitrary prefix of the traversal can miss entirely.
+        seen = set()
+        for page in g.BUILD_DIR.rglob("*.html"):
+            for group in re.findall(
+                    r'class="([^"]*)"',
+                    page.read_text(encoding="utf-8", errors="replace")):
+                seen.update(group.split())
         for entry in g._CHROME_CLASSES:
             self.assertIn(entry, seen, f"chrome class {entry!r} matches nothing built")
         self.assertTrue(any(t.startswith(g._ADM_HEADING_PREFIX) for t in seen),
@@ -1075,6 +1080,28 @@ class IndentMarkerTests(unittest.TestCase):
         self.assertIn("\n  - Child", out)
 
 
+def _contained_fences(corpus):
+    """Fence openers the corpus places inside a container.
+
+    Both kinds the HTML side counts: a list item shows as indentation, a
+    blockquote as its marker. Counting only the indent reads a correctly quoted
+    block as a fence that escaped its container. Openers only — a closer moves
+    independently of what encloses it.
+    """
+    n, inside = 0, False
+    for line in corpus.split("\n"):
+        m = re.match(r"^([ \t]*(?:>[ \t]?)*[ \t]*)(`{3,}|~{3,})", line)
+        if not m:
+            continue
+        if inside:
+            inside = False
+            continue
+        inside = True
+        if m.group(1):
+            n += 1
+    return n
+
+
 class SourceFenceContainmentTests(unittest.TestCase):
     """Ties a fence in the source back to an indented fence in the corpus.
 
@@ -1126,24 +1153,13 @@ class SourceFenceContainmentTests(unittest.TestCase):
             contained += parser.count
         self.assertGreater(contained, 0, "no contained <pre> found; check the scan")
 
-        # Openers only: a closer moves independently of its container.
         _, full, _ = g.build()
-        indented, inside = 0, False
-        for line in full.split("\n"):
-            m = re.match(r"^([ \t]*)(`{3,}|~{3,})", line)
-            if not m:
-                continue
-            if inside:
-                inside = False
-                continue
-            inside = True
-            if m.group(1):
-                indented += 1
+        in_container = _contained_fences(full)
         self.assertEqual(
-            contained, indented,
+            contained, in_container,
             f"the built pages put {contained} fenced blocks inside a list item "
-            f"or blockquote, but {indented} are indented in the corpus: a fence "
-            f"has escaped its container")
+            f"or blockquote, but {in_container} are contained in the corpus: a "
+            f"fence has escaped its container")
 
 
 class ReleaseDriftTests(unittest.TestCase):
@@ -1206,6 +1222,175 @@ class ReleaseDriftTests(unittest.TestCase):
             finally:
                 g.SECTIONS = real
         self.assertEqual(1, len(hits), "planted pin was not reported")
+
+
+class InlineCodeSpacingTests(unittest.TestCase):
+    """A code span's interior is content; the prose around it is layout."""
+
+    def render(self, html):
+        p = g._ArticleText()
+        p.feed(html)
+        p.close()
+        return p.text()
+
+    @staticmethod
+    def decode(span):
+        """The span's text as CommonMark 6.1 reads it back."""
+        m = re.match(r"^(`+)(.*)\1$", span, re.DOTALL)
+        assert m, span
+        inner = m.group(2).replace("\n", " ")
+        if inner[:1] == " " and inner[-1:] == " " and inner.strip():
+            inner = inner[1:-1]
+        return inner
+
+    def round_trip(self, text):
+        out = self.render(f"<p>X <code>{text}</code> Y</p>")
+        return self.decode(re.search(r"X (.*) Y", out, re.DOTALL).group(1))
+
+    def test_a_run_of_spaces_survives(self):
+        # Collapsed as prose, `NAME    TYPE` reflows and the sample stops
+        # lining up with the output it is quoting.
+        self.assertEqual("NAME    TYPE", self.round_trip("NAME    TYPE"))
+
+    def test_an_edge_space_survives_the_delimiter_strip(self):
+        # 6.1 removes one space from each end of a span that has both, so an
+        # edge space only survives if a second is padded on.
+        self.assertEqual(" a ", self.round_trip(" a "))
+
+    def test_a_span_of_only_spaces_is_not_lengthened(self):
+        # The same clause exempts an all-space span from stripping, so padding
+        # one would add a space instead of protecting it.
+        self.assertEqual("   ", self.round_trip("   "))
+
+    def test_a_backtick_inside_a_padded_span_still_round_trips(self):
+        self.assertEqual(" `t` ", self.round_trip(" `t` "))
+
+    def test_a_line_ending_inside_a_span_folds_to_one_space(self):
+        self.assertEqual("a b", self.round_trip("a\nb"))
+
+    def test_prose_around_the_span_still_collapses(self):
+        self.assertEqual(
+            "lots of space `a   b` more space",
+            self.render("<p>lots     of     space <code>a   b</code>"
+                        " more     space</p>"),
+        )
+
+
+class JsxCommentFenceTests(unittest.TestCase):
+    """A comment hides a fence marker exactly as a fence hides a comment."""
+
+    def test_a_fence_marker_inside_a_comment_does_not_open_a_block(self):
+        # Sweeping for fences before comments let the ``` inside the comment
+        # open a block, and the live diagram's own opener was then read as its
+        # closer — the diagram vanished from the corpus entirely.
+        src = "# T\n\n{/*\n```\n*/}\n\n```mermaid\ngraph TD; A-->B\n```\n"
+        self.assertEqual(["graph TD; A-->B"],
+                         [b.split("\n")[1] for _, _, _, b in g.mermaid_blocks(src)])
+
+    def test_a_commented_out_diagram_is_still_dropped(self):
+        src = ("# T\n\n{/*\n```mermaid\ndead\n```\n*/}\n\n"
+               "```mermaid\nlive\n```\n")
+        self.assertEqual(["live"],
+                         [b.split("\n")[1] for _, _, _, b in g.mermaid_blocks(src)])
+
+    def test_delimiters_shown_in_inline_code_are_prose(self):
+        # The page documenting `{/*` and `*/}` sits either side of a diagram.
+        src = "# T\n\nWrite `{/*` and `*/}` around it.\n\n```mermaid\nlive\n```\n"
+        self.assertEqual(["live"],
+                         [b.split("\n")[1] for _, _, _, b in g.mermaid_blocks(src)])
+
+    def test_a_delimiter_inside_a_fenced_block_is_code(self):
+        src = "# T\n\n```js\n// {/*\n```\n\n```mermaid\nlive\n```\n"
+        self.assertEqual(["live"],
+                         [b.split("\n")[1] for _, _, _, b in g.mermaid_blocks(src)])
+
+
+class DiagramContainerTests(unittest.TestCase):
+    """A diagram goes back inside the container it was written in."""
+
+    def splice_one(self, src, body):
+        (heading, occurrence, preceding, block), = g.mermaid_blocks(src)
+        return g.splice_diagram(body, heading, block, occurrence, preceding)
+
+    def test_a_diagram_in_a_list_item_does_not_end_the_item(self):
+        # Spliced at column zero it closed item 1, so the ordered list restarted
+        # and "2." became a second list numbered from one.
+        src = ("## Steps\n\n1. Run this:\n\n   ```mermaid\n   graph TD; A-->B\n"
+               "   ```\n\n2. Then that.\n")
+        out = self.splice_one(src, "## Steps\n\n1. Run this:\n\n2. Then that.")
+        self.assertEqual(
+            "## Steps\n\n1. Run this:\n\n   ```mermaid\n   graph TD; A-->B\n"
+            "   ```\n\n2. Then that.", out)
+
+    def test_a_diagram_in_a_blockquote_keeps_the_quote(self):
+        src = ("## Note\n\n> Look at this:\n>\n> ```mermaid\n> graph TD; A-->B\n"
+               "> ```\n")
+        out = self.splice_one(src, "## Note\n\n> Look at this:")
+        self.assertEqual(
+            "## Note\n\n> Look at this:\n>\n> ```mermaid\n> graph TD; A-->B\n"
+            "> ```", out)
+
+    def test_a_nested_item_indents_past_both_markers(self):
+        src = ("## N\n\n1. Outer\n   - Inner step:\n\n     ```mermaid\n"
+               "     graph TD; A-->B\n     ```\n")
+        out = self.splice_one(src, "## N\n\n1. Outer\n   - Inner step:")
+        self.assertIn("\n     ```mermaid\n     graph TD; A-->B\n     ```", out)
+
+    def test_a_top_level_diagram_is_not_indented(self):
+        src = "## Plain\n\nSome prose.\n\n```mermaid\ngraph TD; A-->B\n```\n"
+        out = self.splice_one(src, "## Plain\n\nSome prose.")
+        self.assertEqual(
+            "## Plain\n\nSome prose.\n\n```mermaid\ngraph TD; A-->B\n```", out)
+
+    def test_a_hard_wrapped_paragraph_still_anchors_the_diagram(self):
+        # `preceding` is one source line but the rendered paragraph is one
+        # joined line, so an exact comparison never matched and the diagram was
+        # placed at the top of the section, ahead of the prose introducing it.
+        src = ("## Section\n\nIntro prose\ncontinues here.\n\n```mermaid\n"
+               "graph TD; A-->B\n```\n")
+        out = self.splice_one(src, "## Section\n\nIntro prose continues here.")
+        self.assertEqual(
+            "## Section\n\nIntro prose continues here.\n\n```mermaid\n"
+            "graph TD; A-->B\n```", out)
+
+    def test_an_unrelated_line_ending_the_same_way_does_not_win(self):
+        # Anchoring on a line that merely *ends* with the source tail put the
+        # diagram after the first line that happened to close that way.
+        src = ("## S\n\nactual intro\nthe tail.\n\n```mermaid\n"
+               "graph TD; A-->B\n```\n")
+        body = "## S\n\nunrelated the tail.\n\nactual intro the tail."
+        out = self.splice_one(src, body)
+        self.assertEqual(
+            "## S\n\nunrelated the tail.\n\nactual intro the tail.\n\n"
+            "```mermaid\ngraph TD; A-->B\n```", out)
+
+    def test_a_paragraph_inside_a_list_item_keeps_the_item_indent(self):
+        # A continuation paragraph carries indentation but no marker; dropping
+        # it would splice the diagram out of the item it belonged to.
+        src = ("## N\n\n1. Outer\n\n   Some prose here.\n\n   ```mermaid\n"
+               "   graph TD; A-->B\n   ```\n")
+        out = self.splice_one(src, "## N\n\n1. Outer\n\n   Some prose here.")
+        self.assertEqual(
+            "## N\n\n1. Outer\n\n   Some prose here.\n\n   ```mermaid\n"
+            "   graph TD; A-->B\n   ```", out)
+
+
+class ContainedFencePatternTests(unittest.TestCase):
+    """The corpus side of the containment check counts both container kinds."""
+
+    contained = staticmethod(_contained_fences)
+
+    def test_a_quoted_block_counts_as_contained(self):
+        # The HTML side counts a <pre> inside a <blockquote>; matching only an
+        # indent here read a correctly quoted block as an escaped fence, so one
+        # valid quoted shell block turned documentation CI red.
+        self.assertEqual(1, self.contained("> ```bash\n> echo hi\n> ```\n"))
+
+    def test_an_indented_block_still_counts(self):
+        self.assertEqual(1, self.contained("  ```bash\n  echo hi\n  ```\n"))
+
+    def test_a_top_level_block_does_not_count(self):
+        self.assertEqual(0, self.contained("```bash\necho hi\n```\n"))
 
 
 if __name__ == "__main__":

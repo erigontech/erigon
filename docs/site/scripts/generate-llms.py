@@ -146,6 +146,7 @@ class _ArticleText(HTMLParser):
         self._link_cur = []
         self._in_pre = 0
         self._pre_start = 0
+        self._in_code = 0
         self._at_list_marker = False
         self._table_depth = 0
         self._row_cells = 0
@@ -373,6 +374,7 @@ class _ArticleText(HTMLParser):
             return
         if tag == "code" and not self._in_pre:
             # Delimiter length is only known once the interior is in hand.
+            self._in_code += 1
             self._emit(_CODE_MARK)
             return
         if tag in _INLINE_WRAP and not self._in_pre:
@@ -514,6 +516,7 @@ class _ArticleText(HTMLParser):
             self._break()
             return
         if tag == "code" and not self._in_pre:
+            self._in_code = max(0, self._in_code - 1)
             buf = self._link_cur if self._href is not None else self.out
             try:
                 i = len(buf) - 1 - buf[::-1].index(_CODE_MARK)
@@ -526,8 +529,12 @@ class _ArticleText(HTMLParser):
             longest = max((len(m) for m in re.findall(r"`+", inner)), default=0)
             delim = "`" * max(1, longest + 1)
             # A span whose text touches a backtick needs a space inside the
-            # delimiters, which CommonMark strips back out (6.1).
-            pad = " " if inner.startswith("`") or inner.endswith("`") else ""
+            # delimiters, which CommonMark strips back out (6.1). The same rule
+            # eats a significant space at either edge, so one is padded back on
+            # — unless the span is nothing but spaces, which 6.1 exempts from
+            # stripping and which padding would therefore lengthen.
+            touches = inner[:1] in ("`", " ") or inner[-1:] in ("`", " ")
+            pad = " " if touches and inner.strip() else ""
             buf[i] = delim + pad
             self._emit(pad + delim)
             return
@@ -543,6 +550,13 @@ class _ArticleText(HTMLParser):
             # An unescaped pipe reads as a column separator: `QUANTITY|TAG` would
             # silently widen the row.
             data = data.replace("|", "\\|")
+        if self._in_code and not self._in_pre:
+            # Runs of spaces inside a code span are content, not layout:
+            # CommonMark keeps them and only folds line endings (6.1).
+            # Collapsing them the way prose is collapsed silently reflows
+            # aligned samples such as `NAME    TYPE`.
+            self._emit(re.sub(r"[\r\n]+", " ", data))
+            return
         if not self._in_pre:
             data = re.sub(r"\s+", " ", data)
             if not data.strip():
@@ -609,8 +623,10 @@ class _ArticleText(HTMLParser):
                 # item's continuation prefix and ship trailing whitespace.
                 out.append("")
             else:
+                # A code span's interior is content, not layout: `NAME    TYPE`
+                # keeps its columns while the prose around it collapses.
                 out.append(re.match(r"[ \t]*", ln).group(0)
-                           + re.sub(r"[ \t]+", " ", ln.strip()))
+                           + _collapse_outside_code(ln.strip()))
         s = "\n".join(out)
         # Collapse blank runs outside fenced blocks only; inside one they are
         # part of the code.
@@ -744,6 +760,7 @@ _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
 
 
 _LIST_MARKER_RE = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=[`~])")
+_ANY_LIST_MARKER_RE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
 
 
 def _peel_quote(line):
@@ -769,8 +786,8 @@ def _peel_container(line):
 _BACKTICK_RUN_RE = re.compile(r"`+")
 
 
-def _blank_code_spans(text):
-    """Blank every code span, pairing runs the way CommonMark does.
+def _code_span_ranges(text):
+    """(start, end) of every code span, pairing runs the way CommonMark does.
 
     A run of N backticks opens a span that only a run of exactly N closes. The
     span may cross a line but not a blank one, since that ends the paragraph:
@@ -791,12 +808,54 @@ def _blank_code_spans(text):
                 spans.append((m.start(), c.end()))
                 i = c.end()
                 break
+    return spans
+
+
+def _blank_code_spans(text):
+    """Blank every code span, keeping line structure."""
     chars = list(text)
-    for start, end in spans:
+    for start, end in _code_span_ranges(text):
         for j in range(start, end):
             if chars[j] != "\n":
                 chars[j] = " "
     return "".join(chars)
+
+
+def _collapse_outside_code(text):
+    """Collapse whitespace runs, leaving code-span interiors byte for byte."""
+    spans = _code_span_ranges(text)
+    if not spans:
+        return re.sub(r"[ \t]+", " ", text)
+    out, pos = [], 0
+    for start, end in spans:
+        out.append(re.sub(r"[ \t]+", " ", text[pos:start]))
+        out.append(text[start:end])
+        pos = end
+    out.append(re.sub(r"[ \t]+", " ", text[pos:]))
+    return "".join(out)
+
+
+def _skip_fenced_block(source, start, marker):
+    """Offset of the end of the line closing the block opened at `start`.
+
+    An unterminated fence runs to the end of the document (CommonMark 4.5), and
+    a closer shorter than its opener does not end the block.
+    """
+    n = len(source)
+    i = source.find("\n", start)
+    if i < 0:
+        return n
+    i += 1
+    while i < n:
+        stop = source.find("\n", i)
+        stop = n if stop < 0 else stop
+        m = _LINE_FENCE_RE.match(source, i)
+        if m and m.end(1) <= stop:
+            closer = m.group(1)
+            if closer[0] == marker[0] and len(closer) >= len(marker):
+                return stop
+        i = stop + 1
+    return n
 
 
 def _mask_jsx_comments(source):
@@ -804,41 +863,59 @@ def _mask_jsx_comments(source):
 
     A delimiter written inside code is prose about JSX, not a comment: the page
     documenting `{/*` and `*/}` sits either side of a live diagram, and a span
-    taken between them removes content that renders. Fenced blocks and inline
-    code spans are therefore hidden from the search, and only the regions found
-    in what remains are blanked.
+    taken between them removes content that renders. So a fenced block and an
+    inline code span each hide a delimiter from the scan — and, symmetrically, a
+    comment hides a fence marker from the fence scan. The three are therefore
+    resolved in one left-to-right pass in which whichever opens first wins.
+    Sweeping for fences first instead lets a ``` written inside a comment open a
+    block that swallows the live diagram after it.
     """
-    blank = lambda text: re.sub(r"[^\n]", " ", text)  # noqa: E731
-    shadow, open_fence = [], None
-    for line in source.split("\n"):
-        m = _LINE_FENCE_RE.match(line)
-        if m:
-            marker = m.group(1)
-            if open_fence is None:
-                open_fence = marker
-            elif marker[0] == open_fence[0] and len(marker) >= len(open_fence):
-                open_fence = None
-            shadow.append(blank(line))
-            continue
-        shadow.append(blank(line) if open_fence is not None else line)
-    # Code spans are blanked over the joined text, not line by line: a span may
-    # cross lines, and its delimiters must not be visible to the comment scan.
-    shadow = _blank_code_spans("\n".join(shadow))
-
+    n = len(source)
     out = list(source)
-    for match in _JSX_COMMENT_RE.finditer(shadow):
-        for i in range(match.start(), match.end()):
-            if out[i] != "\n":
-                out[i] = " "
+    i = 0
+    while i < n:
+        # A fence marker is only a fence at the head of its line.
+        if i == 0 or source[i - 1] == "\n":
+            m = _LINE_FENCE_RE.match(source, i)
+            if m:
+                i = _skip_fenced_block(source, i, m.group(1))
+                continue
+        if source.startswith("{/*", i):
+            close = source.find("*/}", i + 3)
+            if close < 0:
+                # An unterminated delimiter is not a comment: blanking to the
+                # end of the file would drop every diagram after a stray `{/*`.
+                i += 3
+                continue
+            for j in range(i, close + 3):
+                if out[j] != "\n":
+                    out[j] = " "
+            i = close + 3
+            continue
+        if source[i] == "`":
+            m = _BACKTICK_RUN_RE.match(source, i)
+            run = m.group(0)
+            i = m.end()
+            for c in _BACKTICK_RUN_RE.finditer(source, m.end()):
+                # A span does not pair across a blank line, which ends the
+                # paragraph, and only a run of the same length closes it.
+                if "\n\n" in source[m.end():c.start()]:
+                    break
+                if c.group(0) == run:
+                    i = c.end()
+                    break
+            continue
+        i += 1
     return "".join(out)
 
 
 def mermaid_blocks(source):
     """Fenced mermaid diagrams in an MDX source, as fenced Markdown.
 
-    Returns (heading, occurrence, block) triples. `heading` is the text of the
-    nearest ATX heading above the fence, or "" at the top of a page, and
-    `occurrence` says which sighting of that text it was. The heading is what
+    Returns (heading, occurrence, preceding, block) quadruples. `heading` is the
+    text of the nearest ATX heading above the fence, or "" at the top of a page,
+    `occurrence` says which sighting of that text it was, and `preceding` is the
+    line of prose the fence followed, "" when a heading is all there is above. The heading is what
     lets the diagram go back where it belongs: prose around it says things like
     "every box above", which is false if the diagram is appended to the page.
     The occurrence is needed because the text alone is ambiguous — three pages
@@ -879,14 +956,31 @@ def mermaid_blocks(source):
         # `heading -> prose -> diagram` into `heading -> diagram -> prose`.
         at_preceding = ""
         for back in range(i - 1, -1, -1):
-            candidate = lines[back].strip()
+            # A quoted line is prose too, and a bare `>` is a blank one: the
+            # marker is the container, not text to anchor against.
+            peeled = _peel_quote(lines[back])
+            candidate = peeled.strip()
             if not candidate:
                 continue
-            if _ATX_HEADING_RE.match(lines[back]):
+            if _ATX_HEADING_RE.match(peeled):
                 break
             if _fence_at(_peel_container(lines[back])):
                 break          # a fence line is not prose to anchor against
-            at_preceding = _strip_markers(candidate)
+            # The anchor is the whole paragraph, not its last source line: a
+            # hard wrap is several lines here and one joined line in the
+            # rendered page, so the tail alone never compares equal to it.
+            para = []
+            for up in range(back, -1, -1):
+                above = _peel_quote(lines[up])
+                text = above.strip()
+                if (not text or _ATX_HEADING_RE.match(above)
+                        or _fence_at(_peel_container(lines[up]))
+                        or text.startswith("|")):
+                    break
+                para.append(_strip_markers(text))
+                if _ANY_LIST_MARKER_RE.match(text):
+                    break      # a marker begins the block; nothing above joins
+            at_preceding = " ".join(reversed(para))
             break
         at, at_occurrence, body, i = heading, occurrence, [], i + 1
         while i < n:
@@ -913,6 +1007,42 @@ def mermaid_blocks(source):
     return blocks
 
 
+def _continuation_prefix(line):
+    """Prefix a block spliced under `line` needs to stay inside its container.
+
+    A diagram written inside a list item or a blockquote belongs to that
+    container: spliced at column zero it ends the item, splitting one list in
+    two and stranding the text that followed it.
+    """
+    quote = _QUOTE_PREFIX_RE.match(line)
+    prefix = quote.group(0) if quote else ""
+    rest = line[len(prefix):]
+    m = _ANY_LIST_MARKER_RE.match(rest)
+    if m:
+        # Continuation sits at the item's content column, past the marker.
+        return prefix + " " * len(m.group(0).expandtabs(4))
+    return prefix + re.match(r"[ \t]*", rest).group(0)
+
+
+def _blank_in(prefix):
+    """The separator line inside `prefix`'s container.
+
+    A list item takes a truly blank line — carrying the indent would ship
+    trailing whitespace — but a blockquote keeps its marker, since a blank line
+    ends the quote instead of continuing it.
+    """
+    return prefix.rstrip() if prefix.lstrip().startswith(">") else ""
+
+
+def _indent_block(block, prefix):
+    """`block` placed inside `prefix`'s container, one line at a time."""
+    if not prefix:
+        return block
+    blank = _blank_in(prefix)
+    return "\n".join(prefix + ln if ln.strip() else blank
+                     for ln in block.split("\n"))
+
+
 def _insert_after(body, preceding, start, block):
     """Insert point just past `preceding`, searched from `start`, outside fences.
 
@@ -920,13 +1050,18 @@ def _insert_after(body, preceding, start, block):
     instead would anchor to the first copy of a repeated line and undo the
     heading occurrence; ignoring fences would splice the diagram into a code
     block that quotes the same text.
+
+    `preceding` is a whole source paragraph joined into one line, which is the
+    shape the rendered page has, so the comparison stays exact: matching a line
+    that merely *ends* with it would anchor to an unrelated earlier line that
+    happened to close the same way.
     """
     lines = body.split("\n")
     offsets, pos = [], 0
     for line in lines:
         offsets.append(pos)
         pos += len(line) + 1
-    open_fence = None
+    candidates, open_fence = [], None
     for n, line in enumerate(lines):
         m = _LINE_FENCE_RE.match(line)
         if m:
@@ -938,9 +1073,16 @@ def _insert_after(body, preceding, start, block):
             continue
         if open_fence is not None or offsets[n] < start:
             continue
-        if line.strip() == preceding:
-            cut = offsets[n] + len(line)
-            return body[:cut] + "\n\n" + block + body[cut:]
+        candidates.append((n, line))
+    for n, line in candidates:
+        # Peeled on both sides: a quote marker is the container the block goes
+        # back into, not part of the text being matched.
+        if _peel_quote(line).strip() != preceding:
+            continue
+        prefix = _continuation_prefix(line)
+        cut = offsets[n] + len(line)
+        return (body[:cut] + "\n" + _blank_in(prefix) + "\n"
+                + _indent_block(block, prefix) + body[cut:])
     return None
 
 
@@ -951,9 +1093,10 @@ def splice_diagram(body, heading, block, occurrence=0, preceding=""):
     — so there is no placeholder to anchor to and the position has to be
     recovered from the source. `preceding` is the prose the fence followed and
     is the most precise anchor available; the `occurrence`-th `heading` is the
-    fallback, and appending is the last resort. A diagram written inside a list
-    item or a blockquote still lands at the top level of its section: that
-    needs the container recovered as well, which this does not attempt.
+    fallback, and appending is the last resort. A diagram that followed prose
+    inside a list item or a blockquote is indented back into that container, so
+    it does not end the item it belonged to; one placed by heading alone lands
+    at the top level of its section, which is where the heading is.
     """
     if not heading:
         if preceding:
