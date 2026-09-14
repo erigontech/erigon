@@ -160,6 +160,8 @@ func forkExtremeCorpora() []forkCorpus {
 	bk1, bu1, bk2, bu2 := keyedSurvivorCorpus(survivorBareRoot)
 	xk1, xu1, xk2, xu2 := keyedSurvivorCorpus(survivorExtRoot)
 	ek1, eu1, ek2, eu2 := keyedSurvivorCorpus(survivorEOA)
+	ok1, ou1, ok2, ou2 := absentDeleteCorpus(false)
+	rk1, ru1, rk2, ru2 := absentDeleteCorpus(true)
 
 	return []forkCorpus{
 		{"mixed", mk1, mk2, mu1, mu2, 2},
@@ -170,6 +172,8 @@ func forkExtremeCorpora() []forkCorpus {
 		{"keyedSurvivorBareRoot", bk1, bk2, bu1, bu2, 2},
 		{"keyedSurvivorExtRoot", xk1, xk2, xu1, xu2, 2},
 		{"keyedSurvivorEOA", ek1, ek2, eu1, eu2, 2},
+		{"absentDeleteBesideUpdate", ok1, ok2, ou1, ou2, 1},
+		{"absentDeleteInFreshRegion", rk1, rk2, ru1, ru2, 1},
 	}
 }
 
@@ -309,7 +313,7 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 		defer func() {
 			require.Equal(t, "injected account panic", recover(), "the child must panic inside the walk")
 		}()
-		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &deferred)
+		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &[16]bool{}, &[16]bool{}, &deferred)
 	}()
 
 	require.Nil(t, held.trie, "checkin must return the child trie even when the walk panics")
@@ -368,4 +372,26 @@ func TestForkWalk_KeyedSurvivorCorpusShape(t *testing.T) {
 			require.Zerof(t, rec[2]|rec[3], "round 2 must empty the row at %x so its single survivor is promoted", prefix)
 		})
 	}
+}
+
+func absentDeleteCorpus(freshRegion bool) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	const seed = 20260914
+	a0 := addrHex(findAddressForHexPrefix([]byte{0x0}, seed))
+	a1 := addrHex(findAddressForHexPrefix([]byte{0x1}, seed))
+	ub1 := NewUpdateBuilder()
+	ub1.Balance(a0, 1)
+	ub1.Balance(a1, 2)
+	k1, u1 = ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	if freshRegion {
+		ub2.Balance(addrHex(findAddressForHexPrefix([]byte{0x2, 0xa}, seed)), 3)
+		ub2.Balance(addrHex(findAddressForHexPrefix([]byte{0x2, 0xb}, seed)), 4)
+		ub2.Delete(addrHex(findAddressForHexPrefix([]byte{0x2, 0xc}, seed)))
+	} else {
+		ub2.Balance(a0, 3)
+		ub2.Delete(addrHex(findAddressForHexPrefix([]byte{0x5}, seed)))
+	}
+	k2, u2 = ub2.Build()
+	return k1, u1, k2, u2
 }
