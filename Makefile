@@ -241,7 +241,12 @@ test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
+ifeq ($(GOEXE),.exe)
+test-all:
+	python tools/windows_forkchoice_diagnostic.py
+else
 test-all: test-filtered
+endif
 
 ## test-fixtures:                      download & verify all pinned test fixture tarballs
 .PHONY: test-fixtures
