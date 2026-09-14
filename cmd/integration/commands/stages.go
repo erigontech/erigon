@@ -416,10 +416,6 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, bw := blocksIO(db, logger)
 
 	if integritySlow {
@@ -705,10 +701,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	dirs := datadir.New(datadirCli)
 	defer startExecProfiling(dirs, logger)()
 
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
@@ -984,10 +976,6 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 // it only replays execution for measurement, testing, or side-effect generation.
 func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	must(sync.SetCurrentStage(stages.Execution))
@@ -1056,10 +1044,6 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
