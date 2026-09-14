@@ -92,26 +92,20 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		s.previousHeadState, s.headState = s.headState, s.previousHeadState
-	}
-
-	var blkRoot common.Hash
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
+	next := s.previousHeadState
+	if next == nil {
+		next, err = newState.Copy()
 	} else {
-		err = newState.CopyInto(s.headState)
+		err = newState.CopyInto(next)
 	}
 	if err != nil {
 		return err
 	}
-	blkRoot, err = newState.BlockRoot()
+	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
+	s.previousHeadState, s.headState = s.headState, next
 	s.stateHead.Store(&headIdentity{root: blkRoot, slot: newState.Slot()})
 	return nil
 }
@@ -130,20 +124,16 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		s.previousHeadState, s.headState = s.headState, s.previousHeadState
-	}
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
+	next := s.previousHeadState
+	if next == nil {
+		next, err = newState.Copy()
 	} else {
-		err = newState.CopyInto(s.headState)
+		err = newState.CopyInto(next)
 	}
 	if err != nil {
 		return err
 	}
+	s.previousHeadState, s.headState = s.headState, next
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
 }

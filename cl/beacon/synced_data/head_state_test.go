@@ -22,21 +22,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 )
 
+var headUpdates = []struct {
+	name   string
+	update func(*SyncedDataManager, *state.CachingBeaconState) error
+}{
+	{"OnHeadState", (*SyncedDataManager).OnHeadState},
+	{"OnHeadStateWithBlockRoot", func(m *SyncedDataManager, s *state.CachingBeaconState) error {
+		return m.OnHeadStateWithBlockRoot(s, common.Hash{})
+	}},
+}
+
 func TestHeadUpdateKeepsPreviousHead(t *testing.T) {
-	updates := []struct {
-		name   string
-		update func(*SyncedDataManager, *state.CachingBeaconState) error
-	}{
-		{"OnHeadState", (*SyncedDataManager).OnHeadState},
-		{"OnHeadStateWithBlockRoot", func(m *SyncedDataManager, s *state.CachingBeaconState) error {
-			return m.OnHeadStateWithBlockRoot(s, common.Hash{})
-		}},
-	}
-	for _, tc := range updates {
+	for _, tc := range headUpdates {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 			var headRoot [32]byte
@@ -69,6 +71,33 @@ func TestHeadUpdateKeepsPreviousHead(t *testing.T) {
 				root, err := prev.BlockRoot()
 				require.NoError(t, err)
 				require.Equal(t, prevRoot, root)
+			}
+		})
+	}
+}
+
+func TestFailedHeadUpdateKeepsHead(t *testing.T) {
+	broken := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, broken.SetSlot(100))
+	broken.AddPreviousEpochAttestation(&solid.PendingAttestation{
+		AggregationBits: solid.NewBitList(0, 2048),
+		Data:            &solid.AttestationData{Slot: 200},
+	})
+	for _, tc := range headUpdates {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+			for i := range 2 {
+				good := state.New(&clparams.MainnetBeaconConfig)
+				require.NoError(t, good.SetSlot(uint64(10+i)))
+				require.NoError(t, tc.update(manager, good))
+				require.Error(t, tc.update(manager, broken))
+
+				var slot uint64
+				require.NoError(t, manager.ViewHeadState(func(s *state.CachingBeaconState) error {
+					slot = s.Slot()
+					return nil
+				}))
+				require.Equal(t, good.Slot(), slot)
 			}
 		})
 	}
