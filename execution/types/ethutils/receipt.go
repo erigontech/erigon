@@ -47,7 +47,7 @@ type RPCReceipt struct {
 	CumulativeGasUsed hexutil.Uint64   `json:"cumulativeGasUsed"`
 	ContractAddress   *common.Address  `json:"contractAddress"`
 	Logs              any              `json:"logs"`
-	LogsBloom         *types.Bloom     `json:"logsBloom,omitempty"`
+	LogsBloom         *types.Bloom     `json:"logsBloom"`
 	EffectiveGasPrice *hexutil.U256    `json:"effectiveGasPrice,omitempty"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty"`

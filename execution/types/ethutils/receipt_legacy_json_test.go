@@ -342,11 +342,13 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 	}
 	zero := gointerfaces.ConvertAddressToH160(common.Address{})
 	for name, mutate := range map[string]func(r *remoteproto.SubscribeReceiptsReply){
-		"full":                  func(*remoteproto.SubscribeReceiptsReply) {},
-		"contract creation":     func(r *remoteproto.SubscribeReceiptsReply) { r.To = nil },
-		"zero to and contract":  func(r *remoteproto.SubscribeReceiptsReply) { r.To, r.ContractAddress = zero, zero },
-		"no contract address":   func(r *remoteproto.SubscribeReceiptsReply) { r.ContractAddress = nil },
-		"failed without logs":   func(r *remoteproto.SubscribeReceiptsReply) { r.Status, r.Logs, r.LogsBloom = 0, nil, nil },
+		"full":                 func(*remoteproto.SubscribeReceiptsReply) {},
+		"contract creation":    func(r *remoteproto.SubscribeReceiptsReply) { r.To = nil },
+		"zero to and contract": func(r *remoteproto.SubscribeReceiptsReply) { r.To, r.ContractAddress = zero, zero },
+		"no contract address":  func(r *remoteproto.SubscribeReceiptsReply) { r.ContractAddress = nil },
+		"failed without logs": func(r *remoteproto.SubscribeReceiptsReply) {
+			r.Status, r.Logs, r.LogsBloom = 0, nil, make([]byte, types.BloomByteLength)
+		},
 		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) { r.BaseFee, r.BlobGasUsed, r.BlobGasPrice = nil, 0, nil },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -359,4 +361,11 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 			require.JSONEq(t, string(want), string(got))
 		})
 	}
+}
+
+// Otterscan clears LogsBloom after MarshalReceipt, and its clients expect "logsBloom": null rather than a missing key.
+func TestRPCReceiptKeepsNullLogsBloom(t *testing.T) {
+	b, err := json.Marshal(&RPCReceipt{})
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"logsBloom":null`)
 }
