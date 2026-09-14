@@ -32,6 +32,45 @@ jobs:
       - name: Install zizmor
         run: pip install --break-system-packages zizmor==1.26.1
 
+      # docs-cutover.yml decides whether DOCS_DEPLOY_BRANCH gets flipped to a
+      # branch that publishes, and it decides it by parsing another workflow's
+      # `on.push.branches`. That parser has a fixture suite and a second,
+      # unrelated YAML implementation to cross-check it against — neither of
+      # which was run by anything, so a parser regression could land with every
+      # signal green. --oracle is not optional here: the fixtures were written
+      # from what PyYAML does, and checking them against js-yaml is what makes
+      # them evidence about YAML rather than about PyYAML. js-yaml is already a
+      # docs/site dependency, so this needs no new package.
+      - name: Docs deploy-trigger parser tests
+        run: |
+          set -euo pipefail
+
+          # The runner image ships no python3-yaml: its yamllint and ansible-core
+          # come from pipx, in their own virtualenvs. Distro package, not PyPI, so
+          # no --break-system-packages and no unsigned dependency in a lint job.
+          if ! python3 -c 'import yaml' 2>/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends python3-yaml
+          fi
+
+          # js-yaml only, at the version docs/site's lockfile already resolves —
+          # one source of truth, and no drift between the two. `npm ci` on
+          # docs/site would pull the whole Docusaurus tree into a job that runs
+          # for every pull request, to load a single module.
+          js_yaml_version="$(python3 -c \
+            "import json; print(json.load(open('docs/site/package-lock.json'))['packages']['node_modules/js-yaml']['version'])")"
+          # --ignore-scripts: this job's token carries actions: write, and the
+          # version string is a pin, not a lockfile — it does not carry the
+          # resolved integrity hash or the locked transitive tree. Refusing to
+          # run lifecycle scripts is what keeps a compromised publish from
+          # executing against that token. js-yaml has no install scripts today;
+          # this is about what it could grow, or what a dependency could.
+          npm install --no-save --no-audit --no-fund --ignore-scripts \
+            --prefix "${RUNNER_TEMP}/oracle" "js-yaml@${js_yaml_version}"
+
+          JS_YAML_FROM="${RUNNER_TEMP}/oracle" \
+            python3 .github/workflows/scripts/docs-deploy-trigger.test.py --oracle
+
       # -shellcheck '' disables actionlint's built-in inline-script checking;
       # the repo's QA workflow run: blocks have many pre-existing shellcheck
       # warnings that need a separate cleanup pass (#21128).  .sh files are
