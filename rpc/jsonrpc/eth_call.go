@@ -1010,21 +1010,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
 	if len(args.AuthorizationList) > 0 {
-		gasCap := api.GasCap
-		if args.Gas != nil && uint64(*args.Gas) < gasCap {
-			gasCap = uint64(*args.Gas)
-		}
 		rules := blockCtx.Rules(chainConfig)
-		// Must match the per-authorization price mdgas.IntrinsicGas charges for these
-		// rules; a higher bound rejects calls the EVM would run, including the
-		// eth_estimateGas result for them.
-		perAuthGas := uint64(params.PerEmptyAccountCost)
-		if rules.IsAmsterdam {
-			perAuthGas = params.ExecutionPerAuthBaseCostEIP8038
-		}
-		if uint64(len(args.AuthorizationList)) > gasCap/perAuthGas {
-			return nil, errors.New("insufficient gas to process all authorizations")
-		}
 		for i := range args.AuthorizationList {
 			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()

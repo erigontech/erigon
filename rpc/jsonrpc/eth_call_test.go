@@ -1758,12 +1758,11 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	})
 }
 
-// TestCreateAccessListAuthGasGuard pins the authorization-count guard to the same
-// per-authorization cost mdgas.IntrinsicGas charges for the block's fork. Amsterdam
-// prices an authorization at ExecutionPerAuthBaseCostEIP8038, so a gas limit that
-// covers the real intrinsic cost must be accepted even though it is below the
-// pre-Amsterdam per-auth price.
-func TestCreateAccessListAuthGasGuard(t *testing.T) {
+// TestCreateAccessListAuthGas pins that the authorization count is bounded by the
+// intrinsic gas check alone. A gas limit eth_estimateGas returned must be accepted,
+// and one below the intrinsic cost must be refused by that check rather than by a
+// separate count heuristic.
+func TestCreateAccessListAuthGas(t *testing.T) {
 	const authCount = 9
 
 	authorizations := func(addr common.Address) []types.JsonAuthorization {
@@ -1781,41 +1780,64 @@ func TestCreateAccessListAuthGasGuard(t *testing.T) {
 		return auths
 	}
 
-	t.Run("amsterdam accepts the intrinsic-gas cost", func(t *testing.T) {
+	preAmsterdam := chain.AllProtocolChanges.Copy()
+	preAmsterdam.AmsterdamTime = nil
+
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"amsterdam", chain.AllProtocolChanges},
+		{"pre-amsterdam", preAmsterdam},
+	} {
+		t.Run(tc.name+" accepts the estimated gas", func(t *testing.T) {
+			m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, tc.cfg)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+			args := ethapi.CallArgs{
+				From:              &bankAddress,
+				To:                &receiverAddress,
+				AuthorizationList: authorizations(receiverAddress),
+			}
+
+			estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+			require.NoError(t, err)
+
+			args.Gas = &estimate
+			_, err = api.CreateAccessList(context.Background(), args, nil, nil, nil)
+			require.NoError(t, err, "eth_estimateGas result must be accepted by eth_createAccessList")
+		})
+	}
+
+	// Amsterdam prices an authorization below the count heuristic's old divisor, so
+	// this is the case that heuristic used to reject.
+	t.Run("amsterdam estimate lands under the old divisor", func(t *testing.T) {
 		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
 		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-		args := ethapi.CallArgs{
+		estimate, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 			From:              &bankAddress,
 			To:                &receiverAddress,
 			AuthorizationList: authorizations(receiverAddress),
-		}
-
-		estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+		}, nil, nil, nil)
 		require.NoError(t, err)
-		require.Less(t, uint64(estimate), authCount*uint64(params.CallNewAccountGas),
-			"estimate must sit below the stale per-auth price, else this proves nothing")
-
-		args.Gas = &estimate
-		_, err = api.CreateAccessList(context.Background(), args, nil, nil, nil)
-		require.NoError(t, err, "eth_estimateGas result must be accepted by eth_createAccessList")
+		require.Less(t, uint64(estimate), authCount*uint64(params.CallNewAccountGas))
 	})
 
-	t.Run("pre-amsterdam keeps the empty-account price", func(t *testing.T) {
-		preAmsterdam := chain.AllProtocolChanges.Copy()
-		preAmsterdam.AmsterdamTime = nil
-
-		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, preAmsterdam)
+	t.Run("under-gassed reports the intrinsic shortfall", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
 		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-		gas := hexutil.Uint64(authCount*params.PerEmptyAccountCost - 1)
+		gas := hexutil.Uint64(params.TxGas)
 		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
 			From:              &bankAddress,
 			To:                &receiverAddress,
 			Gas:               &gas,
 			AuthorizationList: authorizations(receiverAddress),
 		}, nil, nil, nil)
-		require.ErrorContains(t, err, "insufficient gas to process all authorizations")
+		// The intrinsic gas check rejects it and names the shortfall, which the
+		// removed guard could not do.
+		require.ErrorContains(t, err, "intrinsic gas too low")
 	})
 }
 
