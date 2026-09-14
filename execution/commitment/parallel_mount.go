@@ -113,6 +113,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	}
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
+	base.resetFoldFrontier()
+	if len(base.branchEncoder.deferred) > 0 {
+		base.branchEncoder.ClearDeferred()
+	}
 
 	root := pu.trie.root
 	if len(root.ext) != 0 {

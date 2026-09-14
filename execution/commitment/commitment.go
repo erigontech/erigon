@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -302,7 +301,6 @@ type BranchEncoder struct {
 	callerOwnsDeferred bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -317,26 +315,13 @@ func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	if !defer_ {
 		be.callerOwnsDeferred = false
 	}
-	if defer_ {
-		if be.deferred == nil {
-			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
-		}
-		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
-		}
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
-}
-
-func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
-	if be.pendingPrefixes == nil {
-		return false
-	}
-	_, found := be.pendingPrefixes.Get(prefix)
-	return found
 }
 
 func (be *BranchEncoder) ClearDeferred() {
@@ -345,9 +330,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	}
 	// Delete, not reslice: this encoder sits inside a pooled trie.
 	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
-	if be.pendingPrefixes != nil {
-		be.pendingPrefixes.Clear()
-	}
 	ResetDeferredUpdateMetrics()
 }
 
@@ -531,12 +513,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := !be.callerOwnsDeferred && len(be.deferred) >= limit
-	if !needsFlush {
-		_, needsFlush = be.pendingPrefixes.Get(prefix)
-	}
-
-	if needsFlush {
+	if !be.callerOwnsDeferred && len(be.deferred) >= limit {
 		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
@@ -555,8 +532,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	if prev == nil {
 		prev = []byte{}
 	}
-
-	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {

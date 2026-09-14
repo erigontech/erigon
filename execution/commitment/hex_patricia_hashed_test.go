@@ -1780,3 +1780,61 @@ func TestDeferredCallerOwned_MatchesEagerAcrossDeletions(t *testing.T) {
 	require.NotZero(t, deletions, "the corpus must delete branches, or this proves nothing about deferred deletions")
 	t.Logf("deferred branch deletions applied: %d", deletions)
 }
+
+func TestPostOrderAfter(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		next, prev []byte
+		want       bool
+	}{
+		{"parent closes after its child", []byte{1}, []byte{1, 2}, true},
+		{"sibling to the right", []byte{1, 3}, []byte{1, 2}, true},
+		{"right subtree after a left one two levels up", []byte{2, 0}, []byte{1, 9, 9}, true},
+		{"the same row twice", []byte{1, 2}, []byte{1, 2}, false},
+		{"descending back into a closed row", []byte{1, 2, 3}, []byte{1, 2}, false},
+		{"sibling to the left", []byte{1, 1}, []byte{1, 2}, false},
+		{"root closes last", []byte{}, []byte{7}, true},
+		{"nothing follows the root", []byte{7}, []byte{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, postOrderAfter(tc.next, tc.prev))
+		})
+	}
+}
+
+func TestAdvanceFoldFrontier_RejectsReenteredRow(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+	defer hph.Release()
+
+	for _, key := range [][]byte{{1, 2, 3}, {1, 2}, {1, 5}, {1}} {
+		require.NoError(t, hph.advanceFoldFrontier(key), "post-order fold [%x] must be accepted", key)
+	}
+
+	err := hph.advanceFoldFrontier([]byte{1, 2})
+	require.Error(t, err, "row [0102] closed three folds ago; re-emitting it would overwrite its deferred record")
+	require.Contains(t, err.Error(), "0102")
+
+	hph.resetFoldFrontier()
+	require.NoError(t, hph.advanceFoldFrontier([]byte{1, 2}), "a new walk starts with no frontier")
+}
+
+func TestFoldFrontier_IsEnforcedDuringProcess(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, _, _ := collapseCorpus()
+	ms := NewMockState(t)
+	trie := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer trie.Release()
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	defer upds.Close()
+
+	_, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.True(t, trie.foldFrontierSet, "every fold in a round passes the frontier check, so a completed round must leave one set")
+	require.Zero(t, trie.foldFrontierLen, "the last fold of a round closes the root")
+}

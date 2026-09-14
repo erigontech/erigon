@@ -156,6 +156,14 @@ type HexPatriciaHashed struct {
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
+	// foldFrontier is the key of the last folded row. The walk closes rows in
+	// post-order, so every later fold must come strictly after it; a fold that
+	// does not means a closed subtree was re-entered, and the deferred record
+	// already emitted for that prefix would be silently overwritten.
+	foldFrontier    [128]byte
+	foldFrontierLen int16
+	foldFrontierSet bool
+
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
@@ -272,6 +280,8 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.traceW = nil
 	hph.collapseTracer = nil
 	hph.witness.reset()
+
+	hph.resetFoldFrontier()
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
@@ -1449,7 +1459,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 // a trie.FullNode whose children are HashNodes. Mirrors unfoldBranchNode's branch decode.
 func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, childDepth int16) (*trie.FullNode, error) {
 	compact := nibbles.HexToCompactInto(hph.compactKeyBuf[:], branchPrefix)
-	branchData, err := hph.readBranchAndCheckForFlushing(compact)
+	branchData, err := hph.branchFromCacheOrDB(compact)
 	if err != nil {
 		return nil, err
 	}
@@ -1503,25 +1513,12 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte,
 	return branchNode, nil
 }
 
-// readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
-// This ensures we read fresh data when a prefix has been modified but not yet written.
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
-	be := hph.branchEncoder
-	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
-		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, err
-		}
-		be.ClearDeferred()
-	}
-	return hph.branchFromCacheOrDB(prefix)
-}
-
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, err := hph.readBranchAndCheckForFlushing(key)
+	branchData, err := hph.branchFromCacheOrDB(key)
 	if err != nil {
 		return err
 	}
@@ -2035,6 +2032,41 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) err
 	return nil
 }
 
+// postOrderAfter reports whether next closes a row strictly later than prev in
+// the walk's post-order: a proper prefix of prev is its parent, and a key that
+// differs first at i is later only if it went right there. Equal keys, and keys
+// extending prev, are both re-entries into what prev already closed.
+func postOrderAfter(next, prev []byte) bool {
+	for i := range min(len(next), len(prev)) {
+		if next[i] != prev[i] {
+			return next[i] > prev[i]
+		}
+	}
+	return len(next) < len(prev)
+}
+
+// resetFoldFrontier opens a new walk. Every entry point that starts folding from
+// the root calls it, so one walk's frontier never rejects the next walk's first fold.
+func (hph *HexPatriciaHashed) resetFoldFrontier() {
+	hph.foldFrontierLen = 0
+	hph.foldFrontierSet = false
+}
+
+// A witness pass is exempt: it folds back non-branch virtual rows unconditionally
+// and then re-descends below them, so its fold order is not post-order. It also
+// discards its records, so nothing it emits can be overwritten.
+func (hph *HexPatriciaHashed) advanceFoldFrontier(key []byte) error {
+	if hph.witness.active() {
+		return nil
+	}
+	if hph.foldFrontierSet && !postOrderAfter(key, hph.foldFrontier[:hph.foldFrontierLen]) {
+		return fmt.Errorf("fold [%x] re-enters a row already closed at [%x]", key, hph.foldFrontier[:hph.foldFrontierLen])
+	}
+	hph.foldFrontierLen = int16(copy(hph.foldFrontier[:], key))
+	hph.foldFrontierSet = true
+	return nil
+}
+
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
@@ -2066,6 +2098,10 @@ func (hph *HexPatriciaHashed) fold() error {
 	}
 
 	depth := hph.depths[row]
+
+	if err := hph.advanceFoldFrontier(hph.currentKey[:updateKeyLen]); err != nil {
+		return err
+	}
 
 	updateKey := nibbles.HexToCompactInto(hph.foldKeyBuf[:], hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
@@ -2456,6 +2492,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
+	hph.resetFoldFrontier()
 	set := newWitnessNodeSet()
 	hph.witness.tracer = set
 	defer hph.witness.reset()
@@ -2555,6 +2592,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.traceW = os.Stderr
 
+	hph.resetFoldFrontier()
+	// A round owns its collection window. Anything already queued belongs to a walk
+	// that never applied it, and merging the two would put one prefix in the deferred
+	// set twice — two records with the same stale prev, one of them lost at apply.
+	if len(hph.branchEncoder.deferred) > 0 {
+		hph.branchEncoder.ClearDeferred()
+	}
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
@@ -2718,9 +2762,6 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	deferred := hph.branchEncoder.deferred
 	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
-	if hph.branchEncoder.pendingPrefixes != nil {
-		hph.branchEncoder.pendingPrefixes.Clear()
-	}
 	ResetDeferredUpdateMetrics()
 	return deferred
 }
@@ -2749,6 +2790,7 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 // The aggregator-scope BranchCache is intentionally not cleared here;
 // SharedDomains.Unwind handles correctness via txN-tagged eviction.
 func (hph *HexPatriciaHashed) Reset() {
+	hph.resetFoldFrontier()
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
