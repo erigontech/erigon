@@ -287,7 +287,7 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
-	if merr := PremergeDeferredUpdates(deferred[nib]); merr != nil {
+	if merr := PremergeDeferredUpdates(cw.trie.branchEncoder.deferred); merr != nil {
 		return fmt.Errorf("fork[%x]: child %x premerge: %w", path, nib, merr)
 	}
 	bit := uint16(1) << nib
