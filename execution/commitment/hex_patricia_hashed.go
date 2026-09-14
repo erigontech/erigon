@@ -564,10 +564,6 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	}
 }
 
-func (cell *cell) keylessInPlane(depth int16) bool {
-	return (cell.accountAddrLen == 0 && depth < 64) || (cell.storageAddrLen == 0 && depth > 64)
-}
-
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
 func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension []byte, nibble int) {
 	if lowCell.accountAddrLen > 0 || lowDepth < 64 {
@@ -588,7 +584,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 		}
 	}
 	if lowCell.hashLen > 0 {
-		if lowCell.keylessInPlane(lowDepth) {
+		if (lowCell.accountAddrLen == 0 && lowDepth < 64) || (lowCell.storageAddrLen == 0 && lowDepth > 64) {
 			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble
 			if len(preExtension) > 0 {
 				copy(cell.extension[:], preExtension)

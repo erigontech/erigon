@@ -263,8 +263,10 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	rh, saved, mErr := p.processMounted(ctx, updates)
+	saved := snapshotBase(p.template)
+	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
+		saved.restore(p.template)
 		pu.drainDeferred()
 		return nil, mErr
 	}
