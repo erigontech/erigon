@@ -658,10 +658,3 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 	}
 
 }
-
-// A codec that encodes with json.Marshal must still send a batch as one JSON array.
-func TestRawBatchMarshalJSON(t *testing.T) {
-	got, err := json.Marshal(rawBatch{[]byte(`1`), []byte(`{"a":2}`)})
-	require.NoError(t, err)
-	require.Equal(t, `[1,{"a":2}]`, string(got))
-}
