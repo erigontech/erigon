@@ -209,15 +209,10 @@ type jsonCodec struct {
 	conn      deadlineCloser
 }
 
-// NewFuncCodec creates a codec which uses the given functions to read and write. If conn
-// implements ConnRemoteAddr, log messages will use it to include the remote address of
-// the connection. decode must reject invalid JSON, reading a message relies on it.
-func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerCodec {
-	return newFuncCodec(conn, encode, decode, nil)
-}
-
-// newFuncCodec is NewFuncCodec plus the frame reader the built-in transports use.
-// A transport with a frame reader never calls decode, so it may be nil.
+// newFuncCodec creates a codec that uses the given functions to read and write. If conn
+// implements ConnRemoteAddr, log messages include the remote address. decode must reject
+// invalid JSON, reading a message relies on it. A transport with a frame reader never calls
+// decode, so it may be nil.
 func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:   make(chan any),
@@ -236,19 +231,9 @@ func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFra
 // skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
 type rawResponse []byte
 
-// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
-func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
-
 // rawBatch is a batch response kept as its already-encoded answers in request order, so a
 // transport can stream them instead of first joining them into one buffer.
 type rawBatch [][]byte
-
-// MarshalJSON joins the answers so json.Marshal-based transports don't base64-encode them.
-func (b rawBatch) MarshalJSON() ([]byte, error) {
-	s := jsonstream.New(nil)
-	b.writeTo(s)
-	return s.Buffer(), nil
-}
 
 func (b rawBatch) writeTo(s jsonstream.Stream) {
 	s.WriteArrayStart()
