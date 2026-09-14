@@ -132,26 +132,6 @@ func legacyMarshalReceipt(
 	return fields
 }
 
-func requireSameJSONObject(t *testing.T, name string, want, got any) {
-	t.Helper()
-	decode := func(v any) map[string]json.RawMessage {
-		encoded, err := json.Marshal(v)
-		require.NoError(t, err, name)
-		var fields map[string]json.RawMessage
-		require.NoError(t, json.Unmarshal(encoded, &fields), name)
-		return fields
-	}
-	wantFields, gotFields := decode(want), decode(got)
-	for key, wantValue := range wantFields {
-		gotValue, ok := gotFields[key]
-		require.True(t, ok, "%s: field %q missing", name, key)
-		require.JSONEq(t, string(wantValue), string(gotValue), "%s: field %q", name, key)
-	}
-	for key := range gotFields {
-		require.Contains(t, wantFields, key, "%s: unexpected field %q", name, key)
-	}
-}
-
 func dynamicFeeTx(to *common.Address) types.DynamicFeeTransaction {
 	return types.DynamicFeeTransaction{
 		CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21000, To: to, Value: *uint256.NewInt(5)},
@@ -234,9 +214,11 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 									TransactionIndex:  3,
 								}
 								name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v/ts=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}), withBlockTimestamp)
-								want := legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp)
-								got := MarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp)
-								requireSameJSONObject(t, name, want, got)
+								want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
+								require.NoError(t, err)
+								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
+								require.NoError(t, err)
+								require.JSONEq(t, string(want), string(got), name)
 							}
 						}
 					}

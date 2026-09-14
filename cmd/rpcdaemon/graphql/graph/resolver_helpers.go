@@ -121,29 +121,25 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 		Type:              common.NewUint64(uint64(receipt.Type)),
 		Value:             receipt.Value.Hex(),
 	}
+	str := func(s string) *string { return &s }
 	if receipt.EffectiveGasPrice != nil {
-		gasPrice := receipt.EffectiveGasPrice.String()
-		trans.EffectiveGasPrice = &gasPrice
-		trans.GasPrice = gasPrice
+		trans.EffectiveGasPrice = str(receipt.EffectiveGasPrice.String())
+		trans.GasPrice = *trans.EffectiveGasPrice
 	}
 	if receipt.MaxFeePerGas != nil {
-		maxFeePerGas := receipt.MaxFeePerGas.Hex()
-		trans.MaxFeePerGas = &maxFeePerGas
+		trans.MaxFeePerGas = str(receipt.MaxFeePerGas.Hex())
 	}
 	if receipt.MaxPriorityFeePerGas != nil {
-		maxPriorityFeePerGas := receipt.MaxPriorityFeePerGas.Hex()
-		trans.MaxPriorityFeePerGas = &maxPriorityFeePerGas
+		trans.MaxPriorityFeePerGas = str(receipt.MaxPriorityFeePerGas.Hex())
 	}
 	if receipt.MaxFeePerBlobGas != nil {
-		maxFeePerBlobGas := receipt.MaxFeePerBlobGas.String()
-		trans.MaxFeePerBlobGas = &maxFeePerBlobGas
+		trans.MaxFeePerBlobGas = str(receipt.MaxFeePerBlobGas.String())
 	}
 	if receipt.BlobGasUsed != nil {
 		trans.BlobGasUsed = common.NewUint64(uint64(*receipt.BlobGasUsed))
 	}
 	if receipt.BlobGasPrice != nil {
-		blobGasPrice := receipt.BlobGasPrice.String()
-		trans.BlobGasPrice = &blobGasPrice
+		trans.BlobGasPrice = str(receipt.BlobGasPrice.String())
 	}
 	if receipt.Status != nil {
 		trans.Status = common.NewUint64(uint64(*receipt.Status))

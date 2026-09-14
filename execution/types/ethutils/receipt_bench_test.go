@@ -55,16 +55,14 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		}
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
-		for _, withBlockTimestamp := range []bool{false, true} {
-			b.Run(fmt.Sprintf("logs=%d/ts=%v", logCount, withBlockTimestamp), func(b *testing.B) {
-				b.ReportAllocs()
-				for b.Loop() {
-					out, err := json.Marshal(MarshalReceipt(receipt, txn, chain.TestChainOsakaConfig, header, receipt.TxHash, false, withBlockTimestamp))
-					if err != nil || len(out) == 0 {
-						b.Fatal(err)
-					}
+		b.Run(fmt.Sprintf("logs=%d", logCount), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				out, err := json.Marshal(MarshalReceipt(receipt, txn, chain.TestChainOsakaConfig, header, receipt.TxHash, false, true))
+				if err != nil || len(out) == 0 {
+					b.Fatal(err)
 				}
-			})
-		}
+			}
+		})
 	}
 }

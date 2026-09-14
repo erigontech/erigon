@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -60,6 +61,27 @@ type GraphQLReceipt struct {
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
 	AccessList           types.AccessList `json:"accessList"`
+}
+
+func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
+	transaction := &GraphQLReceipt{
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true, false),
+		Nonce:      txn.GetNonce(),
+		Value:      txn.GetValue(),
+		Data:       txn.GetData(),
+		Logs:       receipt.Logs,
+		Gas:        txn.GetGasLimit(),
+		AccessList: txn.GetAccessList(),
+	}
+	txType := txn.Type()
+	if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
+		transaction.MaxFeePerGas = txn.GetFeeCap()
+		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+	}
+	if blobTx, ok := txn.(*types.BlobTx); ok {
+		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
+	}
+	return transaction
 }
 
 type GraphQLAPI interface {
@@ -203,27 +225,7 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	result := make([]*GraphQLReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-
-		transaction := &GraphQLReceipt{
-			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false),
-			Nonce:      txn.GetNonce(),
-			Value:      txn.GetValue(),
-			Data:       txn.GetData(),
-			Logs:       receipt.Logs,
-			Gas:        txn.GetGasLimit(),
-			AccessList: txn.GetAccessList(),
-		}
-		txType := txn.Type()
-		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
-			transaction.MaxFeePerGas = txn.GetFeeCap()
-			transaction.MaxPriorityFeePerGas = txn.GetTipCap()
-		}
-		if txType == types.BlobTxType {
-			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-			}
-		}
-		result = append(result, transaction)
+		result = append(result, NewGraphQLReceipt(receipt, txn, chainConfig, block.HeaderNoCopy()))
 	}
 
 	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())

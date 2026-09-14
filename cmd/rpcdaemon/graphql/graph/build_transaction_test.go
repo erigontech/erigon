@@ -24,35 +24,11 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
-
-// graphqlReceipt builds a receipt the way buildBlockDetailsResponse does.
-func graphqlReceipt(receipt *types.Receipt, txn types.Transaction, header *types.Header) *jsonrpc.GraphQLReceipt {
-	transaction := &jsonrpc.GraphQLReceipt{
-		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chain.TestChainOsakaConfig, header, txn.Hash(), true, false),
-		Nonce:      txn.GetNonce(),
-		Value:      txn.GetValue(),
-		Data:       txn.GetData(),
-		Logs:       receipt.Logs,
-		Gas:        txn.GetGasLimit(),
-		AccessList: txn.GetAccessList(),
-	}
-	txType := txn.Type()
-	if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
-		transaction.MaxFeePerGas = txn.GetFeeCap()
-		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
-	}
-	if blobTx, ok := txn.(*types.BlobTx); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	}
-	return transaction
-}
 
 func TestBuildTransactionReadsMarshalledReceipt(t *testing.T) {
 	t.Parallel()
@@ -89,7 +65,7 @@ func TestBuildTransactionReadsMarshalledReceipt(t *testing.T) {
 			TransactionIndex:  3,
 		}
 
-		got := (&queryResolver{}).buildTransaction(block, graphqlReceipt(receipt, txn, header))
+		got := (&queryResolver{}).buildTransaction(block, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
 
 		require.Equal(t, uint64(21000), got.Gas)
 		require.Equal(t, "0xdead", got.InputData)
@@ -129,7 +105,7 @@ func TestBuildTransactionReadsMarshalledReceipt(t *testing.T) {
 		txn.SetSender(accounts.InternAddress(sender))
 		receipt := &types.Receipt{PostState: []byte{0x0b}, BlockNumber: uint256.NewInt(7), TxHash: txn.Hash()}
 
-		got := (&queryResolver{}).buildTransaction(block, graphqlReceipt(receipt, txn, header))
+		got := (&queryResolver{}).buildTransaction(block, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
 
 		require.Equal(t, "0x", got.InputData)
 		require.Equal(t, "0x0", got.Nonce)
