@@ -555,7 +555,9 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 			got, err := logs.MarshalFastJSON()
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
-			require.InDelta(t, 1, testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }), 0)
+			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
+				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
+			}
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
