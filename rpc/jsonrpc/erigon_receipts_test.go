@@ -517,3 +517,62 @@ func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
 	require.ErrorContains(t, err, "block not found")
 	require.Nil(t, logs)
 }
+
+// TestGetLogsByHashIncludesBlockTimestamp pins that erigon_getLogsByHash reports the
+// same blockTimestamp erigon_getLogs reports for the same log.
+func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	expected, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	require.NoError(t, err)
+	require.NotEmpty(t, expected)
+
+	byHash, err := api.GetLogsByHash(m.Ctx, expected[0].BlockHash)
+	require.NoError(t, err)
+
+	var seen int
+	for _, txLogs := range byHash {
+		for _, l := range txLogs {
+			require.Equal(t, expected[0].BlockTimestamp, l.BlockTimestamp)
+			require.NotZero(t, l.BlockTimestamp)
+			seen++
+		}
+	}
+	require.NotZero(t, seen)
+}
+
+// TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp pins that a call served from the
+// block receipts cache reports the same logs, and the same blockTimestamp, as the call
+// that filled the cache.
+func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	probe := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	withLogs, err := probe.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	require.NoError(t, err)
+	require.NotEmpty(t, withLogs)
+	hash := withLogs[0].BlockHash
+
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	_, cached := api.getCachedReceipts(m.Ctx, hash)
+	require.False(t, cached)
+
+	uncachedLogs, err := api.GetLogsByHash(m.Ctx, hash)
+	require.NoError(t, err)
+	_, cached = api.getCachedReceipts(m.Ctx, hash)
+	require.True(t, cached)
+
+	cachedLogs, err := api.GetLogsByHash(m.Ctx, hash)
+	require.NoError(t, err)
+	require.Equal(t, uncachedLogs, cachedLogs)
+
+	var seen int
+	for _, txLogs := range cachedLogs {
+		for _, l := range txLogs {
+			require.NotZero(t, l.BlockTimestamp)
+			seen++
+		}
+	}
+	require.NotZero(t, seen)
+}
