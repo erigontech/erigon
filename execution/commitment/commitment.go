@@ -299,6 +299,7 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	deferUpdates       bool
+	callerOwnsDeferred bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
@@ -313,6 +314,9 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
+	if !defer_ {
+		be.callerOwnsDeferred = false
+	}
 	if defer_ {
 		if be.deferred == nil {
 			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
@@ -527,7 +531,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := len(be.deferred) >= limit
+	needsFlush := !be.callerOwnsDeferred && len(be.deferred) >= limit
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}

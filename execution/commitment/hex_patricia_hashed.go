@@ -160,11 +160,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
-	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
-	// applies deferred updates inline.
-	leaveDeferredForCaller bool
-
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
@@ -212,8 +207,8 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
+	hph.branchEncoder.callerOwnsDeferred = cfg.LeaveDeferredForCaller
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
-	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
 	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
@@ -280,7 +275,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
-	hph.leaveDeferredForCaller = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -2026,10 +2020,17 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 
 // collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
-	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
-			return fmt.Errorf("failed to encode branch deletion: %w", err)
+	if !hph.branchBefore[row] {
+		return nil
+	}
+	if hph.branchEncoder.DeferUpdatesEnabled() {
+		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
+			return fmt.Errorf("failed to collect deferred branch deletion: %w", err)
 		}
+		return nil
+	}
+	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
+		return fmt.Errorf("failed to encode branch deletion: %w", err)
 	}
 	return nil
 }
@@ -2658,7 +2659,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.branchEncoder.callerOwnsDeferred {
 		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
@@ -2741,7 +2742,7 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
-	hph.leaveDeferredForCaller = leave
+	hph.branchEncoder.callerOwnsDeferred = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.

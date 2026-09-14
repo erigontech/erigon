@@ -1691,3 +1691,92 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 	}
 	return nil
 }
+
+func Test_HexPatriciaHashed_CallerDeferredIgnoresCapacityLimit(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, _, _ := collapseCorpus()
+
+	ms := NewMockState(t)
+	ctr := &branchWriteCounter{PatriciaContext: ms, wrote: map[string][]byte{}}
+
+	cfg := DefaultTrieConfig()
+	cfg.DeferBranchUpdates = true
+	trie := NewHexPatriciaHashed(length.Addr, ctr, cfg)
+	defer trie.Release()
+	trie.SetLeaveDeferredForCaller(true)
+	trie.branchEncoder.maxDeferredUpdates = 2
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	defer upds.Close()
+
+	ctr.on = true
+	_, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	ctr.on = false
+	require.NoError(t, err)
+
+	require.Greater(t, len(ctr.wrote)+len(trie.branchEncoder.deferred), 2, "corpus must exceed the lowered limit, or the test proves nothing")
+	require.Zero(t, len(ctr.wrote), "caller-deferred mode must write no branch record before the root is returned")
+}
+
+func TestDeferredCallerOwned_MatchesEagerAcrossDeletions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	k1, u1, k2, u2 := collapseCorpus()
+
+	eagerState := NewMockState(t)
+	callerState := NewMockState(t)
+
+	eagerCfg := DefaultTrieConfig()
+	eagerCfg.DeferBranchUpdates = false
+	callerCfg := DefaultTrieConfig()
+	callerCfg.DeferBranchUpdates = true
+
+	trieEager := NewHexPatriciaHashed(length.Addr, eagerState, eagerCfg)
+	defer trieEager.Release()
+	trieCaller := NewHexPatriciaHashed(length.Addr, callerState, callerCfg)
+	defer trieCaller.Release()
+	trieCaller.SetLeaveDeferredForCaller(true)
+
+	var deletions int
+	for round, batch := range []struct {
+		keys [][]byte
+		upds []Update
+	}{{k1, u1}, {k2, u2}} {
+		require.NoError(t, eagerState.applyPlainUpdates(batch.keys, batch.upds))
+		require.NoError(t, callerState.applyPlainUpdates(batch.keys, batch.upds))
+
+		eagerUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batch.keys, batch.upds)
+		rootEager, err := trieEager.Process(ctx, eagerUpds, "", nil, WarmupConfig{})
+		eagerUpds.Close()
+		require.NoError(t, err, "round %d eager", round)
+
+		callerUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batch.keys, batch.upds)
+		rootCaller, err := trieCaller.Process(ctx, callerUpds, "", nil, WarmupConfig{})
+		callerUpds.Close()
+		require.NoError(t, err, "round %d caller-owned", round)
+		require.Equal(t, rootEager, rootCaller, "round %d root", round)
+
+		pending := trieCaller.TakeDeferredUpdates()
+		require.NotEmpty(t, pending, "round %d left nothing for the caller to apply", round)
+		for _, upd := range pending {
+			if len(upd.raw) == 4 && upd.raw[2] == 0 && upd.raw[3] == 0 {
+				deletions++
+			}
+		}
+
+		written, err := ApplyDeferredBranchUpdates(pending, 4, callerState.PutBranch, nil)
+		require.NoError(t, err, "round %d apply", round)
+		require.NotZero(t, written, "round %d wrote nothing", round)
+		for _, upd := range pending {
+			putDeferredUpdate(upd)
+		}
+
+		require.Equal(t, eagerState.cm, callerState.cm, "round %d stored branches", round)
+	}
+
+	require.NotZero(t, deletions, "the corpus must delete branches, or this proves nothing about deferred deletions")
+	t.Logf("deferred branch deletions applied: %d", deletions)
+}

@@ -95,8 +95,8 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	if hph.branchEncoder.deferUpdates {
 		t.Error("branchEncoder.deferUpdates should be false")
 	}
-	if !hph.leaveDeferredForCaller {
-		t.Error("leaveDeferredForCaller should be true")
+	if !hph.branchEncoder.callerOwnsDeferred {
+		t.Error("branchEncoder.callerOwnsDeferred should be true")
 	}
 	if !hph.memoizationOff {
 		t.Error("memoizationOff should be true")

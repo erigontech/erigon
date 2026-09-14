@@ -1202,3 +1202,40 @@ func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
 
 	require.Nil(t, pu.deferredCombined, "Reset still pins the recycled updates")
 }
+
+func TestCollectDeferredUpdate_CallerOwnedIgnoresCapacityLimit(t *testing.T) {
+	t.Parallel()
+	row, bm := generateCellRow(t, 4)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+	be.callerOwnsDeferred = true
+	be.maxDeferredUpdates = 2
+
+	for i := range 5 {
+		require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, byte(i)}, bm, bm, bm, &cells, true))
+	}
+
+	require.Zero(t, len(ctx.puts), "caller owns the output, so nothing may reach the domain before it validates the root")
+	require.Len(t, be.deferred, 5, "every record must still be pending")
+}
+
+func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
+	t.Parallel()
+	row, bm := generateCellRow(t, 4)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+	be.maxDeferredUpdates = 2
+
+	for i := range 3 {
+		require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, byte(i)}, bm, bm, bm, &cells, true))
+	}
+
+	require.Len(t, ctx.puts, 2, "inline collection still bounds its buffer by writing the batch through")
+	require.Len(t, be.deferred, 1)
+}

@@ -17,8 +17,10 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -126,4 +128,52 @@ func TestModeParallel_ErrorKeepsCollection(t *testing.T) {
 		require.Zero(t, ut.Size())
 		require.Equal(t, oracle, got)
 	})
+}
+
+type branchWriteCounter struct {
+	PatriciaContext
+	wrote map[string][]byte
+	on    bool
+}
+
+func (c *branchWriteCounter) PutBranch(prefix, data, prev []byte) error {
+	if c.on {
+		c.wrote[string(prefix)] = bytes.Clone(data)
+	}
+	return c.PatriciaContext.PutBranch(prefix, data, prev)
+}
+
+func collapseCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	rnd := rand.New(rand.NewSource(20260904))
+
+	var spread []string
+	ub1 := NewUpdateBuilder()
+	for nib := range 15 {
+		for i := range 8 {
+			a := addrHex(findAddressForNibble(nib, 70000+nib*1000+i))
+			spread = append(spread, a)
+			ub1.Balance(a, rnd.Uint64()+1)
+			addRandomSlot(ub1, rnd, a)
+		}
+	}
+	for i := range 900 {
+		a := addrHex(findAddressForNibble(0xf, 40000+i))
+		ub1.Balance(a, rnd.Uint64()+1)
+		addRandomSlot(ub1, rnd, a)
+	}
+	k1, u1 = ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	for i, a := range spread {
+		if i%8 == 0 {
+			ub2.Balance(a, rnd.Uint64()+1)
+			continue
+		}
+		ub2.Delete(a)
+	}
+	for i := range 900 {
+		ub2.Balance(addrHex(findAddressForNibble(0xf, 40000+i)), rnd.Uint64()+1)
+	}
+	k2, u2 = ub2.Build()
+	return k1, u1, k2, u2
 }
