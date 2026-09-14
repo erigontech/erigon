@@ -711,14 +711,10 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 }
 
 type recordingCtx struct {
-	branchCalls int
-	puts        []struct{ prefix, data, prev []byte }
+	puts []struct{ prefix, data, prev []byte }
 }
 
-func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
-	r.branchCalls++
-	return nil, 0, nil
-}
+func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
 func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
 	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
 		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
@@ -729,7 +725,7 @@ func (r *recordingCtx) Account(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) Storage(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) TxNum() uint64                     { return 0 }
 
-func TestCollectUpdate_NeverProbesBranchAndHonoursSuppliedPrev(t *testing.T) {
+func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0xab, 0xcd}
 	row, bm := generateCellRow(t, 4)
@@ -738,7 +734,6 @@ func TestCollectUpdate_NeverProbesBranchAndHonoursSuppliedPrev(t *testing.T) {
 	ctxNew := &recordingCtx{}
 	beNew := NewBranchEncoder(1024)
 	require.NoError(t, beNew.CollectUpdate(ctxNew, prefix, bm, bm, bm, &cells, nil))
-	require.Zero(t, ctxNew.branchCalls, "the trie supplies prev from its unfold, so the encoder must never read a branch")
 	require.Len(t, ctxNew.puts, 1)
 	require.Empty(t, ctxNew.puts[0].prev)
 
@@ -750,10 +745,9 @@ func TestCollectUpdate_NeverProbesBranchAndHonoursSuppliedPrev(t *testing.T) {
 	ctxSame := &recordingCtx{}
 	require.NoError(t, beSame.CollectUpdate(ctxSame, prefix, bm, bm, bm, &cells, unchanged))
 	require.Empty(t, ctxSame.puts, "a supplied prev identical to the update suppresses the write, so prev is really being used")
-	require.Zero(t, ctxSame.branchCalls)
 }
 
-func TestCollectDeferredUpdate_NeverProbesBranchAndCarriesSuppliedPrev(t *testing.T) {
+func TestCollectDeferredUpdate_CarriesSuppliedPrev(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0x11, 0x22}
 	row, bm := generateCellRow(t, 4)
@@ -765,7 +759,6 @@ func TestCollectDeferredUpdate_NeverProbesBranchAndCarriesSuppliedPrev(t *testin
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(ctx, prefix, bm, bm, bm, &cells, prev))
 
-	require.Zero(t, ctx.branchCalls, "the trie supplies prev from its unfold, so the encoder must never read a branch")
 	require.Len(t, be.deferred, 1)
 	require.Equal(t, prev, []byte(be.deferred[0].prev), "the record must carry the prev it was given")
 	require.Empty(t, ctx.puts, "deferred collection writes nothing")

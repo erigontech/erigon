@@ -37,11 +37,11 @@ func (hph *HexPatriciaHashed) mountTo(base *HexPatriciaHashed, nibble int) {
 	hph.grid[0] = base.grid[fork]
 }
 
-func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, baseSnapshot, error) {
+func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
 	base := p.template
 	if base == nil {
-		return nil, baseSnapshot{}, errors.New("processMounted: nil template")
+		return nil, errors.New("processMounted: nil template")
 	}
 	if base.ctx == nil && p.trieCtxFactory != nil {
 		bctx, cleanup := p.trieCtxFactory(ctx)
@@ -53,11 +53,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
 	base.resetFoldFrontier()
-	if len(base.branchEncoder.deferred) > 0 {
-		base.branchEncoder.ClearDeferred()
-	}
+	base.branchEncoder.ClearDeferred()
 	base.metrics.Reset()
-	saved := snapshotBase(base)
 
 	concurrency := parallelMountConcurrency(p.numWorkers)
 	leases := newCtxLeasePool(ctx, p.trieCtxFactory, concurrency)
@@ -73,8 +70,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	}
 	bw := &walker{trie: base}
 	if err := fw.attach(ctx, bw); err != nil {
-		saved.restore(base)
-		return nil, saved, err
+		return nil, err
 	}
 	root := pu.trie.root
 	path := make([]byte, 0, forkPathCap)
@@ -83,22 +79,15 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	fw.detach(bw)
 	p.forks.Store(fw.forks.Load())
 	if walkErr != nil {
-		saved.restore(base)
-		return nil, saved, fmt.Errorf("processMounted: %w", walkErr)
+		return nil, fmt.Errorf("processMounted: %w", walkErr)
 	}
 
 	if _, err := foldSplitRow(ctx, base); err != nil {
-		saved.restore(base)
-		return nil, saved, fmt.Errorf("processMounted: root fold: %w", err)
+		return nil, fmt.Errorf("processMounted: root fold: %w", err)
 	}
 	p.metrics.Merge(base.metrics)
 	pu.appendDeferred(base.TakeDeferredUpdates())
-	rh, err := base.RootHash()
-	if err != nil {
-		saved.restore(base)
-		return nil, saved, err
-	}
-	return rh, saved, nil
+	return base.RootHash()
 }
 
 type baseSnapshot struct {
