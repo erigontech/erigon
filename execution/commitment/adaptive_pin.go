@@ -61,7 +61,6 @@ type DbBranchesProvider func(contractHash []byte) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
-	promotedAtTxNum  uint64
 	parallel         *ContractTrunkPreloadParallel
 	coldBlocksInARow int
 }
@@ -238,9 +237,8 @@ func (c *AdaptivePinController) promoteLocked(
 	}
 	recordPreload(started, p.usedBytes)
 	return &adaptiveContractState{
-		contractHash:    hash,
-		promotedAtTxNum: txNum,
-		parallel:        p,
+		contractHash: hash,
+		parallel:     p,
 	}, nil
 }
 
