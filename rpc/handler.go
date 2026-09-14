@@ -672,7 +672,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		if err != nil {
 			return msg.errorResponse(remapDBOverload(ctx, err))
 		}
-		return msg.response(result)
+		if msg.isNotification() {
+			return nil
+		}
+		return msg.writeResponse(stream, result)
 	}
 
 	stream.WriteObjectStart()
@@ -702,32 +705,17 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	return nil
 }
 
-// writeTo writes a success response's already-encoded Result (and id) directly rather than
-// re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
-// except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
-// Nothing here may reach the underlying writer: the response must stay in the stream buffer
-// until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
+// writeTo writes a response built as a message, such as an error; success results go through
+// writeResponse. Nothing here may reach the underlying writer: the response must stay in the
+// stream buffer until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, err := json.Marshal(msg)
-		if err != nil {
-			buf, err = json.Marshal(msg.errorResponse(err))
-		}
-		if err == nil {
-			stream.WriteRawBytes(buf)
-		}
-		return
+	buf, err := json.Marshal(msg)
+	if err != nil {
+		buf, err = json.Marshal(msg.errorResponse(err))
 	}
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString(msg.Version)
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteRawBytes(msg.ID)
-	stream.WriteMore()
-	stream.WriteObjectField("result")
-	stream.WriteRawBytes(msg.Result)
-	stream.WriteObjectEnd()
+	if err == nil {
+		stream.WriteRawBytes(buf)
+	}
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
