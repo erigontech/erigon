@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,9 +73,9 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		assert.Equal(t, 4, p.numWorkers)
 
 		p.SetNumWorkers(0)
-		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+		assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 		p.SetNumWorkers(-3)
-		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+		assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 	})
 
 	t.Run("ResetContextPropagates", func(t *testing.T) {

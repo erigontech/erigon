@@ -42,7 +42,7 @@ func TestInterpEquivBinary(t *testing.T) {
 	g := seg.NewReader(kv.MakeGetter(), compress)
 	get := func(interp bool, budget uint64, k []byte) ([]byte, bool, uint64) {
 		BtInterp, BtInterpBudget = interp, budget
-		v, ok, off, err := bt.bplus.Get(g, k)
+		v, ok, off, err := bt.bplus.Get(g, k, nil)
 		require.NoError(t, err)
 		return v, ok, off
 	}

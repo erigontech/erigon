@@ -112,8 +112,7 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 
 // RunPrune executes pruning on the main pipeline.
 func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle,
-		execfinality.WithTxNumsReader(pe.db, pe.blockReader.TxnumReader()))
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +318,16 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 	return nil
+}
+
+// lastValidationExecStageTiming reports the Execution stage duration of the most
+// recent ValidateBlock, so on a multi-header fork this is the last block's, not
+// the whole validation's.
+func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
+	if pe.validationSync == nil {
+		return 0
+	}
+	return pe.validationSync.LastStageTiming(stages.Execution)
 }
 
 // ValidateBlock executes a fork validation by running the pipeline block-by-block

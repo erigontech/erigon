@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/json"
 	"math/bits"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -83,10 +84,7 @@ func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
 }
 
 func (u *ParticipationBitList) Copy() *ParticipationBitList {
-	n := NewParticipationBitList(u.l, u.c)
-	n.u = make([]byte, len(u.u), cap(u.u))
-	copy(n.u, u.u)
-	return n
+	return &ParticipationBitList{u: slices.Clone(u.u), l: u.l, c: u.c}
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.

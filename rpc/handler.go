@@ -171,7 +171,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
-			h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
+				h.logger.Debug("Failed to write RPC error response", "err", err)
+			}
 		})
 		return
 	}
@@ -234,7 +236,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		h.addSubscriptions(cp.notifiers)
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {
-			n.activate()
+			if err := n.activate(); err != nil {
+				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+			}
 		}
 	})
 }
@@ -259,7 +263,9 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 	}
 	out.WriteArrayEnd()
 	if wrote {
-		h.conn.WriteJSON(ctx, rawResponse(out.Buffer()))
+		if err := h.conn.WriteJSON(ctx, rawResponse(out.Buffer())); err != nil {
+			h.logger.Debug("Failed to write RPC batch response", "err", err)
+		}
 	}
 }
 
@@ -271,7 +277,9 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
-	h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
+	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
+		h.logger.Debug("Failed to write RPC response", "err", err)
+	}
 }
 
 // answerInto runs the call and leaves its response in stream. A streamed method
@@ -296,7 +304,9 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 			break
 		}
 	}
-	h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp})
+	if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
+		h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
+	}
 }
 
 // handleMsg handles a single message.
@@ -312,7 +322,9 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
-			n.activate()
+			if err := n.activate(); err != nil {
+				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+			}
 		}
 	})
 }

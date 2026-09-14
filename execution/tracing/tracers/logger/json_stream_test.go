@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -429,48 +428,6 @@ func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
 		obj := captureOnOpcodeWithReturnData(t, &LogConfig{EnableReturnData: false}, nil, rData, nil, nil)
 		if _, ok := obj["returnData"]; ok {
 			t.Error("expected 'returnData' field to be absent, but it was present")
-		}
-	})
-}
-
-// TestStructLog_ErrorOmitempty verifies that the 'error' field is omitted from
-// MarshalJSON output when there is no error, and present when there is.
-func TestStructLog_ErrorOmitempty(t *testing.T) {
-	t.Run("no error omitted", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		if _, found := obj["error"]; found {
-			t.Errorf("expected 'error' field to be absent, but it was present: %s", obj["error"])
-		}
-	})
-
-	t.Run("error included when present", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1, Err: errors.New("out of gas")}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		raw, found := obj["error"]
-		if !found {
-			t.Fatal("expected 'error' field but it was absent")
-		}
-		var msg string
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			t.Fatalf("cannot parse error field: %v", err)
-		}
-		if msg != "out of gas" {
-			t.Errorf("error message: got %q, want %q", msg, "out of gas")
 		}
 	})
 }

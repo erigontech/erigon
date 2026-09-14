@@ -76,7 +76,9 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 		return err
 	}
 	if !exist {
-		statedb.CreateAccount(DAORefundContract, false)
+		if err := statedb.CreateAccount(DAORefundContract, false); err != nil {
+			return err
+		}
 	}
 
 	// Move every DAO account and extra-balance account funds into the refund contract
@@ -85,8 +87,12 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		statedb.AddBalance(DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
-		statedb.SetBalance(addr, u256.N0, tracing.BalanceDecreaseDaoAccount)
+		if err := statedb.AddBalance(DAORefundContract, balance, tracing.BalanceIncreaseDaoContract); err != nil {
+			return err
+		}
+		if err := statedb.SetBalance(addr, u256.N0, tracing.BalanceDecreaseDaoAccount); err != nil {
+			return err
+		}
 	}
 	return nil
 }

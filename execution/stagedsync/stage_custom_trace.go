@@ -288,7 +288,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	var finalityCtx kv.FinalityContext
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false, execfinality.WithTxNumsReader(db, cfg.BlockReader.TxnumReader()))
+		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false, cfg.BlockReader.TxnumReader())
 		if err != nil {
 			return err
 		}

@@ -206,24 +206,24 @@ type DebugAccountRange struct {
 type Log struct { //nolint
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address common.Address `json:"address" gencodec:"required"`
+	Address common.Address `json:"address"`
 	// list of topics provided by the contract.
-	Topics []common.Hash `json:"topics" gencodec:"required"`
+	Topics []common.Hash `json:"topics"`
 	// supplied by the contract, usually ABI-encoded
-	Data hexutil.Bytes `json:"data" gencodec:"required"`
+	Data hexutil.Bytes `json:"data"`
 
 	// Derived fields. These fields are filled in by the node
 	// but not secured by consensus.
 	// block in which the transaction was included
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
 	// hash of the transaction
-	TxHash common.Hash `json:"transactionHash" gencodec:"required"`
+	TxHash common.Hash `json:"transactionHash"`
 	// index of the transaction in the block
-	TxIndex hexutil.Uint `json:"transactionIndex" gencodec:"required"`
+	TxIndex hexutil.Uint `json:"transactionIndex"`
 	// hash of the block in which the transaction was included
 	BlockHash common.Hash `json:"blockHash"`
 	// index of the log in the receipt
-	Index hexutil.Uint `json:"logIndex" gencodec:"required"`
+	Index hexutil.Uint `json:"logIndex"`
 
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
@@ -234,14 +234,14 @@ type Receipt struct {
 	// Consensus fields
 	PostState         common.Hash    `json:"root"`
 	Status            hexutil.Uint64 `json:"status"`
-	CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-	Bloom             hexutil.Bytes  `json:"logsBloom"         gencodec:"required"`
-	Logs              []*Log         `json:"logs"              gencodec:"required"`
+	CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed"`
+	Bloom             hexutil.Bytes  `json:"logsBloom"`
+	Logs              []*Log         `json:"logs"`
 
 	// Implementation fields (don't reorder!)
-	TxHash          common.Hash     `json:"transactionHash" gencodec:"required"`
+	TxHash          common.Hash     `json:"transactionHash"`
 	ContractAddress *common.Address `json:"contractAddress"`
-	GasUsed         hexutil.Uint64  `json:"gasUsed" gencodec:"required"`
+	GasUsed         hexutil.Uint64  `json:"gasUsed"`
 }
 
 type EthReceipt struct {
@@ -314,7 +314,7 @@ type OtsFullBlock struct {
 	GasLimit   hexutil.Big    `json:"gasLimit"`
 	GasUsed    hexutil.Big    `json:"gasUsed"`
 	Hash       common.Hash    `json:"hash"`
-	Bloom      string         `json:"logsBloom" gencodec:"required"`
+	Bloom      string         `json:"logsBloom"`
 	Miner      common.Address `json:"miner"`
 	MixHash    string         `json:"mixHash"`
 	Nonce      string         `json:"nonce"`

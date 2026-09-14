@@ -49,7 +49,7 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 		}
 	}
 
-	c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88,
+	c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
 	val := make([]byte, 32)
@@ -91,7 +91,7 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)
 	for b.Loop() {
-		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		k := make([]byte, 8)
 		for i := range uint64(keys) {
 			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
@@ -109,7 +109,7 @@ func BenchmarkGenericCacheWorstPut(b *testing.B) {
 	val := make([]byte, 32)
 	var worst time.Duration
 	for b.Loop() {
-		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		k := make([]byte, 8)
 		for i := range uint64(keys) {
 			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)

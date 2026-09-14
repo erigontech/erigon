@@ -80,9 +80,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum', 'golangci-lint.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
           restore-keys: |
-            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|
+            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum', 'golangci-lint.sum') }}|
             golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|
 
       - run: make lintci
@@ -97,7 +97,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum', 'golangci-lint.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
 
       # In the merge queue, cancel the run on first failure so the gate
       # doesn't stall waiting for still-running siblings. PR runs keep

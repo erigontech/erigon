@@ -114,7 +114,3 @@ func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err
 	return nil, false, nil
 }
 func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
-func (c *LatestBatchView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
