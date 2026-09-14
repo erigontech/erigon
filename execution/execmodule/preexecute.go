@@ -144,9 +144,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		// sealed-hold accounting (inFlight.FilterFeed re-offers a sealed body tx) — receipts and body agree at
 		// the seal, so it is not the receipt fold. UNDIAGNOSED. Remove this guard once it is understood; do
 		// not treat it as correct.
-		if flashUpdate.PrefixLen > 0 {
-			stagingBase = flashUpdate.SD
-		}
+		stagingBase = flashUpdate.SD
 		if stagingBase != nil {
 			if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(stagingBase)); err != nil {
 				return ValidationResult{}, err
@@ -161,7 +159,11 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		} else {
 			doms = flashUpdate.SD
 		}
-		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf).
+		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf). Enable
+		// them on the BLOCK's SD as well as the round's: a staged round's reads fall THROUGH to the block's mem
+		// batch, and a history read that lands there fails outright if the flag is only set on the child
+		// ("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled").
+		flashUpdate.SD.SetInMemHistoryReads(true)
 		doms.SetInMemHistoryReads(true)
 		// PRE-EXEC start: tell exec to resume PAST the already-executed prefix instead of at the block
 		// start (which SeekCommitment would report, since fork-validation never commits). resume =
