@@ -24,11 +24,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestCoinbaseSelfdestructWorkerCount(t *testing.T) {
+	previousParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = previousParallel })
+
 	raw, err := os.ReadFile("testdata/coinbase_selfdestruct.json")
 	require.NoError(t, err)
 
