@@ -509,3 +509,20 @@ func TestForkWalk_ExtensionPastTheSplitDropsItsTouchBit(t *testing.T) {
 		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Delete(a).Delete(b) })
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
+
+func TestForkWalk_UpdatedAccountDropsItsDeletedSlotsTouchBit(t *testing.T) {
+	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
+	s0 := slotLocsForHexPrefix([]byte{1}, 1, 1)[0]
+	k0, u0 := NewUpdateBuilder().
+		Balance(addrHex(findAddressForHexPrefix([]byte{0, 0}, 2)), 2).
+		Balance(addrHex(findAddressForHexPrefix([]byte{0, 1}, 3)), 3).
+		Balance(a, 1).Storage(a, s0, "01").
+		Build()
+	k1, u1 := NewUpdateBuilder().
+		Balance(a, 7).
+		DeleteStorage(a, s0).
+		Storage(a, slotLocsForHexPrefix([]byte{8}, 1, 2)[0], "02").
+		Storage(a, slotLocsForHexPrefix([]byte{0xc}, 1, 3)[0], "03").
+		Build()
+	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+}
