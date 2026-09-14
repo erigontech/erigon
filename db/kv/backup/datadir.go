@@ -113,22 +113,7 @@ func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) 
 	}
 	defer unlock()
 
-	if err := downloaderV2Migration(dirs); err != nil {
-		return err
-	}
 	return autoCompactDatadir(ctx, dirs, logger)
-}
-
-// downloaderV2Migration moves the downloader db from snapshots/db to downloader/.
-func downloaderV2Migration(dirs datadir.Dirs) error {
-	from, to := filepath.Join(dirs.Snap, "db", dataFileName), filepath.Join(dirs.Downloader, dataFileName)
-	if exists, err := dir.FileExist(from); err != nil || !exists {
-		return err
-	}
-	if err := os.Rename(from, to); err != nil {
-		return datadir.CopyFile(from, to) // the dirs may be on different disks
-	}
-	return nil
 }
 
 // autoCompactDatadir compacts each db of the datadir whose free pages exceed
