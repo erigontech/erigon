@@ -17,10 +17,20 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
@@ -254,4 +264,100 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 		}
 	default:
 	}
+}
+
+func TestPrefixTrieWalkKeysMatchesSortedFeed(t *testing.T) {
+	t.Parallel()
+	keys, _ := buildMixedCorpus(7, 2000)
+	tr := newPrefixTrie()
+	want := make([][]byte, 0, len(keys))
+	for _, k := range keys {
+		hk := KeyToHexNibbleHash(k)
+		tr.Insert(hk, k, nil)
+		want = append(want, hk)
+	}
+	slices.SortFunc(want, bytes.Compare)
+	want = slices.CompactFunc(want, bytes.Equal)
+
+	var got [][]byte
+	var prev []byte
+	tr.walkKeys(func(key []byte, shared int) bool {
+		require.Equal(t, nibbles.CommonPrefixLen(prev, key), shared, "shared depth of %x", key)
+		prev = bytes.Clone(key)
+		got = append(got, prev)
+		return true
+	})
+	require.Equal(t, want, got)
+
+	calls := 0
+	tr.walkKeys(func([]byte, int) bool {
+		calls++
+		return calls < 10
+	})
+	require.Equal(t, 10, calls, "returning false must stop the walk")
+}
+
+type warmReadCtx struct {
+	*MockState
+	first *sync.Once
+	read  chan struct{}
+}
+
+func (c warmReadCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.first.Do(func() { close(c.read) })
+	return c.MockState.Branch(prefix)
+}
+
+type afterWarmReadCtx struct {
+	*MockState
+	read     <-chan struct{}
+	deadline context.Context
+}
+
+func (c afterWarmReadCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	select {
+	case <-c.read:
+		return c.MockState.Branch(prefix)
+	case <-c.deadline.Done():
+		return nil, 0, errors.New("the walk ran without the warmup reading a single branch")
+	}
+}
+
+func TestParallelProcessFeedsWarmup(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(11, 3000)
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	read := make(chan struct{})
+	deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	walkCtx := afterWarmReadCtx{MockState: ms, read: read, deadline: deadline}
+
+	var once sync.Once
+	var opened, released atomic.Int64
+	warmFactory := func(context.Context) (PatriciaContext, func()) {
+		opened.Add(1)
+		return warmReadCtx{MockState: ms, first: &once, read: read}, func() { released.Add(1) }
+	}
+
+	tr := NewParallelPatriciaHashed(func(context.Context) (PatriciaContext, func()) { return walkCtx, func() {} }, length.Addr, DefaultTrieConfig())
+	defer tr.Release()
+	tr.SetNumWorkers(4)
+	tr.ResetContext(walkCtx)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: warmFactory,
+		NumWorkers: 2,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	require.NoError(t, err)
+	require.Equal(t, opened.Load(), released.Load(), "every warmup context must be released before Process returns")
 }

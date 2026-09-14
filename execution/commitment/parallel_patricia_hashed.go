@@ -263,7 +263,9 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
+	stopWarmup := warmPrefixTrie(ctx, warmup, pu.trie)
 	rh, saved, mErr := p.processMounted(ctx, updates)
+	stopWarmup()
 	if mErr != nil {
 		pu.drainDeferred()
 		return nil, mErr
