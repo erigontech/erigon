@@ -85,3 +85,8 @@ func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 		require.Equal(t, good.Slot(), slot)
 	}
 }
+
+func TestDisabledHeadUpdateIsNoop(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, false)
+	require.NotPanics(t, func() { require.NoError(t, manager.OnHeadState(nil)) })
+}

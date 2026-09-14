@@ -83,6 +83,9 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 
 // OnHeadState updates the current head state and tracks the previous state.
 func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) error {
+	if !s.enabled {
+		return nil
+	}
 	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
