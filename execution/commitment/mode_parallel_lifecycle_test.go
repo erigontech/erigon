@@ -258,7 +258,7 @@ func TestModeParallel_MidWalkErrorRestoresBaseTrie(t *testing.T) {
 	ms.SetConcurrentCommitment(true)
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
-	factory, fail := failAfterNContexts(ms, 2)
+	factory, fail := failAfterNContexts(ms, 0)
 	tr := NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
 	defer tr.Release()
 	tr.SetNumWorkers(4)
@@ -307,7 +307,7 @@ func TestModeParallel_MidWalkErrorLeavesDomainUntouched(t *testing.T) {
 
 	baseCtx := &branchWriteCounter{PatriciaContext: ms, wrote: map[string][]byte{}}
 	tr.ResetContext(baseCtx)
-	factory, _ := failAfterNContexts(ms, 2)
+	factory, _ := failAfterNContexts(ms, 0)
 	tr.SetTrieContextFactory(factory)
 
 	ut2 := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
