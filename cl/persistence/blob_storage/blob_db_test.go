@@ -141,6 +141,29 @@ func TestVerifyAgainstIdentifiersRejectsAnIncompleteHeader(t *testing.T) {
 			require.Zero(t, inserted)
 		})
 	}
+
+	// The loop hashes every sidecar's header, not only the first, so a well-formed sidecar zero
+	// must not let a later incomplete one through.
+	t.Run("incomplete header after a valid sidecar", func(t *testing.T) {
+		blob := goethkzg.Blob{}
+		commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+		require.NoError(t, err)
+		proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+		require.NoError(t, err)
+		header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}
+		blockRoot, err := header.Header.HashSSZ()
+		require.NoError(t, err)
+
+		good := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+		pair := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+		pair.Append(&cltypes.BlobIdentifier{BlockRoot: blockRoot, Index: 0})
+		pair.Append(&cltypes.BlobIdentifier{BlockRoot: blockRoot, Index: 1})
+
+		_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, pair,
+			[]*cltypes.BlobSidecar{good, {Index: 1}}, clparams.GloasVersion, nil)
+		require.Error(t, err)
+		require.Zero(t, inserted)
+	})
 }
 
 func setupTestDB(t *testing.T) kv.RwDB {
