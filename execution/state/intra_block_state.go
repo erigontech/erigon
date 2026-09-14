@@ -1285,18 +1285,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive nil AddressPath read means this tx already consumed the
-			// account's absence, so reconstructing from cells flushed since would
-			// fork its view out of validation's sight — abort and re-execute.
-			// Exempt only an absence concluded from this destruct itself,
-			// recorded as a MapRead at the destruct cell's exact version.
-			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
-				if sdRes.DepIdx() > sdb.dep {
-					sdb.dep = sdRes.DepIdx()
-				}
-				panic(ErrDependency)
-			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
@@ -1316,6 +1304,15 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved == nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
+				}
+				// A live reconstruction must not replace a consumed absence,
+				// unless that absence came from this destruct's exact version.
+				if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+					!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
+					if sdRes.DepIdx() > sdb.dep {
+						sdb.dep = sdRes.DepIdx()
+					}
+					panic(ErrDependency)
 				}
 				// The EVM consumes this conclusion: reconcile the provisional
 				// nil probe with the preserved account so a later flush
