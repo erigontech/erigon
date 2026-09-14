@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -319,6 +320,38 @@ func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
 	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
+}
+
+// TestDefragIfBloated: an open db shrinks in place and stays usable through the
+// same handle. Only tail rows of a plain table are deleted: mdbx defrag stalls
+// when the head is deleted or when DupSort rows are deleted.
+func TestDefragIfBloated(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
+	const deleted = 18_000
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	writeTestDB(t, dbDir, 0)
+	db := openTestDB(dbDir)
+	defer db.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for i := testRows - deleted; i < testRows; i++ {
+			if err := tx.Delete(testTable, u64Key(uint64(i))); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	before := dataFileStat(t, dbDir)
+
+	DefragIfBloated(db, time.Minute, log.New())
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		n, err := tx.Count(testTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64(testRows-deleted), n)
+		return tx.Put(testTable, u64Key(testRows), testVal)
+	}))
+	// mdbx cuts the file on the commit after defrag, not inside it.
+	require.Less(t, dataFileStat(t, dbDir).Size(), before.Size())
 }
 
 // TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
