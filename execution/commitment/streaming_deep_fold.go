@@ -69,6 +69,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	if BranchData(branch).ChildCount() == 0 {
 		return errStorageBaseNotBranch
 	}
+	base.rowBranch[0] = append(base.rowBranch[0][:0], branch...)
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
