@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -196,9 +195,9 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		return fmt.Errorf("fork[%x]: position: %w", path, err)
 	}
 	var opened openedRow
-	leafNib, leafKey := -1, []byte(nil)
+	passNib := -1
 	if positioned {
-		leafNib, leafKey = unfoldedLeaf(w, path)
+		passNib = unfoldedPassThrough(w)
 	} else {
 		opened = openEmptyRow(w, path)
 	}
@@ -263,10 +262,10 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		}
 	}
 	stitchSplitCells(w, cells, touchedBits, presentBits)
-	if leafNib >= 0 {
-		bit := uint16(1) << leafNib
+	if passNib >= 0 && node.plainKey == nil && int(nibs[0]) == passNib {
+		bit := uint16(1) << passNib
 		row := w.activeRows - 1
-		if touchedBits&^presentBits&bit != 0 && w.touchMap[row]&^bit != 0 && bytes.Equal(firstKeyUnder(node, path), leafKey) {
+		if touchedBits&^presentBits&bit != 0 && w.touchMap[row]&^bit != 0 {
 			w.touchMap[row] &^= bit
 		}
 	}

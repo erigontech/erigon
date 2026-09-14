@@ -90,29 +90,16 @@ func openEmptyRow(base *HexPatriciaHashed, prefix []byte) openedRow {
 	return out
 }
 
-func unfoldedLeaf(base *HexPatriciaHashed, prefix []byte) (int, []byte) {
+func unfoldedPassThrough(base *HexPatriciaHashed) int {
 	row := base.activeRows - 1
 	if row < 0 || base.branchBefore[row] || bits.OnesCount16(base.afterMap[row]) != 1 {
-		return -1, nil
+		return -1
 	}
 	nib := bits.TrailingZeros16(base.afterMap[row])
-	c := &base.grid[row][nib]
-	if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
-		return -1, nil
+	if base.grid[row][nib].hashedExtLen == 0 {
+		return -1
 	}
-	key := make([]byte, 0, len(prefix)+1+int(c.hashedExtLen))
-	key = append(append(append(key, prefix...), byte(nib)), c.hashedExtension[:c.hashedExtLen]...)
-	return nib, key
-}
-
-func firstKeyUnder(node *prefixNode, prefix []byte) []byte {
-	key := append([]byte(nil), prefix...)
-	for node.plainKey == nil && len(node.children) > 0 {
-		child := node.children[0]
-		key = append(append(key, byte(bits.TrailingZeros16(node.bitmap))), child.ext...)
-		node = child
-	}
-	return key
+	return nib
 }
 
 func (o openedRow) extendSingleSurvivor(base *HexPatriciaHashed, prefix []byte) {
