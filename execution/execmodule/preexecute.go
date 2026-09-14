@@ -9,8 +9,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // copyFrontierChainTables propagates the single frontier chain's raw-table bookkeeping — canonical hashes
@@ -260,6 +260,15 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	// state. (It used to call ValidatePayload, whose side effect of storing doms as fv.sharedDom is what
 	// put producer state in the validation slot and subjected it to newPayload/FCU teardown.)
 	status, notifications, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
+	// A round that does not go on to register its SD in the frontier owns it, and has to close it. Only the
+	// fresh-SD path can reach here holding one nobody else knows about: the carry-forward path is executing
+	// into the frontier's own generation, which the frontier closes.
+	registered := reuse
+	defer func() {
+		if !registered {
+			doms.Close()
+		}
+	}()
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
@@ -274,6 +283,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		} else {
 			e.preExec.Open(doms, lvh, blockNumber)
 			e.preExec.SetActiveNotifications(notifications)
+			registered = true
 		}
 		e.preExec.RecordTxHashes(body.Transactions)
 		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
@@ -293,11 +303,13 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}
-	// Surface the output side ONLY on a successful pre-exec. On a FAILED round (e.g. a nonce gap in the
-	// accumulated body) the fork validator CLOSES the SD (fork_validator.go), so GetCommitmentContext()
-	// returns nil and reading the trie would nil-deref and CRASH the whole node — a bad round must fail
-	// gracefully as BadBlock, not panic. Surface the state root by reading the accumulated SD's commitment
-	// trie (same in-tree pattern as exec_module_test.go), and the accumulated flashblock receipt count.
+	// Surface the output side ONLY on a successful pre-exec. A failed round (e.g. a nonce gap in the
+	// accumulated body) may have no commitment context to read, so reading the trie unconditionally would
+	// nil-deref and CRASH the whole node — a bad round must fail gracefully as BadBlock, not panic.
+	//
+	// (This used to say the fork validator closes the SD on a failed round. It does not: ExecuteInto touches
+	// no validation state and closes nothing. The SD is the caller's, which is what the registered/defer
+	// above is for.)
 	if validationStatus == ExecutionStatusSuccess {
 		if cc := doms.GetCommitmentContext(); cc != nil {
 			if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {

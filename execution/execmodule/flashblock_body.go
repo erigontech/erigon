@@ -104,9 +104,9 @@ type flashBodyState struct {
 	bodyNonce map[accounts.Address]uint64
 	valid     bool             // a PreExecute has validated for this in-progress block
 	built     FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
-	hash     common.Hash      // the current in-progress header hash
-	root     common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
-	receipts int              // receipts accumulated across rounds (== body txs)
+	hash      common.Hash      // the current in-progress header hash
+	root      common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
+	receipts  int              // receipts accumulated across rounds (== body txs)
 }
 
 // AssembleInProgress seals the CURRENT in-progress flashblock — block-end over its maintained SD (ValidateChain,
@@ -243,6 +243,14 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	if err != nil {
 		return nil, common.Hash{}, vr, err
 	}
+	// A BadBlock round comes back with a NIL error — the status carries the verdict. Falling through on it
+	// recorded the round as valid below with root 0x00…, receipts 0, and a hash over a body whose transactions
+	// never executed: the in-progress block was adopted CORRUPT, and only the fork choice ever said so
+	// ("invalid gasUsed: have N, gasLimit M"). The verdict IS the error.
+	if vr.ValidationStatus != ExecutionStatusSuccess {
+		return nil, common.Hash{}, vr, fmt.Errorf("accumulateFlashblock: num=%d roundTxs=%d status=%v verr=%q",
+			inputs.Number, len(kept), vr.ValidationStatus, vr.ValidationError)
+	}
 	{
 		var forkTxNum, curTxNum uint64
 		if _, _, esd := e.preExec.Active(); esd != nil {
@@ -316,6 +324,12 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
 	if err != nil {
 		return nil, common.Hash{}, vr, err
+	}
+	// Same as the accumulate path: a BadBlock status arrives with a nil error, and recording it as valid
+	// would publish a re-opened block whose restored body never executed.
+	if vr.ValidationStatus != ExecutionStatusSuccess {
+		return nil, common.Hash{}, vr, fmt.Errorf("reopenFlashblock: num=%d restoredTxs=%d status=%v verr=%q",
+			inputs.Number, len(restored), vr.ValidationStatus, vr.ValidationError)
 	}
 	e.logger.Info("[execmodule] block re-opened under corrected attributes", "block", inputs.Number,
 		"restoredTxs", len(restored), "receipts", vr.FlashblockReceiptCount, "status", vr.ValidationStatus)
