@@ -629,7 +629,8 @@ func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
 
 // TestExecCommandsExposeParallelCommitment pins the flag on every integration
 // command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration can only ever run the sequential trie.
+// so integration is stuck on whatever COMMITMENT_PARALLEL selected and
+// cannot switch tries.
 func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -642,23 +643,26 @@ func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
-				"command cannot select the parallel trie")
+				"command cannot select the commitment trie")
 		})
 	}
 }
 
-// TestWithExperimentalCommitmentFollowsErigonDefault pins integration's default to
-// erigon's own flag default, so flipping it in one place cannot leave the two
-// binaries computing commitment with different tries.
-func TestWithExperimentalCommitmentFollowsErigonDefault(t *testing.T) {
-	defer func(v bool) { utils.ExperimentalParallelCommitmentFlag.Value = v }(utils.ExperimentalParallelCommitmentFlag.Value)
+func TestWithExperimentalCommitmentResolution(t *testing.T) {
 	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
 
-	utils.ExperimentalParallelCommitmentFlag.Value = true
-	statecfg.ExperimentalParallelCommitment = false
+	resolve := func(seed bool, args ...string) bool {
+		statecfg.ExperimentalParallelCommitment = seed
+		cmd := &cobra.Command{Use: "probe"}
+		withExperimentalCommitment(cmd)
+		require.NoError(t, cmd.Flags().Parse(args))
+		return statecfg.ExperimentalParallelCommitment
+	}
 
-	withExperimentalCommitment(&cobra.Command{Use: "probe"})
-
-	require.True(t, statecfg.ExperimentalParallelCommitment,
-		"integration ignored erigon's default and would run the sequential trie")
+	for _, seed := range []bool{true, false} {
+		require.Equal(t, seed, resolve(seed),
+			"integration overrode COMMITMENT_PARALLEL with the flag default")
+		require.True(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=true"))
+		require.False(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=false"))
+	}
 }

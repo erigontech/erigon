@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -48,15 +49,14 @@ type forkchoiceOutcome struct {
 	err    error
 }
 
-func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) error {
+func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) {
 	if alreadySent {
-		return nil
+		return
 	}
 	select {
 	case ch <- forkchoiceOutcome{result: result}:
 	default:
 	}
-	return nil
 }
 
 func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutcome, err error, alreadySent bool) error {
@@ -518,7 +518,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if result != nil {
-		return sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
+		sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
+		return nil
 	}
 	if isDomainAheadOfBlocks {
 		// Open a brief RwTx to flush accumulated overlay + SD state atomically.
@@ -530,11 +531,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusTooFarAway,
 			ValidationError: "domain ahead of blocks",
 		}, false)
+		return nil
 	}
 
 	// Set Progress for headers and bodies accordingly.
@@ -639,11 +641,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
 				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
 			}, stateFlushingInParallel)
+			return nil
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
@@ -685,10 +688,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if !valid {
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusInvalidForkchoice,
 				LatestValidHash: common.Hash{},
 			}, stateFlushingInParallel)
+			return nil
 		}
 		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -738,10 +742,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
+		persistStart := time.Now()
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		persist := time.Since(persistStart)
 		e.observeStateTransition(ctx, StateTransitionCommitComplete)
 
 		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
@@ -763,13 +769,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
+		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)
 	}
 
-	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+	sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 		LatestValidHash: headHash,
 		Status:          status,
 		ValidationError: validationError,
 	}, stateFlushingInParallel)
+	return nil
 }
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the
@@ -980,4 +988,18 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		dbgLevel = log.LvlDebug
 	}
 	e.logger.Log(dbgLevel, msg, logArgs...)
+}
+
+func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockTimings, persist time.Duration, headNum, finishProgressBefore uint64, mergedExtendingFork bool) {
+	if e.forkValidator == nil {
+		return
+	}
+	rec := e.forkValidator.TakeBlockMetrics(blockHash)
+	// Without the merge the block is re-executed by RunLoop, so the cached
+	// record describes a run whose state was discarded.
+	if rec == nil || !mergedExtendingFork || headNum != finishProgressBefore+1 {
+		return
+	}
+	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist
+	blockmetrics.Emit(e.logger, common.Deref(e.syncCfg.SlowBlockThreshold), rec)
 }

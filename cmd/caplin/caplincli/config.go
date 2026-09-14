@@ -37,22 +37,23 @@ import (
 type CaplinCliCfg struct {
 	*sentinelcli.SentinelCliCfg
 
-	Chaindata             string        `json:"chaindata"`
-	ErigonPrivateApi      string        `json:"erigon_private_api"`
-	AllowedEndpoints      []string      `json:"endpoints"`
-	BeaconApiReadTimeout  time.Duration `json:"beacon_api_read_timeout"`
-	BeaconApiWriteTimeout time.Duration `json:"beacon_api_write_timeout"`
-	BeaconAddr            string        `json:"beacon_addr"`
-	BeaconProtocol        string        `json:"beacon_protocol"`
-	DataDir               string        `json:"data_dir"`
-	RunEngineAPI          bool          `json:"run_engine_api"`
-	EngineAPIAddr         string        `json:"engine_api_addr"`
-	EngineAPIPort         int           `json:"engine_api_port"`
-	MevRelayUrl           string        `json:"mev_relay_url"`
-	CustomConfig          string        `json:"custom_config"`
-	CustomGenesisState    string        `json:"custom_genesis_state"`
-	MaxPeerCount          uint64        `json:"max_peer_count"`
-	JwtSecret             []byte
+	Chaindata               string        `json:"chaindata"`
+	ErigonPrivateApi        string        `json:"erigon_private_api"`
+	AllowedEndpoints        []string      `json:"endpoints"`
+	BeaconApiReadTimeout    time.Duration `json:"beacon_api_read_timeout"`
+	BeaconApiWriteTimeout   time.Duration `json:"beacon_api_write_timeout"`
+	BeaconAddr              string        `json:"beacon_addr"`
+	BeaconProtocol          string        `json:"beacon_protocol"`
+	DataDir                 string        `json:"data_dir"`
+	RunEngineAPI            bool          `json:"run_engine_api"`
+	EngineAPIAddr           string        `json:"engine_api_addr"`
+	EngineAPIPort           int           `json:"engine_api_port"`
+	MevRelayUrl             string        `json:"mev_relay_url"`
+	AllowPrivateBuilderURLs bool          `json:"allow_private_builder_urls"`
+	CustomConfig            string        `json:"custom_config"`
+	CustomGenesisState      string        `json:"custom_genesis_state"`
+	MaxPeerCount            uint64        `json:"max_peer_count"`
+	JwtSecret               []byte
 
 	AllowedMethods     []string `json:"allowed_methods"`
 	AllowedOrigins     []string `json:"allowed_origins"`
@@ -106,6 +107,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
 	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
+	cfg.AllowPrivateBuilderURLs = ctx.Bool(utils.CaplinAllowPrivateBuilderURLs.Name)
 
 	// Custom Chain
 	cfg.CustomConfig = ctx.String(caplinflags.CustomConfig.Name)

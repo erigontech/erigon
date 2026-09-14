@@ -533,7 +533,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
-		cur.Reset(0, getter)
+		require.NoError(t, cur.Reset(0, getter))
 
 		require.Equal(t, k, cur.Key())
 		require.Equal(t, v, cur.Value())
@@ -807,7 +807,7 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
 
 	for _, key := range keys {
-		_, value, _, found, err := index.Get(key, getter)
+		_, value, _, found, err := index.Get(key, nil, getter)
 		require.NoError(t, err)
 		require.True(t, found)
 		size, found, err := index.GetValSize(key, getter)

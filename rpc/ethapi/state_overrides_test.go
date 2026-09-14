@@ -68,3 +68,41 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 	require.True(t, atDst, "precompile must be present at destination")
 	require.Equal(t, stub.Name(), got.Name())
 }
+
+func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
+	key := common.HexToHash("0x01")
+
+	for _, tc := range []struct {
+		name      string
+		stateDiff bool
+	}{
+		{name: "state"},
+		{name: "stateDiff", stateDiff: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := map[common.Hash]common.Hash{key: common.HexToHash("0x2a")}
+			account := Account{State: &storage}
+			if tc.stateDiff {
+				account = Account{StateDiff: &storage}
+			}
+
+			overrides := StateOverrides{addr: account}
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+
+			rules := &chain.Rules{IsSpuriousDragon: true}
+			require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
+
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+
+			value, err := ibs.GetState(addr, accounts.InternKey(key))
+			require.NoError(t, err)
+			require.Equal(t, uint64(0x2a), value.Uint64())
+		})
+	}
+}

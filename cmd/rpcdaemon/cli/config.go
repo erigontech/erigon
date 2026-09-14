@@ -685,11 +685,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}
 		defer tcpListener.Close()
 		go func() {
-			err := srv.ServeListener(tcpListener)
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					logger.Error("Socket Listener Fatal Error", "err", err)
-				}
+			// ServeListener only returns on error, never nil.
+			if err := srv.ServeListener(tcpListener); !errors.Is(err, net.ErrClosed) {
+				logger.Error("Socket Listener Fatal Error", "err", err)
 			}
 		}()
 		info = append(info, "socket.url", socketUrl)

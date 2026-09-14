@@ -374,9 +374,9 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 		require.NotNil(t, attrs.Withdrawals)
 		require.Len(t, attrs.Withdrawals, len(expectedWithdrawals.Withdrawals))
 		for i, withdrawal := range expectedWithdrawals.Withdrawals {
-			require.Equal(t, withdrawal.Index, attrs.Withdrawals[i].Index)
-			require.Equal(t, withdrawal.Amount, attrs.Withdrawals[i].Amount)
-			require.Equal(t, withdrawal.Validator, attrs.Withdrawals[i].Validator)
+			require.Equal(t, hexutil.Uint64(withdrawal.Index), attrs.Withdrawals[i].Index)
+			require.Equal(t, hexutil.Uint64(withdrawal.Amount), attrs.Withdrawals[i].Amount)
+			require.Equal(t, hexutil.Uint64(withdrawal.Validator), attrs.Withdrawals[i].Validator)
 			require.Equal(t, withdrawal.Address, attrs.Withdrawals[i].Address)
 		}
 		return payloadID, nil

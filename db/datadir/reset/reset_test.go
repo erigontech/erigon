@@ -349,14 +349,14 @@ func checkFs(t *testing.T, fsRoot fs.FS, checkers ...fsChecker) {
 			println("checkFs", path, d, err)
 			matched := false
 			for _, c := range checkers {
-				stop, err := c.OnWalkDir(fsCheckerWalkInput{
+				stop, checkErr := c.OnWalkDir(fsCheckerWalkInput{
 					name: slashName(path),
 					d:    d,
 					err:  err,
 					fs:   fsRoot,
 				})
-				if err != nil {
-					return err
+				if checkErr != nil {
+					return checkErr
 				}
 				if stop {
 					matched = true
@@ -393,7 +393,8 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 	for _, entry := range entries {
 		localName, err := filepath.Localize(string(entry.Name))
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("localizing entry name %q", entry.Name))
-		root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
+		err = root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
+		qt.Assert(t, qt.IsNil(err), qt.Commentf("mkdir for entry %q", entry.Name))
 		switch {
 		case entry.Mode&fs.ModeSymlink != 0:
 			// Windows doesn't seem to create SYMLINKD types when going through os.Root. So we do

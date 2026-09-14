@@ -88,6 +88,7 @@ type RequestGenerator interface {
 	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
 	UnsubscribeAll()
 	TxpoolContent() (int, int, int, error)
+	TxpoolPendingHashesFrom(address common.Address) (map[common.Hash]struct{}, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
@@ -137,6 +138,8 @@ var Methods = struct {
 	AdminNodeInfo RPCMethod
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod
+	// TxpoolContentFrom represents the txpool_contentFrom method
+	TxpoolContentFrom RPCMethod
 	// OTSGetBlockDetails represents the ots_getBlockDetails method
 	OTSGetBlockDetails RPCMethod
 	// ETHNewHeads represents the eth_newHeads sub method
@@ -164,6 +167,7 @@ var Methods = struct {
 	ETHBlockNumber:            "eth_blockNumber",
 	AdminNodeInfo:             "admin_nodeInfo",
 	TxpoolContent:             "txpool_content",
+	TxpoolContentFrom:         "txpool_contentFrom",
 	OTSGetBlockDetails:        "ots_getBlockDetails",
 	ETHNewHeads:               "eth_newHeads",
 	ETHLogs:                   "eth_logs",

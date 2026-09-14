@@ -22,10 +22,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -93,7 +96,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 	if err != nil {
 		return err
 	}
@@ -238,8 +241,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return fmt.Errorf("genesis is not traceable")
 	}
 
-	// check pruning to ensure we have history at this block level
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	// check pruning to ensure we have the block and the history at this block level
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -267,6 +270,14 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
+
+	// The state is built from history at txnIndex, so the earlier transactions of
+	// the block never ran and the log counter they left has to be handed in.
+	firstLogIndex, err := rawtemporaldb.FirstLogIndex(tx, txNum, txnIndex)
+	if err != nil {
+		return err
+	}
+	ibs.ResumeLogIndexAt(firstLogIndex)
 
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
@@ -348,6 +359,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	defer ibs.Close()
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
+	// The override below replaces the caller's blob fee cap, so read the predicate first.
+	unpricedBlobs := args.BlobsUnpriced()
 	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
 		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
@@ -382,6 +395,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		}
 	}
 
+	if unpricedBlobs {
+		blockCtx.BlobBaseFee = uint256.Int{}
+	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	// Trace the transaction and return
 	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, nil, common.Hash{}, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
@@ -488,8 +504,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
-		// do not reset ibs, because we want to keep the overrides and state change
-		// ibs.Reset()
+		// A bundle is a block of its own, so its logs number from zero. Only the
+		// logs are reset: the overrides and state changes have to survive.
+		ibs.ResetLogs()
 		for txnIndex := range bundle.Transactions {
 			txn := &bundle.Transactions[txnIndex]
 			if txn.Gas == nil || *txn.Gas == 0 {
