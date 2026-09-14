@@ -495,7 +495,8 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 // TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
 func TxnRlpByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) ([]byte, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
-	if err != nil || b == nil {
+	// TxCount includes the two system txns; txn ids are global, so an unchecked index reads another block
+	if err != nil || b == nil || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount)-2 {
 		return nil, err
 	}
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
