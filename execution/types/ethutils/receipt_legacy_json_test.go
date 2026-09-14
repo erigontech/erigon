@@ -369,3 +369,21 @@ func TestRPCReceiptKeepsNullLogsBloom(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(b), `"logsBloom":null`)
 }
+
+// A subscribed receipt with an empty or malformed bloom leaves logsBloom null: BytesToBloom would panic on a long
+// one and zero-pad a short one.
+func TestMarshalSubscribeReceiptOddLogsBloom(t *testing.T) {
+	for name, bloom := range map[string][]byte{"empty": nil, "short": make([]byte, 10), "long": make([]byte, types.BloomByteLength+1)} {
+		t.Run(name, func(t *testing.T) {
+			r := &remoteproto.SubscribeReceiptsReply{
+				BlockHash:       gointerfaces.ConvertHashToH256(common.HexToHash("0x01")),
+				TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x02")),
+				From:            gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
+				LogsBloom:       bloom,
+			}
+			b, err := json.Marshal(MarshalSubscribeReceipt(r))
+			require.NoError(t, err)
+			require.Contains(t, string(b), `"logsBloom":null`)
+		})
+	}
+}

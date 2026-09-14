@@ -26,16 +26,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func BenchmarkMarshalReceipt(b *testing.B) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	txn := &types.DynamicFeeTransaction{
-		CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
-		ChainID:  *uint256.NewInt(1337),
-		TipCap:   *uint256.NewInt(2),
-		FeeCap:   *uint256.NewInt(100),
-	}
+	txn := dynamicFeeTx(&to)
+	txn.SetSender(accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef03")))
 	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
 
 	for _, logCount := range []int{0, 2} {
@@ -58,7 +55,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		b.Run(fmt.Sprintf("logs=%d", logCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := json.Marshal(MarshalReceipt(receipt, txn, chain.TestChainOsakaConfig, header, receipt.TxHash, false, true))
+				out, err := json.Marshal(MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, true))
 				if err != nil || len(out) == 0 {
 					b.Fatal(err)
 				}

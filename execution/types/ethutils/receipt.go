@@ -33,22 +33,23 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC representation of a transaction receipt. Logs holds
-// []*types.RPCLog when the block timestamp is requested and []*types.Log otherwise.
+// RPCReceipt is the RPC representation of a transaction receipt. Logs holds []*types.RPCLog when
+// the block timestamp is requested, []*types.Log otherwise, []map[string]any for a subscribed
+// receipt, and nil once Otterscan clears it.
 type RPCReceipt struct {
-	BlockHash         common.Hash      `json:"blockHash"`
-	BlockNumber       hexutil.Uint64   `json:"blockNumber"`
-	TransactionHash   common.Hash      `json:"transactionHash"`
-	TransactionIndex  hexutil.Uint64   `json:"transactionIndex"`
-	From              accounts.Address `json:"from"`
-	To                *common.Address  `json:"to"`
-	Type              hexutil.Uint     `json:"type"`
-	GasUsed           hexutil.Uint64   `json:"gasUsed"`
-	CumulativeGasUsed hexutil.Uint64   `json:"cumulativeGasUsed"`
-	ContractAddress   *common.Address  `json:"contractAddress"`
-	Logs              any              `json:"logs"`
-	LogsBloom         *types.Bloom     `json:"logsBloom"`
-	EffectiveGasPrice *hexutil.U256    `json:"effectiveGasPrice,omitempty"`
+	BlockHash         common.Hash     `json:"blockHash"`
+	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
+	TransactionHash   common.Hash     `json:"transactionHash"`
+	TransactionIndex  hexutil.Uint64  `json:"transactionIndex"`
+	From              common.Address  `json:"from"`
+	To                *common.Address `json:"to"`
+	Type              hexutil.Uint    `json:"type"`
+	GasUsed           hexutil.Uint64  `json:"gasUsed"`
+	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed"`
+	ContractAddress   *common.Address `json:"contractAddress"`
+	Logs              any             `json:"logs"`
+	LogsBloom         *types.Bloom    `json:"logsBloom"`
+	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice,omitempty"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty"`
 	Root         hexutil.Bytes   `json:"root,omitempty"`
@@ -113,7 +114,7 @@ func MarshalReceipt(
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   txnHash,
 		TransactionIndex:  hexutil.Uint64(receipt.TransactionIndex),
-		From:              from,
+		From:              from.Value(),
 		To:                txn.GetTo(),
 		Type:              hexutil.Uint(txn.Type()),
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
@@ -173,7 +174,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		BlockNumber:       hexutil.Uint64(protoReceipt.BlockNumber),
 		TransactionHash:   txHash,
 		TransactionIndex:  hexutil.Uint64(protoReceipt.TransactionIndex),
-		From:              accounts.InternAddress(gointerfaces.ConvertH160toAddress(protoReceipt.From)),
+		From:              common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From)),
 		To:                nonZeroAddress(protoReceipt.To),
 		Type:              hexutil.Uint(protoReceipt.Type),
 		GasUsed:           hexutil.Uint64(protoReceipt.GasUsed),
@@ -181,9 +182,11 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		ContractAddress:   nonZeroAddress(protoReceipt.ContractAddress),
 		Status:            &status,
 	}
-	if len(protoReceipt.LogsBloom) > 0 {
+	if n := len(protoReceipt.LogsBloom); n == types.BloomByteLength {
 		bloom := types.BytesToBloom(protoReceipt.LogsBloom)
 		result.LogsBloom = &bloom
+	} else if n != 0 {
+		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
 	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
