@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const deferredWritesPerWorker = 4096
@@ -314,51 +316,43 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 	}
 
 	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
-	errs := make([]error, workers)
-	written := make([]int, workers)
-	bytesOut := make([]int, workers)
-	var claimed atomic.Int64
-	var wg sync.WaitGroup
-	for w := range workers {
-		wg.Go(func() {
+	var claimed, written, bytesOut atomic.Int64
+	var g errgroup.Group
+	for range workers {
+		g.Go(func() error {
+			var n, size int64
+			defer func() {
+				written.Add(n)
+				bytesOut.Add(size)
+			}()
 			wctx, cleanup := p.trieCtxFactory(ctx)
 			if cleanup != nil {
 				defer cleanup()
 			}
 			if wctx == nil {
-				errs[w] = errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
-				return
+				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 			}
 			for {
 				i := int(claimed.Add(1)) - 1
 				if i >= len(deferred) {
-					return
+					return nil
 				}
 				upd := deferred[i]
 				if upd.encoded == nil {
 					continue
 				}
 				if err := wctx.PutBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-					errs[w] = err
-					return
+					return err
 				}
-				written[w]++
-				bytesOut[w] += len(upd.encoded)
+				n++
+				size += int64(len(upd.encoded))
 			}
 		})
 	}
-	wg.Wait()
-
-	var n, b int
-	for i := range workers {
-		n += written[i]
-		b += bytesOut[i]
-	}
-	publishBranchWrites(n, b, p.metrics)
-	for _, err := range errs {
-		if err != nil {
-			return fmt.Errorf("apply deferred branch updates: %w", err)
-		}
+	err := g.Wait()
+	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	if err != nil {
+		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}
 	return nil
 }
