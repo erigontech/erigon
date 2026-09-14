@@ -139,7 +139,8 @@ type Config struct {
 	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
 
 	// Account Abstraction
-	AllowAA bool
+	AllowAA         bool
+	EIP8253Accounts []common.Address `json:"eip8253Accounts,omitempty"`
 }
 
 // IsEIPEnabled reports whether the given EIP is active at the given block time:
