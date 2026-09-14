@@ -262,7 +262,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		}
 	}
 	stitchSplitCells(w, cells, touchedBits, presentBits)
-	if passNib >= 0 && node.plainKey == nil && int(nibs[0]) == passNib {
+	if passNib >= 0 && int(nibs[0]) == passNib {
 		bit := uint16(1) << passNib
 		row := w.activeRows - 1
 		if touchedBits&^presentBits&bit != 0 && w.touchMap[row]&^bit != 0 {
