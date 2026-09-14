@@ -368,6 +368,7 @@ func splitForkAt(t *testing.T, ms *MockState, prefix []byte, pre, under []splitK
 
 	var (
 		cells    [16]cell
+		touched  uint16
 		present  uint16
 		deferred []*DeferredBranchUpdate
 	)
@@ -387,12 +388,18 @@ func splitForkAt(t *testing.T, ms *MockState, prefix []byte, pre, under []splitK
 		c, err := w.foldMounted(ctx, int(nib))
 		require.NoError(t, err)
 		cells[nib] = c
-		present |= uint16(1) << nib
+		bit := uint16(1) << nib
+		if w.touchMap[0]&bit != 0 {
+			touched |= bit
+		}
+		if w.afterMap[0]&bit != 0 {
+			present |= bit
+		}
 		deferred = append(deferred, w.TakeDeferredUpdates()...)
 		w.Release()
 		i = j
 	}
-	stitchSplitCells(base, &cells, present)
+	stitchSplitCells(base, &cells, touched, present)
 	if _, err := foldSplitRow(ctx, base); err != nil {
 		require.NoError(t, err)
 	}
