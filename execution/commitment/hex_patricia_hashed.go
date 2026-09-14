@@ -160,11 +160,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
-	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
-	// applies deferred updates inline.
-	leaveDeferredForCaller bool
-
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
@@ -204,7 +199,6 @@ func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
-	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
 	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
@@ -271,7 +265,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
-	hph.leaveDeferredForCaller = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -2649,7 +2642,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.cfg.LeaveDeferredForCaller {
 		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
@@ -2732,7 +2725,6 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.cfg.LeaveDeferredForCaller = leave
-	hph.leaveDeferredForCaller = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.

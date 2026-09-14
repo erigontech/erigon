@@ -44,8 +44,7 @@ type ParallelPatriciaHashed struct {
 
 	deepLocalFolds atomic.Uint64
 
-	leaveDeferredForCaller bool
-	deferredForCaller      []*DeferredBranchUpdate
+	deferredForCaller []*DeferredBranchUpdate
 
 	// metrics is the round's aggregate: each mount worker counts into its own
 	// Metrics and merges here when it finishes, so the fold loop never touches
@@ -65,8 +64,6 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		accountKeyLen:  accountKeyLen,
 		numWorkers:     defaultParallelCommitmentWorkers,
 		cfg:            cfg,
-
-		leaveDeferredForCaller: cfg.LeaveDeferredForCaller,
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
 	// same keys the workers do, so aliasing them counts every key twice.
@@ -91,7 +88,6 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	p.cfg.LeaveDeferredForCaller = leave
-	p.leaveDeferredForCaller = leave
 }
 
 func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
@@ -269,7 +265,7 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, mErr
 	}
 
-	if p.leaveDeferredForCaller {
+	if p.cfg.LeaveDeferredForCaller {
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil

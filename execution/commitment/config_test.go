@@ -71,36 +71,7 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	if hph.branchEncoder.deferUpdates {
 		t.Error("branchEncoder.deferUpdates should be false")
 	}
-	if !hph.leaveDeferredForCaller {
-		t.Error("leaveDeferredForCaller should be true")
-	}
 	if !hph.memoizationOff {
 		t.Error("memoizationOff should be true")
-	}
-}
-
-func TestTrieConfig_LeaveDeferredForCallerReachesBothEngines(t *testing.T) {
-	cfg := DefaultTrieConfig()
-	cfg.LeaveDeferredForCaller = true
-
-	hph := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	defer hph.Release()
-	if !hph.leaveDeferredForCaller {
-		t.Error("serial engine must honour cfg.LeaveDeferredForCaller")
-	}
-
-	p := NewParallelPatriciaHashed(nil, length.Addr, cfg)
-	defer p.Release()
-	if !p.leaveDeferredForCaller {
-		t.Error("parallel engine must honour cfg.LeaveDeferredForCaller")
-	}
-
-	p.SetLeaveDeferredForCaller(false)
-	if p.cfg.LeaveDeferredForCaller {
-		t.Error("the setter must keep cfg in step so cfg never reports a stale mode")
-	}
-	hph.SetLeaveDeferredForCaller(false)
-	if hph.cfg.LeaveDeferredForCaller {
-		t.Error("the setter must keep cfg in step so cfg never reports a stale mode")
 	}
 }
