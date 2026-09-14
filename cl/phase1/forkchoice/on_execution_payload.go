@@ -285,21 +285,12 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	return payloadStatus, err
 }
 
-// newPayloadWhileYieldingForkChoiceLock validates a payload with the EL on behalf of a
-// caller holding f.mu, releasing the lock for the duration of the call so that OnTick,
-// OnAttestation and fork-choice reads are not blocked behind the EL. alreadyValidated
-// short-circuits the EL call when a concurrent caller validated the same payload while
-// this one waited for admission. Any invariant the caller checked before this call can
-// go stale and must be revalidated after it returns.
 // newPayloadWhileYieldingForkChoiceLock validates a payload with the EL, releasing the
-// caller-held f.mu for the duration of the call. Anything checked before the call can go
-// stale and must be revalidated after it returns.
-//
-// publishValidated records a VALID result while the admission token is still held, so
-// queued callers for the same payload short-circuit instead of resending it. Publishing
-// after the token is released is too late: the finishing caller must reacquire f.mu first,
-// and the queue drains before that. Nil when the caller has no marker it can set without
-// f.mu.
+// caller-held f.mu for the call. Anything checked before it can go stale. publishValidated
+// records a VALID result before the admission token is released, so queued callers for the
+// same payload reuse it; releasing the token first would be too late, since the finishing
+// caller must reacquire f.mu before it can publish. Nil when there is no marker the caller
+// can set without f.mu.
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	alreadyValidated func() bool,

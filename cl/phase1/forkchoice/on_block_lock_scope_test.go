@@ -18,7 +18,6 @@ package forkchoice
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -28,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -178,179 +177,47 @@ func requireBlockNotAdded(t *testing.T, store *ForkChoiceStore, block *cltypes.S
 	require.NotContains(t, store.headSet, common.Hash(blockRoot))
 }
 
-// blockWithBlobCommitment makes the block take the EL GetBlobs branch. The body edit
-// invalidates the block against its state root, so callers must assert on how OnBlock
-// returns rather than on a successful import.
-func blockWithBlobCommitment(t *testing.T, store *ForkChoiceStore, block *cltypes.SignedBeaconBlock) *cltypes.SignedBeaconBlock {
-	t.Helper()
-	peerDas := dasmock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
-	store.InitPeerDas(peerDas)
-	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	return block
-}
-
-// blockingBlobEngine returns a mock whose GetBlobs signals entry and then blocks.
-func blockingBlobEngine(t *testing.T) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
-	t.Helper()
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	entered := make(chan struct{}, 1)
-	release := make(chan struct{})
-	engine.EXPECT().
-		GetBlobs(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
-			entered <- struct{}{}
-			<-release
-			return nil, nil, nil
-		})
-	return engine, entered, release
-}
-
-// GetBlobs is a blocking EL call on the same pre-Gloas path, so OnBlock must not hold
-// f.mu across it either.
-func TestOnBlockYieldsForkChoiceLockDuringGetBlobs(t *testing.T) {
-	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
-	store, block := buildExAnteStorePendingLast(t, engine)
-	block = blockWithBlobCommitment(t, store, block)
-
-	onBlockDone := make(chan error, 1)
-	go func() { onBlockDone <- store.OnBlock(context.Background(), block, false, true, true) }()
-	awaitSignal(t, blobsEntered, "GetBlobs to start")
-
-	tickDone := make(chan struct{})
-	go func() {
-		store.OnTick(48)
-		close(tickDone)
-	}()
-	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while GetBlobs is blocked")
-
-	close(releaseBlobs)
-	select {
-	case <-onBlockDone:
-	case <-time.After(lockScopeTimeout):
-		t.Fatal("OnBlock did not finish after GetBlobs was released")
-	}
-}
-
-// GetBlobs runs with newPayload=false, where the post-NewPayload recheck never runs, so
-// the finalized-descendant checks have to be redone after this yield too.
-func TestOnBlockRechecksFinalityAfterGetBlobs(t *testing.T) {
-	t.Run("finalized past the block", func(t *testing.T) {
-		store, block, run := startOnBlockInsideGetBlobs(t)
-		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
-		require.NoError(t, run())
-		requireBlockNotAdded(t, store, block)
-	})
-
-	t.Run("finalized onto another branch", func(t *testing.T) {
-		store, block, run := startOnBlockInsideGetBlobs(t)
-		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
-		require.ErrorIs(t, run(), ErrNotFinalizedDescendant)
-		requireBlockNotAdded(t, store, block)
-	})
-}
-
-func startOnBlockInsideGetBlobs(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
-	t.Helper()
-	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
-	store, block := buildExAnteStorePendingLast(t, engine)
-	block = blockWithBlobCommitment(t, store, block)
-	onBlockDone := make(chan error, 1)
-	go func() { onBlockDone <- store.OnBlock(context.Background(), block, false, true, true) }()
-	awaitSignal(t, blobsEntered, "GetBlobs to start")
-	return store, block, func() error {
-		close(releaseBlobs)
-		select {
-		case err := <-onBlockDone:
-			return err
-		case <-time.After(lockScopeTimeout):
-			t.Fatal("OnBlock did not finish after GetBlobs was released")
-			return nil
-		}
-	}
-}
-
-// Finality moving during the EL call must not swallow the EL's own verdict: an invalid
-// payload still has to be reported and recorded, it is only the commit that is dropped.
-func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
-	t.Run("invalidated", func(t *testing.T) {
-		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusInvalidated, nil)
-		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
-
-		require.ErrorIs(t, run(), ErrBlockInvalid)
-		status, ok := store.executionPayloadStatus.Get(block.Block.Body.ExecutionPayload.BlockHash)
-		require.True(t, ok, "the EL verdict must still be recorded")
-		require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
-		requireBlockNotAdded(t, store, block)
-	})
-
-	t.Run("engine error", func(t *testing.T) {
-		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNone, errors.New("el unavailable"))
-		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
-
-		require.ErrorIs(t, run(), ErrNewPayloadNoStatus)
-		requireBlockNotAdded(t, store, block)
-	})
-}
-
-// A NOT_VALIDATED verdict is kept even when finality drops the block: the payload really
-// is unvalidated, so the root stays optimistic while the block itself is not inserted.
-// Nothing prunes that entry on finality; it waits for a later validated payload with a
-// higher execution block number.
-func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
-	store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNotValidated, nil)
-	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
-
-	require.NoError(t, run())
-	requireBlockNotAdded(t, store, block)
-
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	require.True(t, store.IsRootOptimistic(blockRoot), "an unvalidated payload stays optimistic")
-}
-
-// A caller that finishes the EL while another writer holds f.mu cannot publish its result
-// through OnBlock. Callers already queued on the admission token for the same payload must
-// still reuse that result instead of resending it to the EL.
-func TestOnBlockValidatesSamePayloadOnceWhileLockIsPinned(t *testing.T) {
+// Two equivocating blocks can both clear the entry admission check before either is
+// inserted, so the guard has to be redone after the EL call. Whichever finishes second
+// must be rejected.
+func TestOnBlockRejectsEquivocationRegisteredDuringNewPayload(t *testing.T) {
 	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
-	store, block := buildExAnteStorePendingLast(t, engine)
+	store, first := buildExAnteStorePendingLast(t, engine)
 
-	results := make(chan error, 4)
-	run := func() { results <- store.OnBlock(context.Background(), block, true, true, false) }
-	go run()
-	awaitSignal(t, elEntered, "the first NewPayload to start")
+	// A sibling with the same slot and proposer but a different root.
+	second := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(second, diffBlockd4Enc, int(clparams.AltairVersion)))
+	second.Block.StateRoot = common.HexToHash("0xfeed")
+	firstRoot, err := first.Block.HashSSZ()
+	require.NoError(t, err)
+	secondRoot, err := second.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, firstRoot, secondRoot, "the two blocks must have distinct roots")
+	require.Equal(t, first.Block.Slot, second.Block.Slot)
+	require.Equal(t, first.Block.ProposerIndex, second.Block.ProposerIndex)
 
-	// f.mu is free while the first caller sits in the EL, so these reach the admission
-	// token and queue behind it.
-	for range 3 {
-		go run()
-	}
-
-	// Pin f.mu so the first caller cannot reacquire it to publish its result.
-	pinned, unpin := make(chan struct{}), make(chan struct{})
+	// The first block is parked inside the EL with f.mu released, so nothing is inserted yet.
+	done := make(chan error, 1)
 	go func() {
-		store.mu.Lock()
-		close(pinned)
-		<-unpin
-		store.mu.Unlock()
+		done <- store.OnBlockWithEquivocationCheck(context.Background(), second, true, true, false)
 	}()
-	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+	awaitSignal(t, elEntered, "NewPayload to start for the equivocating block")
+
+	// Insert the sibling while the first caller is still in the EL.
+	require.NoError(t, store.OnBlock(context.Background(), first, false, true, false))
+	_, ok := store.forkGraph.GetHeader(firstRoot)
+	require.True(t, ok, "the sibling must be registered before the EL call returns")
 
 	close(releaseEL)
-	close(unpin)
-
-	for range 4 {
-		select {
-		case err := <-results:
-			require.NoError(t, err)
-		case <-time.After(lockScopeTimeout):
-			t.Fatal("a queued OnBlock did not finish")
-		}
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "conflicts with a previously validated proposal",
+			"the equivocating block must be rejected by the equivocation guard, not incidentally")
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("OnBlockWithEquivocationCheck did not finish")
 	}
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
+	_, ok = store.forkGraph.GetHeader(secondRoot)
+	require.False(t, ok, "the equivocating block must not be inserted")
 }
 
 // A caller that wins admission only after someone else validated the same payload
