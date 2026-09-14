@@ -285,6 +285,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
+	hph.branchEncoder.callerOwnsDeferred = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -1770,14 +1771,8 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
-			return fmt.Errorf("failed to collect deferred branch update: %w", err)
-		}
-	} else {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
-			return fmt.Errorf("failed to encode branch update: %w", err)
-		}
+	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
+		return fmt.Errorf("failed to encode branch update: %w", err)
 	}
 	upCell.extLen = depth - upDepth - 1
 	upCell.hashedExtLen = upCell.extLen
@@ -2018,12 +2013,6 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 // collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
 	if !hph.branchBefore[row] {
-		return nil
-	}
-	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
-			return fmt.Errorf("failed to collect deferred branch deletion: %w", err)
-		}
 		return nil
 	}
 	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
