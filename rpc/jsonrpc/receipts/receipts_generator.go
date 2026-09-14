@@ -136,7 +136,7 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.
 // the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
 // is already cached, that I/O and decode are unnecessary — TryGetCachedReceipt short-circuits them.
 //
-// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt) or Bloom.
+// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt).
 // receiptCache (per-tx, keyed by txNum) is checked first because it is populated by every
 // eth_getLogs / eth_getTransactionReceipt call. receiptsCache (block-level) is only populated
 // by eth_getBlockReceipts, so it is checked second to avoid an unnecessary lookup in the common case.
@@ -153,26 +153,6 @@ func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txI
 		}
 	}
 	return nil, false
-}
-
-// PersistedReceiptWithoutBloom reads a receipt only from the persistent cache and caches it with an empty
-// Bloom, which GetReceipt fills in when it serves the receipt; ok is false when the receipt has to be generated.
-func (g *Generator) PersistedReceiptWithoutBloom(tx kv.TemporalTx, header *types.Header, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
-	if !PersistedReceiptsServed() {
-		return nil, false, nil
-	}
-	receipt, ok, err := rawdb.ReadReceiptCacheV2(g.filters.WithTemporalOverlay(tx), rawdb.RCacheV2Query{
-		TxNum:         txNum,
-		BlockNum:      header.Number.Uint64(),
-		BlockHash:     header.Hash(),
-		TxnHash:       txnHash,
-		DontCalcBloom: true,
-	})
-	if err != nil || !ok || receipt == nil {
-		return nil, false, err
-	}
-	g.addToCacheReceipt(txNum, receipt)
-	return receipt, true, nil
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
@@ -270,12 +250,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipt, ok := g.receiptCache.Get(txNum); ok {
 		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
 			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
-			if receipt.Bloom == (types.Bloom{}) && len(receipt.Logs) > 0 {
-				filled := *receipt // cached by PersistedReceiptWithoutBloom; cached receipts are shared, never change them in place
-				filled.Bloom = types.CreateBloom(types.Receipts{&filled})
-				g.addToCacheReceipt(txNum, &filled)
-				receipt = &filled
-			}
 			return receipt, nil
 		}
 
@@ -294,6 +268,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			BlockNum:  blockNum,
 			BlockHash: blockHash,
 			TxnHash:   txnHash,
+			// eth_getLogs reads only the logs; ethutils.MarshalReceipt derives the bloom for the callers that return it
+			DontCalcBloom: true,
 		})
 		if err != nil {
 			return nil, err

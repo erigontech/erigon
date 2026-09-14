@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -85,9 +87,13 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 		"GetReceipt must resolve the log index through the block overlay")
 }
 
-// TestGetReceiptFillsBloomOfLogsOnlyCacheEntry pins that a receipt cached by a logs-only read
-// gets its Bloom when GetReceipt serves it: GetReceipt callers return it as logsBloom.
-func TestGetReceiptFillsBloomOfLogsOnlyCacheEntry(t *testing.T) {
+// TestGetReceiptSkipsBloomOfPersistedReceipt pins that a receipt served from the persistent cache
+// keeps an empty Bloom: eth_getLogs reads only the logs, and ethutils.MarshalReceipt derives the
+// bloom for the callers that return it.
+func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
+
 	signer := types.LatestSignerForChainID(nil)
 	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
 	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
@@ -107,19 +113,15 @@ func TestGetReceiptFillsBloomOfLogsOnlyCacheEntry(t *testing.T) {
 	require.NoError(t, err)
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
-	txNum := minTxNum + 1
+	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
 	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
 
 	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
-	logsOnly, ok, err := gen.PersistedReceiptWithoutBloom(tx, header, txn.Hash(), txNum)
+	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.Len(t, logsOnly.Logs, 1)
-	require.Equal(t, types.Bloom{}, logsOnly.Bloom)
-	_, cached := gen.TryGetCachedReceipt(header.Hash(), txNum, 0)
-	require.True(t, cached, "a logs-only read must fill the receipt cache")
+	require.Len(t, receipt.Logs, 1)
+	require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
 
-	full, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
-	require.NoError(t, err)
-	require.Equal(t, types.CreateBloom(types.Receipts{full}), full.Bloom)
+	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, txn.Hash(), true, true)
+	require.Equal(t, types.CreateBloom(types.Receipts{receipt}), served["logsBloom"])
 }

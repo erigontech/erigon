@@ -344,7 +344,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	require.Equal(t, expect, sent.Data)
 }
 
-// newTestBackend creates a chain with a number of explicitly defined blocks and
+// mockWithGenerator creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen), opts ...execmoduletester.Option) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(
