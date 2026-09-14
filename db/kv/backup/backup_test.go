@@ -161,11 +161,11 @@ func TestClearTablesMultiChunkWriteMap(t *testing.T) {
 
 const dupTestTable = "TD"
 
-func mdbxFileSize(t *testing.T, dbDir string) int64 {
+func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
 	t.Helper()
-	st, err := os.Stat(filepath.Join(dbDir, "mdbx.dat"))
+	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
 	require.NoError(t, err)
-	return st.Size()
+	return st
 }
 
 const (
@@ -228,16 +228,13 @@ func TestCompactInPlace(t *testing.T) {
 
 	dataFile := filepath.Join(dbDir, dataFileName)
 	require.NoError(t, os.Chmod(dataFile, 0600))
-	beforeStat, err := os.Stat(dataFile)
-	require.NoError(t, err)
+	before := dataFileStat(t, dbDir)
 
-	before := mdbxFileSize(t, dbDir)
 	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
-	require.Less(t, mdbxFileSize(t, dbDir), before)
 
-	afterStat, err := os.Stat(dataFile)
-	require.NoError(t, err)
-	require.Equal(t, beforeStat.Mode().Perm(), afterStat.Mode().Perm())
+	after := dataFileStat(t, dbDir)
+	require.Less(t, after.Size(), before.Size())
+	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
 
 	db := openTestDB(dbDir)
 	defer db.Close()
@@ -269,13 +266,6 @@ func TestCompactInPlace(t *testing.T) {
 		}
 		return nil
 	}))
-}
-
-func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
-	t.Helper()
-	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
-	require.NoError(t, err)
-	return st
 }
 
 // TestAutoCompactDatadir pins the threshold: only a db whose free pages exceed

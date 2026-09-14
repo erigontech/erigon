@@ -18,6 +18,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -104,18 +105,14 @@ var autoCompactMinFree uint64 = 1 << 30
 // bloatRatio times its data. A db that fails to compact is left as it was, and
 // a datadir locked by another process is skipped.
 func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	l, locked, err := datadir.TryFlock(dirs)
+	unlock, err := dirs.TryFlock()
+	if errors.Is(err, datadir.ErrDataDirLocked) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if !locked {
-		return nil
-	}
-	defer func() {
-		if err := l.Unlock(); err != nil {
-			logger.Error("failed to unlock datadir", "err", err)
-		}
-	}()
+	defer unlock()
 
 	dbs, err := datadirDBs(dirs)
 	if err != nil {
