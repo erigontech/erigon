@@ -203,6 +203,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 
 	cells := &w.stitchScratch
 	var deferredByChild [16][]*DeferredBranchUpdate
+	var touched, present [16]bool
 	var nibs [16]byte
 	n := 0
 	for bm := node.bitmap; bm != 0; {
@@ -232,7 +233,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 				if i >= n {
 					return nil
 				}
-				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &deferredByChild); cerr != nil {
+				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &touched, &present, &deferredByChild); cerr != nil {
 					return cerr
 				}
 			}
@@ -249,13 +250,22 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	if aerr := fw.attach(ctx, wk); aerr != nil {
 		return aerr
 	}
-	stitchSplitCells(w, cells, node.bitmap)
+	var touchedBits, presentBits uint16
+	for nib := range 16 {
+		if touched[nib] {
+			touchedBits |= uint16(1) << nib
+		}
+		if present[nib] {
+			presentBits |= uint16(1) << nib
+		}
+	}
+	stitchSplitCells(w, cells, touchedBits, presentBits)
 	opened.closeIfEmpty(w)
 	return nil
 }
 
 func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
-	idx, nib int, path []byte, cells *[16]cell, deferred *[16][]*DeferredBranchUpdate) error {
+	idx, nib int, path []byte, cells *[16]cell, touched, present *[16]bool, deferred *[16][]*DeferredBranchUpdate) error {
 	child := node.children[idx]
 	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
 	childPath = append(childPath, path...)
@@ -277,6 +287,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if merr := PremergeDeferredUpdates(deferred[nib]); merr != nil {
 		return fmt.Errorf("fork[%x]: child %x premerge: %w", path, nib, merr)
 	}
+	bit := uint16(1) << nib
+	touched[nib] = cw.trie.touchMap[0]&bit != 0
+	present[nib] = cw.trie.afterMap[0]&bit != 0
 	cells[nib] = c
 	return nil
 }

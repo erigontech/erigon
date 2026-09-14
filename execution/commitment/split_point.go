@@ -113,20 +113,13 @@ func (o openedRow) closeIfEmpty(base *HexPatriciaHashed) {
 	}
 }
 
-func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present uint16) {
+func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, touched, present uint16) {
 	row := max(base.activeRows-1, 0)
-	for bm := present; bm != 0; {
-		bit := bm & -bm
-		nib := bits.TrailingZeros16(bit)
-		base.touchMap[row] |= bit
-		if cells[nib].IsEmpty() {
-			base.afterMap[row] &^= bit
-			base.grid[row][nib].reset()
-		} else {
-			base.afterMap[row] |= bit
-			base.grid[row][nib] = cells[nib]
-		}
-		bm ^= bit
+	base.touchMap[row] |= touched
+	base.afterMap[row] = base.afterMap[row]&^touched | present&touched
+	for bm := touched; bm != 0; bm &= bm - 1 {
+		nib := bits.TrailingZeros16(bm)
+		base.grid[row][nib] = cells[nib]
 	}
 }
 
