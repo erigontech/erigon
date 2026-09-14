@@ -78,6 +78,6 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
 		return err
 	}
-	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
+	log.Debug("[Beacon API] Listening", "addr", routerCfg.Address)
 	return nil
 }

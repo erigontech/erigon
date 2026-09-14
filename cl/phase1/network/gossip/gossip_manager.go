@@ -284,12 +284,17 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
-	// Log peer count for attestation topics to help diagnose propagation issues
+	// Log peer count for attestation topics to help diagnose propagation issues.
+	//
+	// Having no peers is not a fault to report per attestation: on a single-node or dev network it
+	// is the permanent, expected state, and warning about it every slot on every subnet drowns the
+	// log — measured at 63,520 lines, 69% of all warnings and 16% of the entire file over 13 hours.
+	// A warning that always fires is worse than silence, because it is where real warnings go to
+	// hide. The condition is still visible at Debug, and a node that expects peers has other,
+	// louder ways of saying it has none.
 	if gossip.IsTopicBeaconAttestation(name) {
 		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
-		if peerCount == 0 {
-			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
-		} else if peerCount < 3 {
+		if peerCount < 3 {
 			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
 		}
 	}

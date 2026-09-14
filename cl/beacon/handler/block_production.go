@@ -385,7 +385,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
-	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
+	log.Debug("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
@@ -401,16 +401,16 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
-	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
+	log.Debug("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 	startConsensusProcessing = time.Now()
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
-	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
+	log.Debug("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
-	log.Info("BlockProduction: Block produced",
+	log.Debug("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
@@ -474,7 +474,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						resp = resp.With("execution_payload_envelope", envelope)
 						executionPayloadIncluded = true
 					}
-					log.Info("BlockProduction: included unsigned execution payload envelope in response",
+					log.Debug("BlockProduction: included unsigned execution payload envelope in response",
 						"slot", targetSlot, "beaconBlockRoot", beaconBlockRoot, "blockHash", bid.Message.BlockHash)
 				}
 			}
@@ -878,7 +878,7 @@ func (a *ApiHandler) produceBeaconBody(
 		defer wg.Done()
 		start := time.Now()
 		defer func() {
-			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
+			log.Debug("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
@@ -1048,7 +1048,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// Add the requests bundle (pre-GLOAS only; in GLOAS, ExecutionRequests live in the envelope)
 		if stateVersion.Before(clparams.GloasVersion) && requestsBundle != nil && requestsBundle.GetRequests() != nil {
 			if len(requestsBundle.GetRequests()) > 0 {
-				log.Info("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
+				log.Debug("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
 			}
 
 			for _, request := range requestsBundle.GetRequests() {
@@ -1061,7 +1061,7 @@ func (a *ApiHandler) produceBeaconBody(
 					} else if err := beaconBody.ExecutionRequests.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 						log.Error("BlockProduction: Failed to decode deposit request", "err", err)
 					} else {
-						log.Info("BlockProduction: Decoded deposit request", "len", beaconBody.ExecutionRequests.Deposits.Len())
+						log.Debug("BlockProduction: Decoded deposit request", "len", beaconBody.ExecutionRequests.Deposits.Len())
 					}
 				case types.WithdrawalRequestType:
 
@@ -1070,7 +1070,7 @@ func (a *ApiHandler) produceBeaconBody(
 					} else if err := beaconBody.ExecutionRequests.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 						log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
 					} else {
-						log.Info("BlockProduction: Decoded withdrawal request", "len", beaconBody.ExecutionRequests.Withdrawals.Len())
+						log.Debug("BlockProduction: Decoded withdrawal request", "len", beaconBody.ExecutionRequests.Withdrawals.Len())
 					}
 
 				case types.ConsolidationRequestType:
@@ -1079,7 +1079,7 @@ func (a *ApiHandler) produceBeaconBody(
 					} else if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 						log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
 					} else {
-						log.Info("BlockProduction: Decoded consolidation request", "len", beaconBody.ExecutionRequests.Consolidations.Len())
+						log.Debug("BlockProduction: Decoded consolidation request", "len", beaconBody.ExecutionRequests.Consolidations.Len())
 					}
 				}
 			}
@@ -1161,7 +1161,7 @@ func (a *ApiHandler) produceBeaconBody(
 		defer wg.Done()
 		start := time.Now()
 		defer func() {
-			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
+			log.Debug("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
 		}()
 		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
 		if err != nil {
@@ -1179,7 +1179,7 @@ func (a *ApiHandler) produceBeaconBody(
 			if beaconBody.Attestations != nil {
 				attCount = beaconBody.Attestations.Len()
 			}
-			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
+			log.Debug("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
 		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
 			baseState,
@@ -1803,7 +1803,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	log.Info(
+	log.Debug(
 		"BlockPublishing: publishing block and blobs",
 		"slot",
 		blk.Block.Slot,
@@ -2000,7 +2000,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// during block production (especially on minimal preset with rapid epoch
 	// boundaries), causing VerifyBlockSignature to fail.
 	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
-	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
+	log.Debug("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}

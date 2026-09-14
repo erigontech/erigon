@@ -144,7 +144,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		e.pendingBlockMu.Lock()
 		e.pendingBlock[e.nextPayloadId] = params
 		e.pendingBlockMu.Unlock()
-		e.logger.Info("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash, "ts", params.Timestamp, "randao", params.PrevRandao)
+		e.logger.Debug("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash, "ts", params.Timestamp, "randao", params.PrevRandao)
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
 
@@ -160,7 +160,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	}
 
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, e.config.SecondsPerSlot()/4)
-	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	e.logger.Debug("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 }
@@ -233,7 +233,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 		el := time.Since(sealStart)
 		e.execCost.record(el, res.GasUsed, nTx)
 		uqTime, uqGas := e.execCost.upperQuartile()
-		e.logger.Info("[TPS-seal] close", "block", number, "txs", nTx, "ms", el.Milliseconds(),
+		e.logger.Debug("[TPS-seal] close", "block", number, "txs", nTx, "ms", el.Milliseconds(),
 			"txPerSec", int(float64(nTx)/el.Seconds()),
 			"usPerTx", el.Microseconds()/int64(nTx), "gasPerTx", res.GasUsed/uint64(nTx),
 			"uqUsPerTx", uqTime.Microseconds(), "uqGasPerTx", uqGas, "gasUsed", res.GasUsed)
@@ -260,7 +260,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	if err := e.ingestSealedFlashblockLocked(ctx, sealed); err != nil {
 		return nil, false, err
 	}
-	e.logger.Info("[execmodule] preconfirm assemble: sealed preconfirmed flashblock",
+	e.logger.Debug("[execmodule] preconfirm assemble: sealed preconfirmed flashblock",
 		"number", number, "hash", sealed.Hash(), "root", sealed.Root, "gasUsed", sealed.GasUsed, "txs", len(body.Transactions))
 	return &types.BlockWithReceipts{Block: block, Receipts: receipts}, true, nil
 }
@@ -313,7 +313,7 @@ func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, 
 	// This used to be done here, under the same semaphore hold, so that no FCU could tear down N's
 	// SharedDomains in the gap between the close and the open. That race is gone: pre-exec state lives in
 	// its own space now and the FCU cannot reach it ([[preexec_validation_space_separation]]).
-	e.logger.Info("[execmodule] block sealed", "number", sealedHdr.Number.Uint64(), "hash", sealedHdr.Hash(),
+	e.logger.Debug("[execmodule] block sealed", "number", sealedHdr.Number.Uint64(), "hash", sealedHdr.Hash(),
 		"parent", params.ParentHash)
 	return br, nil
 }
@@ -664,7 +664,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 			e.logger.Warn("[GetPayload] DAG boundary awaited but sealed block not yet stored", "payload", payloadID)
 			return AssembledBlockResult{}, nil
 		}
-		e.logger.Info("[GetPayload] DAG boundary retrieved (marker-sealed)", "payload", payloadID, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
+		e.logger.Debug("[GetPayload] DAG boundary retrieved (marker-sealed)", "payload", payloadID, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
 		return AssembledBlockResult{Block: br, BlockValue: blockValue(br, br.Block.Header().BaseFee)}, nil
 	}
 

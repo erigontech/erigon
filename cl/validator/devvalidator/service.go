@@ -340,7 +340,7 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 			continue
 		}
 
-		s.logger.Info("[dev-validator] proposing block", "slot", slot, "validator", key.ValidatorIndex)
+		s.logger.Debug("[dev-validator] proposing block", "slot", slot, "validator", key.ValidatorIndex)
 		if err := s.proposeBlock(ctx, slot, key); err != nil {
 			s.logger.Warn("[dev-validator] proposal failed", "slot", slot, "err", err)
 		}
@@ -433,7 +433,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("submit block: %w", err)
 	}
 
-	s.logger.Info("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
+	s.logger.Debug("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
 	return nil
 }
 

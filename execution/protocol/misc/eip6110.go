@@ -118,7 +118,7 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 // BeaconDepositContract and returns a FlatRequest object ptr
 func ParseDepositLogs(logs []*types.Log, depositContractAddress common.Address) (*types.FlatRequest, error) {
 	if depositContractAddress == (common.Address{}) {
-		log.Warn("Error in ParseDepositLogs - depositContractAddress is 0x0")
+		log.Debug("Error in ParseDepositLogs - depositContractAddress is 0x0")
 	}
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)
 	for _, l := range logs {

@@ -61,7 +61,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 			builder.syncCond.Broadcast()
 		}()
 
-		log.Info("Building block...")
+		log.Debug("Building block...")
 		t := time.Now()
 		result, err = build(param, &builder.interrupt)
 		if err != nil {

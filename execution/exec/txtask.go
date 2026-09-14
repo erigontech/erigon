@@ -296,7 +296,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 		return accounts.NilAddress, err
 	}
 	t.sender = sender
-	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
+	log.Debug("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
 

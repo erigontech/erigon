@@ -245,7 +245,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		if e.currentContext != nil {
 			curTxNum = e.currentContext.TxNum()
 		}
-		e.logger.Info("[TRACE-preexec] round", "block", inputs.Number,
+		e.logger.Debug("[TRACE-preexec] round", "block", inputs.Number,
 			"roundKept", len(kept), "bodyLen", len(body), "forkTxNum", forkTxNum, "curTxNum", curTxNum,
 			"receipts", vr.FlashblockReceiptCount, "gasUsed", vr.GasUsed, "gasLimit", inputs.GasLimit, "status", vr.ValidationStatus, "root", vr.ComputedRoot)
 	}

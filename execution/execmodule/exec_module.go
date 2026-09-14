@@ -514,7 +514,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		// path, exactly as it would a block a follower had executed. Without the adopt the block is accepted
 		// but no candidate is installed, and the FCU falls through to re-executing it from canonical state.
 		adopted := e.forkValidator.AdoptPreExecuted(blockHash, blockNumber)
-		e.logger.Info("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
+		e.logger.Debug("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
 			"number", blockNumber, "hash", blockHash, "root", sealed.Root, "adopted", adopted)
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,

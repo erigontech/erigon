@@ -530,7 +530,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				Status:          ExecutionStatusSuccess,
 				ValidationError: validationError,
 			}, false)
-			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
+			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", true)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -807,7 +807,7 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	e.logger.Info(msg, timings...)
+	e.logger.Debug(msg, timings...)
 }
 
 // dispatchNotificationsFromOverlay sends notifications reading from the SD's
