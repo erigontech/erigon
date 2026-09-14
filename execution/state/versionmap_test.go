@@ -516,7 +516,8 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 // consistent read is thus always value-consistent, no read-side re-check of the
 // value is required — this is why validation carries no value-aware MapRead guard.
 func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
-	t.Parallel()
+	// Not parallel: this test toggles the process-global dbg.AssertEnabled, which
+	// markCellComplete reads from other tests' MarkWritesComplete calls.
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
 
