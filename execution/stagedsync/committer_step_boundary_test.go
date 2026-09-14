@@ -1085,7 +1085,7 @@ func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) ([]string, []com
 	var branchKeys []string
 	require.NoError(t, doms.Flush(ctx, tx))
 	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
-		if len(k) == 0 || len(v) == 0 || bytes.HasPrefix(commitment.KeyCommitmentState, k[:1]) {
+		if len(k) == 0 || len(v) == 0 || bytes.Equal(k, commitment.KeyCommitmentState) {
 			return true, nil
 		}
 		if b := fmt.Sprintf("%02x", k[0]); len(branchKeys) == 0 || branchKeys[len(branchKeys)-1] != b {
