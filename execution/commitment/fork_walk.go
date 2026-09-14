@@ -274,6 +274,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
+	if merr := PremergeDeferredUpdates(deferred[nib]); merr != nil {
+		return fmt.Errorf("fork[%x]: child %x premerge: %w", path, nib, merr)
+	}
 	cells[nib] = c
 	return nil
 }

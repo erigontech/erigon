@@ -17,12 +17,15 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/rand"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -565,4 +568,83 @@ func Benchmark_Commitment_IncrementalWhale(b *testing.B) {
 			runIncrementalParallelBench(b, batch1, batch2, w)
 		})
 	}
+}
+
+type collectingTrieCtx struct {
+	*MockState
+	local map[string]BranchData
+}
+
+func (c *collectingTrieCtx) PutBranch(prefix, data, _ []byte) error {
+	c.local[string(prefix)] = bytes.Clone(data)
+	return nil
+}
+
+func collectingTrieCtxFactory(ms *MockState) (TrieContextFactory, func()) {
+	var mu sync.Mutex
+	var made []*collectingTrieCtx
+	f := func(context.Context) (PatriciaContext, func()) {
+		c := &collectingTrieCtx{MockState: ms, local: make(map[string]BranchData)}
+		mu.Lock()
+		made = append(made, c)
+		mu.Unlock()
+		return c, func() {}
+	}
+	drain := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range made {
+			maps.Copy(ms.cm, c.local)
+		}
+		made = nil
+	}
+	return f, drain
+}
+
+func Benchmark_Commitment_IncrementalWhaleCollecting(b *testing.B) {
+	batch1, batch2 := buildRetouchedWhale(717, 120_000)
+	w := runtime.NumCPU()
+	b.Run(fmt.Sprintf("incremental-whale120k/collecting-w%d", w), func(b *testing.B) {
+		ctx := context.Background()
+		b.ReportAllocs()
+		var pph *ParallelPatriciaHashed
+		defer func() {
+			if pph != nil {
+				pph.Release()
+			}
+		}()
+		for b.Loop() {
+			b.StopTimer()
+			ms := NewMockState(b)
+			ms.SetConcurrentCommitment(true)
+			factory, drain := collectingTrieCtxFactory(ms)
+			if pph == nil {
+				pph = NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
+				pph.SetNumWorkers(w)
+			} else {
+				pph.SetTrieContextFactory(factory)
+				pph.ResetContext(ms)
+			}
+			pph.RootTrie().Reset()
+
+			require.NoError(b, ms.applyPlainUpdates(batch1.keys, batch1.upds))
+			u1 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch1.keys, batch1.upds)
+			_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
+			require.NoError(b, err)
+			u1.Close()
+			drain()
+
+			require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
+			u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+			b.StartTimer()
+
+			_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
+
+			b.StopTimer()
+			require.NoError(b, err)
+			u2.Close()
+			drain()
+			b.StartTimer()
+		}
+	})
 }

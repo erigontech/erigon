@@ -209,6 +209,7 @@ type DeferredBranchUpdate struct {
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
+	merged     bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -231,6 +232,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.merged = false
 
 	return upd
 }
@@ -263,6 +265,7 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
 		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
+		upd.merged = false
 		deferredUpdatePool.Put(upd)
 	}
 }
@@ -330,9 +333,13 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.merged {
+		return nil
+	}
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
+			upd.merged = true
 			return nil
 		}
 		merged, err := merger.Merge(upd.prev, upd.raw)
@@ -341,9 +348,28 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		}
 		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
 		upd.encoded = upd.encodedBuf
+		upd.merged = true
 		return nil
 	}
 	upd.encoded = upd.raw
+	upd.merged = true
+	return nil
+}
+
+// PremergeDeferredUpdates runs the merge half for one subtree's queue on the worker that
+// folded it, so the round's flush finds encoded already final and writes without merging.
+// prev is captured at CollectDeferredUpdate time, so this reads no trie context.
+func PremergeDeferredUpdates(deferred []*DeferredBranchUpdate) error {
+	if len(deferred) == 0 {
+		return nil
+	}
+	merger := workerMergerPool.Get().(*BranchMerger)
+	defer workerMergerPool.Put(merger)
+	for _, upd := range deferred {
+		if err := mergeDeferredUpdate(upd, merger); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

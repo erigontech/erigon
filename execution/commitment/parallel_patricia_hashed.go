@@ -27,6 +27,8 @@ import (
 	"time"
 )
 
+const deferredWritesPerWorker = 4096
+
 var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
 type ParallelPatriciaHashed struct {
@@ -307,18 +309,56 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory(ctx)
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if applyCtx == nil {
-		return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
+	if err := PremergeDeferredUpdates(deferred); err != nil {
+		return fmt.Errorf("premerge deferred branch updates: %w", err)
 	}
 
-	// This path calls PutBranch directly rather than through a BranchEncoder,
-	// so it is the only place the parallel engine's branch writes get counted.
-	if _, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch, p.metrics); err != nil {
-		return fmt.Errorf("apply deferred branch updates: %w", err)
+	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
+	errs := make([]error, workers)
+	written := make([]int, workers)
+	bytesOut := make([]int, workers)
+	var claimed atomic.Int64
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			wctx, cleanup := p.trieCtxFactory(ctx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if wctx == nil {
+				errs[w] = errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
+				return
+			}
+			for {
+				i := int(claimed.Add(1)) - 1
+				if i >= len(deferred) {
+					return
+				}
+				upd := deferred[i]
+				if upd.encoded == nil {
+					continue
+				}
+				if err := wctx.PutBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+					errs[w] = err
+					return
+				}
+				written[w]++
+				bytesOut[w] += len(upd.encoded)
+			}
+		})
+	}
+	wg.Wait()
+
+	var n, b int
+	for i := range workers {
+		n += written[i]
+		b += bytesOut[i]
+	}
+	publishBranchWrites(n, b, p.metrics)
+	for _, err := range errs {
+		if err != nil {
+			return fmt.Errorf("apply deferred branch updates: %w", err)
+		}
 	}
 	return nil
 }
