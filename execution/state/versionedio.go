@@ -1317,6 +1317,9 @@ func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+	if len(m) == 0 {
+		return true
+	}
 	for _, vw := range m {
 		if !yield(vw.WriteHeader) {
 			return false

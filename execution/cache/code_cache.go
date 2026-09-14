@@ -38,20 +38,16 @@ func hash32(b []byte) [32]byte {
 }
 
 const (
-	// DefaultCodeCacheBytes is the byte limit for the code cache.
-	DefaultCodeCacheBytes = 512 * datasize.MB
+	// DefaultCodeCacheBytes is the byte limit for the code cache. Drawn from the
+	// shared cachebudget envelope, so it buys residency against the account and
+	// storage caches rather than on top of them.
+	DefaultCodeCacheBytes = 256 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
 	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
-	// avgCodeEntryBytes translates the code byte budget into the freelru
-	// entry-count cap (the only bound — the byte counters don't evict). Sized to
-	// the resident-code skew (hot contracts run 10-24 KB) rather than the raw
-	// average so the cap keeps RAM near the budget instead of several × over; the
-	// persistent (MDBX-backed) cold tier backstops entries the tighter cap evicts.
-	avgCodeEntryBytes = 12 * 1024
 )
 
 type versionedAddressID struct {
@@ -79,6 +75,15 @@ const (
 	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
 )
 
+// otterEntryOverheadBytes is the cache's own per-entry cost beyond the key and
+// the codeEntry struct. Omitting it undercounts a layer of small entries ~1.6x.
+const otterEntryOverheadBytes = 64
+
+// codeEntryBytes is one slot's resident cost excluding the code bytes. It is
+// both the weigher's fixed term and the key cost the counters use, so counter
+// and bound agree.
+const codeEntryBytes = 8 + int64(unsafe.Sizeof(codeEntry{})) + otterEntryOverheadBytes
+
 type codeEntry struct {
 	code []byte
 	// keyHash is the keccak codeHash this entry is keyed under. maphash.Map
@@ -105,8 +110,8 @@ type codeSizeEntry struct {
 //   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
 //     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
 //
-// Configured byte budgets are translated into LRU entry caps; full layers
-// evict their coldest entries.
+// The content layers are bounded by the bytes they hold. W-TinyLFU protects the
+// incumbent, so admission is not guaranteed.
 //
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
 // same way as the account/storage/branch caches: a contract's code
@@ -121,8 +126,8 @@ type CodeCache struct {
 	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set.
 	addrToHash *lru.Cache[common.Address, versionedAddressID]
-	hashToCode *growLRU[codeEntry] // codeID(maphash(code)) → code, jump-grow + LRU-evicting
-	codeSize   atomic.Int64        // resident bytes (stat; hard bound is the entry cap)
+	hashToCode *byteLRU[codeEntry] // codeID(maphash(code)) → code, byte-bounded
+	codeSize   atomic.Int64        // resident bytes
 
 	// addrToCodeHash maps a 20-byte address to its 32-byte Ethereum codeHash
 	// (keccak), separately from addrToHash (which uses the cheap maphash
@@ -136,8 +141,8 @@ type CodeCache struct {
 	// of L1 — Get-by-codeHash bypasses addr lookup entirely. Memory cost:
 	// duplicates code bytes vs L2 (worst case 2x byte storage); accepted
 	// for the per-key fast-path on many-addrs-one-code workloads.
-	codeHashToCode   *growLRU[codeEntry] // keccak(code) → code, jump-grow + LRU-evicting
-	codeHashCodeSize atomic.Int64        // resident bytes (stat; hard bound is the entry cap)
+	codeHashToCode   *byteLRU[codeEntry] // keccak(code) → code, byte-bounded
+	codeHashCodeSize atomic.Int64        // resident bytes
 
 	// Size-only layer: ethCodeHash → int (length in bytes). Answers
 	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Tiny per-entry
@@ -178,24 +183,32 @@ type CodeCache struct {
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
+	// codeLayerCapB bounds one content layer; usage percentages are against it.
+	codeLayerCapB datasize.ByteSize
 
 	// closed guards the single paired Close of the content layers so a double
 	// Close can't over-return their envelope reservations.
 	closed atomic.Bool
 }
 
+// contentLRU is the byteLRU/growLRU surface the content-addressed insert path
+// uses. A type parameter, not an interface, so the call stays direct.
+type contentLRU[T any] interface {
+	Get(uint64) (T, bool)
+	Add(uint64, T) bool
+	Remove(uint64)
+}
+
 // putContentLocked is the shared insert path for the content-addressed code layers
-// (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a freelru.ShardedLRU
-// of per-key-immutable entries carrying a (txNum, epoch) stamp: a live entry is
-// kept (its bytes/size are invariant for a given key), a stale one is removed
-// (its OnEvict decrements counter) so the fresh entry can replace it, and once
-// the entry-count cap is reached freelru.Add evicts the coldest entry (whose
-// OnEvict decrements counter) rather than freezing. counter tracks resident
-// bytes as a stat; the hard bound is the LRU's entry cap. stamp/valCost are
+// (hashToCode, codeHashToCode, codeSizeByCodeHash). Each holds per-key-immutable
+// entries carrying a (txNum, epoch) stamp: a live entry is kept (its bytes/size
+// are invariant for a given key), a stale one is removed (its onEvict decrements
+// counter) so the fresh entry can replace it, and a full layer evicts (each
+// eviction's onEvict decrements counter) rather than freezing. stamp/valCost are
 // non-capturing so passing them allocates nothing on the put path. The caller
 // holds the key's put stripe.
-func putContentLocked[T any](
-	lru *growLRU[T],
+func putContentLocked[T any, L contentLRU[T]](
+	lru L,
 	h uint64,
 	newEntry T,
 	stamp func(T) (uint64, uint32),
@@ -210,12 +223,19 @@ func putContentLocked[T any](
 		}
 		lru.Remove(h) // stale — OnEvict decrements counter for the removed entry
 	}
-	counter.Add(keyCost + valCost(newEntry))
-	lru.Add(h, newEntry) // evicts the coldest entry when full; its OnEvict decrements counter
+	// Charge before the put: the put can evict this very entry again, and that
+	// onEvict must not run ahead of the charge it cancels. A value too big to be
+	// admitted never gets an onEvict at all, so refund it instead.
+	cost := keyCost + valCost(newEntry)
+	counter.Add(cost)
+	if !lru.Add(h, newEntry) { // evicts when full; each eviction's onEvict decrements counter
+		counter.Add(-cost)
+	}
 }
 
 func codeEntryStamp(e codeEntry) (uint64, uint32)         { return e.txNum, e.epoch }
 func codeEntryCodeLen(e codeEntry) int64                  { return int64(len(e.code)) }
+func codeEntryResident(_ uint64, e codeEntry) int64       { return codeEntryBytes + int64(len(e.code)) }
 func codeSizeEntryStamp(e codeSizeEntry) (uint64, uint32) { return e.txNum, e.epoch }
 func zeroCost[T any](T) int64                             { return 0 }
 
@@ -240,13 +260,15 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
 	}
-	// The content-addressed layers jump-grow from a small start into the shared
-	// envelope, so a cache over few contracts (a test fixture) never pre-commits
-	// the full budget. OnEvict keeps the byte/entry counters following residency.
-	cc.hashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
-		func(_ uint64, e codeEntry) { cc.codeSize.Add(-(8 + int64(len(e.code)))) })
-	cc.codeHashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
-		func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
+	// Both layers store the same slice, so the counters double-charge it. But
+	// nothing keeps their resident sets equal, and disjoint sets really do cost
+	// twice — the split bounds that worst case.
+	perLayer := max(codeCapacityBytes/2, 1)
+	cc.codeLayerCapB = perLayer
+	cc.hashToCode = newByteLRU(perLayer, codeEntryResident,
+		func(k uint64, e codeEntry) { cc.codeSize.Add(-codeEntryResident(k, e)) })
+	cc.codeHashToCode = newByteLRU(perLayer, codeEntryResident,
+		func(k uint64, e codeEntry) { cc.codeHashCodeSize.Add(-codeEntryResident(k, e)) })
 	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
 	// the slot charge already covers.
 	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
@@ -352,9 +374,8 @@ func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, co
 	c.addrBindMu.Unlock()
 
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
-	// freelru keyed by the codeID (maphash of code) directly; 8-byte key cost.
 	putContentLocked(c.hashToCode, codeID, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeSize, 8)
+		&c.coh, &c.codeSize, codeEntryBytes)
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
@@ -508,9 +529,8 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	c.putCodeSizeByCodeHashLocked(codeHash, len(code), hcc, txNum, ep)
 
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
-	// freelru keyed by maphash(codeHash); 32-byte key cost.
 	putContentLocked(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)))
+		&c.coh, &c.codeHashCodeSize, codeEntryBytes)
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -652,8 +672,10 @@ func (c *CodeCache) PrintStatsAndReset() {
 
 	addrSizeB := c.AddrSizeBytes()
 	codeSizeB := c.codeSize.Load()
+	codeHashSizeB := c.codeHashCodeSize.Load()
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
-	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
+	codeUsagePct := float64(codeSizeB) / float64(c.codeLayerCapB) * 100
+	codeHashUsagePct := float64(codeHashSizeB) / float64(c.codeLayerCapB) * 100
 
 	log.Debug("CodeCache stats",
 		"addr_hits", addrHits,
@@ -668,5 +690,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 		"addr_usage_pct", addrUsagePct,
 		"code_size_mb", codeSizeB/(1024*1024),
 		"code_usage_pct", codeUsagePct,
+		"codehash_size_mb", codeHashSizeB/(1024*1024),
+		"codehash_usage_pct", codeHashUsagePct,
 	)
 }

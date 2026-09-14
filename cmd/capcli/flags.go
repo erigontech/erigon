@@ -228,18 +228,33 @@ func (b *BenchmarkNode) command() *cli.Command {
 	}
 }
 
+var (
+	blobStoreCheckFromSlotFlag = &cli.Uint64Flag{Name: "from-slot", Usage: "from slot"}
+	blobStoreCheckRemoveFlag   = &cli.BoolFlag{
+		Name:  "remove-mismatched",
+		Usage: "delete the stored sidecars and index entry of every mismatched slot instead of only reporting it",
+	}
+)
+
+func (b *BlobArchiveStoreCheck) fromCmd(cmd *cli.Command) error {
+	b.chainCfg.fromCmd(cmd)
+	if err := b.outputFolder.fromCmd(cmd); err != nil {
+		return err
+	}
+	b.FromSlot = cmd.Uint64(blobStoreCheckFromSlotFlag.Name)
+	b.RemoveMismatched = cmd.Bool(blobStoreCheckRemoveFlag.Name)
+	return nil
+}
+
 func (b *BlobArchiveStoreCheck) command() *cli.Command {
-	fromSlot := &cli.Uint64Flag{Name: "from-slot", Usage: "from slot"}
 	return &cli.Command{
 		Name:  "blob-archive-store-check",
 		Usage: "blob archive store check",
-		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, fromSlot},
+		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, blobStoreCheckFromSlotFlag, blobStoreCheckRemoveFlag},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			b.chainCfg.fromCmd(cmd)
-			if err := b.outputFolder.fromCmd(cmd); err != nil {
+			if err := b.fromCmd(cmd); err != nil {
 				return err
 			}
-			b.FromSlot = cmd.Uint64(fromSlot.Name)
 			return b.Run(ctx)
 		},
 	}
