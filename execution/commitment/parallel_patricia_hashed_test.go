@@ -290,40 +290,6 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 	return nil
 }
 
-func TestDFSSubtree(t *testing.T) {
-	t.Parallel()
-
-	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"), nil)
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil)
-
-	type kv struct{ hk, pk string }
-	var got []kv
-	err := dfsSubtree(pu.trie.root, nil, func(hk, pk []byte, _ *Update) error {
-		got = append(got, kv{hk: fmt.Sprintf("%x", hk), pk: string(pk)})
-		return nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, []kv{
-		{hk: "0102", pk: "pk-D"},
-		{hk: "010203", pk: "pk-A"},
-		{hk: "010204", pk: "pk-B"},
-		{hk: "050607", pk: "pk-C"},
-	}, got)
-}
-
-func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
-	t.Parallel()
-
-	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	err := dfsSubtree(pu.trie.root, nil, func(_, _ []byte, _ *Update) error { return nil })
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "plainKey")
-}
-
 func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) [][]byte {
 	t.Helper()
 	out := make([][]byte, 0, perSide*2)

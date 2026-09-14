@@ -2783,7 +2783,6 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	deferred := hph.branchEncoder.deferred
 	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
-	ResetDeferredUpdateMetrics()
 	return deferred
 }
 
