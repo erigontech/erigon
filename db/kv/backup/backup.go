@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
