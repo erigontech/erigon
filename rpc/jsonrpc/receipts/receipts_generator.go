@@ -136,7 +136,7 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.
 // the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
 // is already cached, that I/O and decode are unnecessary — TryGetCachedReceipt short-circuits them.
 //
-// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt).
+// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt) or Bloom.
 // receiptCache (per-tx, keyed by txNum) is checked first because it is populated by every
 // eth_getLogs / eth_getTransactionReceipt call. receiptsCache (block-level) is only populated
 // by eth_getBlockReceipts, so it is checked second to avoid an unnecessary lookup in the common case.
@@ -210,6 +210,15 @@ func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	g.receiptCache.Add(txNum, receipt)
 }
 
+// cacheReceiptWithBloom replaces a receipt cached by a logs-only read with a copy that has its Bloom:
+// cached receipts are shared between callers, so they are never changed in place.
+func (g *Generator) cacheReceiptWithBloom(txNum uint64, receipt *types.Receipt) *types.Receipt {
+	withBloom := *receipt
+	withBloom.Bloom = types.CreateBloom(types.Receipts{&withBloom})
+	g.addToCacheReceipt(txNum, &withBloom)
+	return &withBloom
+}
+
 type PostStateInfo struct {
 	Txns              types.Transactions
 	CommitmentHistory bool
@@ -220,7 +229,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 }
 
 // GetReceiptWithoutBloom is GetReceipt for callers that read only logs: a receipt served
-// from the persistent cache has an empty Bloom.
+// from the persistent cache has an empty Bloom, which GetReceipt fills in when it serves it later.
 func (g *Generator) GetReceiptWithoutBloom(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
 	return g.getReceipt(ctx, cfg, tx, header, txn, index, txNum, nil, false)
 }
@@ -260,6 +269,9 @@ func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipt, ok := g.receiptCache.Get(txNum); ok {
 		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
 			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
+			if withBloom && receipt.Bloom == (types.Bloom{}) && len(receipt.Logs) > 0 {
+				receipt = g.cacheReceiptWithBloom(txNum, receipt)
+			}
 			return receipt, nil
 		}
 
@@ -284,9 +296,7 @@ func (g *Generator) getReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && PersistedReceiptsServed() {
-			if withBloom {
-				g.addToCacheReceipt(txNum, receiptFromDB)
-			}
+			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
 	}

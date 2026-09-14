@@ -85,9 +85,9 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 		"GetReceipt must resolve the log index through the block overlay")
 }
 
-// TestGetReceiptWithoutBloomKeepsCacheComplete pins that a receipt read only for its logs
-// does not reach the receipt cache: GetReceipt callers serve its Bloom as logsBloom.
-func TestGetReceiptWithoutBloomKeepsCacheComplete(t *testing.T) {
+// TestGetReceiptFillsBloomOfLogsOnlyCacheEntry pins that a receipt cached by a logs-only read
+// gets its Bloom when GetReceipt serves it: GetReceipt callers return it as logsBloom.
+func TestGetReceiptFillsBloomOfLogsOnlyCacheEntry(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
 	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
@@ -115,6 +115,8 @@ func TestGetReceiptWithoutBloomKeepsCacheComplete(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, logsOnly.Logs, 1)
 	require.Equal(t, types.Bloom{}, logsOnly.Bloom, "the receipt must come from the persistent cache")
+	_, cached := gen.TryGetCachedReceipt(header.Hash(), txNum, 0)
+	require.True(t, cached, "a logs-only read must still fill the receipt cache")
 
 	full, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
 	require.NoError(t, err)
