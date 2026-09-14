@@ -169,7 +169,7 @@ func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 		return 0, 0, err
 	}
 	defer env.Close()
-	if err := env.Open(dbDir, mdbx.Readonly, 0644); err != nil {
+	if err := env.Open(dbDir, mdbx.Readonly, 0o644); err != nil {
 		return 0, 0, err
 	}
 	st, err := env.Stat()
