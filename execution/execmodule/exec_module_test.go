@@ -2727,8 +2727,22 @@ func TestInsertBlocksRepairsStoredBodyTransactionMismatch(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 
 	target := chainPack.Blocks[1]
+	later := chainPack.Blocks[2]
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		if _, err := rawdb.WriteRawBody(tx, target.Hash(), target.NumberU64(), chainPack.Blocks[2].RawBody()); err != nil {
+		sequence, err := tx.ReadSequence(kv.EthTx)
+		if err != nil {
+			return err
+		}
+		if _, err := rawdb.WriteRawBody(tx, target.Hash(), target.NumberU64(), target.RawBody()); err != nil {
+			return err
+		}
+		if err := tx.ResetSequence(kv.EthTx, sequence); err != nil {
+			return err
+		}
+		if _, err := rawdb.WriteRawBody(tx, later.Hash(), later.NumberU64(), later.RawBody()); err != nil {
+			return err
+		}
+		if err := tx.ResetSequence(kv.EthTx, sequence); err != nil {
 			return err
 		}
 		return rawdb.WriteSenders(tx, target.Hash(), target.NumberU64(), []common.Address{{0xff}})
@@ -2747,11 +2761,31 @@ func TestInsertBlocksRepairsStoredBodyTransactionMismatch(t *testing.T) {
 			if err != nil || body == nil {
 				return err
 			}
+			targetStorage, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(target.NumberU64(), target.Hash()))
+			if err != nil || targetStorage == nil {
+				return err
+			}
+			laterBody, err := rawdb.ReadBodyWithTransactions(tx, later.Hash(), later.NumberU64())
+			if err != nil || laterBody == nil {
+				return err
+			}
+			laterStorage, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(later.NumberU64(), later.Hash()))
+			if err != nil || laterStorage == nil {
+				return err
+			}
 			senders, err := rawdb.ReadSenders(tx, target.Hash(), target.NumberU64())
 			if err != nil {
 				return err
 			}
-			matched = body.MatchesHeader(target.HeaderNoCopy()) == nil && len(senders) == 1 && senders[0] == senderAddr
+			sequence, err := tx.ReadSequence(kv.EthTx)
+			if err != nil {
+				return err
+			}
+			matched = body.MatchesHeader(target.HeaderNoCopy()) == nil &&
+				laterBody.MatchesHeader(later.HeaderNoCopy()) == nil &&
+				targetStorage.BaseTxnID.U64() > laterStorage.BaseTxnID.LastSystemTx(laterStorage.TxCount) &&
+				sequence > targetStorage.BaseTxnID.LastSystemTx(targetStorage.TxCount) &&
+				len(senders) == 1 && senders[0] == senderAddr
 			return nil
 		})
 		return err == nil && matched

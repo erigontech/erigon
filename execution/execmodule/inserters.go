@@ -18,8 +18,10 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -33,6 +35,34 @@ import (
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+func ensureEthTxSequenceAfterStoredTransactions(tx kv.RwTx) error {
+	sequence, err := tx.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	cursor, err := tx.Cursor(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	lastKey, _, err := cursor.Last()
+	if err != nil || lastKey == nil {
+		return err
+	}
+	if len(lastKey) != 8 {
+		return fmt.Errorf("invalid last transaction ID length %d", len(lastKey))
+	}
+	lastTxnID := binary.BigEndian.Uint64(lastKey)
+	if lastTxnID >= math.MaxUint64-1 {
+		return errors.New("transaction ID sequence overflow")
+	}
+	nextSequence := lastTxnID + 2
+	if sequence >= nextSequence {
+		return nil
+	}
+	return tx.ResetSequence(kv.EthTx, nextSequence)
+}
 
 // flushBlockOverlayToDB flushes the block overlay to DB, bounding memory
 // during bulk inserts. Not called for single-block chain-tip inserts.
@@ -181,6 +211,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: incoming body mismatch for block %d: %w", height, incomingErr)
 				}
 				e.logger.Warn("Repairing mismatched stored block body", "block", height, "hash", blockHash, "err", err)
+				if err := ensureEthTxSequenceAfterStoredTransactions(blockOverlay); err != nil {
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: reconcile body transaction sequence: %w", err)
+				}
 				if _, err := rawdb.WriteRawBody(blockOverlay, blockHash, height, body); err != nil {
 					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: repair body: %w", err)
 				}
