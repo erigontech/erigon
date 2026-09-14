@@ -101,8 +101,8 @@ const bloatRatio = 4
 // pages, and the growth step pads its compacted file back to the same size.
 var autoCompactMinFree = 10 * datasize.GB
 
-// ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
-// datadir locked by another process is skipped.
+// ApplyMigrations compacts bloated dbs of the datadir. A datadir locked by
+// another process is skipped.
 func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {
