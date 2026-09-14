@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 type datadirDB struct {
@@ -124,7 +126,7 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 			logger.Warn("[compact] can't read db page usage", "db", db.path, "err", err)
 			continue
 		}
-		if free <= bloatRatio*data || free < autoCompactMinFree {
+		if !bloated(data, free) {
 			continue
 		}
 		logger.Info("[compact] auto-compact", "db", db.path, "data", common.ByteCount(data), "free", common.ByteCount(free))
@@ -136,6 +138,44 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 		}
 	}
 	return nil
+}
+
+// CompactIfBloated compacts an open chaindata db in place when it is bloated.
+// Txs begun meanwhile wait; txs still open after drainTimeout skip the compaction.
+// Only a failure to reopen the db is returned.
+func CompactIfBloated(ctx context.Context, db kv.RwDB, drainTimeout time.Duration, logger log.Logger) error {
+	if t, ok := db.(interface{ InternalDB() kv.RwDB }); ok {
+		db = t.InternalDB()
+	}
+	m, ok := db.(*mdbx2.MdbxKV)
+	if !ok {
+		return nil
+	}
+	data, free, err := envPageUsage(m.Env())
+	if err != nil {
+		logger.Warn("[compact] can't read db page usage", "db", m.Path(), "err", err)
+		return nil
+	}
+	if !bloated(data, free) {
+		return nil
+	}
+	logger.Info("[compact] auto-compact", "db", m.Path(), "data", common.ByteCount(data), "free", common.ByteCount(free))
+	start := time.Now()
+	drained, err := m.CloseAndReopen(ctx, drainTimeout, func() {
+		if err := CompactInPlace(ctx, m.Path(), dbcfg.ChainDB, logger); err != nil {
+			logger.Warn("[compact] auto-compact failed, db left as it was", "db", m.Path(), "err", err)
+		}
+	})
+	if !drained {
+		logger.Info("[compact] auto-compact skipped, txs still open", "db", m.Path(), "drainTimeout", drainTimeout)
+	} else {
+		logger.Info("[compact] db closed for", "db", m.Path(), "took", time.Since(start))
+	}
+	return err
+}
+
+func bloated(data, free uint64) bool {
+	return free > bloatRatio*data && free >= autoCompactMinFree
 }
 
 // pageUsage returns the bytes held by the tables of a db and the bytes of free
@@ -151,6 +191,10 @@ func pageUsage(dbDir string) (data, free uint64, err error) {
 	if err := env.Open(dbDir, mdbx.Readonly, 0644); err != nil {
 		return 0, 0, err
 	}
+	return envPageUsage(env)
+}
+
+func envPageUsage(env *mdbx.Env) (data, free uint64, err error) {
 	st, err := env.Stat()
 	if err != nil {
 		return 0, 0, err

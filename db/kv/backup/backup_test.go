@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -319,6 +320,47 @@ func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
 	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
+}
+
+// TestCompactIfBloated: an open db is compacted in place and stays usable through
+// the same handle.
+func TestCompactIfBloated(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
+	const deleted = 18_000
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	writeTestDB(t, dbDir, deleted)
+	db := openTestDB(dbDir)
+	defer db.Close()
+	before := dataFileStat(t, dbDir)
+
+	require.NoError(t, CompactIfBloated(t.Context(), db, time.Second, log.New()))
+
+	require.Less(t, dataFileStat(t, dbDir).Size(), before.Size())
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		n, err := tx.Count(testTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64(testRows-deleted), n)
+		return tx.Put(testTable, u64Key(testRows), testVal)
+	}))
+}
+
+// TestCompactIfBloatedSkipsBusyDB: a tx that outlives the drain timeout keeps the
+// db as it was, and txs begun while waiting proceed afterwards.
+func TestCompactIfBloatedSkipsBusyDB(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	writeTestDB(t, dbDir, 18_000)
+	db := openTestDB(dbDir)
+	defer db.Close()
+	before := dataFileStat(t, dbDir)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, CompactIfBloated(t.Context(), db, 100*time.Millisecond, log.New()))
+
+	require.True(t, os.SameFile(before, dataFileStat(t, dbDir)))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return nil }))
 }
 
 // TestDatadirDBs pins the three rules of the datadir scan: a db is found by its

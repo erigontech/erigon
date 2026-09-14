@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -261,6 +262,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
 			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
+			}
+			if err := backup.CompactIfBloated(ctx, pe.db, time.Minute, pe.logger); err != nil {
+				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: compact chaindata: %w", err)
 			}
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
