@@ -112,108 +112,73 @@ func newTestPendingJobQueue(t *testing.T) *pendingJobQueue[int, string] {
 	})
 }
 
-func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
-	require.Panics(t, func() {
-		newPendingJobQueue[int, string](
-			t.Context(),
-			pendingJobQueueOptions{
-				name:          t.Name(),
-				capacity:      1,
-				expiry:        time.Minute,
-				checkInterval: time.Millisecond,
-			},
-			nil,
-			nil,
-			func(int, string) {},
-		)
-	})
-}
-
-func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
-	require.Panics(t, func() {
-		newPendingJobQueue[int, string](
-			t.Context(),
-			pendingJobQueueOptions{
-				name:          t.Name(),
-				capacity:      1,
-				expiry:        time.Minute,
-				checkInterval: time.Millisecond,
-			},
-			func(context.Context, int, string) pendingJobDecision {
-				return pendingJobKeep
-			},
-			nil,
-			nil,
-		)
-	})
-}
-
-func TestNewPendingJobQueueRejectsEmptyName(t *testing.T) {
-	require.PanicsWithValue(t, "pending job queue name must not be empty", func() {
-		newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
-			capacity:      1,
-			expiry:        time.Minute,
-			checkInterval: time.Millisecond,
-		})
-	})
-}
-
-func TestNewPendingJobQueueRejectsNonPositiveCapacity(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		capacity int32
-	}{
-		{name: "zero", capacity: 0},
-		{name: "negative", capacity: -1},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			require.PanicsWithValue(t, "pending job queue capacity must be positive", func() {
-				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
-					capacity:      test.capacity,
-					expiry:        time.Minute,
-					checkInterval: time.Millisecond,
-				})
-			})
-		})
-	}
-}
-
-func TestNewPendingJobQueueRejectsNonPositiveExpiry(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		expiry time.Duration
-	}{
-		{name: "zero", expiry: 0},
-		{name: "negative", expiry: -time.Millisecond},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			require.PanicsWithValue(t, "pending job queue expiry must be positive", func() {
-				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
-					name:          t.Name(),
-					capacity:      1,
-					expiry:        test.expiry,
-					checkInterval: time.Millisecond,
-				})
-			})
-		})
-	}
-}
-
-func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
+func TestNewPendingJobQueueRejectsInvalidOptions(t *testing.T) {
 	for _, test := range []struct {
 		name          string
-		checkInterval time.Duration
+		changeOptions func(*pendingJobQueueOptions)
+		nilTryProcess bool
+		nilOnExpired  bool
+		wantPanic     string
 	}{
-		{name: "zero", checkInterval: 0},
-		{name: "negative", checkInterval: -time.Millisecond},
+		{name: "nil tryProcess", nilTryProcess: true, wantPanic: "pending job queue requires tryProcess"},
+		{name: "nil onExpired", nilOnExpired: true, wantPanic: "pending job queue requires onExpired"},
+		{
+			name:          "empty name",
+			changeOptions: func(o *pendingJobQueueOptions) { o.name = "" },
+			wantPanic:     "pending job queue name must not be empty",
+		},
+		{
+			name:          "zero capacity",
+			changeOptions: func(o *pendingJobQueueOptions) { o.capacity = 0 },
+			wantPanic:     "pending job queue capacity must be positive",
+		},
+		{
+			name:          "negative capacity",
+			changeOptions: func(o *pendingJobQueueOptions) { o.capacity = -1 },
+			wantPanic:     "pending job queue capacity must be positive",
+		},
+		{
+			name:          "zero expiry",
+			changeOptions: func(o *pendingJobQueueOptions) { o.expiry = 0 },
+			wantPanic:     "pending job queue expiry must be positive",
+		},
+		{
+			name:          "negative expiry",
+			changeOptions: func(o *pendingJobQueueOptions) { o.expiry = -time.Millisecond },
+			wantPanic:     "pending job queue expiry must be positive",
+		},
+		{
+			name:          "zero check interval",
+			changeOptions: func(o *pendingJobQueueOptions) { o.checkInterval = 0 },
+			wantPanic:     "pending job queue check interval must be positive",
+		},
+		{
+			name:          "negative check interval",
+			changeOptions: func(o *pendingJobQueueOptions) { o.checkInterval = -time.Millisecond },
+			wantPanic:     "pending job queue check interval must be positive",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			require.PanicsWithValue(t, "pending job queue check interval must be positive", func() {
-				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
-					capacity:      1,
-					expiry:        time.Minute,
-					checkInterval: test.checkInterval,
-				})
+			options := pendingJobQueueOptions{
+				name:          t.Name(),
+				capacity:      1,
+				expiry:        time.Minute,
+				checkInterval: time.Millisecond,
+			}
+			if test.changeOptions != nil {
+				test.changeOptions(&options)
+			}
+			tryProcess := func(context.Context, int, string) pendingJobDecision { return pendingJobKeep }
+			if test.nilTryProcess {
+				tryProcess = nil
+			}
+			onExpired := func(int, string) {}
+			if test.nilOnExpired {
+				onExpired = nil
+			}
+			require.PanicsWithValue(t, test.wantPanic, func() {
+				queue := newPendingJobQueue(canceledPendingQueueContext(t), options, tryProcess, nil, onExpired)
+				queue.stopAndWait()
 			})
 		})
 	}
@@ -307,6 +272,44 @@ func TestPendingJobQueueCancellationStopsCurrentScan(t *testing.T) {
 	queue.processPending(ctx)
 
 	require.Equal(t, 1, processed)
+}
+
+func TestPendingJobQueueCancellationStillRunsPostRemovalCallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var queue *pendingJobQueue[int, string]
+	callbackCalls := 0
+	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
+		name:          t.Name(),
+		capacity:      1,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	},
+		func(context.Context, int, string) pendingJobDecision {
+			cancel()
+			return pendingJobRemoveThenProcess
+		},
+		func(ctx context.Context, key int, msg string) {
+			callbackCalls++
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Equal(t, 1, key)
+			require.Equal(t, "message", msg)
+			_, stored := queue.jobs.Load(key)
+			require.False(t, stored)
+			require.Zero(t, queue.count.Load())
+		},
+		func(int, string) { t.Fatal("unexpected expiry") },
+	)
+	queue.stopAndWait()
+	require.NoError(t, enqueueTestPendingJob(queue, 1, "message"))
+
+	// The callback may release resources owned outside the queue, even after cancellation.
+	queue.processPending(ctx)
+
+	require.Equal(t, 1, callbackCalls)
+	require.Zero(t, queue.count.Load())
+	_, stored := queue.jobs.Load(1)
+	require.False(t, stored)
 }
 
 func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
