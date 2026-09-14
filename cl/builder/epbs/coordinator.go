@@ -36,6 +36,7 @@ import (
 	clutils "github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -193,6 +194,7 @@ func (c *Coordinator) runSlotGuarded(
 	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
 		return nil, err
 	}
+	log.Debug("Embedded builder payload attempt", "slot", input.Slot, "parentBlockRoot", input.ParentBlockRoot, "parentBlockHash", input.ParentBlockHash)
 
 	preferences := input.ValidatedPreferences.Clone().(*cltypes.SignedProposerPreferences)
 	parameters := buildParameters(input, preferences.Message)
