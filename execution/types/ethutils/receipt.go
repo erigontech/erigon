@@ -32,6 +32,29 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
+// RPCReceipt is the RPC representation of a transaction receipt. Logs holds
+// []*types.RPCLog when the block timestamp is requested and []*types.Log otherwise.
+type RPCReceipt struct {
+	BlockHash         common.Hash      `json:"blockHash"`
+	BlockNumber       hexutil.Uint64   `json:"blockNumber"`
+	TransactionHash   common.Hash      `json:"transactionHash"`
+	TransactionIndex  hexutil.Uint64   `json:"transactionIndex"`
+	From              accounts.Address `json:"from"`
+	To                *common.Address  `json:"to"`
+	Type              hexutil.Uint     `json:"type"`
+	GasUsed           hexutil.Uint64   `json:"gasUsed"`
+	CumulativeGasUsed hexutil.Uint64   `json:"cumulativeGasUsed"`
+	ContractAddress   *common.Address  `json:"contractAddress"`
+	Logs              any              `json:"logs"`
+	LogsBloom         *types.Bloom     `json:"logsBloom"`
+	EffectiveGasPrice *hexutil.U256    `json:"effectiveGasPrice"`
+
+	Status       *hexutil.Uint64 `json:"status,omitempty"`
+	Root         hexutil.Bytes   `json:"root,omitempty"`
+	BlobGasPrice *hexutil.U256   `json:"blobGasPrice,omitempty"`
+	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+}
+
 func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
@@ -40,7 +63,7 @@ func MarshalReceipt(
 	txnHash common.Hash,
 	signed bool,
 	withBlockTimestamp bool,
-) map[string]any {
+) *RPCReceipt {
 	var chainId *uint256.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -84,42 +107,42 @@ func MarshalReceipt(
 		}
 	}
 
-	fields := map[string]any{
-		"blockHash":         receipt.BlockHash,
-		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		"transactionHash":   txnHash,
-		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
-		"from":              from,
-		"to":                txn.GetTo(),
-		"type":              hexutil.Uint(txn.Type()),
-		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
-		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
-		"contractAddress":   nil,
-		"logs":              logsToMarshal,
-		"logsBloom":         logsBloom,
+	result := &RPCReceipt{
+		BlockHash:         receipt.BlockHash,
+		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
+		TransactionHash:   txnHash,
+		TransactionIndex:  hexutil.Uint64(receipt.TransactionIndex),
+		From:              from,
+		To:                txn.GetTo(),
+		Type:              hexutil.Uint(txn.Type()),
+		GasUsed:           hexutil.Uint64(receipt.GasUsed),
+		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
+		Logs:              logsToMarshal,
+		LogsBloom:         &logsBloom,
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
+		result.EffectiveGasPrice = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
 	} else {
 		baseFee := header.BaseFee
 		effectiveTip := txn.GetEffectiveGasTip(baseFee)
 		var gasPrice uint256.Int
 		gasPrice.Add(baseFee, &effectiveTip)
-		fields["effectiveGasPrice"] = (*hexutil.U256)(&gasPrice)
+		result.EffectiveGasPrice = (*hexutil.U256)(&gasPrice)
 	}
 
 	// Assign status if postState is empty.
 	if len(receipt.PostState) == 0 {
-		// Assign receipt status.
-		fields["status"] = hexutil.Uint64(receipt.Status)
+		status := hexutil.Uint64(receipt.Status)
+		result.Status = &status
 	} else {
-		fields["root"] = hexutil.Bytes(receipt.PostState)
+		result.Root = receipt.PostState
 	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
-		fields["contractAddress"] = receipt.ContractAddress
+		contractAddress := receipt.ContractAddress
+		result.ContractAddress = &contractAddress
 	}
 
 	// Set derived blob related fields
@@ -132,12 +155,13 @@ func MarshalReceipt(
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = (*hexutil.U256)(&blobGasPrice)
-			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
+			blobGasUsed := hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
+			result.BlobGasPrice = (*hexutil.U256)(&blobGasPrice)
+			result.BlobGasUsed = &blobGasUsed
 		}
 	}
 
-	return fields
+	return result
 }
 
 func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]any {
@@ -237,7 +261,7 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 		return
 	}
 
-	marshalled := make([]map[string]any, 0, len(receipts))
+	marshalled := make([]*RPCReceipt, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
 		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))

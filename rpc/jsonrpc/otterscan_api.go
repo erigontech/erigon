@@ -46,9 +46,15 @@ const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
 	Txs       []*ethapi.RPCTransaction `json:"txs"`
-	Receipts  []map[string]any         `json:"receipts"`
+	Receipts  []ReceiptWithTimestamp   `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
+}
+
+// ReceiptWithTimestamp is a receipt with the timestamp of its block.
+type ReceiptWithTimestamp struct {
+	*ethutils.RPCReceipt
+	Timestamp uint64 `json:"timestamp"`
 }
 
 type OtterscanAPI interface {
@@ -412,12 +418,12 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	result := make([]map[string]any, 0, len(receipts))
+	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
 		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
-		marshalledRcpt["logs"] = nil
-		marshalledRcpt["logsBloom"] = nil
+		marshalledRcpt.Logs = nil
+		marshalledRcpt.LogsBloom = nil
 		result = append(result, marshalledRcpt)
 	}
 

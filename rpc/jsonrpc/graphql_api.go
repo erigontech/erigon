@@ -47,6 +47,21 @@ type GraphQLCallResult struct {
 	Status  uint64
 }
 
+// GraphQLReceipt is a receipt with the transaction fields the GraphQL resolver reads.
+// Its Logs replaces the RPC logs with the receipt's own.
+type GraphQLReceipt struct {
+	*ethutils.RPCReceipt
+	Nonce                uint64           `json:"nonce"`
+	Value                *uint256.Int     `json:"value"`
+	Data                 []byte           `json:"data"`
+	Logs                 types.Logs       `json:"logs"`
+	Gas                  uint64           `json:"gas"`
+	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
+	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
+	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
+	AccessList           types.AccessList `json:"accessList"`
+}
+
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
@@ -185,27 +200,29 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 
-	result := make([]map[string]any, 0, len(receipts))
+	result := make([]*GraphQLReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 
-		transaction := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
-		transaction["nonce"] = txn.GetNonce()
-		transaction["value"] = txn.GetValue()
-		transaction["data"] = txn.GetData()
-		transaction["logs"] = receipt.Logs
-		transaction["gas"] = txn.GetGasLimit()
+		transaction := &GraphQLReceipt{
+			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false),
+			Nonce:      txn.GetNonce(),
+			Value:      txn.GetValue(),
+			Data:       txn.GetData(),
+			Logs:       receipt.Logs,
+			Gas:        txn.GetGasLimit(),
+			AccessList: txn.GetAccessList(),
+		}
 		txType := txn.Type()
 		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
-			transaction["maxFeePerGas"] = txn.GetFeeCap()
-			transaction["maxPriorityFeePerGas"] = txn.GetTipCap()
+			transaction.MaxFeePerGas = txn.GetFeeCap()
+			transaction.MaxPriorityFeePerGas = txn.GetTipCap()
 		}
 		if txType == types.BlobTxType {
 			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction["maxFeePerBlobGas"] = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
+				transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
 			}
 		}
-		transaction["accessList"] = txn.GetAccessList()
 		result = append(result, transaction)
 	}
 
