@@ -115,13 +115,13 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	return fv.extendingForkHeadHash
 }
 
-func (fv *ForkValidator) hasRetainedOrDisplacedValidatedPayload(hash common.Hash, number uint64) bool {
+func (fv *ForkValidator) hasRetainedOrValidatedPayload(hash common.Hash, number uint64) bool {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.extendingForkHeadHash == hash && fv.extendingForkNumber == number && fv.sharedDom != nil {
 		return true
 	}
-	if fv.sharedDom == nil || fv.validHashes == nil {
+	if fv.validHashes == nil {
 		return false
 	}
 	_, ok := fv.validHashes.Get(hash)

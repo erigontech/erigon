@@ -307,7 +307,7 @@ func TestUpdateForkChoiceIfHeadRejectsUnvalidatedTarget(t *testing.T) {
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, genesisHash, chainPack.TopBlock.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
-	require.Equal(t, "validated target is not retained", result.ValidationError)
+	require.Equal(t, "target is neither retained nor validated", result.ValidationError)
 	assertHead(t, m, genesisHash)
 }
 
@@ -366,7 +366,7 @@ func TestUpdateForkChoiceIfHeadDoesNotReuseRetainedStateForInsertedSibling(t *te
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), sibling.Hash())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
-	require.Equal(t, "validated target is not retained", result.ValidationError)
+	require.Equal(t, "target is neither retained nor validated", result.ValidationError)
 	assertHead(t, m, m.Genesis.Hash())
 
 	result, err = m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), validated.Hash())
@@ -375,7 +375,7 @@ func TestUpdateForkChoiceIfHeadDoesNotReuseRetainedStateForInsertedSibling(t *te
 	assertHead(t, m, validated.Hash())
 }
 
-func TestUpdateForkChoiceIfHeadDoesNotRetainValidatedTargetAcrossBulkInsertion(t *testing.T) {
+func TestUpdateForkChoiceIfHeadReexecutesValidatedTargetAfterBulkInsertionClearsRetention(t *testing.T) {
 	ctx := t.Context()
 	m, validated := newValidatedChild(t)
 	bulk, err := m.GenerateChainFrom(m.Genesis, 17, func(_ int, gen *blockgen.BlockGen) {
@@ -386,12 +386,12 @@ func TestUpdateForkChoiceIfHeadDoesNotRetainValidatedTargetAcrossBulkInsertion(t
 	status, err := m.InsertBlocks(ctx, bulk.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.Zero(t, m.ExecModule.ForkValidator().ExtendingForkHeadHash())
 
 	result, err := m.ExecModule.UpdateForkChoiceIfHead(ctx, m.Genesis.Hash(), validated.Hash())
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
-	require.Equal(t, "validated target is not retained", result.ValidationError)
-	assertHead(t, m, m.Genesis.Hash())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, result.ValidationError)
+	assertHead(t, m, validated.Hash())
 }
 
 func TestUpdateForkChoiceIfHeadRejectsValidatedNonChildWithoutCleanup(t *testing.T) {

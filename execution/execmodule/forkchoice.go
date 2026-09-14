@@ -255,8 +255,8 @@ func (e *ExecModule) conditionalForkChoicePreflight(
 	if !expectedCanonical {
 		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "expected head is not canonical", nil
 	}
-	if e.forkValidator == nil || !e.forkValidator.hasRetainedOrDisplacedValidatedPayload(targetHead, *targetNumber) {
-		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "validated target is not retained", nil
+	if e.forkValidator == nil || !e.forkValidator.hasRetainedOrValidatedPayload(targetHead, *targetNumber) {
+		return conditionalForkChoiceRejected, common.Hash{}, common.Hash{}, "target is neither retained nor validated", nil
 	}
 	preservedSafe := rawdb.ReadForkchoiceSafe(tx)
 	preservedFinalized := rawdb.ReadForkchoiceFinalized(tx)
