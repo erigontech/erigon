@@ -27,12 +27,14 @@ import (
 	"io"
 	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -350,6 +352,18 @@ func (r *Receipt) statusEncoding() []byte {
 }
 
 // Copy creates a deep copy of the Receipt.
+// Size returns the approximate memory held by the receipt and its logs.
+func (r *Receipt) Size() int {
+	n := int(unsafe.Sizeof(*r)) + len(r.PostState)
+	if r.BlockNumber != nil {
+		n += int(unsafe.Sizeof(*r.BlockNumber))
+	}
+	for _, l := range r.Logs {
+		n += int(unsafe.Sizeof(l)) + int(unsafe.Sizeof(*l)) + len(l.Topics)*length.Hash + len(l.Data)
+	}
+	return n
+}
+
 func (r *Receipt) Copy() *Receipt {
 	if r == nil {
 		return nil

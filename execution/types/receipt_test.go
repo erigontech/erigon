@@ -24,12 +24,14 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -631,4 +633,20 @@ func TestTypedReceiptDecodersAgree(t *testing.T) {
 			require.Equal(t, uint64(7), r.CumulativeGasUsed)
 		}
 	})
+}
+
+func TestReceiptSizeCountsLogs(t *testing.T) {
+	r := &Receipt{Logs: Logs{{Topics: make([]common.Hash, 2), Data: make([]byte, 100)}}}
+	withLog := r.Size()
+	require.Greater(t, withLog, (&Receipt{}).Size())
+
+	r.Logs[0].Data = make([]byte, 1100)
+	r.Logs[0].Topics = append(r.Logs[0].Topics, common.Hash{})
+	require.Equal(t, withLog+1000+length.Hash, r.Size())
+}
+
+func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
+	empty := (&Receipt{}).Size()
+	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
 }
