@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -218,14 +217,7 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
@@ -340,7 +332,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
-	ResetDeferredUpdateMetrics()
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {

@@ -2711,7 +2711,6 @@ func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	if hph.branchEncoder.pendingPrefixes != nil {
 		hph.branchEncoder.pendingPrefixes.Clear()
 	}
-	ResetDeferredUpdateMetrics()
 	return deferred
 }
 
