@@ -138,7 +138,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
-	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
+	start := time.Now()
 	src, err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger)
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
 		logger.Warn("[compact] stale lock file left behind", "db", dbDir, "err", err)
 	}
-	args := []any{"label", label, "db", dbDir, "before", common.ByteCount(uint64(before.Size()))}
+	args := []any{"label", label, "db", dbDir, "took", time.Since(start), "before", common.ByteCount(uint64(before.Size()))}
 	if after, err := os.Stat(dataFile); err == nil {
 		args = append(args, "after", common.ByteCount(uint64(after.Size())))
 	} else {
@@ -261,7 +261,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 			copiedRows += rows
 		}
 	}
-	logger.Info("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
+	logger.Debug("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
@@ -280,10 +280,6 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return 0, err
 	}
-	if total > 0 {
-		logger.Info("[db-copy] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
-	}
-
 	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
 	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
 	var ra *kv.ReadAhead

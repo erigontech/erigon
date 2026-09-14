@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
@@ -99,7 +100,7 @@ const bloatRatio = 3
 
 // autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
 // pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree uint64 = 1 << 30
+var autoCompactMinFree = datasize.GB.Bytes()
 
 // ApplyMigrations upgrades an old datadir layout and compacts bloated dbs. A
 // datadir locked by another process is skipped.
