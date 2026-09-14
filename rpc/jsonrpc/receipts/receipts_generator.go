@@ -164,6 +164,32 @@ func PersistedReceiptsServed() bool { return !rpcDisableRCache && !dbg.AssertEna
 
 var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
+// PersistedReceipt returns the receipt from the persistent cache without generating it; ok is false
+// when the receipt is not served from there.
+func (g *Generator) PersistedReceipt(tx kv.TemporalTx, header *types.Header, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	if !PersistedReceiptsServed() {
+		return nil, false, nil
+	}
+	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	g.addToCacheReceipt(txNum, receipt)
+	return receipt, true, nil
+}
+
+func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+		TxNum:     txNum,
+		BlockNum:  blockNum,
+		BlockHash: blockHash,
+		TxnHash:   txnHash,
+		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
+		DontCalcBloom: true,
+	})
+	return receipt, ok && receipt != nil, err
+}
+
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
@@ -263,18 +289,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if !rpcDisableRCache && !calculatePostState {
 		var ok bool
 		var err error
-		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:     txNum,
-			BlockNum:  blockNum,
-			BlockHash: blockHash,
-			TxnHash:   txnHash,
-			// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
-			DontCalcBloom: true,
-		})
+		receiptFromDB, ok, err = readPersistedReceipt(tx, blockNum, blockHash, txnHash, txNum)
 		if err != nil {
 			return nil, err
 		}
-		if ok && receiptFromDB != nil && PersistedReceiptsServed() {
+		if ok && PersistedReceiptsServed() {
 			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
