@@ -65,6 +65,8 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		accountKeyLen:  accountKeyLen,
 		numWorkers:     defaultParallelCommitmentWorkers,
 		cfg:            cfg,
+
+		leaveDeferredForCaller: cfg.LeaveDeferredForCaller,
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
 	// same keys the workers do, so aliasing them counts every key twice.
@@ -88,6 +90,7 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 }
 
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
+	p.cfg.LeaveDeferredForCaller = leave
 	p.leaveDeferredForCaller = leave
 }
 
