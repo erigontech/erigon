@@ -38,7 +38,7 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(runtime.GOMAXPROCS(-1)))
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")

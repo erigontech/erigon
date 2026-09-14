@@ -84,7 +84,7 @@ func withWarmupWorkers(t *testing.T, n uint64) {
 }
 
 func TestClearTablesWarmupOff(t *testing.T) {
-	withWarmupWorkers(t, 0) // default: plain one-shot clear, no chunking
+	withWarmupWorkers(t, 0) // plain one-shot clear, no chunking
 
 	db := newWriteMapDB(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
