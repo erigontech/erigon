@@ -7,24 +7,33 @@ poll_timeout=${GLOAS_POLL_TIMEOUT_SECONDS:-180}
 target_advance=${GLOAS_POLL_TARGET_ADVANCE:-8}
 poll_sleep=${GLOAS_POLL_SLEEP_SECONDS:-3}
 
+normalize_poll_config() {
+  local name=$1 value=$2
+  case "$value" in
+    ''|*[!0-9]*)
+      echo "$name must be an unsigned decimal integer" >&2
+      return 2
+      ;;
+  esac
+  if ((${#value} > 9)); then
+    echo "$name is too large" >&2
+    return 2
+  fi
+  printf '%d' "$((10#$value))"
+}
+
+poll_timeout=$(normalize_poll_config GLOAS_POLL_TIMEOUT_SECONDS "$poll_timeout")
+target_advance=$(normalize_poll_config GLOAS_POLL_TARGET_ADVANCE "$target_advance")
+poll_sleep=$(normalize_poll_config GLOAS_POLL_SLEEP_SECONDS "$poll_sleep")
+max_head_slot=$((9223372036854775806 - target_advance))
+
 curl_args=(
   --silent
   --show-error
   --connect-timeout 5
+  --max-filesize 8388608
 )
 
-curl --fail "${curl_args[@]}" \
-  --retry 4 \
-  --retry-delay 1 \
-  --retry-connrefused \
-  --retry-max-time 30 \
-  --max-time 15 \
-  "$beacon_url/eth/v2/beacon/blocks/head" \
-  --output "$api_tmp_dir/head.json"
-initial_head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json")
-target_head_slot=$((initial_head_slot + target_advance))
-last_head_slot=$initial_head_slot
-next_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
 deadline=$((SECONDS + poll_timeout))
 scan_incomplete=false
 head_fetch_unavailable=false
@@ -39,6 +48,55 @@ wait_for_next_poll() {
   sleep "$sleep_time"
 }
 
+read_head_slot() {
+  jq -ser --arg max_head_slot "$max_head_slot" '
+    def canonical_decimal:
+      type == "string" and
+      length > 0 and
+      (explode | all(.[]; . >= 48 and . <= 57)) and
+      (. == "0" or (startswith("0") | not));
+    select(length == 1) |
+    .[0] |
+    .data.message.slot as $slot |
+    select($slot | canonical_decimal) |
+    select(
+      ($slot | length) < ($max_head_slot | length) or
+      (($slot | length) == ($max_head_slot | length) and $slot <= $max_head_slot)
+    ) |
+    $slot
+  ' "$api_tmp_dir/head.json"
+}
+
+initial_head_slot=
+while ((SECONDS < deadline)); do
+  remaining=$((deadline - SECONDS))
+  request_timeout=$((remaining < 15 ? remaining : 15))
+  if curl --fail "${curl_args[@]}" \
+    --max-time "$request_timeout" \
+    "$beacon_url/eth/v2/beacon/blocks/head" \
+    --output "$api_tmp_dir/head.json" && initial_head_slot=$(read_head_slot); then
+    if ((SECONDS >= deadline)); then
+      initial_head_slot=
+      head_fetch_unavailable=true
+      break
+    fi
+    head_fetch_unavailable=false
+    break
+  fi
+  echo "Initial head block response was unavailable or invalid; retrying"
+  head_fetch_unavailable=true
+  wait_for_next_poll || break
+done
+
+if [ -z "$initial_head_slot" ]; then
+  echo "::error::Head polling was incomplete before the deadline; no valid head slot was observed"
+  exit 1
+fi
+
+target_head_slot=$((initial_head_slot + target_advance))
+last_head_slot=$initial_head_slot
+next_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
+
 while ((SECONDS < deadline)); do
   remaining=$((deadline - SECONDS))
   request_timeout=$((remaining < 15 ? remaining : 15))
@@ -50,11 +108,14 @@ while ((SECONDS < deadline)); do
     wait_for_next_poll || break
     continue
   fi
-  if ! head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json"); then
+  if ! head_slot=$(read_head_slot); then
     echo "Head block response was invalid; retrying"
     head_fetch_unavailable=true
     wait_for_next_poll || break
     continue
+  fi
+  if ((SECONDS >= deadline)); then
+    break
   fi
   head_fetch_unavailable=false
   last_head_slot=$head_slot
@@ -87,12 +148,18 @@ while ((SECONDS < deadline)); do
 
       case "$candidate_http_code" in
         200)
-          if ! jq -e '
+          if ! jq -se '
+            def canonical_decimal:
+              type == "string" and
+              length > 0 and
+              (explode | all(.[]; . >= 48 and . <= 57)) and
+              (. == "0" or (startswith("0") | not));
+            select(length == 1) |
+            .[0] |
             (.version | type == "string") and
             (.data | type == "object") and
             (.data.message | type == "object") and
-            (.data.message.slot | type == "string") and
-            ((try (.data.message.slot | tonumber) catch null) != null) and
+            (.data.message.slot | canonical_decimal) and
             (.data.message.body | type == "object") and
             (.data.message.body.payload_attestations | type == "array") and
             all(.data.message.body.payload_attestations[];
@@ -100,20 +167,19 @@ while ((SECONDS < deadline)); do
               (.aggregation_bits | type == "string") and
               (.signature | type == "string") and
               (.data | type == "object") and
-              (.data.slot | type == "string") and
-              ((try (.data.slot | tonumber) catch null) != null) and
+              (.data.slot | canonical_decimal) and
               (.data.payload_present | type == "boolean")
             )
           ' "$api_tmp_dir/candidate.json"; then
             echo "Candidate block response for slot $slot was invalid; retrying"
             slot_unresolved=true
-          elif ! jq -e --argjson requested_slot "$slot" '
-            (.data.message.slot | tonumber) as $block_slot |
+          elif ! jq -e \
+            --arg requested_slot "$slot" \
+            --arg attestation_slot "$((slot - 1))" '
             .version == "gloas" and
-            $block_slot == $requested_slot and
-            $block_slot > 0 and
+            .data.message.slot == $requested_slot and
             all(.data.message.body.payload_attestations[];
-              (.data.slot | tonumber) == ($block_slot - 1) and
+              .data.slot == $attestation_slot and
               (.aggregation_bits |
                 test("^0x[0-9a-fA-F]+$") and
                 (test("^0x0+$"; "i") | not)
@@ -131,6 +197,10 @@ while ((SECONDS < deadline)); do
               .data.payload_present == true
             )
           ' "$api_tmp_dir/candidate.json"; then
+            if ((SECONDS >= deadline)); then
+              scan_incomplete=true
+              break 2
+            fi
             echo "Found available payload attestations in Gloas block at slot $slot"
             exit 0
           fi
