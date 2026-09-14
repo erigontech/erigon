@@ -35,8 +35,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
-// denebHeadBlock builds a head block at the Deneb fork, carrying commitments KZG commitments. A
-// head with commitments has to have its blob sidecars fetched before it can be committed.
+// denebHeadBlock builds a head block at the Deneb fork carrying the requested number of KZG
+// commitments. A head with commitments has to have its blob sidecars fetched before it can be
+// committed.
 func denebHeadBlock(t *testing.T, beaconConfig *clparams.BeaconChainConfig, commitments int) (common.Hash, []byte) {
 	t.Helper()
 

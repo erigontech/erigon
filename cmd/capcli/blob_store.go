@@ -66,19 +66,10 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	return nil
 }
 
-// storeRemoteBlobs verifies a remote blob response against the requested identifiers, stores what
-// matches, and requires the store to serve every requested identity back afterwards. Given the
-// insert's early-stop contract, its error alone cannot tell a full insert from an empty one.
-//
-// Each response sidecar is bound to the block by commitment first. The insert skips the commitment
-// inclusion proof from Gloas on, so without that comparison nothing ties a sidecar to the block it
-// claims to belong to and a self-consistent blob, commitment and proof from elsewhere would verify.
-//
-// Completeness is judged by reading the store rather than by this invocation's insert count: blob
-// storage commits independently of the caller's beacon transaction, so a re-run can legitimately
-// insert nothing and still be complete. The read has to be ReadBlobSidecars, the same call
-// consumers make, because sidecar files are published before the count row they depend on is
-// committed — checking for the files alone would accept a store nothing can read.
+// storeRemoteBlobs binds each response sidecar to the block by commitment, stores what matches, and
+// confirms completeness by reading every requested identity back through ReadBlobSidecars. Neither
+// the insert's error nor its count can establish that: it stops early without reporting it, and from
+// Gloas on it skips the inclusion proof that would otherwise tie a sidecar to its block.
 func storeRemoteBlobs(
 	ctx context.Context,
 	blobDB blob_storage.BlobStorage,
