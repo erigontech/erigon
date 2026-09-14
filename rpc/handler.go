@@ -216,10 +216,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				default:
 				}
 
-				// handleCallMsg yields one of three:
-				// non-streaming response: res != nil, encoded here via writeTo.
-				// streamed response: res == nil, already written to the stream.
-				// notification: no response, leaving buf empty (only non-empty buffers reply).
+				// A non-nil res is an error answer that still has to be written. On nil the answer
+				// is already in the stream, or the message needs none.
 				buf := bytes.NewBuffer(nil)
 				stream := jsonstream.Get(buf)
 				defer jsonstream.Put(stream)
@@ -282,8 +280,8 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	}
 }
 
-// answerInto runs the call and leaves its response in stream. A streamed method
-// writes its own; anything else is encoded here.
+// answerInto runs the call and leaves its response in stream. The call writes a success
+// itself; only an error answer is encoded here.
 func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
 	answer := h.handleCallMsg(cp, msg, stream)
 	h.addSubscriptions(cp.notifiers)
@@ -521,7 +519,8 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 }
 
-// handleCallMsg executes a call message and returns the answer.
+// handleCallMsg executes a call message. It returns the error answer, or nil once the
+// response is in the stream or the message needs none.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
