@@ -1385,11 +1385,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				invReason = "done-vercheck"
 			}
 		}
-		// A later destruct makes a read predating it stale; checkVersion alone
-		// misses it because the SD doesn't write the read's own path. AddressPath
-		// is existence-only, so it stays valid unless the account is dead
-		// (destroyed, unrevived, no live floor).
-		if valid == VersionValid && path == AddressPath {
+		// A later destruct invalidates a live-account read even when the record
+		// version is unchanged. A read that already observed absence stays valid.
+		if valid == VersionValid && path == AddressPath && !absent {
 			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok &&
 				vm.destroyedAndUnrevived(addr, txIndex) {
 				valid = VersionInvalid
