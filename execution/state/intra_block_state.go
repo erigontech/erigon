@@ -196,6 +196,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe. The probe
 	// (read_paths.go) fires on every versionedReadCore call but reads only
@@ -365,6 +366,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 }
 
 // Release Deprecated use Close
@@ -744,6 +746,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+		sdb.recordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -1285,18 +1288,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive nil AddressPath read means this tx already consumed the
-			// account's absence, so reconstructing from cells flushed since would
-			// fork its view out of validation's sight — abort and re-execute.
-			// Exempt only an absence concluded from this destruct itself,
-			// recorded as a MapRead at the destruct cell's exact version.
-			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
-				if sdRes.DepIdx() > sdb.dep {
-					sdb.dep = sdRes.DepIdx()
-				}
-				panic(ErrDependency)
-			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
@@ -1316,6 +1307,16 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved == nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
+				}
+				// A live reconstruction must not replace a consumed absence.
+				// A wiped MapRead can use an older AddressPath cell's version because
+				// self-destruct snapshots omit the account record.
+				if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+					!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
+					if sdRes.DepIdx() > sdb.dep {
+						sdb.dep = sdRes.DepIdx()
+					}
+					panic(ErrDependency)
 				}
 				// The EVM consumes this conclusion: reconcile the provisional
 				// nil probe with the preserved account so a later flush
@@ -1344,6 +1345,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.accountReadCount++
 				}
 				sdb.stateReader.SetTrace(false, "")
+				sdb.recordStateReadError(err)
 				if err == nil {
 					if sdb.committedBase == nil {
 						sdb.committedBase = make(map[accounts.Address]*accounts.Account)
@@ -1990,6 +1992,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		sdb.accountReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
@@ -3367,6 +3370,16 @@ func (sdb *IntraBlockState) HadInvalidRead() bool {
 	return sdb.dep >= 0
 }
 
+func (sdb *IntraBlockState) StateReadError() error {
+	return sdb.stateReadErr
+}
+
+func (sdb *IntraBlockState) recordStateReadError(err error) {
+	if err != nil && sdb.stateReadErr == nil {
+		sdb.stateReadErr = err
+	}
+}
+
 func (sdb *IntraBlockState) DepTxIndex() int {
 	return sdb.dep
 }
@@ -3395,6 +3408,7 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedReads = ReadSet{}
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 	sdb.recordAccess = false
 }
 

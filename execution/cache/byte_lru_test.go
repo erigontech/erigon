@@ -17,11 +17,13 @@
 package cache
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
@@ -36,4 +38,26 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
 	require.Equal(t, used, cachebudget.Global.Used())
+}
+
+func TestHashByteLRUMissesForeignHash(t *testing.T) {
+	l := NewHashByteLRU(datasize.MB, func(v []byte) int64 { return int64(len(v)) })
+	hash := common.Hash{1, 2, 3}
+	l.Add(hash, []byte{1})
+	_, ok := l.Get(hash)
+	require.True(t, ok)
+
+	foreign := hash
+	foreign[31]++
+	_, ok = l.Get(foreign)
+	require.False(t, ok, "a hash sharing the 8-byte slot must miss")
+}
+
+func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
+	var calls atomic.Int32
+	l := NewHashByteLRU(datasize.MB, func(v []byte) int64 { calls.Add(1); return int64(len(v)) })
+	l.Add(common.Hash{1}, make([]byte, 100))
+	_, ok := l.Get(common.Hash{1})
+	require.True(t, ok)
+	require.Equal(t, int32(1), calls.Load())
 }

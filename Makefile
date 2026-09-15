@@ -8,6 +8,7 @@ GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
+export GOEXPERIMENT ?= jsonv2
 GOARCH ?= $(shell go env GOHOSTARCH)
 GOEXE := $(shell $(GO) env GOEXE 2>/dev/null)
 UNAME := $(shell uname) # Supported: Darwin, Linux
