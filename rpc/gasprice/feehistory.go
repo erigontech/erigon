@@ -33,6 +33,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	commonlru "github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -75,9 +76,9 @@ type cacheKey struct {
 // processedFees holds the computed fee data for a single block.
 // This is what gets stored in the LRU cache.
 type processedFees struct {
-	reward                       []*big.Int
-	baseFee, nextBaseFee         *uint256.Int
-	blobBaseFee, nextBlobBaseFee *uint256.Int
+	reward                       []hexutil.U256
+	baseFee, nextBaseFee         hexutil.U256
+	blobBaseFee, nextBlobBaseFee hexutil.U256
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
 }
@@ -144,13 +145,11 @@ func (s sortGasAndReward) Less(i, j int) bool {
 // the block field filled in, retrieves the block from the backend if not present yet and
 // fills in the rest of the fields.
 func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainconfig *chain.Config) {
-	if bf.results.baseFee = bf.header.BaseFee; bf.results.baseFee == nil {
-		bf.results.baseFee = new(uint256.Int)
+	if bf.header.BaseFee != nil {
+		bf.results.baseFee = hexutil.U256(*bf.header.BaseFee)
 	}
 	if chainconfig.IsLondon(bf.blockNumber + 1) {
-		bf.results.nextBaseFee = misc.CalcBaseFee(chainconfig, bf.header)
-	} else {
-		bf.results.nextBaseFee = new(uint256.Int)
+		bf.results.nextBaseFee = hexutil.U256(*misc.CalcBaseFee(chainconfig, bf.header))
 	}
 
 	// Fill in blob base fee and next blob base fee.
@@ -166,12 +165,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			bf.err = err
 			return
 		}
-		bf.results.blobBaseFee = &blobBaseFee256
-		bf.results.nextBlobBaseFee = &nextBlobBaseFee256
-
-	} else {
-		bf.results.blobBaseFee = new(uint256.Int)
-		bf.results.nextBlobBaseFee = new(uint256.Int)
+		bf.results.blobBaseFee = hexutil.U256(blobBaseFee256)
+		bf.results.nextBlobBaseFee = hexutil.U256(nextBlobBaseFee256)
 	}
 	bf.results.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
 
@@ -186,16 +181,13 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
+		bf.results.reward = []hexutil.U256{}
 		return
 	}
 
-	bf.results.reward = make([]*big.Int, len(percentiles))
+	bf.results.reward = make([]hexutil.U256, len(percentiles))
 	if len(bf.block.Transactions()) == 0 {
-		// return an all zero row if there are no transactions to gather data from
-		for i := range bf.results.reward {
-			bf.results.reward[i] = new(big.Int)
-		}
-		return
+		return // an all zero row: there are no transactions to gather data from
 	}
 
 	sorter := make(sortGasAndReward, len(bf.block.Transactions()))
@@ -217,7 +209,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			txIndex++
 			sumGasUsed += sorter[txIndex].gasUsed
 		}
-		bf.results.reward[i] = sorter[txIndex].reward.ToBig()
+		bf.results.reward[i] = hexutil.U256(sorter[txIndex].reward)
 	}
 }
 
@@ -309,7 +301,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*uint256.Int, []float64, []*uint256.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]hexutil.U256, []hexutil.U256, []float64, []hexutil.U256, []float64, error) {
 	if blocks < 1 {
 		return common.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
@@ -365,10 +357,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	var (
 		blockResults = make([]blockResult, blocks)
-		reward       = make([][]*big.Int, blocks)
-		baseFee      = make([]*uint256.Int, blocks+1)
+		reward       = make([][]hexutil.U256, blocks)
+		baseFee      = make([]hexutil.U256, blocks+1)
 		gasUsedRatio = make([]float64, blocks)
-		blobBaseFee  = make([]*uint256.Int, blocks+1)
+		blobBaseFee  = make([]hexutil.U256, blocks+1)
 	)
 	var next atomic.Uint64
 	next.Store(oldestBlock)
@@ -532,7 +524,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// Post-processing is serial: all goroutines have finished, no races.
 	firstMissing := len(blockResults)
 	blobGasUsedRatio := make([]float64, len(blockResults))
-	for i, r := range blockResults {
+	for i := range blockResults {
+		r := &blockResults[i]
 		if r.missing || !r.hasResult {
 			if i < firstMissing {
 				firstMissing = i
