@@ -900,15 +900,14 @@ type accessListResult struct {
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
-// recoverAuthority is types.Authorization.RecoverSigner. excludeAuthorities takes it
-// as a parameter so a test can count the calls and pin that none happen before the
-// gas check.
+// recoverAuthority is types.Authorization.RecoverSigner, taken as a parameter so a
+// test can count the calls.
 type recoverAuthority func(*types.Authorization) (common.Address, error)
 
 // excludeAuthorities adds the message's EIP-7702 authorities to excl, which the state
 // transition pre-warms. Each one costs an ECDSA recovery, so a list that cannot cover
 // its intrinsic gas is refused before any of them runs.
-func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}, recover recoverAuthority) error {
+func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}, recoverSigner recoverAuthority) error {
 	if err := checkIntrinsicGas(msg, chainRules); err != nil {
 		return err
 	}
@@ -918,7 +917,7 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 		if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(chainRules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 			continue
 		}
-		authority, err := recover(auth)
+		authority, err := recoverSigner(auth)
 		if err != nil {
 			continue
 		}
@@ -927,22 +926,18 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 	return nil
 }
 
-// checkIntrinsicGas rejects a message that cannot cover its own intrinsic gas, the
-// same comparison the executor makes before running it. The message carries the
-// effective gas limit, RPC gas cap included, and the cost follows the block's fork
-// rules, so a gas figure eth_estimateGas returned is never rejected here.
+// checkIntrinsicGas rejects a message whose gas cannot cover the intrinsic cost of
+// its authorizations. It leaves out the access list, which the tracer strips of
+// excluded addresses before the executor prices it, so the figure stays at or below
+// what the executor charges and a call it would run is never refused here.
 //
-// It stops at that comparison on purpose. The EIP-7825 cap the executor applies
-// beside it is gated on CheckGas, which ToMessage leaves false, so enforcing it
-// here would reject calls the executor would run.
+// The EIP-7825 cap the executor applies beside this comparison is gated on CheckGas,
+// which ToMessage leaves false, so enforcing it here would reject calls too.
 func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	contractCreation := msg.To().IsNil()
-	accessList := msg.AccessList()
 	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               msg.Data(),
 		AuthorizationsLen:  uint64(len(msg.Authorizations())),
-		AccessListLen:      uint64(len(accessList)),
-		StorageKeysLen:     uint64(accessList.StorageKeys()),
 		IsContractCreation: contractCreation,
 		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
 		HasValue:           !msg.Value().IsZero(),

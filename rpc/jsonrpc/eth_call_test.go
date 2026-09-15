@@ -1840,51 +1840,22 @@ func TestCreateAccessListAuthGas(t *testing.T) {
 		// removed guard could not do.
 		require.ErrorContains(t, err, "intrinsic gas too low")
 	})
-}
 
-// TestCreateAccessListAuthorizationsAffordable pins that a list too large for the gas
-// it may spend is refused by the intrinsic gas check. Every entry that reaches the
-// exclusion loop costs an ECDSA recovery, so the request must not pay for them.
-func TestCreateAccessListAuthorizationsAffordable(t *testing.T) {
-	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	t.Run("no gas field leaves the rpc gas cap to refuse it", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	// One signature replicated: recovery costs the same per entry either way, and
-	// signing each of them would dominate the test instead.
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
-	require.NoError(t, err)
-	signed := func(n int) []types.JsonAuthorization {
-		auths := make([]types.JsonAuthorization, n)
+		auths := make([]types.JsonAuthorization, 4096)
 		for i := range auths {
-			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+			auths[i] = authorizations(receiverAddress)[0]
 		}
-		return auths
-	}
-
-	t.Run("gas below the intrinsic cost is refused", func(t *testing.T) {
-		gas := hexutil.Uint64(params.TxGas)
 		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
 			From:              &bankAddress,
 			To:                &receiverAddress,
-			Gas:               &gas,
-			AuthorizationList: signed(64),
+			AuthorizationList: auths,
 		}, nil, nil, nil)
 		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
 	})
-
-	t.Run("the rpc gas cap bounds a request that sends no gas", func(t *testing.T) {
-		// Without a gas field the effective limit is the RPC gas cap, which leaves
-		// room for far fewer authorizations than this.
-		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
-			From:              &bankAddress,
-			To:                &receiverAddress,
-			AuthorizationList: signed(4096),
-		}, nil, nil, nil)
-		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
-	})
-
 }
 
 // TestExcludeAuthoritiesOrder pins that no authority is recovered until the intrinsic
@@ -1955,6 +1926,38 @@ func TestExcludeAuthoritiesOrder(t *testing.T) {
 		require.Equal(t, 8, calls)
 		require.Contains(t, excl, authority)
 	})
+}
+
+// TestCreateAccessListExcludedAccessList pins that a caller-supplied entry the
+// tracer drops is not charged for. The sender is pre-warmed, so its entry never
+// reaches the executor and must not count against the gas limit either.
+func TestCreateAccessListExcludedAccessList(t *testing.T) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(t, err)
+
+	keys := make([]common.Hash, 200)
+	for i := range keys {
+		keys[i] = common.BigToHash(big.NewInt(int64(i)))
+	}
+	// The sender is in excl, so NewAccessListTracer drops this whole entry.
+	accessList := types.AccessList{{Address: bankAddress, StorageKeys: keys}}
+	gas := hexutil.Uint64(280_000)
+
+	res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		From:              &bankAddress,
+		To:                &receiverAddress,
+		Gas:               &gas,
+		AccessList:        &accessList,
+		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
+	}, nil, nil, nil)
+
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
 }
 
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
