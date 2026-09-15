@@ -51,9 +51,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -91,8 +88,6 @@ var (
 )
 
 type metricsSink struct {
-	processedKeys                 metrics.Counter
-	branchesUpdated               metrics.Counter
 	stateSkipRate                 metrics.Counter
 	stateLoadRate                 metrics.Counter
 	stateLevelledSkipRatesAccount [6]metrics.Counter
@@ -109,8 +104,6 @@ type metricsSink struct {
 }
 
 var defaultMetricsSink = &metricsSink{
-	processedKeys:                 mxTrieProcessedKeys,
-	branchesUpdated:               mxTrieBranchesUpdated,
 	stateSkipRate:                 mxTrieStateSkipRate,
 	stateLoadRate:                 mxTrieStateLoadRate,
 	stateLevelledSkipRatesAccount: mxTrieStateLevelledSkipRatesAccount,
@@ -126,18 +119,6 @@ func metricsSinkFor(m *Metrics) *metricsSink {
 		return defaultMetricsSink
 	}
 	return m.sink
-}
-
-func (s *metricsSink) recordProcessedKey() {
-	if s.processedKeys != nil {
-		s.processedKeys.Inc()
-	}
-}
-
-func (s *metricsSink) recordBranchUpdate(n int) {
-	if s.branchesUpdated != nil {
-		s.branchesUpdated.AddInt(n)
-	}
 }
 
 func (s *metricsSink) flushTrieStateRates() {
@@ -508,7 +489,6 @@ func ApplyDeferredBranchUpdates(
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		metricsSinkFor(m).recordBranchUpdate(written)
 		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
@@ -553,7 +533,6 @@ func ApplyDeferredBranchUpdates(
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	metricsSinkFor(m).recordBranchUpdate(written)
 	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
@@ -603,7 +582,6 @@ func (be *BranchEncoder) CollectUpdate(
 		return err
 	}
 	publishBranchWrites(1, len(updateCopy), be.metrics)
-	metricsSinkFor(be.metrics).recordBranchUpdate(1)
 	return nil
 }
 
@@ -1653,13 +1631,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
 	default:
 	}
@@ -1768,22 +1746,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {

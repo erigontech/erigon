@@ -102,6 +102,7 @@ GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
+GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -116,6 +117,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
+PROTOC_VERSION = 36.0
 PROTOC_INCLUDE = build/include/google
 PROTO_PATH = node/interfaces
 
@@ -123,8 +125,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 25 ]; then \
-		echo "minimum required Golang version is 1.25"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 26 ]; then \
+		echo "minimum required Golang version is 1.26"; \
 		exit 1 ;\
 	fi
 
@@ -339,19 +341,11 @@ check-generated:
 
 ## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
 check-large-files:
-	@base="${BASE:-main}"; \
-	found=0; \
-	while IFS= read -r file; do \
-		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
-		if [ "$$size" -gt 1048576 ]; then \
-			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
-			found=1; \
-		fi; \
-	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
-	if [ "$$found" -eq 1 ]; then \
-		echo "ERROR: Files exceeding 1 MB found."; \
-		exit 1; \
-	fi
+	@bash .github/workflows/scripts/check-large-files.sh "$(or $(BASE),main)"
+
+## test-check-large-files:          test the large-file checker itself
+test-check-large-files:
+	@bash .github/workflows/scripts/check-large-files.test.sh
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
@@ -504,13 +498,13 @@ kurtosis-cleanup:
 
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
-	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml --fast-only
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`
@@ -525,14 +519,17 @@ clean:
 $(GOBINREL):
 	mkdir -p "$(GOBIN)"
 
-$(GOBINREL)/protoc: | $(GOBINREL)
+# Stamped: make ignores recipe changes, so a plain protoc target would keep an old compiler.
+$(GOBINREL)/protoc-$(PROTOC_VERSION).stamp: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	rm -f "$(GOBIN)/protoc-"*".stamp"
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
 	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
 	rm -rf "$(PROTOC_TMP)"
+	touch "$@"
 
 # 'protoc-gen-go' tool generates proto messages
 $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
@@ -542,7 +539,7 @@ $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
 $(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
 	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+protoc-all: $(GOBINREL)/protoc-$(PROTOC_VERSION).stamp $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
 
 protoc-clean:
 	rm -f "$(GOBIN)/protoc"*

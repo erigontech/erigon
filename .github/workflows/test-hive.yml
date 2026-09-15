@@ -104,6 +104,7 @@ jobs:
           {
             echo "repository=$(jq -r .hive_repository "$versions")"
             echo "ref=$(jq -r .hive_ref "$versions")"
+            echo "devp2p_geth_ref=$(jq -r '.devp2p_geth_ref // empty' "$versions")"
             echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' "$versions")"
           } >> "$GITHUB_OUTPUT"
 
@@ -115,10 +116,27 @@ jobs:
           path: hive
           persist-credentials: false
 
+      # TODO: remove devp2p_geth_ref from hive-versions.json after Geth fixes its fixture and https://github.com/erigontech/erigon/issues/22808 is completed
+      - name: Pin Geth used by DevP2P
+        if: ${{ matrix.sim == 'devp2p' && steps.hive-version.outputs.devp2p_geth_ref != '' }}
+        env:
+          GETH_REF: ${{ steps.hive-version.outputs.devp2p_geth_ref }}
+        run: |
+          if ! echo "$GETH_REF" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "Error: devp2p_geth_ref is not a valid git SHA: $GETH_REF"
+            exit 1
+          fi
+          dockerfile=hive/simulators/devp2p/Dockerfile
+          sed -i "s|^RUN git clone --depth 1 https://github.com/ethereum/go-ethereum.git /go-ethereum$|RUN git init /go-ethereum \&\& git -C /go-ethereum remote add origin https://github.com/ethereum/go-ethereum.git \&\& git -C /go-ethereum fetch --depth 1 origin ${GETH_REF} \&\& git -C /go-ethereum checkout --detach FETCH_HEAD|" "$dockerfile"
+          if ! grep -Fq "fetch --depth 1 origin ${GETH_REF}" "$dockerfile"; then
+            echo "Error: failed to pin Geth in the DevP2P Dockerfile"
+            exit 1
+          fi
+
       - name: Setup go env and cache
         uses: actions/setup-go@v7
         with:
-          go-version: '>=1.25'
+          go-version: '>=1.26'
           go-version-file: 'hive/go.mod'
 
       - name: Conditional Docker Login

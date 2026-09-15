@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
@@ -92,20 +91,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -130,7 +120,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +279,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("insufficient funds for transfer")
 		}
 		available.Sub(available, value)
+
+		if blobGas := msg.BlobGas(); blobGas > 0 && chainConfig.IsCancun(effectiveHeader.Time) {
+			blobFee := new(big.Int).Mul(msg.MaxFeePerBlobGas().ToBig(), new(big.Int).SetUint64(blobGas))
+			if blobFee.Cmp(available) >= 0 {
+				return 0, protocol.ErrInsufficientFunds
+			}
+			available.Sub(available, blobFee)
+		}
 
 		allowance := new(big.Int).Div(available, feeCap)
 
@@ -547,7 +545,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if err != nil {
 		return nil, err
 	}
-	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
+	proof.AccountProof = toHexBytes(accountProof)
 
 	// get account data from the trie
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
@@ -630,7 +628,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
-			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
+			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
 
@@ -649,6 +647,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	return proof, nil
+}
+
+func toHexBytes(in [][]byte) []hexutil.Bytes {
+	out := make([]hexutil.Bytes, len(in))
+	for i, b := range in {
+		out[i] = b
+	}
+	return out
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
@@ -1005,6 +1011,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
 	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.

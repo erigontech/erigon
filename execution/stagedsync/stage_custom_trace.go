@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -153,9 +152,6 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	// what this re-derives lags the state until it finishes, and must not clamp the files it
 	// re-executes from
 	defer unalignProduced(cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator), cfg.Produce)()
-
-	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	//stepSize := agg.StepSize()
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -287,12 +283,12 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 
 	}
 
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	stepSize := db.StepSize()
 	var fromStep, toStep kv.Step
-	var finalityCtx dbfinality.Context
+	var finalityCtx kv.FinalityContext
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false)
+		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false, cfg.BlockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
@@ -304,14 +300,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		if err != nil {
 			return err
 		}
-		if lastTxNum/agg.StepSize() > 0 {
-			toStep = kv.Step(lastTxNum / agg.StepSize())
+		if lastTxNum/stepSize > 0 {
+			toStep = kv.Step(lastTxNum / stepSize)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if err := agg.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
+	if err := db.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {

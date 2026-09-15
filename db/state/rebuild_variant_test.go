@@ -80,12 +80,12 @@ func rebuildVariantTrieCfg(v commitment.TrieVariant) commitment.TrieConfig {
 
 func rebuildVariantAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs) *state.Aggregator {
 	t.Helper()
-	agg := state.NewTest(dirs).StepSize(rebuildVariantStepSize).Logger(log.New()).MustOpen(t.Context(), rawDB)
+	agg := state.NewTest(dirs).StepSize(rebuildVariantStepSize).Logger(log.New()).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	// The bin trie refuses referenced branches; production resolves that from
 	// erigondb.toml, NewTest bypasses it.
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 	return agg
 }
 
@@ -126,22 +126,22 @@ func rebuildVariantDatadir(t *testing.T) (kv.TemporalRwDB, *state.Aggregator, da
 				Balance:  *uint256.NewInt(txNum*1_000 + uint64(i)),
 				CodeHash: accounts.EmptyCodeHash,
 			}
-			prev, _, err := sd.GetLatest(kv.AccountsDomain, rwTx, addr)
-			require.NoError(t, err)
+			prev, _, getErr := sd.GetLatest(kv.AccountsDomain, rwTx, addr)
+			require.NoError(t, getErr)
 			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), txNum, prev))
 
 			for j := range rebuildVariantSlots {
 				sk := rebuildVariantSlotKey(addr, j)
 				val := []byte{byte(txNum + 1), byte(i + 1), byte(j + 1)}
-				prev, _, err := sd.GetLatest(kv.StorageDomain, rwTx, sk)
-				require.NoError(t, err)
+				prev, _, slotErr := sd.GetLatest(kv.StorageDomain, rwTx, sk)
+				require.NoError(t, slotErr)
 				require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, sk, val, txNum, prev))
 			}
 		}
 	}
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 
 	// Collation seals a commitment file per step even with the writes discarded,
 	// and a rebuild takes any file covering a range as that range already done.
@@ -164,8 +164,8 @@ func rebuildVariantDatadir(t *testing.T) (kv.TemporalRwDB, *state.Aggregator, da
 // folding nothing: only files written by the named engine restore under it.
 func rebuildVariantRestoredRoot(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, v commitment.TrieVariant) []byte {
 	t.Helper()
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

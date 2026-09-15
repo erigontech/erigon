@@ -49,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 const (
 	pbinM1AStepSize = uint64(8)
@@ -68,12 +68,12 @@ func pbinM1ABinVariant(t *testing.T) {
 
 func pbinM1ANewAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs, stepSize uint64) *state.Aggregator {
 	t.Helper()
-	agg := state.NewTest(dirs).StepSize(stepSize).Logger(log.New()).MustOpen(t.Context(), rawDB)
+	agg := state.NewTest(dirs).StepSize(stepSize).Logger(log.New()).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	// Referenced branches rewrite bytes at hex cell offsets during merge. Production
 	// refuses that combination when resolving settings; NewTest bypasses it.
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 	return agg
 }
 
@@ -330,7 +330,7 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
 	stepRoots, forwardRoot := pbinForwardRun(t, db, pbinM1AStepSize, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
-	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 
 	require.Equal(t, forwardRoot, pbinM1ARecomputeRoot(t, db),
 		"a full-touch recompute over the same datadir must reproduce the forward root")
@@ -347,8 +347,8 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, rebuiltRoot, "rebuild-from-domains must reproduce the forward root")
 
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	require.Equal(t, wantRoot, pbinM1ARestoredRoot(t, db),
 		"the rebuilt files must carry a trie state that restores to the rebuilt root")
 	require.Equal(t, forwardRoot, pbinM1ARecomputeRoot(t, db),
@@ -387,7 +387,7 @@ func TestPBinM1ABranchRecordsSurviveCollationAndMerge(t *testing.T) {
 	require.NotEmpty(t, inDB)
 	require.Zero(t, pbinM1AFileServedRecords(t, db, inDB), "before collation every record lives in the db")
 
-	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()

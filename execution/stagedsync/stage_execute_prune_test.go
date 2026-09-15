@@ -165,7 +165,7 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 	state := &PruneState{
 		ID:              stages.Execution,
 		ForwardProgress: forwardProgress,
-		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true),
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true, rawdbv3.TxNums),
 		CurrentSyncCycle: CurrentSyncCycleInfo{
 			IsInitialCycle: true,
 		},

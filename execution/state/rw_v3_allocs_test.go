@@ -40,9 +40,6 @@ func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptio
 func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return len(g.val), len(g.val) > 0, nil
 }
-func (g fixedTemporalTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
 func (g fixedTemporalTx) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
 
 type histMockTx struct {
@@ -76,7 +73,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	}{
 		{"ReaderV3.ReadAccountStorage", 0, func() { _, _, _ = r.ReadAccountStorage(addr, key) }},
 		{"ReaderV3.ReadAccountData", 1, func() { _, _ = r.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"ReaderV3.HasStorage", 0, func() { _, _ = r.HasStorage(addr) }},
 		{"ReaderV3.ReadAccountCode", 0, func() { _, _ = r.ReadAccountCode(addr) }},
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
@@ -92,7 +88,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
 		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
-		{"CachedReaderV3.HasStorage", 0, func() { _, _ = cr.HasStorage(addr) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)
@@ -160,41 +155,6 @@ func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
 	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Nil(t, got)
-}
-
-// BenchmarkCachedReaderAccountRead prices one apply-loop account read that hits
-// the block state cache, on each of its two paths.
-func BenchmarkCachedReaderAccountRead(b *testing.B) {
-	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
-	acc := cacheReadTestAccount()
-
-	b.Run("committed", func(b *testing.B) {
-		cache := NewBlockStateCache()
-		cache.PutCommittedAccount(addr, acc)
-		r := NewCurrentCachedReaderV3(nil, cache)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			got, err := r.ReadAccountData(addr)
-			if err != nil || got == nil {
-				b.Fatal(err)
-			}
-		}
-	})
-
-	b.Run("written", func(b *testing.B) {
-		cache := NewBlockStateCache()
-		cache.WriteAccount(addr, accounts.SerialiseV3(acc), 1)
-		r := NewCurrentCachedReaderV3(nil, cache)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			got, err := r.ReadAccountData(addr)
-			if err != nil || got == nil {
-				b.Fatal(err)
-			}
-		}
-	})
 }
 
 // returnReadList pools the list, so leaving Vals populated keeps every value the

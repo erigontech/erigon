@@ -77,7 +77,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	if err != nil {
 		return nil, err
 	}
-	defer dir.RemoveAll(tempDir)
+	defer func() { _ = dir.RemoveAll(tempDir) }()
 	replayDirs := datadir.New(tempDir)
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
 		InMem(replayDirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
@@ -89,7 +89,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	replaySettings := *erigonDBSettings
 	replaySettings.FrozenAtTxNum = nil
-	agg, err := dbstate.New(replayDirs).Logger(r.logger).WithErigonDBSettings(&replaySettings).Open(ctx, db)
+	agg, err := dbstate.New(replayDirs).Logger(r.logger).WithErigonDBSettings(&replaySettings).Open(ctx)
 	if err != nil {
 		return nil, err
 	}

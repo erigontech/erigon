@@ -80,7 +80,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
-	// allows to collect reading metrics for kv by file level
+	// allows to collect reading metrics for kv by file level. Read
+	// unsynchronised on every domain read, so it may only be written before any
+	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// allow simultaneous build of multiple snapshot types.
@@ -150,7 +152,7 @@ var (
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore                  = EnvBool("USE_CODE_STORE", true)
+	UseCodeStore                  = EnvBool("USE_CODE_STORE", false)
 	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead                     = EnvBool("READ_AHEAD", true)

@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 )
 
@@ -35,6 +37,13 @@ type commitmentReconstructionTx struct {
 }
 
 func (tx commitmentReconstructionTx) AggTx() any { return &tx.agg }
+
+func (tx commitmentReconstructionTx) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := tx.TemporalTx.(membatchwithdb.HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
+}
 
 type commitmentReconstructionAgg struct {
 	*dbstate.AggregatorRoTx

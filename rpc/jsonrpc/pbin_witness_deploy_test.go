@@ -69,7 +69,7 @@ func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
 
-	c := &pbinWitnessChain{m: m, pack: pack}
+	c := &pbinWitnessChain{m: m}
 	enableCommitmentHistoryFlag(t, c.m.DB)
 	api := NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, &rpccfg.DebugApiConfig{})
 

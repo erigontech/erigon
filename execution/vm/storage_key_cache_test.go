@@ -261,64 +261,6 @@ func TestInternAddressSurvivesResetBetweenBlocks(t *testing.T) {
 		"a warmed address must still hit after the worker moves to the next block")
 }
 
-// requireDistinctBuckets fails the benchmark unless every word owns a bucket.
-// A retuned constant or a resized table would otherwise quietly move part of the
-// loop onto the miss path, which is the path these benchmarks exist to stay off.
-func requireDistinctBuckets(b *testing.B, words []uint256.Int, index func(*uint256.Int) uint64) {
-	b.Helper()
-	buckets := make(map[uint64]struct{}, len(words))
-	for i := range words {
-		buckets[index(&words[i])] = struct{}{}
-	}
-	if len(buckets) != len(words) {
-		b.Fatalf("%d words occupy %d buckets, so %d of them take the miss path",
-			len(words), len(buckets), len(words)-len(buckets))
-	}
-}
-
 var internSink accounts.Address
 
-// BenchmarkInternAddressHit measures the path every repeat word takes — the one
-// the table exists to keep off unique.Make.
-func BenchmarkInternAddressHit(b *testing.B) {
-	evm := &EVM{}
-	words := make([]uint256.Int, 64)
-	for i := range words {
-		words[i] = uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) & 0xffffffff, 0}
-	}
-	requireDistinctBuckets(b, words, addrIndex)
-	for range addressCacheMinOps + 1 {
-		evm.internAddress(&words[0])
-	}
-	for i := range words {
-		evm.internAddress(&words[i])
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		internSink = evm.internAddress(&words[i&63])
-	}
-}
-
 var keySink accounts.StorageKey
-
-func BenchmarkInternStorageKeyHit(b *testing.B) {
-	evm := &EVM{}
-	words := make([]uint256.Int, 64)
-	for i := range words {
-		w := uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) * 0x165667b19e3779f9, 0}
-		// slotIndex xors all four limbs, so limb 3 sets the bucket outright.
-		w[3] = w[0] ^ w[1] ^ w[2] ^ uint64(i)
-		words[i] = w
-	}
-	requireDistinctBuckets(b, words, slotIndex)
-	for range storageKeyCacheMinOps + 1 {
-		evm.internStorageKey(&words[0])
-	}
-	for i := range words {
-		evm.internStorageKey(&words[i])
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		keySink = evm.internStorageKey(&words[i&63])
-	}
-}

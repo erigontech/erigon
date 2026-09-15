@@ -102,7 +102,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		return nil, err
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	curHeader := rawdb.ReadCurrentHeader(tx)
 	if curHeader == nil {
 		return nil, nil
 	}
@@ -161,7 +161,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		return nil, err
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	curHeader := rawdb.ReadCurrentHeader(tx)
 	if curHeader == nil {
 		return nil, nil
 	}

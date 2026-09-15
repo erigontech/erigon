@@ -23,37 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
-	"github.com/erigontech/erigon/common/crypto"
 )
-
-func BenchmarkLambdaShuffledIndex(b *testing.B) {
-	eth2ShuffleHash := func(data []byte) []byte {
-		hashed := crypto.Sha256(data)
-		return hashed[:]
-	}
-	seed := [32]byte{2, 35, 6}
-
-	for b.Loop() {
-		eth2shuffle.PermuteIndex(eth2ShuffleHash, uint8(clparams.MainnetBeaconConfig.ShuffleRoundCount), 10, 1000, seed)
-	}
-}
-
-// Faster by ~40%, the effects of it will be felt mostly on computation of the proposer index.
-func BenchmarkErigonShuffledIndex(b *testing.B) {
-	s := state.New(&clparams.MainnetBeaconConfig)
-	seed := [32]byte{2, 35, 6}
-	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
-
-	var err error
-	for b.Loop() {
-		_, err = shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, crypto.Sha256)
-	}
-	require.NoError(b, err)
-}
 
 func TestShuffling(t *testing.T) {
 	s := raw.GetTestState()

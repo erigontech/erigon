@@ -81,10 +81,10 @@ func shardTombstoneSlotKey(addr []byte) []byte {
 func shardTombstoneAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs) *state.Aggregator {
 	t.Helper()
 	agg := state.NewTest(dirs).StepSize(shardTombstoneStepSize).StepsInFrozenFile(shardTombstoneFrozenSteps).
-		Logger(log.New()).MustOpen(t.Context(), rawDB)
+		Logger(log.New()).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 	return agg
 }
 
@@ -122,7 +122,7 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 	writeShardTombstoneRange(t, db, 0, range1TxCount, 1, func(i int) (drop bool, val []byte) {
 		return false, []byte{byte(i + 1), byte(i + 2), 0xAA}
 	})
-	require.NoError(t, agg.BuildFiles(range1TxCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, range1TxCount, unboundedFinalityCtx))
 	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	writeShardTombstoneRange(t, db, range1TxCount, range2TxCount, 2, func(i int) (drop bool, val []byte) {
@@ -131,14 +131,14 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 		}
 		return false, []byte{byte(i + 1), byte(i + 2), 0xBB}
 	})
-	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, range1TxCount+range2TxCount, unboundedFinalityCtx))
 	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	// Collation holds a step back until a write in the next one proves it closed
 	// (`step+1 records visible`, aggregator.go). Without this, range 2's own last
 	// step never seals into a file and the range never forms.
 	writeShardTombstoneGuard(t, db, range1TxCount+range2TxCount)
-	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount+shardTombstoneStepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, range1TxCount+range2TxCount+shardTombstoneStepSize, unboundedFinalityCtx))
 
 	return trimShardTombstoneCommitment(t, agg, rawDB, dirs), dirs
 }

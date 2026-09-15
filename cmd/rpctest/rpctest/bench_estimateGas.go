@@ -62,8 +62,7 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 
 			nTransactions++
 
-			var request string
-			request = reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
+			request := reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
 
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 

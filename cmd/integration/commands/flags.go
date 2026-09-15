@@ -187,12 +187,8 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
-// withExperimentalCommitment binds the flag erigon uses to pick the commitment
-// trie. The default ORs erigon's own flag default with the env-derived value so
-// that flipping the default in one binary cannot leave the other on a different
-// trie.
 func withExperimentalCommitment(cmd *cobra.Command) {
-	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
+	def := statecfg.ExperimentalParallelCommitment
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
 	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)

@@ -62,7 +62,11 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128)); err != nil {
+	var parentSlot uint64
+	if preState.Version() >= clparams.GloasVersion && preState.GetLatestExecutionPayloadBid() != nil {
+		parentSlot = preState.GetLatestExecutionPayloadBid().Slot
+	}
+	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128), parentSlot); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -566,9 +570,8 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 		ExecutionValid bool `yaml:"execution_valid"`
 	}
 	execMeta.ExecutionValid = true // default to true if file doesn't exist
-	if metaErr := spectest.ReadMeta(root, "execution.yaml", &execMeta); metaErr != nil {
-		// file may not exist (e.g. GLOAS tests use signed_envelope); ignore
-	}
+	// file may not exist (e.g. GLOAS tests use signed_envelope); ignore
+	_ = spectest.ReadMeta(root, "execution.yaml", &execMeta)
 
 	if c.Version() >= clparams.GloasVersion {
 		// [New in Gloas:EIP7732] execution_payload tests use signed_envelope.ssz_snappy
@@ -636,7 +639,7 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 	block.Slot = signedBid.Message.Slot
 	block.ParentRoot = signedBid.Message.ParentBlockRoot
 	block.Body.SignedExecutionPayloadBid = signedBid
-	if err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
+	if _, err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
 		if expectedError {
 			return nil
 		}

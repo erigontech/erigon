@@ -94,9 +94,9 @@ func TestConvertPBinRecordFilesEndToEnd(t *testing.T) {
 		StepSize(source.StepSize()).
 		WithErigonDBSettings(outputSettings).
 		Logger(log.New()).
-		MustOpen(t.Context(), db)
+		MustOpen(t.Context())
 	t.Cleanup(output.Close)
-	require.NoError(t, output.OpenFolder())
+	require.NoError(t, output.OpenFolder(db))
 
 	at := output.BeginFilesRo()
 	err = state.ConvertPBinRecordFiles(t.Context(), at, log.New(), 2)

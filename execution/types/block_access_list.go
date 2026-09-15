@@ -718,9 +718,8 @@ func encodingSizeHashList(hashes []accounts.StorageKey) int {
 var ErrInvalidBlockAccessList = errors.New("invalid block access list")
 
 func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
-	var err error
-	var size uint64
-	if size, err = s.List(); err != nil {
+	size, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			// EOL at List() time means the BAL value is missing/pruned,
 			// not that an empty list (0xc0) was decoded. Return nil.
@@ -809,9 +808,8 @@ func encodeAccountChanges(list []AccountChanges, w io.Writer, b []byte) error {
 	return nil
 }
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
-	var err error
-	var size uint64
-	if size, err = s.List(); err != nil {
+	size, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}
@@ -839,8 +837,8 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 }
 
 func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
-	var err error
-	if _, err = s.List(); err != nil {
+	_, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}
@@ -865,8 +863,8 @@ func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
 }
 
 func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
-	var err error
-	if _, err = s.List(); err != nil {
+	_, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}
@@ -891,8 +889,8 @@ func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
 }
 
 func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
-	var err error
-	if _, err = s.List(); err != nil {
+	_, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}
@@ -917,8 +915,8 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 }
 
 func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
-	var err error
-	if _, err = s.List(); err != nil {
+	_, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}
@@ -943,9 +941,8 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 }
 
 func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
-	var err error
-	var size uint64
-	if size, err = s.List(); err != nil {
+	size, err := s.List()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
 			return nil, nil
 		}

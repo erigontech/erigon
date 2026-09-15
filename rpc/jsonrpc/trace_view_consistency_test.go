@@ -60,7 +60,7 @@ type rejectOverlayBlockReader struct {
 }
 
 func (r rejectOverlayBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, error) {
-	if view, ok := tx.(interface{ IsOverlayReadView() bool }); blockNum != 0 && ok && view.IsOverlayReadView() {
+	if blockNum != 0 && carriesOverlayView(tx) {
 		return nil, nil, errUnexpectedOverlayBlockRead
 	}
 	return r.FullBlockReader.BlockWithSenders(ctx, tx, hash, blockNum)
@@ -287,8 +287,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	baseline, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, baseline, 1)
-	expectedRoot, ok := baseline[0]["stateRoot"].(common.Hash)
-	require.True(t, ok)
+	expectedRoot := baseline[0].StateRoot
 
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -313,7 +312,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	result, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
-	require.Equal(t, expectedRoot, result[0]["stateRoot"])
+	require.Equal(t, expectedRoot, result[0].StateRoot)
 }
 
 func TestExecutionWitnessRejectsNonCanonicalBlockHash(t *testing.T) {

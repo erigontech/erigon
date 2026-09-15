@@ -34,7 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -50,6 +52,13 @@ import (
 
 type pbinWitnessWithoutCommitmentHistory struct {
 	kv.TemporalTx
+}
+
+func (tx pbinWitnessWithoutCommitmentHistory) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := tx.TemporalTx.(membatchwithdb.HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
 }
 
 func (tx pbinWitnessWithoutCommitmentHistory) GetAsOf(domain kv.Domain, key []byte, txNum uint64) ([]byte, bool, error) {

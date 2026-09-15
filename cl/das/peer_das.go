@@ -1697,8 +1697,7 @@ func isExpectedColumnDownloadMiss(err error) bool {
 	if err == nil {
 		return false
 	}
-	var peerErr *httpreqresp.PeerResponseError
-	if errors.As(err, &peerErr) {
+	if peerErr, ok := errors.AsType[*httpreqresp.PeerResponseError](err); ok {
 		return peerErr.Code == httpreqresp.ResponseCodeResourceUnavailable
 	}
 	return false

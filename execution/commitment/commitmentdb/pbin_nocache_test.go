@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,8 @@ import (
 )
 
 type pbinStubSharedDomains struct{ sharedCache bool }
+
+func (s *pbinStubSharedDomains) AddCommitmentTime(time.Duration) {}
 
 var pbinTestConfigMu sync.Mutex
 
@@ -121,9 +124,9 @@ func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := state.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(tb.Context(), db)
+	agg := state.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	require.NoError(tb, agg.OpenFolder())
+	require.NoError(tb, agg.OpenFolder(db))
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	return tdb

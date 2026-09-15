@@ -18,6 +18,7 @@ package commitmentdb
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,6 +29,8 @@ import (
 )
 
 type pbinStateStubSD struct{}
+
+func (s *pbinStateStubSD) AddCommitmentTime(time.Duration) {}
 
 func (s *pbinStateStubSD) SetTxNum(uint64) {}
 func (s *pbinStateStubSD) AsStateGetter(kv.TemporalTx, execctxapi.StateGetterOptions) execctxapi.StateGetter {

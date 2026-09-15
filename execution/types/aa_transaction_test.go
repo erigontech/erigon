@@ -19,6 +19,7 @@ package types
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/chain"
@@ -40,4 +41,20 @@ func TestAAPreTransactionGasCostChargesRevisedPerAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 2*(params.AccountWriteCostEIP8038Revised-params.AccountWriteCostEIP8038), revised-unrevised)
+}
+
+// TestAATxnAsMessageCarriesNoBlobHashes pins that an AA message is not mistaken
+// for a blob-carrying one: EIP-4844 validation keys off a non-nil blob hash
+// slice, and an AA txn has no blobs. Its To is nil, so a non-nil empty slice
+// would trip the blob contract-creation rule.
+func TestAATxnAsMessageCarriesNoBlobHashes(t *testing.T) {
+	t.Parallel()
+
+	txn := &AccountAbstractionTransaction{FeeCap: uint256.NewInt(1)}
+	msg, err := txn.AsMessage(Signer{}, nil, nil)
+	require.NoError(t, err)
+
+	require.Nil(t, msg.BlobHashes())
+	require.Zero(t, msg.BlobGas())
+	require.True(t, msg.To().IsNil())
 }

@@ -318,13 +318,13 @@ func (c *Compressor) Compress() error {
 	}
 	c.stopWorkers()
 
-	cf, err := dir.CreateTemp(c.outputFile)
-	if err != nil {
-		return err
+	cf, createErr := dir.CreateTemp(c.outputFile)
+	if createErr != nil {
+		return createErr
 	}
+	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
+	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName) //nolint:errcheck
-	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -365,8 +365,7 @@ func (c *Compressor) Compress() error {
 		if c.lvl < log.LvlTrace {
 			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 		}
-		var db *DictionaryBuilder
-		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 		if err != nil {
 			return err
 		}
@@ -390,8 +389,7 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	var outputStat os.FileInfo
-	outputStat, err = os.Stat(c.outputFile)
+	outputStat, err := os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}
@@ -812,80 +810,6 @@ type DynamicCell struct {
 	patternIdx  int // offset of the last element in the pattern slice
 }
 
-type Ring struct {
-	cells             []DynamicCell
-	head, tail, count int
-}
-
-func NewRing() *Ring {
-	return &Ring{
-		cells: make([]DynamicCell, 16),
-		head:  0,
-		tail:  0,
-		count: 0,
-	}
-}
-
-func (r *Ring) Reset() {
-	r.count = 0
-	r.head = 0
-	r.tail = 0
-}
-
-func (r *Ring) ensureSize() {
-	if r.count < len(r.cells) {
-		return
-	}
-	newcells := make([]DynamicCell, r.count*2)
-	if r.tail > r.head {
-		copy(newcells, r.cells[r.head:r.tail])
-	} else {
-		n := copy(newcells, r.cells[r.head:])
-		copy(newcells[n:], r.cells[:r.tail])
-	}
-	r.head = 0
-	r.tail = r.count
-	r.cells = newcells
-}
-
-func (r *Ring) PushFront() *DynamicCell {
-	r.ensureSize()
-	if r.head == 0 {
-		r.head = len(r.cells)
-	}
-	r.head--
-	r.count++
-	return &r.cells[r.head]
-}
-
-func (r *Ring) PushBack() *DynamicCell {
-	r.ensureSize()
-	if r.tail == len(r.cells) {
-		r.tail = 0
-	}
-	result := &r.cells[r.tail]
-	r.tail++
-	r.count++
-	return result
-}
-
-func (r Ring) Len() int {
-	return r.count
-}
-
-func (r *Ring) Get(i int) *DynamicCell {
-	if i < 0 || i >= r.count {
-		return nil
-	}
-	return &r.cells[(r.head+i)&(len(r.cells)-1)]
-}
-
-// Truncate removes all items starting from i
-func (r *Ring) Truncate(i int) {
-	r.count = i
-	r.tail = (r.head + i) & (len(r.cells) - 1)
-}
-
 type DictAggregator struct {
 	collector     *etl.Collector
 	dist          map[int]int
@@ -951,14 +875,6 @@ type RawWordsFile struct {
 
 func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Create(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
-}
-
-func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
-	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}

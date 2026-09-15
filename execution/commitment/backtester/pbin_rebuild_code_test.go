@@ -95,7 +95,7 @@ func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.
 	t.Helper()
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinCodeStepSize)
 	stepRoots, _ := pbinForwardRun(t, db, pbinCodeStepSize, 0, txCount, accts, pbinCodeSlots)
-	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 
 	collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain, kv.CodeDomain)
 	require.Positive(t, collatedTxNum, "collation must produce domain files to rebuild from")
@@ -106,8 +106,8 @@ func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.
 	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	return db, wantRoot, rebuiltRoot, report
 }
 
@@ -269,7 +269,7 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 	db, agg, dirs := pbinM1ANewDatadir(t, stepSize)
 	agg.PresetOfflineMerge() // 128 one-step collations, so build them the way the offline tool does
 	stepRoots, _ := pbinForwardRun(t, db, stepSize, 0, txCount, accts, pbinCodeSlots)
-	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 
 	collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain, kv.CodeDomain)
 	wantRoot := stepRoots[collatedTxNum-1]
@@ -291,8 +291,8 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 			"the chunk cache lives for one shard, so shard %d must chunk the shared code itself", i)
 	}
 
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	records := pbinCodeZoneRecords(t, db)
 	require.NotEmpty(t, records)
 	for chunk := range 2 {

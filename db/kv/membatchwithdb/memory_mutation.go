@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -60,6 +61,7 @@ type MemoryMutation struct {
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
+	overlay          *MemoryMutation // non-nil marks a read view, pointing at the overlay it was created from
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -387,16 +389,37 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 
+// Range merges the db side and the overlay by key, so on a DupSort table a db
+// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	cleared := m.isTableCleared(table)
+	// Hidden rows don't count against limit, so the db side must be free to
+	// look past them; the merge below still stops at limit.
+	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !cleared {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if _, err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -424,7 +447,7 @@ func (s *rangeIter) Close() {
 	}
 }
 func (s *rangeIter) init() (*rangeIter, error) {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -448,22 +471,25 @@ func (s *rangeIter) HasNext() bool {
 }
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextKdb, s.nextKmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		k = s.nextKdb
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextKdb, s.nextVdb = nil, nil
 		if s.hasNextDb {
-			k = s.nextKdb
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		k = s.nextKmem
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextKmem, s.nextVmem = nil, nil
 		if s.hasNextMem {
-			k = s.nextKmem
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -475,13 +501,30 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	skipDb := m.isTableCleared(table) || m.isEntryDeleted(table, key)
+	hidden := len(m.deletedDups[table][string(key)]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !skipDb {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isDupDeleted(table, key, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -511,7 +554,7 @@ func (s *rangeDupSortIter) Close() {
 }
 
 func (s *rangeDupSortIter) init() error {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -536,20 +579,23 @@ func (s *rangeDupSortIter) HasNext() bool {
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextVdb, s.nextVmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextVdb = nil
 		if s.hasNextDb {
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextVmem = nil
 		if s.hasNextMem {
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -571,6 +617,8 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
 		t = map[string]map[string]struct{}{}
@@ -991,13 +1039,6 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.GetAsOf(name, k, ts)
 }
 
-func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	if m.db == nil {
-		return nil, nil, false, nil
-	}
-	return m.db.HasPrefix(name, prefix)
-}
-
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	if m.db == nil {
 		return 0
@@ -1102,10 +1143,37 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
-// IsOverlayReadView reports whether this is a non-owning view that already pins
-// an overlay generation.
-func (m *MemoryMutation) IsOverlayReadView() bool {
-	return m != nil && m.memDb == nil
+// OverlayViewCarrier is implemented by txs that are pinned overlay views.
+// A wrapper that embeds a concrete view type keeps the marker through method
+// promotion; one that embeds the bare tx interface must forward OverlayView
+// explicitly, or the wrap points will treat it as unpinned.
+type OverlayViewCarrier interface {
+	// OverlayView returns the overlay the tx was pinned to and whether the
+	// tx is a pinned view at all. A pinned view with a nil overlay resolved
+	// "no overlay published" and must keep reading committed data only.
+	OverlayView() (overlay *MemoryMutation, pinned bool)
+}
+
+// CarriesOverlayView reports whether tx is already a pinned overlay view, so
+// wrap points leave it alone (rationale on rpchelper.PinToOverlay).
+func CarriesOverlayView(tx kv.Tx) bool {
+	_, ok := ViewOverlay(tx)
+	return ok
+}
+
+// ViewOverlay returns the overlay tx was pinned to, and whether tx is a
+// pinned view at all.
+func ViewOverlay(tx kv.Tx) (*MemoryMutation, bool) {
+	if c, ok := tx.(OverlayViewCarrier); ok {
+		return c.OverlayView()
+	}
+	return nil, false
+}
+
+// OverlayView implements OverlayViewCarrier for read views; a MemoryMutation
+// that owns its overlay data is not a view and carries no pin.
+func (m *MemoryMutation) OverlayView() (*MemoryMutation, bool) {
+	return m.overlay, m.overlay != nil
 }
 
 // newReadViewMut is the internal constructor that returns the full
@@ -1125,6 +1193,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		readTx:         tx,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
+		overlay:        m,
 	}
 }
 
@@ -1166,10 +1235,6 @@ func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 
 func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return v.temporalTx.GetLatestValSize(name, k)
-}
-
-func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return v.temporalTx.HasPrefix(name, prefix)
 }
 
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
@@ -1343,6 +1408,38 @@ func (td temporaldb) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRw
 }
 
 func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFilesChange) {}
+
+func (td temporaldb) OpenStateSnapshots(context.Context) error {
+	return nil
+}
+
+func (td temporaldb) StepSize() uint64 {
+	return td.memoryMutation.Debug().StepSize()
+}
+
+func (td temporaldb) MaxPrunableStepsBacklog() uint64 {
+	return 0
+}
+
+func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, kv.FinalityContext, bool) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) BuildFilesInBackground(kv.FinalityContext) chan struct{} {
+	finished := make(chan struct{})
+	close(finished)
+	return finished
+}
+
+func (td temporaldb) BuildMissedAccessors(context.Context, int, ...kv.BuildAccessorsOption) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) CollateAndPrune(context.Context, func(kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+	finished := make(chan struct{})
+	close(finished)
+	return false, finished, nil
+}
 
 func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	return f(td.memoryMutation)

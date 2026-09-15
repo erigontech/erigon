@@ -330,8 +330,13 @@ type loadFlags uint8
 
 const (
 	cellLoadNone    = loadFlags(0)
-	cellLoadAccount = loadFlags(1)
-	cellLoadStorage = loadFlags(2)
+	cellLoadBalance = loadFlags(1)
+	cellLoadNonce   = loadFlags(2)
+	cellLoadCode    = loadFlags(4)
+	cellLoadStorage = loadFlags(8)
+	// An account leaf hashes nonce, balance and code hash together, so a cell counts as
+	// loaded only when all three are known — a partial update leaves the rest to the read.
+	cellLoadAccount = cellLoadBalance | cellLoadNonce | cellLoadCode
 )
 
 // maxCompactKeyLen bounds a compact-encoded (hex-prefix) key or branch prefix,
@@ -350,6 +355,16 @@ func (f loadFlags) String() string {
 	} else {
 		if f.account() {
 			b.WriteString("Account ")
+		} else {
+			if f&cellLoadBalance != 0 {
+				b.WriteString("Balance ")
+			}
+			if f&cellLoadNonce != 0 {
+				b.WriteString("Nonce ")
+			}
+			if f&cellLoadCode != 0 {
+				b.WriteString("Code ")
+			}
 		}
 		if f.storage() {
 			b.WriteString("Storage ")
@@ -359,7 +374,7 @@ func (f loadFlags) String() string {
 }
 
 func (f loadFlags) account() bool {
-	return f&cellLoadAccount != 0
+	return f&cellLoadAccount == cellLoadAccount
 }
 
 func (f loadFlags) storage() bool {
@@ -457,10 +472,48 @@ func (cell *cell) setFromUpdate(update *Update, sinks ...*metricsSink) {
 		cell.loaded = cell.loaded.addFlag(cellLoadStorage)
 		sink.hadToLoad.Add(1)
 	}
-	if update.Flags&BalanceUpdate != 0 || update.Flags&NonceUpdate != 0 || update.Flags&CodeUpdate != 0 {
-		cell.loaded = cell.loaded.addFlag(cellLoadAccount)
+	if acc := accountLoadFlags(update.Flags); acc != cellLoadNone {
+		cell.loaded = cell.loaded.addFlag(acc)
 		sink.hadToLoad.Add(1)
 	}
+}
+
+func accountLoadFlags(f UpdateFlags) loadFlags {
+	var l loadFlags
+	if f&BalanceUpdate != 0 {
+		l |= cellLoadBalance
+	}
+	if f&NonceUpdate != 0 {
+		l |= cellLoadNonce
+	}
+	if f&CodeUpdate != 0 {
+		l |= cellLoadCode
+	}
+	return l
+}
+
+// fillAccountGaps applies a state read to the account fields the cell is still missing.
+// Fields an update already merged in are the post-state the caller committed to and the
+// read can be older, so it may neither overwrite them nor turn the cell into a deletion.
+func (cell *cell) fillAccountGaps(read *Update, sink *metricsSink) {
+	if cell.loaded&cellLoadAccount == cellLoadNone {
+		cell.setFromUpdate(read, sink)
+	} else {
+		gaps := *read
+		gaps.Flags &^= DeleteUpdate
+		if cell.loaded&cellLoadBalance != 0 {
+			gaps.Flags &^= BalanceUpdate
+		}
+		if cell.loaded&cellLoadNonce != 0 {
+			gaps.Flags &^= NonceUpdate
+		}
+		if cell.loaded&cellLoadCode != 0 {
+			gaps.Flags &^= CodeUpdate
+		}
+		cell.setFromUpdate(&gaps, sink)
+	}
+	// The read is the whole account record, whatever subset of it the context flagged.
+	cell.loaded = cell.loaded.addFlag(cellLoadAccount)
 }
 
 func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
@@ -495,6 +548,10 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	} else {
 		cell.accountAddrLen = 0
 	}
+	if depth == 64 && cell.hashedExtLen == 0 && cell.extLen > 0 {
+		copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+		cell.hashedExtLen = cell.extLen
+	}
 	cell.storageAddrLen = upCell.storageAddrLen
 	if upCell.storageAddrLen > 0 {
 		copy(cell.storageAddr[:], upCell.storageAddr[:upCell.storageAddrLen])
@@ -508,6 +565,9 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
 	cell.loaded = upCell.loaded
+	if cell.accountAddrLen == 0 {
+		cell.loaded &^= cellLoadAccount
+	}
 }
 
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
@@ -556,8 +616,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	if lowDepth > 64 {
-		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	if lowDepth > 64 && lowCell.accountAddrLen == 0 {
+		cell.loaded = cell.loaded&cellLoadAccount | lowCell.loaded&cellLoadStorage
 	} else {
 		cell.loaded = lowCell.loaded
 	}
@@ -594,7 +654,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
 			}
-			if depth == 0 {
+			if depth == 0 && cell.accountAddrLen == 0 {
 				accountKeyLen = 0
 			}
 			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
@@ -1084,7 +1144,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
 			}
-			cell.setFromUpdate(update, metricsSinkFor(hph.metrics))
+			cell.fillAccountGaps(update, metricsSinkFor(hph.metrics))
 		}
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
@@ -1194,10 +1254,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 	}
 	if cell.accountAddrLen > 0 {
-		if err := cell.hashAccKey(hph.keccak, depth, hph.cellHashBuf[:]); err != nil {
-			return nil, err
-		}
-		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
 			switch {
 			case cell.extLen > 0: // Extension
@@ -1237,8 +1293,15 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if err != nil {
 				return nil, err
 			}
-			cell.setFromUpdate(update, metricsSinkFor(hph.metrics))
+			cell.fillAccountGaps(update, metricsSinkFor(hph.metrics))
 		}
+
+		// Derived here rather than on entry: the memoized-stateHash return above
+		// never reads the hashed key, and hashing the address is not free.
+		if err := cell.hashAccKey(hph.keccak, depth, hph.cellHashBuf[:]); err != nil {
+			return nil, err
+		}
+		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
 		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], hph.accValBuf[:valLen])
@@ -2014,9 +2077,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			if err != nil {
 				return counters, err
 			}
-			cell.setFromUpdate(upd, metricsSinkFor(hph.metrics))
-			// if the update is empty, the loaded flag was not updated so do it manually
-			cell.loaded = cell.loaded.addFlag(cellLoadAccount)
+			cell.fillAccountGaps(upd, metricsSinkFor(hph.metrics))
 			counters.accLoaded++
 		}
 		if !cell.loaded.storage() && cell.storageAddrLen > 0 {
@@ -2190,7 +2251,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		cell.accountAddrLen = int16(len(plainKey))
 		copy(cell.accountAddr[:], plainKey)
 
+		// The reset throws away whatever code hash the cell held, so it is no longer loaded.
 		cell.CodeHash = empty.CodeHash
+		cell.loaded &^= cellLoadCode
 	} else { // set storage key
 		cell.storageAddrLen = int16(len(plainKey))
 		copy(cell.storageAddr[:], plainKey)
@@ -2224,11 +2287,12 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
+		unfoldErr := hph.unfold(hashedKey, unfolding)
 		if unfoldDone != nil {
 			unfoldDone()
+		}
+		if unfoldErr != nil {
+			return fmt.Errorf("unfold: %w", unfoldErr)
 		}
 		if printLater {
 			fmt.Fprintf(hph.traceW, "[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
@@ -2244,11 +2308,12 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
-		if err := hph.fold(); err != nil {
-			return fmt.Errorf("fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return fmt.Errorf("fold: %w", foldErr)
 		}
 	}
 	// Now unfold the path so the cell at hashedKey is reachable.
@@ -2273,8 +2338,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
-
-	metricsSinkFor(hph.metrics).recordProcessedKey()
 	return nil
 }
 
@@ -2300,8 +2363,13 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
-		if err := hph.fold(); err != nil {
-			return cell{}, fmt.Errorf("final fold: %w", err)
+		foldDone := hph.metrics.StartFolding(nil)
+		foldErr := hph.fold()
+		if foldDone != nil {
+			foldDone()
+		}
+		if foldErr != nil {
+			return cell{}, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2546,11 +2614,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return nil, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2992,6 +3061,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			return err
 		}
 		hph.root.setFromUpdate(update, metricsSinkFor(hph.metrics))
+		hph.root.loaded = hph.root.loaded.addFlag(cellLoadAccount)
 	}
 	if hph.root.storageAddrLen > 0 {
 		if hph.ctx == nil {
@@ -3002,6 +3072,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			return err
 		}
 		hph.root.setFromUpdate(update, metricsSinkFor(hph.metrics))
+		hph.root.loaded = hph.root.loaded.addFlag(cellLoadStorage)
 	}
 	// A leaf root's navigation path is derivable but not reliably persisted: without it a
 	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.

@@ -90,12 +90,12 @@ func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputF
 		StepSize(source.StepSize()).
 		WithErigonDBSettings(settings).
 		Logger(log.New()).
-		MustOpen(t.Context(), db)
+		MustOpen(t.Context())
 	// Windows refuses to unlink a mapped file, so the mmaps must go before
 	// t.TempDir's own cleanup runs.
 	t.Cleanup(output.Close)
 	t.Cleanup(source.Close)
-	require.NoError(t, output.OpenFolder())
+	require.NoError(t, output.OpenFolder(db))
 	if legacy {
 		keys, values := readKVFile(t, output, filepath.Join(outputDirs.SnapDomain, filepath.Base(selectedPath)))
 		legacyCount := 0

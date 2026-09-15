@@ -1054,7 +1054,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
+	if err = db.OpenStateSnapshots(ctx); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
 

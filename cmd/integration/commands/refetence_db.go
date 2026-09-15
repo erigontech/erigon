@@ -98,19 +98,22 @@ var cmdCompareStates = &cobra.Command{
 }
 
 var cmdMdbxToMdbx = &cobra.Command{
-	Use:   "mdbx_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "mdbx_to_mdbx",
+	Short:        "copy data from '--chaindata' to '--chaindata.to'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
+
+		if toChaindata == "" {
+			return errors.New("--chaindata.to is required: it names the db to copy --chaindata into")
+		}
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
 		err := backup.Kv2kv(ctx, from, to, nil, logger)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
+		if errors.Is(err, context.Canceled) {
+			return nil
 		}
+		return err
 	},
 }
 

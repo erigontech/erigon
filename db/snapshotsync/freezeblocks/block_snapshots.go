@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -117,7 +116,7 @@ type BlockRetire struct {
 
 type blockRetireRequest struct {
 	minBlockNum uint64
-	finalityCtx dbfinality.Context
+	finalityCtx kv.FinalityContext
 }
 
 func NewBlockRetire(
@@ -179,7 +178,7 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }
 
-func (br *BlockRetire) canRetire(blocksInSnapshots uint64, finalityCtx dbfinality.Context, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
+func (br *BlockRetire) canRetire(blocksInSnapshots uint64, finalityCtx kv.FinalityContext, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
 	blockTo = finalityCtx.RetireToBlockNum()
 	blockFrom = blocksInSnapshots + 1
 	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
@@ -236,7 +235,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 func (br *BlockRetire) buildFiles(
 	ctx context.Context,
 	minBlockNum uint64,
-	finalityCtx dbfinality.Context,
+	finalityCtx kv.FinalityContext,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 ) (bool, error) {
@@ -343,7 +342,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
 	minBlockNum uint64,
-	finalityCtx dbfinality.Context,
+	finalityCtx kv.FinalityContext,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 	onFinishRetire func() error,
@@ -423,7 +422,7 @@ func (br *BlockRetire) Close() {
 func (br *BlockRetire) BuildFiles(
 	ctx context.Context,
 	requestedMinBlockNum uint64,
-	finalityCtx dbfinality.Context,
+	finalityCtx kv.FinalityContext,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 	onFinish func() error,

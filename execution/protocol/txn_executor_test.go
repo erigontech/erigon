@@ -26,13 +26,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -804,86 +802,6 @@ func TestEIP2780ContractCreationFrameStartsAfterRuntimeCharge(t *testing.T) {
 	require.Equal(t, uint64(frameGas), enteredGas)
 }
 
-func TestEIP2780ContractCreationOntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
-	t.Parallel()
-	const blockGasLimit = 30_000_000
-	sender := accounts.InternAddress(common.HexToAddress("0xcafe"))
-	target := accounts.InternAddress(types.CreateAddress(sender.Value(), 0))
-	initCode := []byte{byte(vm.STOP)}
-	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               initCode,
-		IsContractCreation: true,
-		IsEIP2:             true,
-		IsEIP2028:          true,
-		IsEIP3860:          true,
-		IsEIP7623:          true,
-		IsEIP7976:          true,
-		IsEIP7981:          true,
-		IsEIP2780:          true,
-	})
-	require.False(t, overflow)
-	for _, tt := range []struct {
-		name           string
-		gasLimit       uint64
-		wantErr        error
-		wantReceiptGas uint64
-	}{
-		{
-			name:           "insufficient gas",
-			gasLimit:       intrinsic.ExecutionGas + params.StateGasNewAccount - 1,
-			wantErr:        vm.ErrRuntimeOutOfGas,
-			wantReceiptGas: intrinsic.ExecutionGas + params.StateGasNewAccount - 1,
-		},
-		{
-			name:           "collision refills charge",
-			gasLimit:       params.MaxTxnGasLimit + params.StateGasNewAccount,
-			wantErr:        vm.ErrContractAddressCollision,
-			wantReceiptGas: params.MaxTxnGasLimit,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			ibs.CreateAccount(sender, false)
-			ibs.CreateAccount(target, true)
-			require.NoError(t, ibs.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
-			empty, err := ibs.Empty(target)
-			require.NoError(t, err)
-			require.True(t, empty)
-			hasStorage, err := ibs.HasStorage(target)
-			require.NoError(t, err)
-			require.True(t, hasStorage)
-			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
-			msg := types.NewMessage(
-				sender,
-				accounts.NilAddress,
-				0,
-				uint256.NewInt(0),
-				tt.gasLimit,
-				uint256.NewInt(0),
-				uint256.NewInt(0),
-				uint256.NewInt(0),
-				initCode,
-				nil,
-				false,
-				false,
-				true,
-				false,
-				nil,
-			)
-			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
-			require.NoError(t, err)
-			require.ErrorIs(t, result.Err, tt.wantErr)
-			require.Equal(t, tt.wantReceiptGas, result.ReceiptGasUsed)
-			require.Zero(t, result.BlockStateGasUsed)
-			nonce, err := ibs.GetNonce(sender)
-			require.NoError(t, err)
-			require.Equal(t, uint64(1), nonce)
-		})
-	}
-}
-
 func TestContractCreationDoesNotWarmZeroAddressDelegationTarget(t *testing.T) {
 	t.Parallel()
 
@@ -1019,7 +937,10 @@ func TestBlobGasPreservedOnReject(t *testing.T) {
 			false, false, true, false,
 			uint256.NewInt(1), // maxFeePerBlobGas
 		)
-		m.SetBlobVersionedHashes(make([]common.Hash, 2))
+		m.SetBlobVersionedHashes([]common.Hash{
+			{kzg.BlobCommitmentVersionKZG},
+			{kzg.BlobCommitmentVersionKZG},
+		})
 		return m
 	}
 
@@ -1247,50 +1168,104 @@ func TestPreCheckNonceMismatchError(t *testing.T) {
 	})
 }
 
-// BenchmarkSysCallContract measures what a system call pays around the contract
-// itself: block start and block end run these on the newPayload path, and each
-// call built its own EVM before SysCallContractWithEVM existed. The EIP-4788
-// beacon-roots predeploy is the shortest of the system contracts.
-func BenchmarkSysCallContract(b *testing.B) {
-	code := hexutil.MustDecode("0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500")
-	contract := accounts.InternAddress(common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"))
-	root := common.HexToHash("0x0badc0de")
-	header := &types.Header{
-		Number:                *uint256.NewInt(25604144),
-		Time:                  1755000000,
-		Difficulty:            uint256.Int{},
-		BaseFee:               uint256.NewInt(7),
-		ParentBeaconBlockRoot: &root,
-	}
-	chainConfig := chainspec.Mainnet.Config
-	engine := ethash.NewFaker()
+// runPreCheckMsg executes msg against cfg and returns the resulting error.
+func runPreCheckMsg(t *testing.T, cfg *chain.Config, msg *types.Message, blobGas uint64) error {
+	t.Helper()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	gp := new(GasPool).AddGas(30_000_000).AddBlobGas(blobGas)
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	return err
+}
 
-	newIBS := func(b *testing.B) *state.IntraBlockState {
-		b.Helper()
-		ibs := state.New(state.NewNoopReader())
-		require.NoError(b, ibs.CreateAccount(contract, false))
-		require.NoError(b, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
-		return ibs
-	}
+// TestPreCheckAccessListRequiresBerlin pins that a message carrying an access
+// list is rejected before EIP-2930 activates. Typed transactions are already
+// gated by AccessListTx.AsMessage, but eth_call builds its Message directly.
+func TestPreCheckAccessListRequiresBerlin(t *testing.T) {
+	t.Parallel()
 
-	b.Run("evm_per_call", func(b *testing.B) {
-		ibs := newIBS(b)
-		b.ReportAllocs()
-		for b.Loop() {
-			if _, err := SysCallContract(contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}); err != nil {
-				b.Fatal(err)
-			}
-		}
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	preBerlin := chain.TestChainBerlinConfig.Copy()
+	preBerlin.BerlinBlock = nil
+
+	newMsg := func(al types.AccessList) *types.Message {
+		return types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, al,
+			false, false, false, false, nil,
+		)
+	}
+	populated := types.AccessList{{
+		Address:     common.HexToAddress("0x3333333333333333333333333333333333333333"),
+		StorageKeys: []common.Hash{{0x01}},
+	}}
+
+	t.Run("populated access list pre-Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, runPreCheckMsg(t, preBerlin, newMsg(populated), 0), types.ErrAccessListPreBerlin)
 	})
 
-	b.Run("evm_reused", func(b *testing.B) {
-		ibs := newIBS(b)
-		evm := NewSysCallEVM(chainConfig, vm.Config{})
-		b.ReportAllocs()
-		for b.Loop() {
-			if _, err := SysCallContractWithEVM(evm, contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}); err != nil {
-				b.Fatal(err)
-			}
-		}
+	t.Run("empty but present access list pre-Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, runPreCheckMsg(t, preBerlin, newMsg(types.AccessList{}), 0), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("absent access list pre-Berlin is accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, preBerlin, newMsg(nil), 0))
+	})
+
+	t.Run("access list from Berlin on is accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(populated), 0))
+	})
+}
+
+// TestPreCheckBlobPrerequisites pins the EIP-4844 structural rules for messages
+// that carry blob hashes without having been decoded as a BlobTx.
+func TestPreCheckBlobPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	newMsg := func(to accounts.Address, hashes []common.Hash) *types.Message {
+		msg := types.NewMessage(
+			sender, to, 0, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil,
+			false, false, false, false, nil,
+		)
+		msg.SetBlobVersionedHashes(hashes)
+		return msg
+	}
+
+	t.Run("blob hashes pre-Cancun are rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("blob contract creation is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(accounts.NilAddress, []common.Hash{validHash}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrNilToFieldTx)
+	})
+
+	t.Run("empty but present blob hash list is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{}), 0)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+	})
+
+	t.Run("wrong versioned hash version byte is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{{0x02}}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrBlobTxnInvalidVersionedHash)
+	})
+
+	t.Run("absent blob hashes are accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, nil), 0))
+	})
+
+	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob))
 	})
 }

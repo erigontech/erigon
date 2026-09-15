@@ -585,8 +585,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				var abortErr protocol.ErrExecAbortError
-				if !errors.As(applyErr, &abortErr) {
+				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 
@@ -688,7 +687,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 

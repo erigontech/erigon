@@ -54,7 +54,7 @@ func TestPBinBinOnlySimulation(t *testing.T) {
 		require.Len(t, result, len(blocks))
 		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 			for i, block := range result {
-				require.Equal(t, rawdb.ReadHeaderByNumber(tx, uint64(i)+2).Root, block["stateRoot"], "commitment history %v, block %d", history, i+2)
+				require.Equal(t, rawdb.ReadHeaderByNumber(tx, uint64(i)+2).Root, block.StateRoot, "commitment history %v, block %d", history, i+2)
 			}
 			return nil
 		}))
@@ -79,9 +79,9 @@ func TestPBinDualSimulation(t *testing.T) {
 			require.Len(t, result, len(tc.blocks))
 			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 				for i, block := range result {
-					calls := block["calls"].([]CallResult)
+					calls := block.Calls.([]CallResult)
 					require.Equal(t, hexutil.Uint64(1), calls[0].Status)
-					require.Equal(t, rawdb.ReadHeaderByNumber(tx, tc.base+uint64(i)+1).Root, block["stateRoot"])
+					require.Equal(t, rawdb.ReadHeaderByNumber(tx, tc.base+uint64(i)+1).Root, block.StateRoot)
 				}
 				return nil
 			}))
@@ -106,13 +106,13 @@ func TestPBinDualSimulation(t *testing.T) {
 		result, err := replayAPI.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: []SimulatedBlock{call(4)}}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(3)))
 		require.NoError(t, err)
 		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-			require.Equal(t, rawdb.ReadHeaderByNumber(tx, 4).Root, result[0]["stateRoot"])
+			require.Equal(t, rawdb.ReadHeaderByNumber(tx, 4).Root, result[0].StateRoot)
 			return nil
 		}))
 		actual, err := replayAPI.SimulateV1(t.Context(), request(), selector)
 		require.NoError(t, err)
 		for i := range expected {
-			require.Equal(t, expected[i]["stateRoot"], actual[i]["stateRoot"])
+			require.Equal(t, expected[i].StateRoot, actual[i].StateRoot)
 		}
 
 	})

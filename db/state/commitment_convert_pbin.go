@@ -334,7 +334,7 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		return 0, fmt.Errorf("convertPBinFile %q: output basename %q does not match source basename %q", srcPath, filepath.Base(outputPath), filepath.Base(srcPath))
 	}
 	stageDir := filepath.Join(d.dirs.Tmp, pbinConvertStageDir)
-	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+	if err = os.MkdirAll(stageDir, 0o755); err != nil {
 		return 0, fmt.Errorf("convertPBinFile %q: create staging dir: %w", srcPath, err)
 	}
 	stagePath := d.kvNewFilePathIn(stageDir, stepFrom, stepTo)
@@ -359,9 +359,9 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		return 0, fmt.Errorf("convertPBinFile %q: classify: %w", srcPath, err)
 	}
 	if !hasLegacy {
-		complete, err := commitmentOutputComplete(paths)
-		if err != nil {
-			return 0, fmt.Errorf("convertPBinFile %q: check output: %w", srcPath, err)
+		complete, completeErr := commitmentOutputComplete(paths)
+		if completeErr != nil {
+			return 0, fmt.Errorf("convertPBinFile %q: check output: %w", srcPath, completeErr)
 		}
 		if complete {
 			return 0, errSkip
@@ -449,7 +449,7 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	}
 
 	coll := Collation{valuesComp: comp, valuesPath: stagePath, valuesCount: comp.Count() / 2}
-	if err := verifyPBinPairCount(sourcePairs, coll.valuesComp.Count()); err != nil {
+	if err = verifyPBinPairCount(sourcePairs, coll.valuesComp.Count()); err != nil {
 		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
 	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), stageDir)
@@ -463,16 +463,16 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	if pbinConvertAfterBuildHook != nil {
 		pbinConvertAfterBuildHook(stagePath)
 	}
-	if err := verifyPBinSamples(ctx, d, stagePath, samples); err != nil {
+	if err = verifyPBinSamples(ctx, d, stagePath, samples); err != nil {
 		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
 
 	vf.src.closeFiles()
 	swapped = true
-	if err := removeCommitmentOutputFiles(paths); err != nil {
+	if err = removeCommitmentOutputFiles(paths); err != nil {
 		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
-	if err := swapCommitmentOutputFiles(stagePaths, paths); err != nil {
+	if err = swapCommitmentOutputFiles(stagePaths, paths); err != nil {
 		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
 	logger.Info("[pbin_convert] converted", "file", filepath.Base(srcPath), "pairs", pairs)
