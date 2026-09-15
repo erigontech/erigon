@@ -398,7 +398,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		// The pending block comes from the mining cache and is rebuilt
 		// continuously, so its results are never memoized.
 		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
-			fees := &blockFees{blockNumber: blockNumber, block: pendingBlock, receipts: pendingReceipts, header: pendingBlock.Header()}
+			fees := &blockFees{blockNumber: blockNumber, header: pendingBlock.Header()}
+			if len(rewardPercentiles) != 0 {
+				fees.block, fees.receipts = pendingBlock, pendingReceipts
+			}
 			oracle.processBlock(fees, chainconfig)
 			if fees.err != nil {
 				return common.Big0, nil, nil, nil, nil, nil, fees.err

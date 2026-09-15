@@ -284,21 +284,48 @@ func TestFeeHistoryValues(t *testing.T) {
 	}
 }
 
-// The mining feed delivers a pending block without receipts; its reward row must still encode as [].
-func TestFeeHistoryPendingBlockWithoutReceiptsHasEmptyRewardRow(t *testing.T) {
+// pendingFeeChain has head 1 and a pending block 2 with one transaction; the mining feed sends no receipts.
+func pendingFeeChain() *feeChain {
 	header := func(number, gasUsed uint64) *types.Header {
 		return &types.Header{Number: *uint256.NewInt(number), GasLimit: 30_000_000, GasUsed: gasUsed, BaseFee: uint256.NewInt(common.GWei)}
 	}
 	tip := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, uint256.NewInt(2*common.GWei), nil)
-	backend := &feeChain{
+	return &feeChain{
 		blocks:  []*types.Block{types.NewBlock(header(0, 0), nil, nil, nil, nil, nil), types.NewBlock(header(1, 0), nil, nil, nil, nil, nil)},
 		pending: types.NewBlock(header(2, 21000), []types.Transaction{tip}, nil, nil, nil, nil),
 	}
-	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
+}
+
+// The reward row of a pending block without receipts must still encode as [].
+func TestFeeHistoryPendingBlockWithoutReceiptsHasEmptyRewardRow(t *testing.T) {
+	oracle := gasprice.NewOracle(pendingFeeChain(), gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 
 	_, reward, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.PendingBlockNumber, []float64{50})
 	require.NoError(t, err)
 	got, err := json.Marshal(reward)
 	require.NoError(t, err)
 	require.JSONEq(t, `[[]]`, string(got))
+}
+
+type errorCounter struct{ errors atomic.Int32 }
+
+func (h *errorCounter) Log(r *log.Record) error {
+	if r.Lvl == log.LvlError {
+		h.errors.Add(1)
+	}
+	return nil
+}
+
+func (h *errorCounter) Enabled(context.Context, log.Lvl) bool { return true }
+
+func TestFeeHistoryPendingBlockWithoutPercentilesSkipsRewards(t *testing.T) {
+	errs := &errorCounter{}
+	logger := log.New()
+	logger.SetHandler(errs)
+	oracle := gasprice.NewOracle(pendingFeeChain(), gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), logger)
+
+	_, reward, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	require.Nil(t, reward)
+	require.Zero(t, errs.errors.Load(), "no rewards were requested, so missing receipts are not an error")
 }
