@@ -288,6 +288,9 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 
 // ChainId implements eth_chainId. Returns the current ethereum chainId.
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
+	if cc := api._chainConfig.Load(); cc != nil {
+		return hexutil.Uint64(cc.ChainID.Uint64()), nil
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
