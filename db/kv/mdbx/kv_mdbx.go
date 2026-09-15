@@ -800,6 +800,16 @@ type MdbxCursor struct {
 }
 
 func (db *MdbxKV) Env() *mdbx.Env { return db.env }
+
+// Defrag runs mdbx_env_defrag. It takes the writer lock, so it waits for the
+// current RwTx and blocks the next one until it returns.
+func (db *MdbxKV) Defrag(opts mdbx.DefragOptions) (*mdbx.DefragResult, error) {
+	if !db.trackTxBegin() {
+		return nil, errors.New("db closed")
+	}
+	defer db.trackTxEnd()
+	return db.env.Defrag(opts)
+}
 func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
