@@ -234,6 +234,28 @@ func (f *preExecFrontier) Abandon() {
 	f.txHashes = nil
 }
 
+// DropFrom closes and drops every generation at or above number, sealed or not — blocks the consensus layer
+// did not build on. Returns how many were dropped.
+func (f *preExecFrontier) DropFrom(number uint64) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.gens[:0]
+	dropped := 0
+	for _, g := range f.gens {
+		if g.number >= number {
+			f.closeGen(g)
+			dropped++
+			continue
+		}
+		kept = append(kept, g)
+	}
+	f.gens = kept
+	if dropped > 0 {
+		f.txHashes = nil
+	}
+	return dropped
+}
+
 // Live reports whether (hash, number) is a block held live here. Such a block is a valid BASE for its
 // successor — its full post-execution state is in the SharedDomains the successor chains to — so
 // newPayload must not re-assemble and re-execute it as an unvalidated side fork (which would replay its

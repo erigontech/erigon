@@ -542,10 +542,17 @@ func (e *ExecModule) PreconfirmedBody(sd *execctx.SharedDomains, number uint64) 
 // builds on a DIFFERENT parent than the in-progress flashblock was opened on — Caplin accepted a new head
 // (catch-up/reorg). It drops the stale in-progress fork and re-anchors the frontier to that accepted head, so the
 // boundary opens FRESH on it. Abandoning is what makes a SAME-HEIGHT reorg safe (PreExecuteFlashblock only auto-
-// resets its body on a NUMBER change). No in-progress block, or the CL still on the same parent ⇒ no-op — this
-// must NOT fire during normal run-ahead (frontier legitimately ahead of the accepted head). Caller (AssembleBlock)
+// resets its body on a NUMBER change). A parent BELOW the frontier orphans every block this node sealed above it.
+// No in-progress block, or the CL still on the same parent ⇒ no-op. Caller (AssembleBlock)
 // holds e.semaphore; this is the exec-internal replacement for the driver's former AnchorFrontier callback.
 func (e *ExecModule) reanchorFrontierForBlockLocked(ctx context.Context, params *builder.Parameters) {
+	// The CL building on a block BELOW the frontier passed over the blocks this node sealed above it.
+	if fr := e.frontierHeader.Load(); fr != nil && fr.Hash() != params.ParentHash {
+		if parent := e.headerByHashLocked(ctx, params.ParentHash); parent != nil && parent.Number.Uint64() < fr.Number.Uint64() {
+			e.orphanFromLocked(parent)
+			return
+		}
+	}
 	e.flash.mu.Lock()
 	valid := e.flash.valid
 	inProgressParent := e.flash.built.Parent
@@ -559,6 +566,47 @@ func (e *ExecModule) reanchorFrontierForBlockLocked(ctx context.Context, params 
 		}
 	}
 	e.abandonExtendingForkLocked()
+}
+
+// orphanFromLocked discards every pre-executed block above parent, sealed or in progress: the consensus layer
+// is building that height on parent instead, so they will never be part of the chain. What goes with them is
+// their state, their maintained body and any sealed copy waiting for GetPayload — left behind, the height
+// re-opens into the orphan's state and can never be produced again. Caller holds e.semaphore.
+func (e *ExecModule) orphanFromLocked(parent *types.Header) {
+	from := parent.Number.Uint64() + 1
+	e.forkValidator.ReleaseOrphanedPreExec(from)
+	dropped := e.preExec.DropFrom(from)
+	e.flash.mu.Lock()
+	e.flash.resetLocked(0)
+	e.flash.mu.Unlock()
+	e.pendingBlockMu.Lock()
+	for k, br := range e.preconfirmedByParent {
+		if br.Block.NumberU64() >= from {
+			delete(e.preconfirmedByParent, k)
+		}
+	}
+	e.pendingBlockMu.Unlock()
+	// Reads executed on top of the orphans went into the shared state cache; the re-opened height would read
+	// its state back from there.
+	if e.stateCache != nil {
+		e.stateCache.ClearWithHash(parent.Hash())
+	}
+	e.frontierHeader.Store(parent)
+	e.logger.Warn("[execmodule] pre-executed blocks orphaned — the consensus layer built on their parent",
+		"parent", parent.Hash(), "from", from, "dropped", dropped)
+}
+
+// sealedAtLocked returns the block this node sealed at number on the frontier's chain, or nil when the frontier
+// does not reach that height. Caller holds e.semaphore.
+func (e *ExecModule) sealedAtLocked(ctx context.Context, number uint64) *types.Header {
+	h := e.frontierHeader.Load()
+	for h != nil && h.Number.Uint64() > number {
+		h = e.headerByHashLocked(ctx, h.ParentHash)
+	}
+	if h == nil || h.Number.Uint64() != number {
+		return nil
+	}
+	return h
 }
 
 // headerByHashLocked resolves a header by hash from the DB (canonical/sealed blocks). Returns nil when it can't
@@ -656,11 +704,23 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		}
 		e.pendingBlockMu.Lock()
 		br, ready := e.preconfirmedByParent[params.ParentHash]
+		stale := ready && !preconfirmAttrsMatch(br.Block.Header(), params)
+		if stale {
+			// Sealed on this parent for a slot that has passed. Serving it gets it rejected and loses it; drop
+			// it here, and the height's next round orphans its state and re-opens under these attributes.
+			delete(e.preconfirmedByParent, params.ParentHash)
+			ready = false
+		}
 		if ready {
 			delete(e.preconfirmedByParent, params.ParentHash)
 			delete(e.pendingBlock, payloadID)
 		}
 		e.pendingBlockMu.Unlock()
+		if stale {
+			e.logger.Warn("[GetPayload] sealed block was built for an earlier slot — not served", "payload", payloadID,
+				"num", br.Block.NumberU64(), "sealedTs", br.Block.Time(), "slotTs", params.Timestamp)
+			return AssembledBlockResult{}, nil
+		}
 		if !ready {
 			// GetAssembledBlock returned but the commits handler has not stored the sealed block yet (a race at
 			// the marker) — report not-ready so the CL retries GetPayload rather than skipping the slot.

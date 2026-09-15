@@ -409,6 +409,20 @@ func (fv *ForkValidator) adoptPreExecutedLocked(hash common.Hash, number uint64)
 	return true
 }
 
+// ReleaseOrphanedPreExec empties the validation slot if it holds a pre-executed generation at or above number,
+// which the frontier is about to drop as an orphan. It is not closed here: the frontier owns it and closes it.
+func (fv *ForkValidator) ReleaseOrphanedPreExec(number uint64) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if fv.sharedDom == nil || fv.extendingForkNumber < number || !fv.preExec.Owns(fv.sharedDom) {
+		return
+	}
+	fv.sharedDom = nil
+	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkNumber = 0
+	fv.extendingForkNotifications = nil
+}
+
 // ExecuteInto runs header+body into the CALLER's SharedDomains and reports the outcome, touching no
 // validation state whatsoever — no extending fork, no validHashes, no candidate slot. It is the
 // PRODUCER's execution primitive: pre-exec needs execution, not validation, and routing it through

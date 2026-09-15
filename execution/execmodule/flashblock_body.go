@@ -244,6 +244,14 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		return e.reopenFlashblockLocked(ctx, inputs, newTxRLPs)
 	}
 	roundStart := time.Now()
+	// A round for a height this node already sealed, under a different parent or slot, means the consensus
+	// layer passed over that block and is asking for the height again. Orphan it first, or this round executes
+	// into its state.
+	if sealed := e.sealedAtLocked(ctx, inputs.Number); sealed != nil && (sealed.ParentHash != inputs.Parent || sealed.Time != inputs.Timestamp) {
+		if parent := e.headerByHashLocked(ctx, inputs.Parent); parent != nil {
+			e.orphanFromLocked(parent)
+		}
+	}
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
