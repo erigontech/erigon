@@ -23,6 +23,8 @@
 // cycle that previously forced duplicated implementations.
 package nibbles
 
+import "encoding/binary"
+
 // Terminator is the hex nibble terminator byte (0x10 = 16).
 const Terminator byte = 0x10
 
@@ -81,12 +83,24 @@ func CompactToHex(compact []byte) []byte {
 func KeybytesToHex(str []byte) []byte {
 	l := len(str)*2 + 1
 	var nibbles = make([]byte, l)
-	for i, b := range str {
-		nibbles[i*2] = b / Terminator
-		nibbles[i*2+1] = b % Terminator
-	}
+	Expand(str, nibbles)
 	nibbles[l-1] = Terminator
 	return nibbles
+}
+
+func Expand(src, dst []byte) {
+	dst = dst[:2*len(src)]
+	for len(src) >= 4 {
+		v := uint64(binary.LittleEndian.Uint32(src))
+		v = (v | v<<16) & 0x0000ffff0000ffff
+		v = (v | v<<8) & 0x00ff00ff00ff00ff
+		v = (v<<8 | v>>4) & 0x0f0f0f0f0f0f0f0f
+		binary.LittleEndian.PutUint64(dst, v)
+		src, dst = src[4:], dst[8:]
+	}
+	for i, b := range src {
+		dst[2*i], dst[2*i+1] = b>>4, b&0x0f
+	}
 }
 
 // HexToKeybytes turns hex nibbles into key bytes.
