@@ -106,6 +106,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
+		SlotExceeded:     SlotExceededIndices(config, header.Extra),
 	}
 	return blockContext
 }

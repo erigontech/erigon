@@ -131,6 +131,11 @@ type Config struct {
 	// Account Abstraction
 	AllowAA bool
 
+	// SlotExceededTxs lets a block include a transaction as FAILED, the way an out-of-gas one is, because its
+	// producer could not execute it within the slot. The verdict travels in the header's extra-data and every
+	// node applies it instead of executing the transaction (see protocol.SlotExceededIndices).
+	SlotExceededTxs bool `json:"slotExceededTxs,omitempty"`
+
 	// Precompiles, when set, is the chain's own precompile set, built once at
 	// chain initialization (see vm.NewChainPrecompiles) and immutable thereafter.
 	// Each chain owns an isolated set, so multiple chains in one process never

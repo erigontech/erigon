@@ -133,7 +133,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			return err
 		}
 	} else {
-		result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		result, err := protocol.ApplyBlockMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
 			if result == nil {
 				return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)

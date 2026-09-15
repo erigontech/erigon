@@ -50,6 +50,22 @@ type BlockContext struct {
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
 	SlotNumber  uint64           // Provides information for SLOTNUM
+
+	// SlotExceeded lists, ascending, the body indices of transactions the producer included as FAILED because
+	// they could not execute within the slot. Read from the header's extra-data on chains that enable it
+	// (chain.Config.SlotExceededTxs); empty everywhere else. Only paths replaying a block's own transactions
+	// consult it — a call or simulation against this block context never does.
+	SlotExceeded []uint16
+}
+
+// IsSlotExceeded reports whether the block's transaction at txIndex was included as slot-exceeded.
+func (bc *BlockContext) IsSlotExceeded(txIndex int) bool {
+	for _, i := range bc.SlotExceeded {
+		if int(i) == txIndex {
+			return true
+		}
+	}
+	return false
 }
 
 // TxContext provides the EVM with information about a transaction.

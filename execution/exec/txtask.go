@@ -577,9 +577,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			var applyErr error
 
 			if !calcFees {
-				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
+				applyRes, applyErr = protocol.ApplyBlockMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
 			} else {
-				applyRes, applyErr = protocol.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
+				applyRes, applyErr = protocol.ApplyBlockMessage(evm, message, txTask.GasPool(), true, false, engine)
 			}
 
 			if applyErr != nil {

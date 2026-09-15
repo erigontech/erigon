@@ -10,8 +10,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -30,6 +32,11 @@ type FlashblockInputs struct {
 	FeeRecipient          common.Address
 	ParentBeaconBlockRoot common.Hash
 	Withdrawals           []*types.Withdrawal
+
+	// SlotExceeded names transactions the producer includes in this block as FAILED because they could not
+	// execute within the slot. BuildFlashHeader records their body positions in the header's extra-data, which
+	// is how every other node learns the verdict (protocol.SlotExceededIndices).
+	SlotExceeded []common.Hash
 }
 
 // FlashblockOutputs is the CLOSE's computed output side of the header (all-zero for an in-progress /
@@ -74,7 +81,32 @@ func BuildFlashHeader(in FlashblockInputs, txs [][]byte, out FlashblockOutputs) 
 		ExcessBlobGas:         &zeroBlobGas,
 		ParentBeaconBlockRoot: &pbbr,
 		RequestsHash:          &reqHash,
+		Extra:                 slotExceededExtra(in.SlotExceeded, txs),
 	}
+}
+
+// slotExceededExtra is the extra-data naming which of txs the block includes as slot-exceeded, by body
+// position. A named transaction that is not in the body contributes nothing. The driver never names more
+// than one header carries, so the cap here only keeps a header valid.
+func slotExceededExtra(named []common.Hash, txs [][]byte) []byte {
+	if len(named) == 0 {
+		return nil
+	}
+	set := make(map[common.Hash]struct{}, len(named))
+	for _, h := range named {
+		set[h] = struct{}{}
+	}
+	var idx []int
+	for i, rlp := range txs {
+		if _, ok := set[crypto.Keccak256Hash(rlp)]; ok {
+			idx = append(idx, i)
+			if len(idx) == protocol.MaxSlotExceeded {
+				break
+			}
+		}
+	}
+	extra, _ := protocol.EncodeSlotExceeded(idx)
+	return extra
 }
 
 // snKeyExec identifies a tx by sender+nonce for in-body dedup (a resubmit under a new hash reuses the pair).
