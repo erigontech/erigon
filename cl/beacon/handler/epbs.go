@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
-	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -732,16 +731,21 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
+				// Only duplicates can be acknowledged without storing or gossiping again.
+				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) {
+					continue
+				}
 				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
 				continue
 			}
 		}
 
 		if a.proposerPreferencesService == nil && a.epbsPool != nil {
-			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-				Slot:          req.Message.ProposalSlot,
-				DependentRoot: req.Message.DependentRoot,
-			}, req)
+			if _, err := clservices.ValidateProposerPreferenceSlot(a.ethClock, a.beaconChainCfg, req.Message.ProposalSlot); err != nil {
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
+			}
+			a.epbsPool.AddProposerPreference(req)
 		}
 
 		if a.sentinel != nil {
@@ -968,7 +972,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
+	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
@@ -1312,6 +1316,12 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 	return nil
 }
 
+func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, true)
+}
+
 // ---- Execution Payload Bid ----
 
 // PostEthV1BeaconExecutionPayloadBid publishes a SignedExecutionPayloadBid.
@@ -1426,8 +1436,8 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
 	}
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 	var (
 		baseBlockRoot common.Hash
 		baseBlockSlot uint64

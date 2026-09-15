@@ -122,8 +122,8 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	// [IGNORE] First valid message for this dependent root and proposal slot.
 	seenKey := newSeenProposerPreferencesKey(preferences)
 	if s.hasSeenPreference(seenKey) {
-		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
-			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
+		return fmt.Errorf("%w: %w from validator %d for slot %d with dependent root %v",
+			ErrIgnore, ErrProposerPreferenceAlreadySeen, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
 	dependentHeader, ok := s.forkchoiceStore.GetHeader(preferences.DependentRoot)
 	if !ok {
@@ -151,8 +151,8 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	s.storeMu.Lock()
 	if s.hasSeenPreference(seenKey) {
 		s.storeMu.Unlock()
-		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
-			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
+		return fmt.Errorf("%w: %w from validator %d for slot %d with dependent root %v",
+			ErrIgnore, ErrProposerPreferenceAlreadySeen, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
 	s.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
 		Slot:          proposalSlot,
@@ -170,6 +170,26 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"targetGasLimit", preferences.TargetGasLimit)
 
 	return nil
+}
+
+// ValidateProposerPreferenceSlot checks that the proposal is in the gossip lookahead and has not passed.
+func ValidateProposerPreferenceSlot(
+	clock eth_clock.EthereumClock,
+	cfg *clparams.BeaconChainConfig,
+	proposalSlot uint64,
+) (uint64, error) {
+	currentEpoch := clock.GetCurrentEpoch()
+	proposalEpoch := state.GetEpochAtSlot(cfg, proposalSlot)
+	if proposalEpoch < currentEpoch || proposalEpoch > currentEpoch+cfg.MinSeedLookahead {
+		return 0, fmt.Errorf("%w: proposal slot %d is in epoch %d, expected epoch in [%d, %d]",
+			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+cfg.MinSeedLookahead)
+	}
+	currentSlot := clock.GetCurrentSlot()
+	if proposalSlot <= currentSlot {
+		return 0, fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
+			ErrIgnore, proposalSlot, currentSlot)
+	}
+	return proposalEpoch, nil
 }
 
 func isPastSlot(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64, disparity time.Duration) (bool, bool) {

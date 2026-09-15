@@ -1009,8 +1009,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
-	// Invalidate head cache — payload status may have changed from PENDING to FULL.
-	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
+
+	// Payload status participates in Gloas head selection, so a change invalidates the cached head.
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 

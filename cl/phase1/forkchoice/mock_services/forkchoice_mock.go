@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,24 +45,27 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]forkchoice.ForkChoiceNode
-	AnchorSlotVal          uint64
-	AnchorRootVal          common.Hash
-	FinalizedCheckpointVal solid.Checkpoint
-	FinalizedSlotVal       uint64
-	LowestAvailableSlotVal *uint64
-	HeadVal                common.Hash
-	HeadSlotVal            uint64
-	HeadPayloadStatusVal   cltypes.PayloadStatus
-	GetHeadNodeFn          func() (forkchoice.ForkChoiceNode, error)
-	GetStateAtBlockRootFn  func(common.Hash, bool) (*state.CachingBeaconState, error)
-	ViewStateAtBlockRootFn func(common.Hash, func(*state.CachingBeaconState) error) error
-	HighestSeenVal         uint64
-	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
-	ProposerBoostRootVal   common.Hash
-	SlotVal                uint64
-	TimeVal                uint64
+	Ancestors                    map[uint64]forkchoice.ForkChoiceNode
+	AnchorSlotVal                uint64
+	AnchorRootVal                common.Hash
+	FinalizedCheckpointVal       solid.Checkpoint
+	FinalizedSlotVal             uint64
+	LowestAvailableSlotVal       *uint64
+	HeadVal                      common.Hash
+	HeadSlotVal                  uint64
+	HeadPayloadStatusVal         cltypes.PayloadStatus
+	HeadPayloadStatusInvalidated atomic.Bool
+	BlockProcessingVal           bool
+	ResolveHeadPayloadStatusFn   func(common.Hash) (cltypes.PayloadStatus, bool)
+	GetHeadNodeFn                func() (forkchoice.ForkChoiceNode, error)
+	GetStateAtBlockRootFn        func(common.Hash, bool) (*state.CachingBeaconState, error)
+	ViewStateAtBlockRootFn       func(common.Hash, func(*state.CachingBeaconState) error) error
+	HighestSeenVal               uint64
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -112,6 +116,7 @@ type ForkChoiceStorageMock struct {
 	MockPeerDas *mock_services.MockPeerDas
 
 	ShouldExtendPayloadVal bool
+	ShouldBuildOnFullVal   *bool
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -293,11 +298,16 @@ func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) 
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
+	f.HeadPayloadStatusInvalidated.Store(false)
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) BlockProcessing() bool {
+	return f.BlockProcessingVal
 }
 
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {
@@ -672,6 +682,26 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
+func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	if f.ResolveHeadPayloadStatusFn != nil {
+		return f.ResolveHeadPayloadStatusFn(root)
+	}
+	if f.GetHeadNodeFn != nil {
+		head, err := f.GetHeadNodeFn()
+		if err != nil || head.Root != root {
+			return cltypes.PayloadStatusPending, false
+		}
+		return head.PayloadStatus, true
+	}
+	if f.HeadPayloadStatusInvalidated.Load() {
+		_, _, _ = f.GetHead(nil)
+	}
+	if f.HeadVal != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return f.HeadPayloadStatusVal, true
+}
+
 func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	return f.HeadPayloadStatusVal
 }
@@ -687,7 +717,10 @@ func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
 	return f.ShouldExtendPayloadVal
 }
 
-func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, slot uint64) bool {
+func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, proposalSlot uint64) bool {
+	if f.ShouldBuildOnFullVal != nil {
+		return *f.ShouldBuildOnFullVal
+	}
 	return true
 }
 

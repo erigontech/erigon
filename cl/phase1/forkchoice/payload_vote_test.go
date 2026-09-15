@@ -373,21 +373,20 @@ func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
+	}, 1))
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
-	}))
+	}, 1))
 
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 2))
 }
 
 func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {

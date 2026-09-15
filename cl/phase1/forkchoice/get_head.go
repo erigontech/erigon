@@ -153,12 +153,58 @@ func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState)
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the payload status of the current head node.
-// Must be called after GetHead has been called (head is cached).
+// ResolveHeadPayloadStatus returns the current head's payload status when it matches root. An
+// invalidated Gloas head is recomputed, cached, and published; a valid different head is a mismatch.
+func (f *ForkChoiceStore) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	status, matches, ready := f.cachedHeadPayloadStatus(root)
+	if ready {
+		return status, matches
+	}
+	if !f.trackGloasWeights() {
+		return cltypes.PayloadStatusPending, false
+	}
+	head, _, err := f.getHeadGloas()
+	if err != nil {
+		if f.shouldLogHeadResolutionFailure(time.Now()) {
+			log.Warn("ResolveHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		}
+		return cltypes.PayloadStatusPending, false
+	}
+	if head.Root != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return head.PayloadStatus, true
+}
+
 func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.headPayloadStatus
+}
+
+func (f *ForkChoiceStore) shouldLogHeadResolutionFailure(now time.Time) bool {
+	nowNanos := now.UnixNano()
+	for {
+		previous := f.headPayloadStatusLogAt.Load()
+		if previous != 0 && nowNanos-previous < int64(time.Minute) {
+			return false
+		}
+		if f.headPayloadStatusLogAt.CompareAndSwap(previous, nowNanos) {
+			return true
+		}
+	}
+}
+
+func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.headHash == (common.Hash{}) {
+		return cltypes.PayloadStatusPending, false, false
+	}
+	if f.headHash != root {
+		return cltypes.PayloadStatusPending, false, true
+	}
+	return f.headPayloadStatus, true, true
 }
 
 func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, error) {
