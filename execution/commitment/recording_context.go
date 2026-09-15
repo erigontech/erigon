@@ -57,6 +57,10 @@ func (rc *RecordingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return data, step, nil
 }
 
+func (rc *RecordingContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return rc.Branch(prefix)
+}
+
 func (rc *RecordingContext) Account(plainKey []byte) (*Update, error) {
 	u, err := rc.inner.Account(plainKey)
 	if err != nil {

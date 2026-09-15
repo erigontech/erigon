@@ -79,6 +79,10 @@ func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
 }
 
+func (c *balCommitmentContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return c.Branch(prefix)
+}
+
 type balCommitmentCacheStats struct {
 	hits         atomic.Uint64
 	misses       atomic.Uint64
