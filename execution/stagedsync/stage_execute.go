@@ -606,14 +606,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
-	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
-		}
-	}
+	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+	stagePruneTimeout := min(baseTimeout+extra, maxTimeout)
 	if timeout > 0 && timeout > stagePruneTimeout {
 		stagePruneTimeout = timeout
 	}

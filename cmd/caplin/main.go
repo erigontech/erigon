@@ -115,6 +115,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		NetworkId:                 networkId,
 		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
+		AllowPrivateBuilderURLs:   cfg.AllowPrivateBuilderURLs,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,

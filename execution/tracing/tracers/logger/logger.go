@@ -30,8 +30,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -62,47 +60,21 @@ type LogConfig struct {
 	Overrides *chain.Config `json:"overrides,omitempty"`
 }
 
-//go:generate gencodec -type StructLog -field-override structLogMarshaling -out gen_structlog.go
-
 // StructLog is emitted to the EVM each cycle and lists information about the current internal state
 // prior to the execution of the statement.
 type StructLog struct {
-	Pc            uint64                      `json:"pc"`
-	Op            vm.OpCode                   `json:"op"`
-	Gas           uint64                      `json:"gas"`
-	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory,omitempty"`
-	MemorySize    int                         `json:"memSize"`
-	Stack         []uint256.Int               `json:"stack"`
-	ReturnData    []byte                      `json:"returnData"`
-	Storage       map[common.Hash]common.Hash `json:"-"`
-	Depth         int                         `json:"depth"`
-	RefundCounter uint64                      `json:"refund"`
-	Err           error                       `json:"-"`
-}
-
-// overrides for gencodec
-type structLogMarshaling struct {
-	Stack       []hexutil.U256
-	Gas         math.HexOrDecimal64
-	GasCost     math.HexOrDecimal64
-	Memory      hexutil.Bytes
-	ReturnData  hexutil.Bytes
-	OpName      string `json:"opName"`          // adds call to OpName() in MarshalJSON
-	ErrorString string `json:"error,omitempty"` // adds call to ErrorString() in MarshalJSON
-}
-
-// OpName formats the operand name in a human-readable format.
-func (s *StructLog) OpName() string {
-	return s.Op.String()
-}
-
-// ErrorString formats the log's error as a string.
-func (s *StructLog) ErrorString() string {
-	if s.Err != nil {
-		return s.Err.Error()
-	}
-	return ""
+	Pc            uint64
+	Op            vm.OpCode
+	Gas           uint64
+	GasCost       uint64
+	Memory        []byte
+	MemorySize    int
+	Stack         []uint256.Int
+	ReturnData    []byte
+	Storage       map[common.Hash]common.Hash
+	Depth         int
+	RefundCounter uint64
+	Err           error
 }
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a

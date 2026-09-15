@@ -600,7 +600,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	// Ask the aggregator to build up through step 11.
 	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
 	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(db, 11*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
 
 	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
@@ -629,7 +629,7 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
-	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
@@ -829,4 +829,49 @@ func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
 	require.NoError(t, agg.MergeLoop(t.Context()))
 	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
 	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
+}
+
+func TestGetStateIndicesSaltRewritesMalformedFile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		rewrite bool
+	}{
+		{name: "empty", content: []byte{}, rewrite: true},
+		{name: "too short", content: []byte("bad"), rewrite: true},
+		{name: "too long", content: []byte("toolong"), rewrite: true},
+		{name: "valid", content: []byte{1, 2, 3, 4}, rewrite: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+			require.NoError(t, os.WriteFile(fpath, tc.content, os.ModePerm))
+
+			salt, err := GetStateIndicesSalt(dirs, true, log.New())
+			require.NoError(t, err)
+
+			saltBytes, err := os.ReadFile(fpath)
+			require.NoError(t, err)
+			require.Len(t, saltBytes, 4)
+			require.Equal(t, binary.BigEndian.Uint32(saltBytes), *salt)
+			if !tc.rewrite {
+				require.Equal(t, tc.content, saltBytes, "a valid salt file must not be rewritten")
+			}
+		})
+	}
+}
+
+func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	fpath := filepath.Join(dirs.Snap, "salt-state.txt")
+	content := []byte("bad")
+	require.NoError(t, os.WriteFile(fpath, content, os.ModePerm))
+
+	salt, err := GetStateIndicesSalt(dirs, false, log.New())
+	require.NoError(t, err)
+	require.Nil(t, salt, "genNew=false must not invent a salt")
+
+	saltBytes, err := os.ReadFile(fpath)
+	require.NoError(t, err)
+	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
 }

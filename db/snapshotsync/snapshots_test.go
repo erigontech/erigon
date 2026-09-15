@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -210,7 +211,7 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
-		s.OpenFolder()
+		require.NoError(s.OpenFolder())
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
@@ -586,7 +587,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.Len(list, 60)
 
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
-	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
+	require.NoError(dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name())))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
@@ -657,6 +658,77 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.NoError(err)
 	require.Equal(4, len(list))
 
+}
+
+func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	from, to := uint64(0), uint64(500_000)
+
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+	createTestSegmentOnlyFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_1, logger)
+	newIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, from, to, snaptype2.Enums.Transactions.String()))
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     dir,
+		IndexFile:  newIdx,
+		LeafSize:   8,
+	}, logger)
+	require.NoError(t, err)
+	defer idx.Close()
+	idx.DisableFsync()
+	require.NoError(t, idx.AddKey([]byte{1}, 0))
+	require.NoError(t, idx.Build(t.Context()))
+
+	oldSeg := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, snaptype2.Enums.Transactions))
+	oldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Enums.Transactions.String()))
+	oldToBlock := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name))
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Transactions}, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, oldSeg)
+	require.NoFileExists(t, oldIdx, "superseded by the v1.1 index and held by no segment")
+	require.FileExists(t, newIdx, "the retired segment resolved its first slot to the survivor's index")
+	require.FileExists(t, oldToBlock, "the only match for the survivor's second slot")
+
+	var survivor *DirtySegment
+	s.WalkDirtySegments(snaptype2.Enums.Transactions, func(seg *DirtySegment) bool {
+		survivor = seg
+		return false
+	})
+	require.NotNil(t, survivor)
+	require.Equal(t, version.V1_1, survivor.Version())
+	require.True(t, survivor.IsIndexed())
+	require.Equal(t, oldToBlock, survivor.Index(snaptype2.Indexes.TxnHash2BlockNum).FilePath())
+}
+
+func TestRemoveOverlapsLeavesAnotherCollectionsIdxAlone(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	from, to := uint64(0), uint64(500_000)
+
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Headers, dir, version.V1_1, logger)
+	ownedOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Enums.Headers.String()))
+
+	foreignOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype.BeaconBlocks.Name()))
+	foreignNewIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, from, to, snaptype.BeaconBlocks.Name()))
+	require.NoError(t, os.WriteFile(foreignOldIdx, []byte{0}, 0o644))
+	require.NoError(t, os.WriteFile(foreignNewIdx, []byte{0}, 0o644))
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, ownedOldIdx, "an owned superseded index is still reclaimed")
+	require.FileExists(t, foreignOldIdx, "another collection's index is not this collection's to unlink")
+	require.FileExists(t, foreignNewIdx)
 }
 
 func TestCanRetire(t *testing.T) {

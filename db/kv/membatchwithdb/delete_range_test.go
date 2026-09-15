@@ -35,7 +35,7 @@ func TestMemoryMutationDeleteRange(t *testing.T) {
 	newBatch := func(t *testing.T) *membatchwithdb.MemoryMutation {
 		t.Helper()
 		_, rwTx := newTestTx(t)
-		initializeDbNonDupSort(rwTx)
+		initializeDbNonDupSort(t, rwTx)
 		batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 		require.NoError(t, err)
 		t.Cleanup(batch.Close)

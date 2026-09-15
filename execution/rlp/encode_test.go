@@ -425,11 +425,11 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 		wg.Go(func() {
 			for range 1000 {
 				_, r, _ := EncodeToReader("foo")
-				io.ReadAll(r)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
+				_, _ = io.ReadAll(r)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
 			}
 		})
 	}
@@ -472,7 +472,7 @@ func TestEncodeUint256Buffer(t *testing.T) {
 
 	var writer3 bytes.Buffer
 	var buf31 [31]byte
-	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
+	require.Panics(t, func() { _ = EncodeUint256(i, &writer3, buf31[:]) })
 }
 
 func TestEncodeUint256Random(t *testing.T) {

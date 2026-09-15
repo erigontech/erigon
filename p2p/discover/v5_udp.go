@@ -488,20 +488,29 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 	}
 }
 
+// checkTableAddr reports whether a record relayed from sender may enter the
+// routing table.
+func (t *UDPv5) checkTableAddr(sender netip.Addr, node *enode.Node) error {
+	if err := netutil.CheckRelayAddr(sender, node.IPAddr()); err != nil {
+		return err
+	}
+	if t.netrestrict != nil && !t.netrestrict.ContainsAddr(node.IPAddr()) {
+		return errors.New("not contained in netrestrict list")
+	}
+	if node.UDP() <= 1024 {
+		return errLowPort
+	}
+	return nil
+}
+
 // verifyResponseNode checks validity of a record in a NODES response.
 func (t *UDPv5) verifyResponseNode(c *callV5, r *enr.Record, distances []uint, seen map[enode.ID]struct{}) (*enode.Node, error) {
 	node, err := enode.New(t.validSchemes, r)
 	if err != nil {
 		return nil, err
 	}
-	if err := netutil.CheckRelayAddr(c.addr.Addr(), node.IPAddr()); err != nil {
+	if err := t.checkTableAddr(c.addr.Addr(), node); err != nil {
 		return nil, err
-	}
-	if t.netrestrict != nil && !t.netrestrict.ContainsAddr(node.IPAddr()) {
-		return nil, errors.New("not contained in netrestrict list")
-	}
-	if node.UDP() <= 1024 {
-		return nil, errLowPort
 	}
 	if distances != nil {
 		nd := enode.LogDist(c.id, node.ID())
@@ -771,8 +780,16 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 		return err
 	}
 	if fromNode != nil {
-		// Handshake succeeded, add to table.
-		t.tab.addInboundNode(fromNode)
+		// Handshake succeeded, add to table. The record is self-signed and its
+		// endpoint is not tied to the packet source, so it gets the same filters
+		// as a record learned from a NODES response.
+		if err := t.checkTableAddr(fromAddr.Addr(), fromNode); err != nil {
+			if t.trace {
+				t.log.Trace("[p2p] Rejected discv5 handshake record", "id", fromID, "addr", fromAddr, "record", fromNode.IPAddr(), "err", err)
+			}
+		} else {
+			t.tab.addInboundNode(fromNode)
+		}
 	}
 	if t.trace && packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.

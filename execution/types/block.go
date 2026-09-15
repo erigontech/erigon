@@ -1467,7 +1467,7 @@ func (b *Block) Size() common.StorageSize {
 		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, b)
+	_ = rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }

@@ -113,6 +113,14 @@ func TestForkChoiceBasic(t *testing.T) {
 	// first steps
 	store.OnTick(0)
 	store.OnTick(12)
+	blockRoot, err := block0x3a.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, store.ValidateBlockForPublishing(block0x3a, false))
+	_, insertedByPreflight := store.GetHeader(blockRoot)
+	require.False(t, insertedByPreflight)
+	block0x3a.Block.StateRoot[0] ^= 1
+	require.ErrorIs(t, store.ValidateBlockForPublishing(block0x3a, false), forkchoice.ErrBlockInvalid)
+	block0x3a.Block.StateRoot[0] ^= 1
 	require.NoError(t, store.OnBlock(ctx, block0x3a, false, true, false))
 	// Check if we get correct status (1)
 	require.Equal(t, uint64(12), store.Time())

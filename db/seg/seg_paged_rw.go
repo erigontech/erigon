@@ -76,12 +76,6 @@ type Page struct {
 	compressionBuf []byte
 }
 
-func FromBytes(buf []byte, compressionEnabled bool) *Page {
-	r := &Page{}
-	r.Reset(buf, compressionEnabled)
-	return r
-}
-
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
 	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf[:0], v, compressionEnabled)
@@ -146,7 +140,7 @@ type pageResult struct {
 }
 
 type PagedReader struct {
-	file         ReaderI
+	file         *Reader
 	isCompressed bool
 	pageSize     int
 	page         *Page
@@ -154,7 +148,7 @@ type PagedReader struct {
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r ReaderI, pageSize int, snappy bool) *PagedReader {
+func NewPagedReader(r *Reader, pageSize int, snappy bool) *PagedReader {
 	if pageSize == 0 {
 		pageSize = 1
 	}

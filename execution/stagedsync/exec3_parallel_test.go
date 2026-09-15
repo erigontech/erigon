@@ -601,7 +601,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	}
 
 	cancel()
-	pe.wait(ctx)
+	_ = pe.wait(ctx)
 
 	if check != nil {
 		err = check(pe)

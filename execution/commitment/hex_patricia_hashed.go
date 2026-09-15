@@ -2353,8 +2353,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
-
-	mxTrieProcessedKeys.Inc()
 	return nil
 }
 

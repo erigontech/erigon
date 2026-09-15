@@ -3983,7 +3983,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "sum(rate(domain_commitment_keys{instance=~\"$instance\"}[$__rate_interval])) by (instance) > 0",
+              "expr": "sum(rate(commitment_key_traversals_total{instance=~\"$instance\"}[$__rate_interval])) by (instance) > 0",
               "legendFormat": "keys committed",
               "range": true,
               "refId": "A"
@@ -4005,7 +4005,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "irate(domain_commitment_updates_applied{instance=~\"$instance\"}[$__rate_interval]) > 0",
+              "expr": "irate(commitment_branch_writes_total{instance=~\"$instance\"}[$__rate_interval]) > 0",
               "legendFormat": "commitment trie node updates",
               "range": true,
               "refId": "F"

@@ -125,10 +125,12 @@ Examples:
 
 			// --- Mode 2/3: JSON-RPC proxy ---
 			url := rpcURL
-			if port > 0 {
+			switch {
+			case port > 0:
 				url = fmt.Sprintf("http://127.0.0.1:%d", port)
-			} else {
-				// Auto-discover: probe default ports.
+			case !cmd.Flags().Changed("rpc.url"):
+				// Only probe when the user named no endpoint at all; discovery
+				// must never override an explicit --rpc.url.
 				if discovered := autoDiscover(ctx, logger); discovered != "" {
 					url = discovered
 				}
