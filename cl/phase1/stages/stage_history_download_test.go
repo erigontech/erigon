@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,52 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingBlobHistoryDownloader struct {
+	mu       sync.Mutex
+	headSlot uint64
+	notify   *network.BlobBackfilledNotifier
+	started  bool
+}
+
+func (d *recordingBlobHistoryDownloader) SetHeadSlot(slot uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.headSlot = slot
+}
+
+func (d *recordingBlobHistoryDownloader) SetNotifyBlobBackfilled(notify *network.BlobBackfilledNotifier) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.notify = notify
+}
+
+func (d *recordingBlobHistoryDownloader) Start() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.started = true
+}
+
+func TestBlobHistoryDownloadStartsOnlyAfterBlockHistoryFinishes(t *testing.T) {
+	downloader := &recordingBlobHistoryDownloader{}
+
+	startBlobHistoryDownload(false, downloader, 99, func(bool) {})
+	require.False(t, downloader.started)
+	require.Zero(t, downloader.headSlot)
+	require.Nil(t, downloader.notify)
+
+	startBlobHistoryDownload(true, downloader, 99, func(bool) {})
+	require.True(t, downloader.started)
+	require.Equal(t, uint64(99), downloader.headSlot)
+	require.NotNil(t, downloader.notify)
+}
+
+func TestBlobHistoryDownloadIgnoresNilConfiguredDownloader(t *testing.T) {
+	var downloader *network.BlobHistoryDownloader
+	require.NotPanics(t, func() {
+		startBlobHistoryDownload(true, downloader, 99, func(bool) {})
+	})
+}
 
 type failingHistoryDownloader struct {
 	err      error
@@ -183,4 +230,40 @@ func TestHistoryDownloadPersistsInitialGloasBlockWithoutPayloadClassification(t 
 		require.Equal(t, common.Hash{}, executionHash)
 		return nil
 	}))
+}
+
+func TestWaitForHistoryCompletion(t *testing.T) {
+	t.Run("asynchronous caller returns immediately", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		require.NoError(t, waitForHistoryCompletion(ctx, make(chan struct{}), false))
+	})
+
+	t.Run("synchronous caller waits for completion", func(t *testing.T) {
+		finishCh := make(chan struct{})
+		close(finishCh)
+
+		require.NoError(t, waitForHistoryCompletion(context.Background(), finishCh, true))
+	})
+
+	t.Run("synchronous caller remains owned until cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- waitForHistoryCompletion(ctx, make(chan struct{}), true)
+		}()
+		cancel()
+
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
+
+	t.Run("cancellation wins when completion is also ready", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		finishCh := make(chan struct{})
+		close(finishCh)
+
+		require.ErrorIs(t, waitForHistoryCompletion(ctx, finishCh, true), context.Canceled)
+	})
 }
