@@ -394,15 +394,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		txnHash, ok, err := api._txnReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txIndex)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-
-		r, ok, err := api.receiptsGenerator.PersistedReceipt(tx, header, txnHash, txNum)
+		r, ok, err := api.receiptsGenerator.PersistedReceipt(ctx, tx, header, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
