@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -42,7 +44,7 @@ import (
 type Generator struct {
 	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *lru.Cache[uint64, *types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -85,11 +87,6 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
-	if err != nil {
-		panic(err)
-	}
-
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -105,7 +102,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
-		receiptCache:       receiptCache,
+		receiptCache:       newReceiptCache(datasize.ByteSize(receiptsCacheLimit*100) * datasize.KB),
 		evmTimeout:         evmTimeout,
 
 		blockExecMutex: &loaderMutex[common.Hash]{},
@@ -164,6 +161,36 @@ func PersistedReceiptsServed() bool { return !rpcDisableRCache && !dbg.AssertEna
 
 var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
+// PersistedReceipt returns the receipt from the persistent cache without generating it; ok is false
+// when the receipt is not served from there.
+func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, header *types.Header, txIndex int, txNum uint64) (*types.Receipt, bool, error) {
+	if !PersistedReceiptsServed() {
+		return nil, false, nil
+	}
+	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txIndex)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	g.addToCacheReceipt(txNum, receipt)
+	return receipt, true, nil
+}
+
+func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+		TxNum:     txNum,
+		BlockNum:  blockNum,
+		BlockHash: blockHash,
+		TxnHash:   txnHash,
+		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
+		DontCalcBloom: true,
+	})
+	return receipt, ok && receipt != nil, err
+}
+
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
@@ -202,11 +229,14 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
+func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] {
+	return cache.NewByteLRU(maxBytes, func(_ uint64, r *types.Receipt) int64 { return int64(r.Size()) + cache.ByteLRUEntryOverheadBytes })
+}
+
 func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(txNum, receipt)
 }
 
@@ -263,16 +293,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if !rpcDisableRCache && !calculatePostState {
 		var ok bool
 		var err error
-		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:     txNum,
-			BlockNum:  blockNum,
-			BlockHash: blockHash,
-			TxnHash:   txnHash,
-		})
+		receiptFromDB, ok, err = readPersistedReceipt(tx, blockNum, blockHash, txnHash, txNum)
 		if err != nil {
 			return nil, err
 		}
-		if ok && receiptFromDB != nil && PersistedReceiptsServed() {
+		if ok && PersistedReceiptsServed() {
 			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}

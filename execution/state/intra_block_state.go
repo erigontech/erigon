@@ -1305,10 +1305,11 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
 				}
-				// A live reconstruction must not replace a consumed absence,
-				// unless that absence came from this destruct's exact version.
+				// A live reconstruction must not replace a consumed absence.
+				// A wiped MapRead can use an older AddressPath cell's version because
+				// self-destruct snapshots omit the account record.
 				if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-					!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
+					!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
 					if sdRes.DepIdx() > sdb.dep {
 						sdb.dep = sdRes.DepIdx()
 					}

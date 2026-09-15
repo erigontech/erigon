@@ -437,7 +437,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
-					if path == StoragePath {
+					if path == StoragePath || path == AddressPath {
 						readVersion := sdVersion
 						if pathRead.Status() == MVReadResultDone {
 							readVersion = pathRead.Version()
@@ -1024,6 +1024,8 @@ func (s *IntraBlockState) traceDepReadContext(addr accounts.Address, r *readPath
 func (s *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, ver Version) {
 	hdr := ReadHeader{Source: MapRead, Version: ver}
 	switch path {
+	case AddressPath:
+		s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
 	case StoragePath:
 		s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
 	case CodePath:
