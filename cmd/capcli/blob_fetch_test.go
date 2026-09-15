@@ -151,3 +151,29 @@ func TestBlobFetchTallyCountsOnlyRealFailures(t *testing.T) {
 	tally.rejected = 1
 	require.Equal(t, 4, tally.failures())
 }
+
+// Pacing is driven by this counter: the loop sleeps only when a slot actually contacted an
+// endpoint. Without it the pause applies to every slot, and a range that is 97% blobless takes
+// days instead of minutes.
+func TestBeaconAPISourceCountsOnlyOutboundRequests(t *testing.T) {
+	var served int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		served++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"root":"0x1234"}}`))
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client()}
+	require.Zero(t, src.requests, "a source that has not been used must report no requests")
+
+	_, ok, err := src.headerRoot(t.Context(), 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, served, src.requests, "every outbound request must be counted")
+
+	before := src.requests
+	_, _, err = src.headerRoot(t.Context(), 2)
+	require.NoError(t, err)
+	require.Greater(t, src.requests, before, "a second fetch must advance the counter")
+}

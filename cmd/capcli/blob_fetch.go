@@ -163,15 +163,19 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 			}
 			continue
 		}
-		reachedRemote := true
+		var reachedRemote bool
 		if arc != nil {
 			before := arc.requests
 			if err := c.fillSlotFromArchive(ctx, tx, snr, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
 				return err
 			}
 			reachedRemote = arc.requests > before
-		} else if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
-			return err
+		} else {
+			before := src.requests
+			if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
+				return err
+			}
+			reachedRemote = src.requests > before
 		}
 		// Only pace the slots that touched a remote. Sleeping through locally answered slots
 		// turns a two hour job into a two day one for no politeness gain.
@@ -390,6 +394,7 @@ func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblo
 type beaconAPISource struct {
 	endpoints []string
 	client    *http.Client
+	requests  int
 }
 
 // headerRoot returns the block root an endpoint reports for a slot. An endpoint that cannot
@@ -436,6 +441,7 @@ func (s *beaconAPISource) sidecars(ctx context.Context, blockRoot common.Hash) (
 // get reports ok=false for a 404, and an error for anything else that is not a 200, so
 // "this endpoint does not have it" is never confused with "this endpoint is broken".
 func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, error) {
+	s.requests++
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, err
