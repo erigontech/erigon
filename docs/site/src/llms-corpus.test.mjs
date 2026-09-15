@@ -18,17 +18,35 @@ import {gfmFromMarkdown} from 'mdast-util-gfm'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CORPUS = path.join(HERE, '..', 'static', 'llms-full.txt')
 
-function pages(text) {
-  // Split on the URL line. A column-zero "# comment" inside a fence is not a
-  // heading, and splitting on "# " would truncate the page being measured.
-  const parts = text.split(/^URL: (\S+)$/m)
-  const out = []
-  for (let i = 1; i < parts.length; i += 2) out.push([parts[i], parts[i + 1]])
-  return out
-}
-
 const parse = md =>
   fromMarkdown(md, {extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()]})
+
+function pages(text) {
+  // Boundaries come from the parse, never from a regex over the text. Splitting
+  // on "# " truncates a page at a column-zero comment inside a fence, and
+  // splitting on "URL: " truncates it at a configuration example containing one
+  // — either cut lands mid-fence and hands the tests two fragments that report a
+  // closed fence as unclosed. A heading node is one the parser actually saw, so
+  // a "# " or "URL: " inside a fence is part of that code node and is never a
+  // boundary. These are also the positions the assembler starts each page at.
+  const lines = text.split('\n')
+  const starts = parse(text).children
+    .filter((n) => n.type === 'heading' && n.depth === 1)
+    .map((n) => n.position.start.line - 1)
+  return starts.map((from, i) => {
+    const to = i + 1 < starts.length ? starts[i + 1] : lines.length
+    const body = lines.slice(from, to).join('\n')
+    // Read the sentinel positionally — the first non-blank line after the
+    // heading — rather than searching the body for the first "URL:" line. The
+    // search would label the page with a configuration example when a page has
+    // lost its own sentinel, which is exactly the case the label has to name
+    // correctly. The heading stands in when there is nothing sentinel-shaped
+    // there; the caller only uses this to label a failure.
+    const first = lines.slice(from + 1, to).find((l) => l.trim() !== '') ?? ''
+    const m = first.match(/^URL: (\S+)$/)
+    return [m ? m[1] : lines[from].slice(0, 60), body]
+  })
+}
 
 function nodesOfType(tree, type) {
   const found = []
@@ -84,28 +102,23 @@ test('every page sentinel survives as prose, none captured by a fence', () => {
 })
 
 test('every fenced block in the corpus closes', () => {
-  // Page boundaries come from the parse, not from a regex over "URL:" lines: a
-  // configuration example can contain one, and splitting there cuts a fenced
-  // block in half and reports the halves as unclosed.
+  // Splitting mid-fence would report both halves as unclosed, so the boundaries
+  // have to be the parse-derived ones pages() returns.
   const text = fs.readFileSync(CORPUS, 'utf8')
-  const lines = text.split('\n')
-  const starts = parse(text).children
-    .filter((n) => n.type === 'heading' && n.depth === 1)
-    .map((n) => n.position.start.line - 1)
-  assert.ok(starts.length > 0, 'no page headings found')
+  const parsed = pages(text)
+  assert.ok(parsed.length > 0, 'no page headings found')
 
   const unclosed = []
-  starts.forEach((from, i) => {
-    const to = i + 1 < starts.length ? starts[i + 1] : lines.length
+  for (const [url, body] of parsed) {
     let open = null
-    for (const line of lines.slice(from, to)) {
+    for (const line of body.split('\n')) {
       const m = line.match(/^\s*(`{3,}|~{3,})/)
       if (!m) continue
       if (open === null) open = m[1]
       else if (m[1][0] === open[0] && m[1].length >= open.length) open = null
     }
-    if (open !== null) unclosed.push(lines[from].slice(0, 60))
-  })
+    if (open !== null) unclosed.push(url)
+  }
   assert.deepEqual(unclosed, [], 'page ends inside a fenced block')
 })
 
