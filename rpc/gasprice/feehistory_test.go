@@ -21,6 +21,7 @@ package gasprice_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -147,6 +148,7 @@ func TestFeeHistory(t *testing.T) {
 type feeChain struct {
 	blocks   []*types.Block
 	receipts map[uint64]types.Receipts
+	pending  *types.Block
 	fetches  atomic.Int32
 }
 
@@ -178,7 +180,7 @@ func (c *feeChain) GetReceiptsGasUsed(_ context.Context, b *types.Block) (types.
 	return c.receipts[b.NumberU64()], nil
 }
 
-func (c *feeChain) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
+func (c *feeChain) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return c.pending, nil }
 
 func (c *feeChain) CheckBlockRewardsAvailable(context.Context, uint64) error { return nil }
 
@@ -279,4 +281,23 @@ func TestFeeHistoryValues(t *testing.T) {
 			require.Equal(t, []float64{0, 0, float64(params.GasPerBlob) / float64(maxBlobGas)}, blobGasUsedRatio)
 		})
 	}
+}
+
+// The mining feed delivers a pending block without receipts; its reward row must still encode as [].
+func TestFeeHistoryPendingBlockWithoutReceiptsHasEmptyRewardRow(t *testing.T) {
+	header := func(number, gasUsed uint64) *types.Header {
+		return &types.Header{Number: *uint256.NewInt(number), GasLimit: 30_000_000, GasUsed: gasUsed, BaseFee: uint256.NewInt(common.GWei)}
+	}
+	tip := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, uint256.NewInt(2*common.GWei), nil)
+	backend := &feeChain{
+		blocks:  []*types.Block{types.NewBlock(header(0, 0), nil, nil, nil, nil, nil), types.NewBlock(header(1, 0), nil, nil, nil, nil, nil)},
+		pending: types.NewBlock(header(2, 21000), []types.Transaction{tip}, nil, nil, nil, nil),
+	}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
+
+	_, reward, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.PendingBlockNumber, []float64{50})
+	require.NoError(t, err)
+	got, err := json.Marshal(reward)
+	require.NoError(t, err)
+	require.JSONEq(t, `[[]]`, string(got))
 }

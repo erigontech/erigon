@@ -181,6 +181,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
+		bf.results.reward = []hexutil.U256{}
 		return
 	}
 
