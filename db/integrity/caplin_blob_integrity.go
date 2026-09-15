@@ -44,6 +44,35 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	if db == nil {
 		return fmt.Errorf("blob snapshot integrity: canonical database is unavailable")
 	}
+	var missingIndexErr error
+	snapshots.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(segment *snapshotsync.DirtySegment) bool {
+		if segment.IsIndexed() {
+			return true
+		}
+		from, to := segment.GetRange()
+		missingIndexErr = fmt.Errorf("blob snapshot segment %d-%d: index is missing", from, to)
+		return false
+	})
+	if missingIndexErr != nil {
+		logger.Error("[integrity] CaplinBlobSidecars", "err", missingIndexErr)
+		return missingIndexErr
+	}
+	if beaconCfg.DenebForkEpoch != math.MaxUint64 && beaconCfg.SlotsPerEpoch != 0 && beaconCfg.DenebForkEpoch <= math.MaxUint64/beaconCfg.SlotsPerEpoch {
+		denebSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
+		expectedFrom := denebSlot / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
+		snapshots.WalkDirtySegments(snaptype.BeaconBlocks.Enum(), func(segment *snapshotsync.DirtySegment) bool {
+			from, to := segment.GetRange()
+			if segment.IsIndexed() || to <= expectedFrom {
+				return true
+			}
+			missingIndexErr = fmt.Errorf("beacon snapshot segment %d-%d: index is missing", from, to)
+			return false
+		})
+		if missingIndexErr != nil {
+			logger.Error("[integrity] CaplinBlobSidecars", "err", missingIndexErr)
+			return missingIndexErr
+		}
+	}
 	view := snapshots.View()
 	defer view.Close()
 
@@ -191,7 +220,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 			return fmt.Errorf("blob snapshot slot %d: canonical block is missing from beacon snapshots", slot)
 		}
 		if len(sidecars) != 0 {
-			return fmt.Errorf("blob snapshot slot %d: expected 0 sidecars, got %d", slot, len(sidecars))
+			return fmt.Errorf("blob snapshot slot %d: beacon block is missing but found %d sidecars", slot, len(sidecars))
 		}
 		return nil
 	}

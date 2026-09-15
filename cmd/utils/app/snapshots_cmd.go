@@ -1676,11 +1676,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			caplinDB, caplinSnaps, beaconCfg, err := caplinBlobIntegrityInputs(res)
-			if err != nil {
-				return err
-			}
-			return integrity.CheckCaplinBlobSidecars(ctx, caplinDB, caplinSnaps, beaconCfg, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, failFast, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
@@ -3154,19 +3150,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	return
-}
-
-func caplinBlobIntegrityInputs(res OpenSnapsResult) (kv.RoDB, *freezeblocks.CaplinSnapshots, *clparams.BeaconChainConfig, error) {
-	if res.CaplinSnaps == nil {
-		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: caplin snapshots are unavailable")
-	}
-	if res.CaplinIndexDB == nil {
-		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: caplin index database is unavailable")
-	}
-	if res.BeaconConfig == nil {
-		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: beacon config is unavailable")
-	}
-	return res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, nil
 }
 
 func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
