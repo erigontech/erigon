@@ -458,7 +458,7 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-var roTxPoolSize = dbg.EnvInt("MDBX_RO_TX_POOL", 256)
+var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
 	log          log.Logger
@@ -758,7 +758,7 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 }
 
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
-	if tx.Reset() == nil {
+	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
 		select {
 		case db.roTxPool <- tx:
 			return
