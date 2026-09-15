@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	commonlru "github.com/erigontech/erigon/common/lru"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,6 +45,9 @@ import (
 var (
 	ErrInvalidPercentile = errors.New("invalid reward percentile")
 	ErrRequestBeyondHead = errors.New("request beyond head block")
+
+	feeHistoryCacheHit  = metrics.GetOrCreateCounter("rpc_fee_history_cache_hit_total")
+	feeHistoryCacheMiss = metrics.GetOrCreateCounter("rpc_fee_history_cache_miss_total")
 )
 
 const (
@@ -419,10 +423,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
 			if cached, ok := oracle.historyCache.get(key); ok {
+				feeHistoryCacheHit.Inc()
 				blockResults[blockNumber-oldestBlock] = blockResult{processed: cached, hasResult: true}
 				continue
 			}
 		}
+		feeHistoryCacheMiss.Inc()
 		misses++
 	}
 	if err := ctx.Err(); err != nil {
