@@ -32,9 +32,9 @@ import (
 
 // ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
 // caller's weigher, instead of by an entry count over an assumed average size.
-// A budgeted cache (newByteLRU) grows its ceiling one chunk at a time out of the shared
-// cachebudget envelope and stops for good once the envelope refuses a chunk; an unbudgeted
-// one (NewByteLRU) holds maxBytes from the start.
+// A budgeted cache (newByteLRU) raises its limit one chunk at a time out of the shared
+// cachebudget envelope, up to maxBytes, and stops asking once the envelope refuses a chunk,
+// until Purge or Close; an unbudgeted one (NewByteLRU) holds maxBytes from the start.
 //
 // The synchronous executor orders InvalidateAll but not eviction against Add,
 // so a layer can sit over its ceiling until the next write; CleanUp forces a
