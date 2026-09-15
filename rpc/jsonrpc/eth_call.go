@@ -507,8 +507,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	// touch account
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
+	for _, storageKey := range storageKeys {
+		sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
+	}
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
@@ -557,24 +559,6 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
-
-	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) != 0 && len(storageKeys) != 0 {
-		// touch storage keys
-		for _, storageKey := range storageKeys {
-			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
-		}
-
-		// generate the trie for proofs, this works by loading the merkle paths to the touched key
-		var storageProofRoot []byte
-		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof", false)
-		if err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(storageProofRoot, header.Root[:]) {
-			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", storageProofRoot, header.Root[:])
-		}
-	}
 
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
