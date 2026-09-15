@@ -16,9 +16,7 @@
 
 package stages
 
-import (
-	"testing"
-)
+import "testing"
 
 // currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
 // to 0 rather than underflow into a ~2^64 slot count.

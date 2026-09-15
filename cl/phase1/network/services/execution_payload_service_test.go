@@ -56,6 +56,7 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 		envelope.Payload.Extra = solid.NewExtraData()
 		envelope.Payload.Transactions = &solid.TransactionsSSZ{}
 		envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+		envelope.Payload.BlockAccessList = solid.NewByteListSSZ(clparams.MainnetBeaconConfig.MaxBytesPerTransaction)
 	}
 	return &cltypes.SignedExecutionPayloadEnvelope{
 		Message:   envelope,
@@ -78,6 +79,71 @@ func TestExecutionPayloadServiceDecodeRejectsNonCanonicalOffsets(t *testing.T) {
 
 	_, err = service.DecodeGossipMessage("peer123", nonCanonical, clparams.GloasVersion)
 	require.Error(t, err)
+}
+
+func oversizedExtraDataEnvelopeSSZ(t *testing.T, envelope *cltypes.SignedExecutionPayloadEnvelope) []byte {
+	t.Helper()
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const (
+		signedMessageOffsetPosition          = 0
+		messageRequestsOffsetPosition        = 4
+		payloadExtraOffsetPosition           = 436
+		payloadTransactionsOffsetPosition    = 504
+		payloadWithdrawalsOffsetPosition     = 508
+		payloadBlockAccessListOffsetPosition = 528
+	)
+	messageStart := int(binary.LittleEndian.Uint32(encoded[signedMessageOffsetPosition:]))
+	payloadStart := messageStart + int(binary.LittleEndian.Uint32(encoded[messageStart:]))
+	extraStart := payloadStart + int(binary.LittleEndian.Uint32(encoded[payloadStart+payloadExtraOffsetPosition:]))
+	malformed := append([]byte{}, encoded[:extraStart]...)
+	malformed = append(malformed, make([]byte, 33)...)
+	malformed = append(malformed, encoded[extraStart:]...)
+
+	for _, position := range []int{
+		messageStart + messageRequestsOffsetPosition,
+		payloadStart + payloadTransactionsOffsetPosition,
+		payloadStart + payloadWithdrawalsOffsetPosition,
+		payloadStart + payloadBlockAccessListOffsetPosition,
+	} {
+		offset := binary.LittleEndian.Uint32(malformed[position:])
+		binary.LittleEndian.PutUint32(malformed[position:], offset+33)
+	}
+	return malformed
+}
+
+func TestExecutionPayloadServiceRejectsOversizedExtraDataSSZ(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+
+	_, err := service.DecodeGossipMessage("", oversizedExtraDataEnvelopeSSZ(t, envelope), clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestExecutionPayloadServiceRejectsUnsupportedEnvelopeVersions(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	encoded, err := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.StateVersion(255)} {
+		_, err := service.DecodeGossipMessage("", encoded, version)
+		require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")
+	}
+	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	require.NotNil(t, decoded)
+}
+
+func TestExecutionPayloadServiceRejectsMalformedEnvelopeBeforePendingHash(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+	envelope.Message.Payload.Withdrawals.Append(nil)
+
+	require.NotPanics(t, func() {
+		err := service.ProcessMessage(context.Background(), nil, envelope)
+		require.ErrorContains(t, err, "nil withdrawal at index 0")
+	})
 }
 
 func TestExecutionPayloadServiceNilEnvelope(t *testing.T) {
@@ -107,6 +173,7 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Verify envelope was queued (check internal state)
 	impl := service.(*executionPayloadService)
 	require.Equal(t, int32(1), impl.pending.count.Load())
+	fcu.DeleteEnvelope(blockRoot)
 
 	// Now add block to forkchoice
 	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -401,6 +468,32 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	require.Contains(t, err.Error(), "already seen envelope")
 }
 
+func TestExecutionPayloadServiceSharesSeenEnvelopeAdmissionWithREST(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, true)
+
+	err = service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "already seen")
+	require.False(t, fcu.OnExecutionPayloadCalled)
+}
+
+func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	service.(*executionPayloadService).seenEnvelopesCache.Add(seenEnvelopeKey{blockRoot, 1}, struct{}{})
+
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, envelope), ErrIgnore)
+}
+
 func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 
@@ -414,8 +507,6 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 		},
 	}
 
-	// Set finalized slot higher than envelope slot
-	fcu.FinalizedSlotVal = 100
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 
 	err := service.ProcessMessage(context.Background(), nil, envelope)
@@ -487,6 +578,25 @@ func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadServiceRechecksFinalizedBoundaryAfterApply(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
+	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+		fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+		return nil
+	}
+
+	err := service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "envelope slot 100 < finalized slot 128")
+	impl := service.(*executionPayloadService)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}))
+}
+
 func TestExecutionPayloadServiceSuccess(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 
@@ -524,6 +634,25 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 			fcu.OnExecutionPayloadErr = processErr
 
 			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+			require.ErrorIs(t, err, ErrIgnore)
+		})
+	}
+}
+
+func TestExecutionPayloadServiceIgnoresLocalPersistenceFailures(t *testing.T) {
+	for _, processErr := range []error{
+		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
+		forkchoice.ErrExecutionPayloadEnvelopeIndicesPending,
+	} {
+		t.Run(processErr.Error(), func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			blockRoot := common.HexToHash("0x1234")
+			fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.FinalizedSlotVal = 50
+			fcu.OnExecutionPayloadErr = processErr
+
+			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+
 			require.ErrorIs(t, err, ErrIgnore)
 		})
 	}
