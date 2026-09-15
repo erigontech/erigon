@@ -213,8 +213,7 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 
 	task := &taskVersion{
 		execTask: &execTask{
-			Task:               txTask,
-			shouldDelayFeeCalc: true,
+			Task: txTask,
 		},
 		version: state.Version{
 			BlockNum: blockNum,
@@ -328,7 +327,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	transferAmt := uint256.NewInt(1_000_000_000)
 	tip := uint256.NewInt(21_000)
 
-	// When shouldDelayFeeCalc=true, execution runs with calcFees=false:
+	// Execution runs with calcFees=false:
 	// sender is only debited the transfer amount (no gas), and coinbase
 	// is NOT touched during execution. Fees are applied during finalize.
 	newSenderBal := new(uint256.Int).Sub(senderBal, transferAmt)
@@ -554,7 +553,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 
 	task := result.Task.(*taskVersion)
 
-	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil, result.Coinbase, result.ExecutionResult.FeeTipped)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 	return writes
 }
@@ -706,7 +705,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil, result.Coinbase, result.ExecutionResult.FeeTipped)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
@@ -754,7 +753,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil, result.Coinbase, result.ExecutionResult.FeeTipped)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 
 	coinbaseWrite := findBalance(writes, s.coinbase)
@@ -843,7 +842,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil, result.Coinbase, result.ExecutionResult.FeeTipped)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
@@ -1654,7 +1653,7 @@ func TestCalcFees_EstimateDestructDoesNotPruneCoinbase(t *testing.T) {
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
 			task := &taskVersion{
-				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				execTask: &execTask{Task: txTask},
 				version:  version,
 			}
 			result := &execResult{TxResult: &exec.TxResult{
@@ -1697,7 +1696,7 @@ func TestCalcFees_DoneDestructStillPrunesCoinbase(t *testing.T) {
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
 	task := &taskVersion{
-		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		execTask: &execTask{Task: txTask},
 		version:  version,
 	}
 	result := &execResult{TxResult: &exec.TxResult{
@@ -1773,7 +1772,7 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 
 	version := r.task.Version()
 	recorded := r.recorded()
-	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited(), r.result.Coinbase, r.result.ExecutionResult.FeeTipped)
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited())
 	require.NoError(t, err)
 
 	var credit *state.WriteSet
@@ -1827,7 +1826,7 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 	require.True(t, ok)
 	balanceOnly.SetBalance(s.coinbase, bw)
 
-	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly, r.result.Coinbase, r.result.ExecutionResult.FeeTipped)
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly)
 	require.NoError(t, err)
 	require.Equal(t, feeCreditNew, outcome, "a recorded balance without its AddressPath sibling must be re-credited")
 	require.NotNil(t, findAddress(tip, s.coinbase))
@@ -2106,7 +2105,7 @@ func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
 	task := &taskVersion{
-		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		execTask: &execTask{Task: txTask},
 		version:  version,
 	}
 	result := &execResult{TxResult: &exec.TxResult{
