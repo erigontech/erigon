@@ -84,7 +84,7 @@ func withWarmupWorkers(t *testing.T, n uint64) {
 }
 
 func TestClearTablesWarmupOff(t *testing.T) {
-	withWarmupWorkers(t, 0) // default: plain one-shot clear, no chunking
+	withWarmupWorkers(t, 0) // plain one-shot clear, no chunking
 
 	db := newWriteMapDB(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -237,6 +237,7 @@ func TestCompactInPlace(t *testing.T) {
 	after := dataFileStat(t, dbDir)
 	require.Less(t, after.Size(), before.Size())
 	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
+	require.FileExists(t, filepath.Join(dbDir, lockFileName))
 
 	db := openTestDB(dbDir)
 	defer db.Close()
@@ -270,8 +271,7 @@ func TestCompactInPlace(t *testing.T) {
 	}))
 }
 
-// TestAutoCompactDatadir pins the threshold: only a db whose free pages exceed
-// bloatRatio times its data is rewritten.
+// TestAutoCompactDatadir: only a db over bloatRatio is rewritten.
 func TestAutoCompactDatadir(t *testing.T) {
 	withAutoCompactMinFree(t, 0)
 	dirs := datadir.New(t.TempDir())
@@ -279,14 +279,13 @@ func TestAutoCompactDatadir(t *testing.T) {
 	writeTestDB(t, dirs.TxPool, 2_000)
 	bloated, healthy := dataFileStat(t, dirs.Chaindata), dataFileStat(t, dirs.TxPool)
 
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
 	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
 }
 
-// TestAutoCompactDatadirSkipsLockedDatadir: integration opens a datadir while the
-// node that holds its lock keeps running, so the lock owner's dbs must stay untouched.
+// TestAutoCompactDatadirSkipsLockedDatadir: dbs of a locked datadir stay untouched.
 func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
 	withAutoCompactMinFree(t, 0)
 	dirs := datadir.New(t.TempDir())
@@ -296,27 +295,26 @@ func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
 	unlock, err := dirs.TryFlock()
 	require.NoError(t, err)
 	defer unlock()
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }
 
-func withAutoCompactMinFree(t *testing.T, v uint64) {
+func withAutoCompactMinFree(t *testing.T, v datasize.ByteSize) {
 	t.Helper()
 	prev := autoCompactMinFree
 	autoCompactMinFree = v
 	t.Cleanup(func() { autoCompactMinFree = prev })
 }
 
-// TestAutoCompactDatadirSkipsLittleFreeSpace: a small db crosses bloatRatio with
-// a few free pages, and its rewrite gives back nothing the growth step keeps.
+// TestAutoCompactDatadirSkipsLittleFreeSpace: a small db crossing bloatRatio is not rewritten.
 func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
-	withAutoCompactMinFree(t, 1<<30)
+	withAutoCompactMinFree(t, datasize.GB)
 	dirs := datadir.New(t.TempDir())
 	writeTestDB(t, dirs.Chaindata, 18_000)
 	before := dataFileStat(t, dirs.Chaindata)
 
-	require.NoError(t, AutoCompactDatadir(t.Context(), dirs, log.New()))
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
 	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
 }

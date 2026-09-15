@@ -23,9 +23,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -93,18 +93,12 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 	return nil
 }
 
-// bloatRatio is how many times the free pages of a db must outweigh its data
-// before AutoCompactDatadir rewrites it.
-const bloatRatio = 3
+const bloatRatio = 4 // autoCompactDatadir rewrites a db whose free pages exceed its data this many times
 
-// autoCompactMinFree skips a small db: it crosses bloatRatio with a few free
-// pages, and the growth step pads its compacted file back to the same size.
-var autoCompactMinFree uint64 = 1 << 30
+var autoCompactMinFree = 10 * datasize.GB // a small db crosses bloatRatio but gives back nothing
 
-// AutoCompactDatadir compacts each db of the datadir whose free pages exceed
-// bloatRatio times its data. A db that fails to compact is left as it was, and
-// a datadir locked by another process is skipped.
-func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+// ApplyMigrations compacts bloated dbs; a datadir locked by another process is skipped.
+func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {
 		return nil
@@ -114,6 +108,11 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 	}
 	defer unlock()
 
+	return autoCompactDatadir(ctx, dirs, logger)
+}
+
+// autoCompactDatadir expects the datadir lock held. A db that fails to compact is left as it was.
+func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	dbs, err := datadirDBs(dirs)
 	if err != nil {
 		return err
@@ -127,7 +126,7 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 		if free <= bloatRatio*data || free < autoCompactMinFree {
 			continue
 		}
-		logger.Info("[compact] auto-compact", "db", db.path, "data", common.ByteCount(data), "free", common.ByteCount(free))
+		logger.Info("[compact] auto-compact", "db", db.path, "data", data.HR(), "free", free.HR())
 		if err := CompactInPlace(ctx, db.path, db.label, logger); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -138,17 +137,15 @@ func AutoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 	return nil
 }
 
-// pageUsage returns the bytes held by the tables of a db and the bytes of free
-// pages below its last used page. The unallocated tail of the file is not free
-// space: mdbx grows the file ahead of use, so counting it would compact a
-// freshly compacted db again.
-func pageUsage(dbDir string) (data, free uint64, err error) {
+// pageUsage: free is the pages below the last used page minus table pages. The
+// unused file tail is not counted: mdbx grows the file ahead of use.
+func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer env.Close()
-	if err := env.Open(dbDir, mdbx.Readonly, 0644); err != nil {
+	if err := env.Open(dbDir, mdbx.Readonly, 0o644); err != nil {
 		return 0, 0, err
 	}
 	st, err := env.Stat()
@@ -159,9 +156,9 @@ func pageUsage(dbDir string) (data, free uint64, err error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	pageSize := uint64(st.PSize)
-	data = (st.BranchPages + st.LeafPages + st.OverflowPages) * pageSize
-	used := (info.MiLastPgNo + 1) * pageSize
+	pageSize := datasize.ByteSize(st.PSize)
+	data = datasize.ByteSize(st.BranchPages+st.LeafPages+st.OverflowPages) * pageSize
+	used := datasize.ByteSize(info.MiLastPgNo+1) * pageSize
 	return data, used - min(used, data), nil
 }
 

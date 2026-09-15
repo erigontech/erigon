@@ -114,7 +114,7 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 		if err := app.RetireStateIfStepsInDB(ctx, dirs, 3, logger); err != nil {
 			return nil, err
 		}
-		if err := backup.AutoCompactDatadir(ctx, dirs, logger); err != nil {
+		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 			return nil, err
 		}
 	}
