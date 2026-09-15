@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -512,113 +513,74 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
 	}
 
-	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, proofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
+	return api.proofFromWitnessNodes(ctx, roTx, sdCtx, header, address, storageKeys, blockNumber, isLatest, logger)
+}
+
+// proofFromWitnessNodes serves getProof from the captured witness nodes without decoding them into a trie: a proof is
+// the captured bytes on the key's path, whose hashes the fold already computed, so nothing is encoded or hashed again.
+func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalTx, sdCtx *commitmentdb.SharedDomainsCommitmentContext, header *types.Header, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
+	nodes, root, err := sdCtx.WitnessNodesByHash(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(proofRoot, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", proofRoot, header.Root[:])
+	if !bytes.Equal(root, header.Root[:]) {
+		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", root, header.Root[:])
 	}
-
-	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
 		Balance:      new(hexutil.U256),
-		Nonce:        hexutil.Uint64(0),
-		CodeHash:     common.Hash{},
-		StorageHash:  common.Hash{},
 		StorageProof: make([]accounts.StorProofResult, len(storageKeys)),
 	}
-
-	// get account proof
-	accountProof, err := proofTrie.Prove(crypto.Keccak256(address[:]), 0, false)
+	accountProof, accountRLP, err := trie.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
 	if err != nil {
 		return nil, err
 	}
 	proof.AccountProof = toHexBytes(accountProof)
-
-	// get account data from the trie
-	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
-	if acc == nil {
+	if accountRLP == nil {
 		for i, storageKey := range storageKeys {
-			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   storageKey.EncodeKey(),
-				Value: new(hexutil.U256),
-				Proof: []hexutil.Bytes{},
-			}
-		}
-		err = trie.VerifyAccountProof(header.Root, proof)
-		if err != nil {
-			return nil, err
+			proof.StorageProof[i] = accounts.StorProofResult{Key: storageKey.EncodeKey(), Value: new(hexutil.U256), Proof: []hexutil.Bytes{}}
 		}
 		return proof, nil
 	}
-
+	var acc accounts.Account
+	if err := acc.DecodeForHashing(accountRLP); err != nil {
+		return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+	}
 	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
-
+	if len(storageKeys) == 0 {
+		return proof, nil
+	}
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
-
-	// get storage key proofs
 	for i, storageKey := range storageKeys {
-		// Stop early if the RPC request was canceled while proofs are being built.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
+		if acc.Root == common.BytesToHash(empty.RootHash[:]) {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.U256)
 			continue
 		}
-
-		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.Keccak256Hash(address[:])
-		keyHash := crypto.Keccak256Hash(storageKey.Hash[:])
-		fullKey := make([]byte, 0, 64)
-		fullKey = append(fullKey, addrHash[:]...)
-		fullKey = append(fullKey, keyHash[:]...)
-
-		// get proof for the given key
-		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
+		storageProof, _, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
-			return nil, errors.New("cannot verify store proof")
+			return nil, err
 		}
-
 		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
 		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
-
-		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
-
-	// Verify proofs before returning result to the user
-	err = trie.VerifyAccountProof(header.Root, proof)
-	if err != nil {
-		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
-	}
-
-	// verify storage proofs
-	for _, storageProof := range proof.StorageProof {
-		err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
-		if err != nil {
-			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
-		}
-	}
-
 	return proof, nil
 }
 

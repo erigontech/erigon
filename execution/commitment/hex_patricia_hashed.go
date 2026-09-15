@@ -2454,8 +2454,28 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // capturing consensus node bytes as they are hashed. It returns the captured superset
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+	set, provedKeys, rootHash, err := hph.witnessNodeSet(ctx, updates, produceExclusionProofs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if nodes, err = set.nodes(rootHash); err != nil {
+		return nil, nil, nil, err
+	}
+	return nodes, provedKeys, rootHash, nil
+}
+
+// WitnessNodesByHash folds like Witnesses, but returns the captured nodes keyed by their hash.
+func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return set.byHash, rootHash, nil
+}
+
+func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updates, produceExclusionProofs bool) (set *witnessNodeSet, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
-	set := newWitnessNodeSet()
+	set = newWitnessNodeSet()
 	hph.witness.tracer = set
 	defer hph.witness.reset()
 
@@ -2535,11 +2555,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	nodes, err = set.nodes(rootHash)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return nodes, provedKeys, rootHash, nil
+	return set, provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
