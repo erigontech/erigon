@@ -21,8 +21,10 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"unsafe"
 
@@ -126,7 +128,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 
 func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 	w := bytes.NewBuffer(nil)
-	casted := ReceiptForStorage(*want)
+	casted := (*ReceiptForStorage)(want)
 	err := casted.EncodeRLP(w)
 	if err != nil {
 		return nil, err
@@ -649,4 +651,49 @@ func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
 	empty := (&Receipt{}).Size()
 	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
 	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
+}
+
+func TestReceiptLogsBloomCachesDerivedBloom(t *testing.T) {
+	t.Parallel()
+	r := &Receipt{Logs: Logs{{Address: common.Address{1}, Topics: []common.Hash{{2}}}}}
+	want := CreateBloom(Receipts{r})
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { assert.Equal(t, want, r.LogsBloom()) })
+	}
+	wg.Wait()
+	require.True(t, r.Bloom.IsEmpty(), "LogsBloom must not write the shared Bloom field")
+
+	r.Logs[0].Topics[0] = common.Hash{3}
+	require.Equal(t, want, r.LogsBloom(), "a derived bloom is cached")
+
+	withBloom := &Receipt{Bloom: Bloom{1}, Logs: r.Logs}
+	require.Equal(t, Bloom{1}, withBloom.LogsBloom())
+}
+
+func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
+	t.Parallel()
+	next := &Receipt{Status: ReceiptStatusSuccessful, TxHash: common.Hash{9},
+		Logs: Logs{{Address: common.Address{2}, Topics: []common.Hash{{3}}, Data: []byte{}}}}
+	rlpEnc, err := rlp.EncodeToBytes(next)
+	require.NoError(t, err)
+	binEnc, err := next.MarshalBinary()
+	require.NoError(t, err)
+	jsonEnc, err := json.Marshal(next)
+	require.NoError(t, err)
+
+	for name, decode := range map[string]func(*Receipt) error{
+		"DecodeRLP":       func(r *Receipt) error { return rlp.DecodeBytes(rlpEnc, r) },
+		"UnmarshalBinary": func(r *Receipt) error { return r.UnmarshalBinary(binEnc) },
+		"UnmarshalJSON":   func(r *Receipt) error { return json.Unmarshal(jsonEnc, r) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := &Receipt{Logs: Logs{{Address: common.Address{1}}}}
+			_ = r.LogsBloom()
+			require.NoError(t, decode(r))
+			require.Equal(t, CreateBloom(Receipts{next}), r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
+		})
+	}
 }
