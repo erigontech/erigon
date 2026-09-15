@@ -68,12 +68,7 @@ func IsOnly(err error, targets ...error) bool {
 	case interface{ Unwrap() error }:
 		return IsOnly(x.Unwrap(), targets...)
 	default:
-		for _, target := range targets {
-			if errors.Is(err, target) {
-				return true
-			}
-		}
-		return false
+		return IsOneOf(err, targets)
 	}
 }
 

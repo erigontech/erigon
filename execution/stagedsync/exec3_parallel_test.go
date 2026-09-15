@@ -1137,13 +1137,14 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 	return pe, roTx
 }
 
-func newParallelFinalizeTestBlock(config *chain.Config) (*blockExecutor, *taskVersion) {
+func newParallelResultTestBlock(config *chain.Config, txs ...types.Transaction) (*blockExecutor, *taskVersion) {
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	txTask := &exec.TxTask{
 		Header:          header,
 		TxNum:           1,
 		TxIndex:         0,
 		Config:          config,
+		Txs:             txs,
 		Logger:          log.New(),
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
@@ -1210,7 +1211,7 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			pe, roTx := newResumeTestExec(t, db, config)
 			cause := fmt.Errorf("epoch database write failed")
 			pe.cfg.engine = rulesEngineWithErrors{Engine: pe.cfg.engine, finalizeErr: tc.engineErr(cause)}
-			be, task := newParallelFinalizeTestBlock(config)
+			be, task := newParallelResultTestBlock(config)
 
 			result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
 				Task:  task,
@@ -1233,7 +1234,7 @@ func TestParallelFinalizeStateReadErrorUsesOperationalBlockResult(t *testing.T) 
 	cause := errors.New("withdrawal account read failed")
 	beneficiary := accounts.InternAddress(common.Address{19: 0x42})
 	pe.cfg.engine = rulesEngineWithFinalizeBalance{Engine: pe.cfg.engine, beneficiary: beneficiary}
-	be, task := newParallelFinalizeTestBlock(config)
+	be, task := newParallelResultTestBlock(config)
 
 	result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
 		Task:  task,
@@ -1254,33 +1255,10 @@ func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
 	pe, roTx := newResumeTestExec(t, db, config)
 	cause := fmt.Errorf("account domain read failed")
 
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	txTask := &exec.TxTask{
-		Header:          header,
-		TxNum:           1,
-		TxIndex:         0,
-		Config:          config,
-		Txs:             []types.Transaction{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
-		Logger:          log.New(),
-		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-	}
-	eTask := &execTask{Task: txTask, index: 0}
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
-	be.txIncarnations = []int{0}
-	be.execFailed = []int{0}
-	be.execAborted = []int{0}
-	be.estimateDeps[0] = []int{}
-	be.execTasks.setInProgress(0)
+	be, task := newParallelResultTestBlock(config, signSelfSendTx(t, 0, 0, 1, 21_000, config, 0))
 	be.settledInput[0] = true
+	task.versionMap = be.versionMap
 
-	task := &taskVersion{
-		execTask:   eTask,
-		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
-		versionMap: be.versionMap,
-	}
 	ibs := state.New(failingAccountStateReader{NoopReader: state.NewNoopReader(), err: cause})
 	t.Cleanup(ibs.Close)
 	evm := &vm.EVM{}
@@ -1365,33 +1343,10 @@ func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	pe, roTx := newResumeTestExec(t, db, config)
 	panicValue := fmt.Errorf("%w: account reader panic", rules.ErrInvalidBlock)
 
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	txTask := &exec.TxTask{
-		Header:          header,
-		TxNum:           1,
-		TxIndex:         0,
-		Config:          config,
-		Txs:             []types.Transaction{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
-		Logger:          log.New(),
-		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-	}
-	eTask := &execTask{Task: txTask, index: 0}
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
-	be.txIncarnations = []int{0}
-	be.execFailed = []int{0}
-	be.execAborted = []int{0}
-	be.estimateDeps[0] = []int{}
-	be.execTasks.setInProgress(0)
+	be, task := newParallelResultTestBlock(config, signSelfSendTx(t, 0, 0, 1, 21_000, config, 0))
 	be.settledInput[0] = true
+	task.versionMap = be.versionMap
 
-	task := &taskVersion{
-		execTask:   eTask,
-		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
-		versionMap: be.versionMap,
-	}
 	ibs := state.New(panickingAccountStateReader{NoopReader: state.NewNoopReader(), panicValue: panicValue})
 	t.Cleanup(ibs.Close)
 	evm := &vm.EVM{}
