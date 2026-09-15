@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -42,7 +44,7 @@ import (
 type Generator struct {
 	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *lru.Cache[uint64, *types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -85,11 +87,6 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
-	if err != nil {
-		panic(err)
-	}
-
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -105,7 +102,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
-		receiptCache:       receiptCache,
+		receiptCache:       newReceiptCache(datasize.ByteSize(receiptsCacheLimit*100) * datasize.KB),
 		evmTimeout:         evmTimeout,
 
 		blockExecMutex: &loaderMutex[common.Hash]{},
@@ -232,11 +229,14 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
+func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] {
+	return cache.NewByteLRU(maxBytes, func(_ uint64, r *types.Receipt) int64 { return int64(r.Size()) + cache.ByteLRUEntryOverheadBytes })
+}
+
 func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(txNum, receipt)
 }
 
