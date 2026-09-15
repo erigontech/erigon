@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -83,6 +84,7 @@ type Task interface {
 	GasPool() *protocol.GasPool
 
 	IsBlockEnd() bool
+	IsSystemTx() bool
 	IsHistoric() bool
 
 	TracingHooks() *tracing.Hooks
@@ -224,6 +226,7 @@ type TxTask struct {
 	Trace                 bool
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	isSystemTx            bool   // consensus system transaction (Parlia): runs outside the block gas pool
 
 	gasPool      *protocol.GasPool
 	sender       accounts.Address
@@ -454,6 +457,10 @@ func (t *TxTask) IsBlockEnd() bool {
 	return t.TxIndex == len(t.Txs)
 }
 
+func (t *TxTask) IsSystemTx() bool { return t.isSystemTx }
+
+func (t *TxTask) SetSystemTx(v bool) { t.isSystemTx = v }
+
 func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
@@ -549,6 +556,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
+		if txTask.isSystemTx {
+			result = *txTask.executeSystemTx(engine, evm, ibs)
+			break
+		}
+
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
 			if !chainConfig.AllowAA {
 				result.Err = errors.New("account abstraction transactions are not allowed")
@@ -708,6 +720,58 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+
+	return &result
+}
+
+// executeSystemTx runs a consensus system transaction as a free call (no gas
+// pool, no intrinsic gas): the engine owns the surrounding state effect, the run
+// closure bumps the sender nonce and performs the EVM call.
+func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+	var result TxResult
+
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+	from := msg.From()
+
+	// The engine performs the consensus state effect (reward move); the executor
+	// bumps the sender nonce and runs the call.
+	if err = engine.(rules.SystemTxEngine).ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	nonce, err := ibs.GetNonce(from)
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	rules := txTask.Rules()
+	if rules.IsCancun {
+		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	}
+
+	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if callErr != nil {
+		// A reverted system tx is a consensus violation: reject the block.
+		result.Err = callErr
+		return &result
+	}
+	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed.Total()
+
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
+	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	return &result
 }

@@ -83,6 +83,14 @@ type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
 type SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract accounts.Address, data []byte) ([]byte, error)
 
+// SystemTxEngine is implemented by engines (Parlia) that embed system
+// transactions in the block body. ApplySystemTx performs the engine's state
+// effect (the reward move) before the executor runs the transaction.
+type SystemTxEngine interface {
+	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
+	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
+}
+
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
