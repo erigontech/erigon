@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -42,6 +43,43 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
+
+// TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
+// a receipt read for the wrong txNum would still carry the requested transaction's hash.
+func TestGetLogsFromPersistedReceipts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+		execmoduletester.WithEnableDomain(kv.RCacheDomain),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	topics := []common.Hash{{0x11}, {0x22}, {0x33}}
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		for _, topic := range topics {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)})
+	require.NoError(t, err)
+	require.Len(t, logs, len(topics))
+	for i, l := range logs {
+		require.Equal(t, c.Blocks[0].Transactions()[i].Hash(), l.TxHash)
+		require.Equal(t, []common.Hash{topics[i]}, l.Topics)
+	}
+}
 
 func TestGetLogs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)

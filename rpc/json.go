@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -108,21 +110,49 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
+// writeResponse encodes result straight into stream as the success response and returns nil.
+// If result does not encode, nothing is written and the error response is returned instead.
+// The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
+func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
+	w := &responseWriter{stream: stream, id: msg.ID}
 	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
-	}
-	if err != nil {
-		// TODO: wrap with 'internal server error'
+		enc, err := fm.MarshalFastJSON()
+		if err != nil {
+			return msg.errorResponse(err)
+		}
+		w.writeResult(enc)
+	} else if err := json.NewEncoder(w).Encode(result); err != nil {
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	stream.WriteObjectEnd()
+	return nil
+}
+
+// responseWriter receives json.Encoder output. Encode writes once, and only after the whole
+// value has encoded, so a result that fails leaves the stream untouched.
+type responseWriter struct {
+	stream jsonstream.Stream
+	id     json.RawMessage
+}
+
+func (w *responseWriter) Write(b []byte) (int, error) {
+	w.writeResult(bytes.TrimSuffix(b, []byte{'\n'}))
+	return len(b), nil
+}
+
+func (w *responseWriter) writeResult(enc []byte) {
+	if len(enc) == 0 {
+		enc = null
+	}
+	w.stream.WriteObjectStart()
+	w.stream.WriteObjectField("jsonrpc")
+	w.stream.WriteString(vsn)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("id")
+	w.stream.WriteRawBytes(w.id)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("result")
+	w.stream.WriteRawBytes(enc)
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -207,15 +237,10 @@ type jsonCodec struct {
 	conn      deadlineCloser
 }
 
-// NewFuncCodec creates a codec which uses the given functions to read and write. If conn
-// implements ConnRemoteAddr, log messages will use it to include the remote address of
-// the connection. decode must reject invalid JSON, reading a message relies on it.
-func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerCodec {
-	return newFuncCodec(conn, encode, decode, nil)
-}
-
-// newFuncCodec is NewFuncCodec plus the frame reader the built-in transports use.
-// A transport with a frame reader never calls decode, so it may be nil.
+// newFuncCodec creates a codec that uses the given functions to read and write. If conn
+// implements ConnRemoteAddr, log messages include the remote address. decode must reject
+// invalid JSON, reading a message relies on it. A transport with a frame reader never calls
+// decode, so it may be nil.
 func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:   make(chan any),
@@ -234,8 +259,20 @@ func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFra
 // skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
 type rawResponse []byte
 
-// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
-func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
+// rawBatch is a batch response kept as its already-encoded answers in request order, so a
+// transport can stream them instead of first joining them into one buffer.
+type rawBatch [][]byte
+
+func (b rawBatch) writeTo(s jsonstream.Stream) {
+	s.WriteArrayStart()
+	for i, answer := range b {
+		if i > 0 {
+			s.WriteMore()
+		}
+		s.WriteRawBytes(answer)
+	}
+	s.WriteArrayEnd()
+}
 
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
@@ -249,12 +286,19 @@ func NewCodec(conn Conn) ServerCodec {
 func newJSONEncoder(conn Conn) func(v any) error {
 	enc := json.NewEncoder(conn)
 	return func(v any) error {
-		raw, ok := v.(rawResponse)
-		if !ok {
+		switch r := v.(type) {
+		case rawResponse:
+			_, err := conn.Write(append(r, '\n'))
+			return err
+		case rawBatch:
+			s := jsonstream.Get(conn)
+			defer jsonstream.Put(s)
+			r.writeTo(s)
+			s.WriteRaw("\n")
+			return s.Flush()
+		default:
 			return enc.Encode(v)
 		}
-		_, err := conn.Write(append(raw, '\n'))
-		return err
 	}
 }
 

@@ -80,20 +80,23 @@ func GetDataColumnSidecars(
 // instead of SignedBlockHeader, KzgCommitments, and KzgCommitmentsInclusionProof.
 // Note: In GLOAS, kzg_commitments are no longer stored in the sidecar structure.
 func GetDataColumnSidecarsGloas(
+	cfg *clparams.BeaconChainConfig,
 	slot uint64,
 	beaconBlockRoot common.Hash,
 	cellsAndKZGProofs []CellsAndKZGProofs,
 ) ([]*cltypes.DataColumnSidecar, error) {
-	cfg := clparams.GetBeaconConfig()
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
 	// Initialize sidecars for each column
 	for columnIndex := uint64(0); columnIndex < cfg.NumberOfColumns; columnIndex++ {
-		columnCells := solid.NewStaticListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
-		columnProofs := solid.NewStaticListSSZ[*cltypes.KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		columnCells := solid.NewStaticProgressiveListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
+		columnProofs := solid.NewStaticProgressiveListSSZ[*cltypes.KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 
 		// For each blob, extract the cell and proof for this column
 		for blobIndex := range cellsAndKZGProofs {
+			if int(columnIndex) >= len(cellsAndKZGProofs[blobIndex].Blobs) || int(columnIndex) >= len(cellsAndKZGProofs[blobIndex].Proofs) {
+				return nil, fmt.Errorf("incomplete cell data for blob %d column %d", blobIndex, columnIndex)
+			}
 			cell := &cltypes.Cell{}
 			copy(cell[:], cellsAndKZGProofs[blobIndex].Blobs[columnIndex][:])
 			columnCells.Append(cell)
