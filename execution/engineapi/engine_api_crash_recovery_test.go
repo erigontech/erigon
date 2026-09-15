@@ -39,11 +39,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -144,6 +146,8 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 			state:    readCrashRecoveryState(t, eat.ChainDB),
 			sum:      sums[len(sums)-1],
 		}
+		assertCrashRecoveryReference(t, prefix)
+		assertCrashRecoveryReference(t, tip)
 		prefix.continuation, prefix.continuationSums = suffix[:3], sums[:3]
 		if side {
 			tip.continuation, tip.continuationSums = churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(2_000 + k) })
@@ -152,13 +156,6 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 		return prefix, tip, addr
 	}
 	prefix, canonical, addr := buildReference(false)
-	require.Contains(t, canonical.state.StageProgress, stages.Senders)
-	require.Contains(t, canonical.state.StageProgress, stages.TxLookup)
-	require.NotEmpty(t, canonical.state.TxLookup)
-	for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
-		require.Contains(t, canonical.state.Domains, domain)
-		require.NotEmpty(t, canonical.state.ReceiptHistory[domain], "receipt history must be part of the oracle")
-	}
 	sidePrefix, side, sideAddr := buildReference(true)
 	require.Equal(t, addr, sideAddr)
 	assertCrashRecoveryState(t, prefix.state, sidePrefix.state)
@@ -230,6 +227,39 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
+	t.Helper()
+	head := uint64(chain.payloads[len(chain.payloads)-1].ExecutionPayload.BlockNumber)
+	for _, stage := range []stages.SyncStage{stages.Senders, stages.TxLookup} {
+		require.Equalf(t, head, chain.state.StageProgress[stage], "reference %s progress", stage)
+	}
+	require.NotEmpty(t, chain.state.TxLookup)
+	for _, key := range [][]byte{
+		rawtemporaldb.CumulativeGasUsedInBlockKey,
+		rawtemporaldb.CumulativeBlobGasUsedInBlockKey,
+		rawtemporaldb.LogIndexAfterTxKey,
+	} {
+		require.NotEmptyf(t, chain.state.Domains[kv.ReceiptDomain][hex.EncodeToString(key)], "reference receipt metadata key %x", key)
+	}
+	// Block-end transactions clear the latest cached receipt; its data remains in history.
+	require.Contains(t, chain.state.Domains, kv.RCacheDomain)
+	for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
+		require.NotEmpty(t, chain.state.ReceiptHistory[domain], "receipt history must be part of the oracle")
+	}
+	hasCachedReceipt := false
+	for _, entry := range chain.state.ReceiptHistory[kv.RCacheDomain] {
+		if entry.Before == "" {
+			continue
+		}
+		encoded, err := hex.DecodeString(entry.Before)
+		require.NoError(t, err)
+		var receipt types.ReceiptForStorage
+		require.NoErrorf(t, rlp.DecodeBytes(encoded, &receipt), "reference cached receipt before txNum %d", entry.TxNum)
+		hasCachedReceipt = true
+	}
+	require.True(t, hasCachedReceipt, "reference receipt cache must contain encoded receipts")
 }
 
 func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState {
