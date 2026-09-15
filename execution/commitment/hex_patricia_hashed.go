@@ -156,6 +156,12 @@ type HexPatriciaHashed struct {
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
+	// rowBranch retains the record unfoldBranchNode read for each row, so folding it
+	// does not read the same prefix a second time to fill the update's prev. Empty
+	// means the row carries no retained record, whatever branchBefore says: a mounted
+	// row 0 inherits branchBefore from a base that did the reading.
+	rowBranch [128][]byte
+
 	// foldFrontier is the key of the last folded row. The walk closes rows in
 	// post-order, so every later fold must come strictly after it; a fold that
 	// does not means a closed subtree was re-entered, and the deferred record
@@ -282,6 +288,9 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.witness.reset()
 
 	hph.resetFoldFrontier()
+	for i := range hph.rowBranch {
+		hph.rowBranch[i] = hph.rowBranch[i][:0]
+	}
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
@@ -1529,6 +1538,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	// from the cache-or-DB helper (cache never had a meaningful step anyway).
 	hph.depthsToTxNum[depth] = 0
 
+	hph.rowBranch[row] = append(hph.rowBranch[row][:0], branchData...)
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
 	}
@@ -1771,7 +1781,11 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
+	prev, err := hph.previousBranch(row, updateKey)
+	if err != nil {
+		return err
+	}
+	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, prev); err != nil {
 		return fmt.Errorf("failed to encode branch update: %w", err)
 	}
 	upCell.extLen = depth - upDepth - 1
@@ -2012,12 +2026,30 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 
 // collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
-	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
-			return fmt.Errorf("failed to encode branch deletion: %w", err)
-		}
+	if !hph.branchBefore[row] {
+		return nil
+	}
+	prev, err := hph.previousBranch(row, updateKey)
+	if err != nil {
+		return err
+	}
+	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, prev); err != nil {
+		return fmt.Errorf("failed to encode branch deletion: %w", err)
 	}
 	return nil
+}
+
+// previousBranch returns the record stored at the folding row's prefix, which the
+// update is merged onto. It falls back to a read only for a row this trie never
+// unfolded itself — a mounted row 0, seeded from the base.
+func (hph *HexPatriciaHashed) previousBranch(row int, updateKey []byte) ([]byte, error) {
+	if !hph.branchBefore[row] {
+		return nil, nil
+	}
+	if len(hph.rowBranch[row]) > 0 {
+		return hph.rowBranch[row], nil
+	}
+	return hph.branchFromCacheOrDB(updateKey)
 }
 
 // postOrderAfter reports whether next closes a row strictly later than prev in

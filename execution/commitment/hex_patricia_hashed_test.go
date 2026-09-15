@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
@@ -1837,4 +1838,69 @@ func TestFoldFrontier_IsEnforcedDuringProcess(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, trie.foldFrontierSet, "every fold in a round passes the frontier check, so a completed round must leave one set")
 	require.Zero(t, trie.foldFrontierLen, "the last fold of a round closes the root")
+}
+
+type branchReadCounter struct {
+	PatriciaContext
+	reads map[string]int
+}
+
+func (c *branchReadCounter) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.reads[string(prefix)]++
+	return c.PatriciaContext.Branch(prefix)
+}
+
+func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	k1, u1, k2, u2 := collapseCorpus()
+
+	ms := NewMockState(t)
+	counter := &branchReadCounter{PatriciaContext: ms, reads: map[string]int{}}
+
+	cfg := DefaultTrieConfig()
+	trie := NewHexPatriciaHashed(length.Addr, counter, cfg)
+	defer trie.Release()
+	trie.SetLeaveDeferredForCaller(true)
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	seed := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	_, err := trie.Process(ctx, seed, "", nil, WarmupConfig{})
+	seed.Close()
+	require.NoError(t, err)
+	_, err = ApplyDeferredBranchUpdates(trie.TakeDeferredUpdates(), 4, ms.PutBranch, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	counter.reads = map[string]int{}
+	round := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	_, err = trie.Process(ctx, round, "", nil, WarmupConfig{})
+	round.Close()
+	require.NoError(t, err)
+
+	pending := trie.TakeDeferredUpdates()
+	defer func() {
+		for _, upd := range pending {
+			putDeferredUpdate(upd)
+		}
+	}()
+
+	var totalReads, repeated, withPrev int
+	for _, n := range counter.reads {
+		totalReads += n
+		if n > 1 {
+			repeated++
+		}
+	}
+	for _, upd := range pending {
+		if len(upd.prev) > 0 {
+			withPrev++
+		}
+	}
+
+	require.NotZero(t, withPrev, "no record carried a previous value, so this proves nothing")
+	require.Zero(t, repeated,
+		"a round reads each branch prefix once; preparing an update's prev must reuse what the unfold read, not read it again")
+	t.Logf("branch reads %d for %d records, %d of them merged onto a previous value", totalReads, len(pending), withPrev)
 }

@@ -455,29 +455,21 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+// prev is the record stored at prefix, empty when the branch is new. The caller
+// supplies it because the trie already read it while unfolding the row.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
 	if be.deferUpdates {
-		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, isNew)
-	}
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -502,12 +494,13 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
+// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
@@ -518,16 +511,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
-	}
-
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
 	}
 	if prev == nil {
 		prev = []byte{}
