@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -50,4 +51,13 @@ func TestHashByteLRUMissesForeignHash(t *testing.T) {
 	foreign[31]++
 	_, ok = l.Get(foreign)
 	require.False(t, ok, "a hash sharing the 8-byte slot must miss")
+}
+
+func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
+	var calls atomic.Int32
+	l := NewHashByteLRU(datasize.MB, func(v []byte) int64 { calls.Add(1); return int64(len(v)) })
+	l.Add(common.Hash{1}, make([]byte, 100))
+	_, ok := l.Get(common.Hash{1})
+	require.True(t, ok)
+	require.Equal(t, int32(1), calls.Load())
 }

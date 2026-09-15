@@ -187,18 +187,18 @@ func (b *ByteLRU[V]) Close() {
 
 // HashByteLRU is an unbudgeted ByteLRU keyed by a hash: the first 8 bytes pick the slot, Get compares the whole hash.
 type HashByteLRU[V any] struct {
-	c *ByteLRU[hashEntry[V]]
+	c     *ByteLRU[hashEntry[V]]
+	weigh func(V) int64
 }
 
 type hashEntry[V any] struct {
-	hash  common.Hash
-	value V
+	hash   common.Hash
+	value  V
+	weight int64 // weighed once in Add: ByteLRU asks for the weight on Add, on insert and on eviction
 }
 
 func NewHashByteLRU[V any](maxBytes datasize.ByteSize, weigh func(V) int64) *HashByteLRU[V] {
-	return &HashByteLRU[V]{c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 {
-		return weigh(e.value) + length.Hash + ByteLRUEntryOverheadBytes
-	})}
+	return &HashByteLRU[V]{weigh: weigh, c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 { return e.weight })}
 }
 
 func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
@@ -210,5 +210,5 @@ func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
 }
 
 func (l *HashByteLRU[V]) Add(hash common.Hash, value V) {
-	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value})
+	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value, weight: l.weigh(value) + length.Hash + ByteLRUEntryOverheadBytes})
 }
