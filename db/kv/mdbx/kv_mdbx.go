@@ -384,6 +384,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		buckets:      kv.TableCfg{},
 		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
 		roTxsLimiter: opts.roTxsLimiter,
+		roTxPool:     make(chan *mdbx.Txn, dbg.EnvInt("MDBX_RO_TX_POOL", 256)),
 
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
@@ -462,10 +463,12 @@ type MdbxKV struct {
 	env          *mdbx.Env
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
-	opts         MdbxOpts
-	txSize       uint64
-	closed       atomic.Bool
-	path         string
+	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
+	roTxPool chan *mdbx.Txn
+	opts     MdbxOpts
+	txSize   uint64
+	closed   atomic.Bool
+	path     string
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -676,6 +679,10 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
+	close(db.roTxPool)
+	for tx := range db.roTxPool {
+		tx.Abort()
+	}
 
 	db.env.Close()
 	db.env = nil
@@ -720,7 +727,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
+	tx, err := db.beginRoTxn()
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
@@ -734,6 +741,29 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	db.registerLiveTx(mt, true)
 	return mt, nil
+}
+
+func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
+	select {
+	case tx := <-db.roTxPool:
+		if err := tx.Renew(); err == nil {
+			return tx, nil
+		}
+		tx.Abort()
+	default:
+	}
+	return db.env.BeginTxn(nil, mdbx.Readonly)
+}
+
+func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
+	if tx.Reset() == nil {
+		select {
+		case db.roTxPool <- tx:
+			return
+		default:
+		}
+	}
+	tx.Abort()
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -1332,7 +1362,11 @@ func (tx *MdbxTx) Rollback() {
 		return
 	}
 	tx.closeCursors()
-	tx.tx.Abort()
+	if tx.readOnly {
+		tx.db.releaseRoTxn(tx.tx)
+	} else {
+		tx.tx.Abort()
+	}
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.tx = nil
 	tx.db.trackTxEnd()

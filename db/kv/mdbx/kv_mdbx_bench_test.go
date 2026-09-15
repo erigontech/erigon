@@ -42,6 +42,21 @@ func BenchmarkDB_BeginRO(b *testing.B) {
 	}
 }
 
+func BenchmarkDB_BeginROParallel(b *testing.B) {
+	db := BaseCaseDBForBenchmark(b)
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tx, err := db.BeginRo(b.Context())
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			tx.Rollback()
+		}
+	})
+}
+
 func BenchmarkDB_Get(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	table := "Table"
