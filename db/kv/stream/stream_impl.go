@@ -34,11 +34,6 @@ var (
 	EmptyKU64 = &EmptyDuo[[]byte, uint64]{}
 )
 
-var (
-	TracedU64 = &Traced[uint64]{}
-	TracedKV  = &TracedDuo[[]byte, []byte]{}
-)
-
 func FilterU64(it U64, filter func(k uint64) bool) *Filtered[uint64] {
 	return Filter[uint64](it, filter)
 }
@@ -84,26 +79,29 @@ func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
 }
 
-type TransformKV2U64Iter[K, V []byte] struct {
+type TransformKV2U64Iter struct {
 	it        KV
-	transform func(K, V) (uint64, error)
+	transform func(k, v []byte) (uint64, error)
+	err       error
 }
 
-func TransformKV2U64[K, V []byte](it KV, transform func(K, V) (uint64, error)) *TransformKV2U64Iter[K, V] {
-	return &TransformKV2U64Iter[K, V]{it: it, transform: transform}
+func TransformKV2U64(it KV, transform func(k, v []byte) (uint64, error)) *TransformKV2U64Iter {
+	return &TransformKV2U64Iter{it: it, transform: transform}
 }
-func (m *TransformKV2U64Iter[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *TransformKV2U64Iter[K, V]) Next() (uint64, error) {
+func (m *TransformKV2U64Iter) HasNext() bool { return m.err != nil || m.it.HasNext() }
+func (m *TransformKV2U64Iter) Next() (n uint64, err error) {
+	if m.err != nil {
+		return 0, m.err
+	}
 	k, v, err := m.it.Next()
 	if err != nil {
 		return 0, err
 	}
-	return m.transform(k, v)
+	n, m.err = m.transform(k, v)
+	return n, m.err
 }
-func (m *TransformKV2U64Iter[K, v]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+func (m *TransformKV2U64Iter) Close() {
+	m.it.Close()
 }
 
 // UnionKVIter - for duplicate keys, the first stream (x) takes precedence.
@@ -117,17 +115,17 @@ type UnionKVIter struct {
 	err                error
 }
 
-// UnionKV - for duplicate keys, the first stream (x) takes precedence.
+// UnionKV - for duplicate keys, the first stream (x) takes precedence. Ascending only.
 // In set theory: A ∪ B contains all elements that are in A, or in B, or in both
 func UnionKV(x, y KV, limit int) KV {
 	if x == nil && y == nil {
 		return EmptyKV
 	}
 	if x == nil {
-		return y
+		return LimitDuo(y, limit)
 	}
 	if y == nil {
-		return x
+		return LimitDuo(x, limit)
 	}
 	m := &UnionKVIter{x: x, y: y, limit: limit}
 	m.advanceX()
@@ -162,41 +160,40 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
+	if !m.HasNext() {
+		return nil, nil, ErrIteratorExhausted
+	}
 	m.limit--
 	if m.xHasNext && m.yHasNext {
 		cmp := bytes.Compare(m.xNextK, m.yNextK)
 		if cmp < 0 {
-			k, v, err := m.xNextK, m.xNextV, m.err
+			k, v := m.xNextK, m.xNextV
 			m.advanceX()
-			return k, v, err
+			return k, v, nil
 		} else if cmp == 0 {
-			k, v, err := m.xNextK, m.xNextV, m.err
+			k, v := m.xNextK, m.xNextV
 			m.advanceX()
 			m.advanceY()
-			return k, v, err
+			return k, v, nil
 		}
-		k, v, err := m.yNextK, m.yNextV, m.err
+		k, v := m.yNextK, m.yNextV
 		m.advanceY()
-		return k, v, err
+		return k, v, nil
 	}
 	if m.xHasNext {
-		k, v, err := m.xNextK, m.xNextV, m.err
+		k, v := m.xNextK, m.xNextV
 		m.advanceX()
-		return k, v, err
+		return k, v, nil
 	}
-	k, v, err := m.yNextK, m.yNextV, m.err
+	k, v := m.yNextK, m.yNextV
 	m.advanceY()
-	return k, v, err
+	return k, v, nil
 }
 
 // func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *UnionKVIter) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
+	m.x.Close()
+	m.y.Close()
 }
 
 // MultisetDuoIter - sorted merge of two Duo[[]byte, V] streams preserving duplicates.
@@ -216,10 +213,10 @@ func multisetDuo[V any](x, y Duo[[]byte, V], limit int) Duo[[]byte, V] {
 		return &EmptyDuo[[]byte, V]{}
 	}
 	if x == nil {
-		return y
+		return LimitDuo(y, limit)
 	}
 	if y == nil {
-		return x
+		return LimitDuo(x, limit)
 	}
 	m := &MultisetDuoIter[V]{x: x, y: y, limit: limit}
 	m.advanceX()
@@ -227,10 +224,10 @@ func multisetDuo[V any](x, y Duo[[]byte, V], limit int) Duo[[]byte, V] {
 	return m
 }
 
-// MultisetKV returns a sorted merge of two KV streams preserving duplicates.
+// MultisetKV returns a sorted merge of two KV streams preserving duplicates. Ascending only.
 func MultisetKV(x, y KV, limit int) KV { return multisetDuo[[]byte](x, y, limit) }
 
-// MultisetKU64 returns a sorted merge of two KU64 streams preserving duplicates.
+// MultisetKU64 returns a sorted merge of two KU64 streams preserving duplicates. Ascending only.
 func MultisetKU64(x, y KU64, limit int) KU64 { return multisetDuo[uint64](x, y, limit) }
 
 func (m *MultisetDuoIter[V]) HasNext() bool {
@@ -259,35 +256,30 @@ func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 	if m.err != nil {
 		return nil, zero, m.err
 	}
+	if !m.HasNext() {
+		return nil, zero, ErrIteratorExhausted
+	}
 	m.limit--
 	if m.xHasNext && m.yHasNext {
 		if bytes.Compare(m.xNextK, m.yNextK) <= 0 {
-			k, v, err := m.xNextK, m.xNextV, m.err
+			k, v := m.xNextK, m.xNextV
 			m.advanceX()
-			return k, v, err
+			return k, v, nil
 		}
-		k, v, err := m.yNextK, m.yNextV, m.err
+		k, v := m.yNextK, m.yNextV
 		m.advanceY()
-		return k, v, err
+		return k, v, nil
 	}
 	if m.xHasNext {
-		k, v, err := m.xNextK, m.xNextV, m.err
+		k, v := m.xNextK, m.xNextV
 		m.advanceX()
-		return k, v, err
+		return k, v, nil
 	}
-	k, v, err := m.yNextK, m.yNextV, m.err
+	k, v := m.yNextK, m.yNextV
 	m.advanceY()
-	return k, v, err
+	return k, v, nil
 }
 func (m *MultisetDuoIter[V]) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
-}
-
-type Closer interface {
-	Close()
+	m.x.Close()
+	m.y.Close()
 }
