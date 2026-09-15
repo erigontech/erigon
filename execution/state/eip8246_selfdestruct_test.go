@@ -59,6 +59,30 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	require.True(t, exists, "the preserved account still exists")
 }
 
+func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246B1"))
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(7)
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 0}, &account, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, account.Balance, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 1}, account.Balance, true)
+
+	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetTxContext(1, 2)
+	ibs.eip8246 = true
+
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, account.Balance, bal)
+}
+
 // The block assembler runs every tx on one shared IBS (no per-tx Reset).
 // After a balance-preserving SELFDESTRUCT is finalized, a later tx's CREATE2 at
 // the same address must carry the preserved balance — i.e. FinalizeTx must not
