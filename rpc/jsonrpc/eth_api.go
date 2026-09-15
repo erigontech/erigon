@@ -213,6 +213,11 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	return api
 }
 
+func (api *BaseAPI) tryChainConfig() (*chain.Config, bool) {
+	cc := api._chainConfig.Load()
+	return cc, cc != nil
+}
+
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
 	cfg, _, err := api.chainConfigWithGenesis(ctx, tx)
 	return cfg, err
