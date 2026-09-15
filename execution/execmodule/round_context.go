@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/exec"
 )
 
 // RoundContext carries a per-round cancellation into the validation stage pipeline.
@@ -79,6 +82,12 @@ type roundCommitKey struct{}
 // decides. A round that loses closes its staged state and reports ErrRoundAbandoned.
 func WithRoundCommit(ctx context.Context, claim func() bool) context.Context {
 	return context.WithValue(ctx, roundCommitKey{}, claim)
+}
+
+// WithTxExecuted attaches a callback a pre-exec round calls as each of its transactions finishes executing. See
+// exec.WithTxExecuted.
+func WithTxExecuted(ctx context.Context, done func(common.Hash)) context.Context {
+	return exec.WithTxExecuted(ctx, done)
 }
 
 func roundCommitClaim(ctx context.Context) func() bool {

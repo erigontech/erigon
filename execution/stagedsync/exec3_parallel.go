@@ -2393,6 +2393,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	tx := task.index
 	be.results[tx] = &execResult{res, nil}
+	if res.Err == nil {
+		if done := exec.TxExecuted(ctx); done != nil {
+			if h := task.TxHash(); h != (common.Hash{}) {
+				done(h)
+			}
+		}
+	}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if res.Version().Incarnation > len(be.tasks) {
