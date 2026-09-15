@@ -557,8 +557,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 	default:
 		if txTask.isSystemTx {
-			sysEngine, _ := asSystemTxEngine(engine)
-			result = *txTask.executeSystemTx(sysEngine, evm, ibs)
+			result = *txTask.executeSystemTx(engine, evm, ibs)
 			break
 		}
 
@@ -725,15 +724,10 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-func asSystemTxEngine(e rules.Engine) (rules.SystemTxEngine, bool) {
-	s, ok := e.(rules.SystemTxEngine)
-	return s, ok
-}
-
 // executeSystemTx runs a consensus system transaction as a free call (no gas
 // pool, no intrinsic gas): the engine owns the surrounding state effect, the run
 // closure bumps the sender nonce and performs the EVM call.
-func (txTask *TxTask) executeSystemTx(engine rules.SystemTxEngine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
 	var result TxResult
 
 	msg, err := txTask.TxMessage()
@@ -743,25 +737,36 @@ func (txTask *TxTask) executeSystemTx(engine rules.SystemTxEngine, evm *vm.EVM, 
 	}
 	from := msg.From()
 
-	run := func(ibs *state.IntraBlockState) (uint64, error) {
-		nonce, nerr := ibs.GetNonce(from)
-		if nerr != nil {
-			return 0, nerr
-		}
-		if nerr := ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); nerr != nil {
-			return 0, nerr
-		}
-		_, _, gasUsed, cerr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
-		return gasUsed.Total(), cerr
+	// The engine performs the consensus state effect (reward move); the executor
+	// bumps the sender nonce and runs the call.
+	if err = engine.(rules.SystemTxEngine).ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
+		result.Err = err
+		return &result
 	}
 
-	gasUsed, callErr := engine.ApplySystemTx(txTask.Tx(), ibs, txTask.Header, run)
-	if callErr != nil {
-		// A reverted system call yields a failed receipt but a valid block.
-		result.ExecutionResult.Err = callErr
+	nonce, err := ibs.GetNonce(from)
+	if err != nil {
+		result.Err = err
+		return &result
 	}
-	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
+	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	rules := txTask.Rules()
+	if rules.IsCancun {
+		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	}
+
+	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if callErr != nil {
+		// A reverted system tx is a consensus violation: reject the block.
+		result.Err = callErr
+		return &result
+	}
+	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed.Total()
 
 	if !ibs.IsVersioned() {
 		ibs.SoftFinalise()

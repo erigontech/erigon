@@ -83,16 +83,12 @@ type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
 type SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract accounts.Address, data []byte) ([]byte, error)
 
-// SystemTxRun executes an in-block system transaction's EVM call, returning the
-// gas used. The executor supplies it; the engine decides the surrounding state.
-type SystemTxRun func(ibs *state.IntraBlockState) (gasUsed uint64, err error)
-
 // SystemTxEngine is implemented by engines (Parlia) that embed system
 // transactions in the block body. ApplySystemTx performs the engine's state
-// effect and runs the transaction via run.
+// effect (the reward move) before the executor runs the transaction.
 type SystemTxEngine interface {
 	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
-	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header, run SystemTxRun) (gasUsed uint64, err error)
+	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 }
 
 // RewardKind - The kind of block reward.
