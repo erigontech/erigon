@@ -66,7 +66,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 0}
+// 8.0.0 - LargeValues domain layout: bareKey -> invStep+seqID (DupSort) + seqID -> value (plain)
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 8, Minor: 0, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.

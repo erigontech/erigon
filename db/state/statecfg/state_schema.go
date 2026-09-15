@@ -246,7 +246,7 @@ var Schema = SchemaGen{
 		},
 	},
 	CodeDomain: DomainCfg{
-		Name: kv.CodeDomain, ValuesTable: kv.TblCodeVals,
+		Name: kv.CodeDomain, KeysTable: kv.TblCodeKeys, ValuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
@@ -269,8 +269,9 @@ var Schema = SchemaGen{
 		},
 	},
 	CommitmentDomain: DomainCfg{
-		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
+		Name: kv.CommitmentDomain, KeysTable: kv.TblCommitmentKeys, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+		LargeValues: true,
 
 		Accessors:                      AccessorHashMap,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
@@ -320,7 +321,7 @@ var Schema = SchemaGen{
 		},
 	},
 	RCacheDomain: DomainCfg{
-		Name: kv.RCacheDomain, ValuesTable: kv.TblRCacheVals,
+		Name: kv.RCacheDomain, KeysTable: kv.TblRCacheKeys, ValuesTable: kv.TblRCacheVals,
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
