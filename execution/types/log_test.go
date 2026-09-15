@@ -515,3 +515,58 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
+
+// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
+// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
+// so the bound is checked directly as well.
+func TestRPCLogsMarshalFastJSON(t *testing.T) {
+	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
+		return &RPCLog{
+			Log: Log{
+				Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+				Topics:      topics,
+				Data:        data,
+				BlockNumber: hexutil.Uint64(^uint64(0)),
+				TxHash:      common.HexToHash("0xaabb"),
+				TxIndex:     hexutil.Uint(^uint(0)),
+				BlockHash:   common.HexToHash("0xccdd"),
+				Index:       hexutil.Uint(^uint(0)),
+				Removed:     removed,
+			},
+			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+		}
+	}
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+	for name, logs := range map[string]RPCLogs{
+		"nil":                nil,
+		"empty":              {},
+		"zero":               {{}},
+		"nil-topics":         {maxed(nil, []byte{1, 2, 3}, false)},
+		"empty-topics":       {maxed([]common.Hash{}, nil, false)},
+		"many-topics":        {maxed([]common.Hash{topic, {}, topic, {}}, make([]byte, 4096), false)},
+		"removed-nil-topics": {maxed(nil, nil, true)},
+		"nil-entries":        {nil, maxed([]common.Hash{topic}, []byte{9}, false), nil},
+		"many-nil-topics":    {maxed(nil, nil, false), maxed(nil, nil, true), maxed(nil, nil, false)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			got, err := logs.MarshalFastJSON()
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
+				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
+			}
+
+			for _, l := range logs {
+				want, err := json.Marshal(l)
+				require.NoError(t, err)
+				got, err := l.MarshalFastJSON()
+				require.NoError(t, err)
+				require.Equal(t, string(want), string(got))
+				require.LessOrEqual(t, len(got), l.fastJSONLen())
+			}
+		})
+	}
+}
