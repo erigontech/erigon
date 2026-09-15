@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/binary"
+	"github.com/holiman/uint256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,6 +205,17 @@ func BenchmarkDecodeHeader_Loop_London_Hoisted(b *testing.B) {
 				b.Fatal(err)
 			}
 			_ = h.ParentHash
+		}
+	}
+}
+
+func BenchmarkHeaderMarshalJSON(b *testing.B) {
+	h := &Header{Number: *uint256.NewInt(25_973_863), GasLimit: 45_000_000, GasUsed: 21_000_000, Time: 1_757_900_000, BaseFee: uint256.NewInt(1_234_567_890), Extra: make([]byte, 32)}
+	h.Hash()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := h.MarshalJSON(); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
