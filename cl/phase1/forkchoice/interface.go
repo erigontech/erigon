@@ -153,7 +153,9 @@ type ForkChoiceStorageWriter interface {
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
 	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
+	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
+	ForgetExecutionPayloadEnvelopeForGossip(common.Hash, uint64)
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced

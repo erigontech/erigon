@@ -871,6 +871,12 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
+	if block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot); ok && block != nil {
+		if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+	}
 	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(
 		r.Context(),
 		signedEnvelope.Message.BeaconBlockRoot,
@@ -887,6 +893,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
+			if persistedKnown && persisted == nil {
+				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
+			}
 			if persistedKnown && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 				return
@@ -907,7 +916,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			}
 			defer a.finishExecutionPayloadEnvelopeRetry(gossipKey)
 			if !persistedKnown {
-				persisted, _ = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 				if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 					beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 					return
@@ -1084,6 +1093,15 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 
 	accepted = !contentsIntegrationFailed
 	w.WriteHeader(status)
+}
+
+func (a *ApiHandler) readExecutionPayloadEnvelopeForAdmissionRetry(key executionPayloadEnvelopeGossipKey) *cltypes.SignedExecutionPayloadEnvelope {
+	persisted, err := a.forkchoiceStore.ReadEnvelopeFromDisk(key.BeaconBlockRoot)
+	if err != nil || persisted == nil || persisted.Message == nil {
+		a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.BeaconBlockRoot, key.BuilderIndex)
+		return nil
+	}
+	return persisted
 }
 
 func signedExecutionPayloadEnvelopesEqual(left, right *cltypes.SignedExecutionPayloadEnvelope) bool {

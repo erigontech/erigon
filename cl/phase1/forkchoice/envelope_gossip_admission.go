@@ -132,6 +132,31 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Claim(
 	}
 }
 
+func (a *ExecutionPayloadEnvelopeAdmissions) TryClaim(
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	identity := executionPayloadEnvelopeIdentity{beaconBlockRoot: beaconBlockRoot, builderIndex: builderIndex}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; ok {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+	}
+	if _, ok := a.inflight[identity]; ok {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: execution payload envelope already being published", ErrExecutionPayloadEnvelopeAdmissionBusy)
+	}
+	if len(a.inflight) >= maxInflightExecutionPayloadEnvelopes {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: too many execution payload envelopes are being published", ErrExecutionPayloadEnvelopeAdmissionBusy)
+	}
+	if a.inflight == nil {
+		a.inflight = make(map[executionPayloadEnvelopeIdentity]executionPayloadEnvelopeAdmission)
+	}
+	a.nextID++
+	id := a.nextID
+	a.inflight[identity] = executionPayloadEnvelopeAdmission{id: id, done: make(chan struct{})}
+	return ExecutionPayloadEnvelopeAdmissionToken{identity: identity, id: id}, nil
+}
+
 func (a *ExecutionPayloadEnvelopeAdmissions) removeWaiter(identity executionPayloadEnvelopeIdentity, admissionID uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -169,4 +194,27 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Finish(token ExecutionPayloadEnvelo
 		a.seenFIFO = append(a.seenFIFO, token.identity)
 	}
 	a.seen[token.identity] = struct{}{}
+}
+
+func (a *ExecutionPayloadEnvelopeAdmissions) ForgetSeen(beaconBlockRoot common.Hash, builderIndex uint64) {
+	identity := executionPayloadEnvelopeIdentity{beaconBlockRoot: beaconBlockRoot, builderIndex: builderIndex}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; !ok {
+		return
+	}
+	delete(a.seen, identity)
+	ordered := make([]executionPayloadEnvelopeIdentity, 0, len(a.seenFIFO)-1)
+	start := 0
+	if len(a.seenFIFO) == maxSeenExecutionPayloadEnvelopes {
+		start = a.seenNext
+	}
+	for i := range len(a.seenFIFO) {
+		entry := a.seenFIFO[(start+i)%len(a.seenFIFO)]
+		if entry != identity {
+			ordered = append(ordered, entry)
+		}
+	}
+	a.seenFIFO = ordered
+	a.seenNext = 0
 }
