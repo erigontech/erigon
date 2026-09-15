@@ -431,7 +431,7 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
+		BaseFee:               new(uint256.Int).Set((*uint256.Int)(elPayload.BaseFeePerGas)),
 		Extra:                 elPayload.ExtraData,
 		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),

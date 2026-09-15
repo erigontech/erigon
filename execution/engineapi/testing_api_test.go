@@ -21,7 +21,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1456,7 +1455,7 @@ func TestNewPayloadV4RejectsSlotNumber(t *testing.T) {
 	zero := hexutil.Uint64(0)
 	payload := &engine_types.ExecutionPayload{
 		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1)),
 		Transactions:  []hexutil.Bytes{},
 		Withdrawals:   []*types.Withdrawal{},
 		BlobGasUsed:   &zero,
@@ -1479,7 +1478,7 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	zero := hexutil.Uint64(0)
 	payload := &engine_types.ExecutionPayload{
 		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1)),
 		Transactions:  []hexutil.Bytes{},
 		Withdrawals:   []*types.Withdrawal{},
 		BlobGasUsed:   &zero,

@@ -18,10 +18,10 @@ package engine_types
 
 import (
 	"encoding/json"
-	"math/big"
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -50,14 +50,14 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 	cases := map[string]*GetPayloadResponse{
 		"nil bundle": {
-			BlockValue:        (*hexutil.Big)(big.NewInt(123)),
+			BlockValue:        (*hexutil.U256)(uint256.NewInt(123)),
 			ExecutionRequests: []hexutil.Bytes{{0x01}, {0x02}},
 		},
 		"empty-array bundle": {
 			BlobsBundle: &BlobsBundle{Commitments: []hexutil.Bytes{}, Proofs: []hexutil.Bytes{}, Blobs: []hexutil.Bytes{}},
 		},
 		"small bundle": {
-			BlockValue:            (*hexutil.Big)(big.NewInt(7)),
+			BlockValue:            (*hexutil.U256)(uint256.NewInt(7)),
 			BlobsBundle:           &BlobsBundle{Commitments: []hexutil.Bytes{{0x01}}, Proofs: []hexutil.Bytes{{0x02}, {0x03}}, Blobs: []hexutil.Bytes{{0x04}}},
 			ShouldOverrideBuilder: true,
 		},
@@ -74,11 +74,11 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 				GasLimit:      30_000_000,
 				GasUsed:       21_000,
 				Timestamp:     1_700_000_000,
-				BaseFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+				BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 				BlockHash:     common.HexToHash("0xb10c"),
 				Transactions:  []hexutil.Bytes{{0x01, 0x02}, {0x03}},
 			},
-			BlockValue:  (*hexutil.Big)(big.NewInt(99)),
+			BlockValue:  (*hexutil.U256)(uint256.NewInt(99)),
 			BlobsBundle: &BlobsBundle{Commitments: []hexutil.Bytes{{0x01}}, Proofs: []hexutil.Bytes{{0x02}}, Blobs: []hexutil.Bytes{{0x03}}},
 		},
 	}
