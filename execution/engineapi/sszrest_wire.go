@@ -11,7 +11,6 @@ package engineapi
 import (
 	"encoding/binary"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -218,13 +217,12 @@ func decodeClientVersionRequest(buf []byte) (*engine_types.ClientVersionV1, erro
 	return version, nil
 }
 
-func blockValueHash(v *hexutil.Big) common.Hash {
+func blockValueHash(v *hexutil.U256) common.Hash {
 	var out common.Hash
 	if v == nil {
 		return out
 	}
-	u := uint256.MustFromBig((*big.Int)(v))
-	b := u.Bytes32()
+	b := (*uint256.Int)(v).Bytes32()
 	for i := range b {
 		out[i] = b[31-i]
 	}

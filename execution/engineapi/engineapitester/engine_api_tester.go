@@ -427,7 +427,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
 		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
 	}
-	temporalDB, _ := ethBackend.ChainDB().(kv.TemporalRwDB)
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -445,7 +444,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
 		StateAgg:             stateAgg,
-		ChainDB:              temporalDB,
+		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -482,7 +481,7 @@ type EngineApiTester struct {
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
-	ChainDB              kv.TemporalRwDB
+	ChainDB              kv.TemporalRoDB
 	cleanup              *cleanupHandle
 }
 
