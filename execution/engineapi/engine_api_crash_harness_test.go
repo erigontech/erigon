@@ -19,6 +19,8 @@ package engineapi_test
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -27,6 +29,48 @@ import (
 
 	"github.com/erigontech/erigon/execution/execmodule"
 )
+
+func TestCrashRecoveryAttemptDeadline(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name         string
+		testDeadline time.Time
+		want         time.Time
+	}{
+		{"no_test_deadline", time.Time{}, now.Add(rpcClientTimeout)},
+		{"long_test_deadline", now.Add(2 * rpcClientTimeout), now.Add(rpcClientTimeout)},
+		{"cleanup_reserve", now.Add(5 * time.Minute), now.Add(4*time.Minute + 30*time.Second)},
+		{"near_deadline", now.Add(time.Second), now.Add(900 * time.Millisecond)},
+		{"at_deadline", now, now},
+		{"expired", now.Add(-time.Minute), now.Add(-time.Minute)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, crashRecoveryAttemptDeadline(now, tc.testDeadline))
+		})
+	}
+}
+
+func TestCrashRecoveryRejectsChildFailure(t *testing.T) {
+	const failureChild = "ERIGON_CRASH_FAILURE_CHILD"
+	if os.Getenv(failureChild) == "1" {
+		t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
+		t.Fatal("intentional child failure")
+	}
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCrashRecoveryRejectsChildFailure$", "-test.v")
+	cmd.Env = append(os.Environ(), failureChild+"=1")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, ctx.Err())
+	var exited *exec.ExitError
+	require.ErrorAs(t, err, &exited)
+	require.Equal(t, crashRecoveryFailureExitCode, exited.ExitCode())
+	require.Contains(t, string(output), "intentional child failure")
+	require.NotContains(t, string(output), "WARNING: DATA RACE")
+	require.Error(t, crashRecoveryExitError(err), "a failed child is not a boundary-triggered kill")
+}
 
 func TestCrashRecoveryWaitsForTransition(t *testing.T) {
 	t.Run("early_valid", func(t *testing.T) {

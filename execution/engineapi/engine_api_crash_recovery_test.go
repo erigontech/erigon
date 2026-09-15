@@ -21,11 +21,14 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -37,14 +40,17 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -53,6 +59,9 @@ import (
 )
 
 const unwindCrashChild = "ERIGON_UNWIND_CRASH_CHILD"
+
+// Windows reports Process.Kill as exit code 1; child failures must stay distinct.
+const crashRecoveryFailureExitCode = 2
 
 type crashRecoveryRequest struct {
 	Genesis        *types.Genesis
@@ -79,7 +88,7 @@ type crashRecoveryState struct {
 	StateRoot       common.Hash
 	Domains         map[kv.Domain]map[string]string
 	TxLookup        map[string]string
-	ReceiptHistory  map[kv.Domain][]crashRecoveryHistoryEntry
+	History         map[kv.Domain][]crashRecoveryHistoryEntry
 }
 
 type crashRecoveryHistoryEntry struct {
@@ -109,14 +118,10 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 	genesis, key, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
 	baseArgs := engineapitester.EngineApiTesterInitArgs{
-		Genesis:       genesis,
-		CoinbaseKey:   key,
-		NoEmptyBlock1: true,
-		EthConfigTweaker: func(config *ethconfig.Config) {
-			config.MaxReorgDepth = stateChurnReorgDepthBudget
-			config.FcuBackgroundPrune = true
-			config.PersistReceiptsCacheV2 = true
-		},
+		Genesis:          genesis,
+		CoinbaseKey:      key,
+		NoEmptyBlock1:    true,
+		EthConfigTweaker: configureCrashRecovery,
 	}
 	const prefixPokes, suffixPokes = 20, 12
 	buildReference := func(side bool) (prefix, tip crashRecoveryChain, addr common.Address) {
@@ -134,13 +139,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 			state:    readCrashRecoveryState(t, eat.ChainDB),
 			sum:      sums[len(sums)-1],
 		}
-		suffix, sums := churnAndAssert(ctx, t, eat, churn, suffixPokes, func(k int) int64 {
-			seed := int64(prefixPokes + k)
-			if side {
-				seed += 1_000_000
-			}
-			return seed
-		})
+		suffix, sums := buildCrashRecoverySuffix(ctx, t, eat, churn, prefixPokes, suffixPokes, side)
 		tip = crashRecoveryChain{
 			payloads: append(payloads, suffix...),
 			state:    readCrashRecoveryState(t, eat.ChainDB),
@@ -148,6 +147,10 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 		}
 		assertCrashRecoveryReference(t, prefix)
 		assertCrashRecoveryReference(t, tip)
+		require.NotEqual(t, prefix.state.Domains[kv.CodeDomain], tip.state.Domains[kv.CodeDomain], "the unwind range must contain code changes")
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			require.Greater(t, len(tip.state.History[domain]), len(prefix.state.History[domain]), "the unwind range must extend %s history", domain)
+		}
 		prefix.continuation, prefix.continuationSums = suffix[:3], sums[:3]
 		if side {
 			tip.continuation, tip.continuationSums = churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(2_000 + k) })
@@ -160,6 +163,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 	require.Equal(t, addr, sideAddr)
 	assertCrashRecoveryState(t, prefix.state, sidePrefix.state)
 	require.NotEqual(t, canonical.state.Domains[kv.StorageDomain], side.state.Domains[kv.StorageDomain])
+	require.NotEqual(t, canonical.state.Domains[kv.CodeDomain], side.state.Domains[kv.CodeDomain], "both forks must exercise different code changes")
 
 	for _, scenario := range []struct {
 		name        string
@@ -219,6 +223,10 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 					}
 					built, buildErr := eat.MockCl.BuildCanonicalBlock(t.Context())
 					require.NoError(t, buildErr)
+					parent := scenario.replacement.continuation[len(scenario.replacement.continuation)-1]
+					require.NotNil(t, parent.ExecutionPayload.SlotNumber)
+					require.NotNil(t, built.ExecutionPayload.SlotNumber)
+					require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber), "block production must advance the CL slot")
 					assertCanonicalHead(t.Context(), t, eat, built)
 					_, _, _, consistent := readChurn(t.Context(), t, churn)
 					require.True(t, consistent, "state must remain consistent after block production resumes")
@@ -228,6 +236,49 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 	}
 }
 
+func configureCrashRecovery(config *ethconfig.Config) {
+	config.MaxReorgDepth = stateChurnReorgDepthBudget
+	config.FcuBackgroundPrune = true
+	config.PersistReceiptsCacheV2 = true
+	config.Prune = prune.ArchiveMode
+	config.Snapshot.NoDownloader = true
+	config.Snapshot.ProduceE2 = false
+	config.Snapshot.ProduceE3 = false
+}
+
+func buildCrashRecoverySuffix(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, churn *contracts.StateChurn, firstSeed, pokes int, side bool) ([]*engineapitester.MockClPayload, []*big.Int) {
+	t.Helper()
+	opts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+	require.NoError(t, err)
+	opts.GasLimit = params.MaxTxnGasLimit
+	deployAt := 0
+	if side {
+		deployAt = pokes / 2
+	}
+	payloads := make([]*engineapitester.MockClPayload, 0, pokes)
+	sums := make([]*big.Int, 0, pokes)
+	for k := range pokes {
+		var deployHash common.Hash
+		if k == deployAt {
+			_, txn, _, deployErr := contracts.DeployStateChurn(opts, eat.ContractBackend)
+			require.NoError(t, deployErr)
+			deployHash = txn.Hash()
+			require.NoError(t, eat.TxnInclusionVerifier.WaitForPending(ctx, opts.From, deployHash))
+		}
+		seed := int64(firstSeed + k)
+		if side {
+			seed += 1_000_000
+		}
+		payload := applyStateChurnPoke(ctx, t, eat, churn, opts, seed)
+		if deployHash != (common.Hash{}) {
+			require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, deployHash))
+		}
+		payloads = append(payloads, payload)
+		sums = append(sums, recordChurnSum(ctx, t, churn))
+	}
+	return payloads, sums
+}
+
 func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
 	t.Helper()
 	head := uint64(chain.payloads[len(chain.payloads)-1].ExecutionPayload.BlockNumber)
@@ -235,6 +286,7 @@ func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
 		require.Equalf(t, head, chain.state.StageProgress[stage], "reference %s progress", stage)
 	}
 	require.NotEmpty(t, chain.state.TxLookup)
+	require.Greater(t, len(chain.state.Domains[kv.CommitmentDomain]), 1, "commitment branches must be present alongside the saved root")
 	for _, key := range [][]byte{
 		rawtemporaldb.CumulativeGasUsedInBlockKey,
 		rawtemporaldb.CumulativeBlobGasUsedInBlockKey,
@@ -244,11 +296,11 @@ func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
 	}
 	// Block-end transactions clear the latest cached receipt; its data remains in history.
 	require.Contains(t, chain.state.Domains, kv.RCacheDomain)
-	for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
-		require.NotEmpty(t, chain.state.ReceiptHistory[domain], "receipt history must be part of the oracle")
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain, kv.RCacheDomain} {
+		require.NotEmpty(t, chain.state.History[domain], "%s history must be part of the oracle", domain)
 	}
 	hasCachedReceipt := false
-	for _, entry := range chain.state.ReceiptHistory[kv.RCacheDomain] {
+	for _, entry := range chain.state.History[kv.RCacheDomain] {
 		if entry.Before == "" {
 			continue
 		}
@@ -268,6 +320,11 @@ func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState
 	defer tx.Rollback()
 	lastBlock, _, err := rawdbv3.TxNums.Last(tx)
 	require.NoError(t, err)
+	require.Less(t, lastBlock, uint64(stateChurnReorgDepthBudget), "the fixture must stay below the changeset pruning range")
+	require.Empty(t, tx.Debug().DomainFiles(), "crash recovery is checked without snapshot files")
+	pruneMode, err := prune.Get(tx)
+	require.NoError(t, err)
+	require.Equal(t, prune.ArchiveMode, pruneMode, "background pruning must preserve the oracle's data")
 	state := crashRecoveryState{
 		HeadBlock:      rawdb.ReadHeadBlockHash(tx),
 		HeadHeader:     rawdb.ReadHeadHeaderHash(tx),
@@ -279,7 +336,7 @@ func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState
 		StageProgress:  make(map[stages.SyncStage]uint64),
 		Domains:        make(map[kv.Domain]map[string]string),
 		TxLookup:       make(map[string]string),
-		ReceiptHistory: make(map[kv.Domain][]crashRecoveryHistoryEntry),
+		History:        make(map[kv.Domain][]crashRecoveryHistoryEntry),
 	}
 	for block := uint64(0); block <= lastBlock; block++ {
 		state.Canonical[block], err = rawdb.ReadCanonicalHash(tx, block)
@@ -307,15 +364,15 @@ func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState
 	require.NoError(t, err)
 	require.NotNil(t, header)
 	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match the head header")
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain, kv.RCacheDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain} {
 		state.Domains[domain] = readCrashRecoveryDomain(t, tx, domain)
 	}
 	require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(key, value []byte) error {
 		state.TxLookup[hex.EncodeToString(key)] = hex.EncodeToString(value)
 		return nil
 	}))
-	for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
-		state.ReceiptHistory[domain] = readCrashRecoveryHistory(t, tx, domain)
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain, kv.RCacheDomain} {
+		state.History[domain] = readCrashRecoveryHistory(t, tx, domain)
 	}
 	return state
 }
@@ -366,10 +423,10 @@ func assertCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {
 		require.Equalf(t, entries, got.Domains[domain], "persisted %s state", domain)
 	}
 	want.Domains, got.Domains = nil, nil
-	for domain, history := range want.ReceiptHistory {
-		require.Equalf(t, history, got.ReceiptHistory[domain], "persisted %s history", domain)
+	for domain, history := range want.History {
+		require.Equalf(t, history, got.History[domain], "persisted %s history", domain)
 	}
-	want.ReceiptHistory, got.ReceiptHistory = nil, nil
+	want.History, got.History = nil, nil
 	require.Equal(t, want.TxLookup, got.TxLookup, "persisted transaction lookup index")
 	want.TxLookup, got.TxLookup = nil, nil
 	require.Equal(t, want, got, "persisted canonical metadata and commitment")
@@ -381,6 +438,11 @@ func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineap
 		status, err := eat.MockCl.InsertNewPayload(ctx, payload)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, status.Status)
+		if slot := payload.ExecutionPayload.SlotNumber; slot != nil {
+			// Replayed payloads advance the CL clock; a reorg must not turn it back.
+			cl := eat.MockCl.State()
+			cl.SlotNumber = max(cl.SlotNumber, uint64(*slot)+1)
+		}
 	}
 }
 
@@ -401,7 +463,6 @@ func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold,
 }
 
 func runUnwindCrashChild(t *testing.T) {
-	t.Cleanup(func() { os.Exit(1) })
 	var request crashRecoveryRequest
 	require.NoError(t, json.NewDecoder(os.Stdin).Decode(&request))
 	ctx, cancel := context.WithDeadline(t.Context(), request.Deadline)
@@ -422,10 +483,8 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			config.MaxReorgDepth = stateChurnReorgDepthBudget
-			config.FcuBackgroundPrune = true
+			configureCrashRecovery(config)
 			config.Sync.ParallelStateFlushing = true
-			config.PersistReceiptsCacheV2 = true
 		},
 	})
 	require.NoError(t, err)
@@ -434,29 +493,35 @@ func runUnwindCrashChild(t *testing.T) {
 		go func() { response <- eat.MockCl.UpdateForkChoice(ctx, payload) }()
 		return response
 	}
+	t.Log("importing the canonical chain")
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Canonical)
 	canonicalPublished := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
 	canonicalCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
 	canonicalResponse := startForkchoice(request.Canonical[len(request.Canonical)-1])
 	// Force the early response to arrive while persistence is still blocked.
 	// Only this FCU's clear event allows the replacement barrier to be armed.
+	t.Log("waiting for the canonical FCU's early response")
 	select {
 	case err := <-canonicalResponse:
-		require.NoError(t, err)
+		require.NoError(t, err, "canonical FCU before overlay publication")
 	case <-ctx.Done():
 		t.Fatalf("canonical FCU did not respond before commit: %v", ctx.Err())
 	}
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil))
+	t.Log("waiting for canonical overlay publication")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil), "canonical FCU after its early response")
 	canonicalPublished.release()
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil))
+	t.Log("waiting for canonical overlay teardown")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil), "canonical FCU after overlay publication")
 	canonicalCleared.release()
 
+	t.Log("importing the replacement chain")
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
 	boundary := transitions.hold(t, request.Point, 1)
 	// Abort before cleanup can release the crash barrier, even on failure.
-	t.Cleanup(func() { os.Exit(1) })
+	t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
 	response := startForkchoice(request.Replacement[len(request.Replacement)-1])
-	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response))
+	t.Logf("waiting for replacement transition %d", request.Point)
+	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response), "replacement FCU")
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
 	require.NoError(t, err)
@@ -467,17 +532,49 @@ func runUnwindCrashChild(t *testing.T) {
 	t.Fatalf("parent did not kill the child at transition %d: %v", boundary.point, ctx.Err())
 }
 
-func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
-	t.Helper()
-	deadline := time.Now().Add(rpcClientTimeout)
-	if testDeadline, ok := t.Deadline(); ok {
-		cleanupBudget := min(time.Minute, time.Until(testDeadline)/10)
+func crashRecoveryAttemptDeadline(now, testDeadline time.Time) time.Time {
+	deadline := now.Add(rpcClientTimeout)
+	if !testDeadline.IsZero() {
+		cleanupBudget := min(time.Minute, max(0, testDeadline.Sub(now)/10))
 		if latest := testDeadline.Add(-cleanupBudget); latest.Before(deadline) {
 			deadline = latest
 		}
 	}
+	return deadline
+}
+
+func crashRecoveryExitError(err error) error {
+	if err == nil {
+		return errors.New("child exited successfully instead of being killed")
+	}
+	var exited *exec.ExitError
+	if !errors.As(err, &exited) {
+		return fmt.Errorf("wait for a killed child: %w", err)
+	}
+	if status, ok := exited.Sys().(syscall.WaitStatus); ok {
+		if runtime.GOOS == "windows" {
+			if status.ExitStatus() == 1 {
+				return nil
+			}
+		} else if status.Signaled() && status.Signal() == syscall.SIGKILL {
+			return nil
+		}
+	}
+	return fmt.Errorf("child exited without the expected kill: %w", err)
+}
+
+func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
+	t.Helper()
+	require.NotEmpty(t, request.Canonical)
+	require.NotEmpty(t, request.Replacement)
+	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
+	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
+	require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
+	testDeadline, _ := t.Deadline()
+	deadline := crashRecoveryAttemptDeadline(time.Now(), testDeadline)
 	ctx, cancel := context.WithDeadline(t.Context(), deadline)
 	defer cancel()
+	require.NoError(t, ctx.Err(), "no time remains for a crash attempt")
 	var listenConfig net.ListenConfig
 	listener, err := listenConfig.Listen(ctx, "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -519,9 +616,8 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	require.NoError(t, json.NewDecoder(conn).Decode(&reached))
 	require.Equal(t, request.Point, reached)
 	require.NoError(t, ctx.Err(), "only a boundary-triggered kill counts as a crash test")
-	require.NoError(t, cmd.Process.Kill())
+	require.NoError(t, cmd.Process.Kill(), "child must remain alive at the reported boundary")
 	<-done
-	var killed *exec.ExitError
-	require.ErrorAs(t, exitErr, &killed)
+	require.NoError(t, crashRecoveryExitError(exitErr))
 	require.NotContains(t, output.String(), "WARNING: DATA RACE", "a killed child must not hide a race report")
 }

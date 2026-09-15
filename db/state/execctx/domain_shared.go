@@ -1182,6 +1182,8 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 // with a new one on a fresh transaction. The domain flush advances
 // PlainStateVersion exactly once; Commit verifies both its starting version and
 // the version it will publish.
+// Validation callbacks run after the domain flush and before the MDBX commit.
+// A callback error leaves the transaction uncommitted for the caller to roll back.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
