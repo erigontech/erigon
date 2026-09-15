@@ -2,7 +2,6 @@ package commitment
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 )
@@ -40,9 +39,6 @@ func (hph *HexPatriciaHashed) mountTo(base *HexPatriciaHashed, nibble int) {
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
 	base := p.template
-	if base == nil {
-		return nil, errors.New("processMounted: nil template")
-	}
 	if base.ctx == nil && p.trieCtxFactory != nil {
 		bctx, cleanup := p.trieCtxFactory(ctx)
 		if cleanup != nil {
