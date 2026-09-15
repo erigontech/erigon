@@ -603,7 +603,11 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 		if !haveLatest {
 			latest, latestIdx, haveLatest = v, k, true
 		}
-		if v.flag == FlagDone && v.Value {
+		// A validated (pre-seal) self-destruct is as authoritative as a Done one:
+		// the read side (readSelfDestructMemo→resolved) already treats it as a
+		// destruct, so this single lifecycle authority must too, or the two disagree
+		// on a validated destruct and a wiped-slot read never settles.
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
@@ -612,7 +616,7 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	if !wiped {
 		return LifecycleLive, Version{}, 0
 	}
-	if latest.flag == FlagDone {
+	if latest.flag == FlagDone || latest.flag == FlagValidated {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
 	} else {
 		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
@@ -657,7 +661,7 @@ func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 // netAbsentDestruct reports whether a lower tx left addr net-absent via create+self-destruct with no revival above it, so a base read of it is not stale (see IsNetAbsent).
 func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool {
 	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
-	if !ok || !destructed || (sdRR.Status() != MVReadResultDone && sdRR.Status() != MVReadResultDependency) {
+	if !ok || !destructed || (!sdRR.resolved() && sdRR.Status() != MVReadResultDependency) {
 		return false
 	}
 	destructTxIndex := sdRR.DepIdx()
@@ -1181,7 +1185,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, StorageRead,
 					version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 				if valid == VersionValid {
-					if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
+					if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.resolved() {
 						valid = VersionInvalid
 					}
 				}
@@ -1191,7 +1195,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// destruct is stale; checkVersion misses it because the SD doesn't write the read's path.
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
-			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
+			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed {
 				destructTxIndex := sdRR.DepIdx()
 				if destructTxIndex > rr.Version().TxIndex {
 					revivalLimit := txIndex - 1
@@ -1244,7 +1248,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// IncarnationPath is the specific signal (written only by CreateAccount and
 					// SelfDestruct), unlike BalancePath which overfires for every gas payer.
 					if valid == VersionValid {
-						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
+						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.resolved() {
 							valid = VersionInvalid
 						}
 					}
