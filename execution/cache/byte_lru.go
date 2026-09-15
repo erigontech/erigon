@@ -29,8 +29,9 @@ import (
 
 // ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
 // caller's weigher, instead of by an entry count over an assumed average size.
-// The ceiling rises one chunk at a time out of the shared cachebudget envelope
-// and stops for good once the envelope refuses a chunk.
+// A budgeted cache (newByteLRU) grows its ceiling one chunk at a time out of the shared
+// cachebudget envelope and stops for good once the envelope refuses a chunk; an unbudgeted
+// one (NewByteLRU) holds maxBytes from the start.
 //
 // The synchronous executor orders InvalidateAll but not eviction against Add,
 // so a layer can sit over its ceiling until the next write; CleanUp forces a
@@ -45,7 +46,7 @@ type ByteLRU[V any] struct {
 	onEvict atomic.Pointer[func(uint64, V)]
 
 	resident atomic.Int64
-	limit    atomic.Int64 // bytes reserved from the envelope; also otter's maximum
+	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
@@ -145,8 +146,8 @@ func (b *ByteLRU[V]) grow(w int64) {
 func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
 func (b *ByteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
-// Purge empties the cache and returns the grown reservation, keeping the floor
-// so the cache is never left disabled.
+// Purge empties the cache. A budgeted cache also returns its grown reservation, keeping
+// the floor so it is never left disabled.
 func (b *ByteLRU[V]) Purge() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
@@ -162,7 +163,7 @@ func (b *ByteLRU[V]) Purge() {
 	b.c.SetMaximum(uint64(floor))
 }
 
-// Close returns this cache's envelope reservation. Idempotent.
+// Close empties the cache and returns a budgeted cache's envelope reservation. Idempotent.
 func (b *ByteLRU[V]) Close() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
