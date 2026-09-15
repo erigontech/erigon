@@ -372,35 +372,14 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	results := &feeHistoryResult{
-		OldestBlock:  (*hexutil.Big)(oldest),
-		GasUsedRatio: gasUsed,
-	}
-	if reward != nil {
-		results.Reward = make([][]hexutil.U256, len(reward))
-		for i, w := range reward {
-			results.Reward[i] = make([]hexutil.U256, len(w))
-			for j := range w {
-				results.Reward[i][j] = hexutil.U256(w[j])
-			}
-		}
-	}
-	if baseFee != nil {
-		results.BaseFee = make([]hexutil.U256, len(baseFee))
-		for i, v := range baseFee {
-			results.BaseFee[i] = hexutil.U256(*v)
-		}
-	}
-	if blobBaseFee != nil {
-		results.BlobBaseFee = make([]hexutil.U256, len(blobBaseFee))
-		for i, v := range blobBaseFee {
-			results.BlobBaseFee[i] = hexutil.U256(*v)
-		}
-	}
-	if blobGasUsedRatio != nil {
-		results.BlobGasUsedRatio = blobGasUsedRatio
-	}
-	return results, nil
+	return &feeHistoryResult{
+		OldestBlock:      (*hexutil.Big)(oldest),
+		Reward:           reward,
+		BaseFee:          baseFee,
+		GasUsedRatio:     gasUsed,
+		BlobBaseFee:      blobBaseFee,
+		BlobGasUsedRatio: blobGasUsedRatio,
+	}, nil
 }
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
