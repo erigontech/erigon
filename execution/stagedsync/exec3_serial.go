@@ -431,6 +431,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return fmt.Errorf("can't finalize block %d: state read: %w", txTask.BlockNumber(), stateErr)
+				}
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
