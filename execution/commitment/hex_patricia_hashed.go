@@ -173,6 +173,25 @@ func (hph *HexPatriciaHashed) SetCollapseTracer(tracer CollapseTracer) {
 	hph.collapseTracer = tracer
 }
 
+// abandonFold discards a computation that returned part way — a cancelled context or a failed fold. Its
+// unfolded rows describe keys that were never finished, and any branch updates it deferred were never
+// applied. Both have to go: the next computation restores the trie from stored state, and SetState refuses a
+// trie with live rows, so one abandoned fold would otherwise make every later restore fail. The root is left
+// alone; the restore overwrites it.
+func (hph *HexPatriciaHashed) abandonFold() {
+	hph.currentKeyLen = 0
+	hph.activeRows = 0
+	for i := range hph.depths {
+		hph.depths[i] = 0
+		hph.branchBefore[i] = false
+		hph.touchMap[i] = 0
+		hph.afterMap[i] = 0
+	}
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+		hph.branchEncoder.ClearDeferred()
+	}
+}
+
 // resetForReuse resets all mutable state so a pooled HexPatriciaHashed is safe to reuse.
 // The large grid array is NOT zeroed — activeRows=0 means no cells are live,
 // and cells are properly initialized via cell.reset() during unfold/fold.
@@ -2772,6 +2791,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	defer func() { logEvery.Stop() }()
+	defer func() {
+		if err != nil {
+			hph.abandonFold()
+		}
+	}()
 
 	// Setup warmup if configured
 	var warmuper *Warmuper
