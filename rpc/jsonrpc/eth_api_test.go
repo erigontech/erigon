@@ -575,3 +575,23 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestGetBlockByHashServesCachedBlockWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+	require.NoError(t, err)
+	require.NotEmpty(t, block.Transactions())
+	api.blocksLRU.Add(block.Hash(), block)
+	api.db = noReadTxDB{m.DB}
+
+	got, err := api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), false), false)
+	require.NoError(t, err)
+	require.Equal(t, block.Hash(), *got.Hash)
+
+	_, err = api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), true), false)
+	require.Error(t, err, "a canonical lookup still needs the read tx")
+}
