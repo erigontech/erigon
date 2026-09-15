@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -217,18 +216,7 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
@@ -327,7 +315,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	}
 	// Delete, not reslice: this encoder sits inside a pooled trie.
 	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
-	ResetDeferredUpdateMetrics()
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
@@ -1356,8 +1343,6 @@ func (t *Updates) IsConcurrentCommitment() bool {
 }
 
 type keyHasher func(key []byte) []byte
-
-func keyHasherNoop(key []byte) []byte { return key }
 
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()

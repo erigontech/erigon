@@ -143,46 +143,6 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.precompiles = append(t.precompiles, precompile)
-	if precompile && !t.config.IncludePrecompiles {
-		return
-	}
-	var toValue *common.Address
-	if !to.IsNil() {
-		v := to.Value()
-		toValue = &v
-	}
-	t.callstack[0] = callFrame{
-		From:  from.Value(),
-		To:    toValue,
-		Input: bytes.Clone(input),
-		Gas:   hexutil.Uint64(t.gasLimit), // gas has intrinsicGas already subtracted
-	}
-	if value != nil {
-		v := *value
-		t.callstack[0].Value = (*hexutil.U256)(&v)
-	}
-	t.callstack[0].setType(vm.CALL)
-	if create {
-		t.callstack[0].setType(vm.CREATE)
-	}
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-
-	if len(t.callstack) == 0 {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		return
-	}
-
-	t.callstack[0].processOutput(output, err)
-}
-
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)

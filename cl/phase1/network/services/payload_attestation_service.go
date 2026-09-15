@@ -45,8 +45,8 @@ type seenPayloadAttestationKey struct {
 	validatorIndex uint64
 }
 
-// pendingPayloadAttestationKey tracks attestations waiting for their block to arrive.
-// Key is (blockRoot, validatorIndex) since each validator can only submit one attestation per block.
+// pendingPayloadAttestationKey keeps distinct signed attestations for a validator
+// and block separate until validation, so an invalid message cannot suppress a valid one.
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
@@ -115,14 +115,19 @@ func NewPayloadAttestationService(
 		validatedREST:         make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
 		now:                   time.Now,
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *payloadAttestationService) newPendingQueue() *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
-	return newPendingJobQueue(maxPendingAttestations, pendingPayloadAttestationExpiry, pendingPayloadAttestationCheckInterval,
+func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "payload_attestation",
+		capacity:      maxPendingAttestations,
+		expiry:        pendingPayloadAttestationExpiry,
+		checkInterval: pendingPayloadAttestationCheckInterval,
+	},
 		s.tryProcessPendingAttestation,
+		nil,
 		func(key pendingPayloadAttestationKey, _ *cltypes.PayloadAttestationMessage) {
 			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
 		})
@@ -193,8 +198,11 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 		if !queueMissing {
 			return fmt.Errorf("%w: block not available", ErrIgnore)
 		}
-		if !s.queuePendingAttestation(blockRoot, msg) {
-			return fmt.Errorf("%w: %w: block not available", ErrIgnore, ErrAttestationCapacity)
+		if err := s.queuePendingAttestation(blockRoot, msg); err != nil {
+			if errors.Is(err, errPendingJobQueueFull) {
+				return fmt.Errorf("%w: %w: block not available: %w", ErrIgnore, ErrAttestationCapacity, err)
+			}
+			return fmt.Errorf("%w: payload attestation pending queue admission failed: %w", ErrIgnore, err)
 		}
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
@@ -358,49 +366,56 @@ func (s *payloadAttestationService) releaseValidatedRESTAttestation(key seenPayl
 	}
 }
 
-// queuePendingAttestation adds an attestation to the pending queue for later processing.
-func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) bool {
-	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
+// queuePendingAttestation returns an error when the queue cannot admit the attestation.
+func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) error {
+	key, err := pendingPayloadAttestationKeyFor(blockRoot, msg)
+	if err != nil {
+		log.Warn("Failed to hash payload attestation for pending queue",
+			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
+		return err
+	}
 	if _, loaded := s.pending.jobs.Load(key); loaded {
-		return true
+		return nil
 	}
-	if !s.pending.reserve() {
+	err = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) { return key, nil })
+	if errors.Is(err, errPendingJobQueueFull) {
 		if _, loaded := s.pending.jobs.Load(key); loaded {
-			return true
+			return nil
 		}
-		return false
 	}
-	s.pending.storeReserved(key, msg)
-	return true
+	return err
 }
 
-func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
-	root, _ := msg.HashSSZ()
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return pendingPayloadAttestationKey{}, err
+	}
 	return pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
 		messageRoot:    common.Hash(root),
-	}
+	}, nil
 }
 
-// tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,
-// dropping attestations that are no longer for the current slot.
-func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
+// tryProcessPendingAttestation retains jobs while validation is retryable and
+// drops attestations that are no longer for the current slot.
+func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !isPayloadAttestationSlotCurrent(s.ethClock, s.now(), msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
-		return nil, true
+		return pendingJobRemove
 	}
 
 	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
-		return nil, false
+		return pendingJobKeep
 	}
 
 	err := s.processMessage(ctx, msg, false, nil)
 	if errors.Is(err, ErrAttestationRetryable) {
-		return nil, false
+		return pendingJobKeep
 	}
 	if err != nil {
 		log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
 	}
-	return nil, true
+	return pendingJobRemove
 }

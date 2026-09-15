@@ -193,15 +193,6 @@ type HexPatriciaHashed struct {
 	hadToLoadL             map[uint64]skipStat
 }
 
-// Clones current trie state to allow concurrent processing.
-func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	subCfg := hph.cfg.Subtrie()
-	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
-
-	subTrie.mountTo(hph, forNibble)
-	return subTrie
-}
-
 var hphPool sync.Pool
 
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConfig) *HexPatriciaHashed {
@@ -2779,7 +2770,6 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	deferred := hph.branchEncoder.deferred
 	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
-	ResetDeferredUpdateMetrics()
 	return deferred
 }
 
@@ -2800,6 +2790,7 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
+	hph.cfg.LeaveDeferredForCaller = leave
 	hph.branchEncoder.callerOwnsDeferred = leave
 }
 
