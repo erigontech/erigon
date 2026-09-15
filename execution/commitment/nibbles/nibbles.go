@@ -92,7 +92,6 @@ func KeybytesToHex(str []byte) []byte {
 }
 
 func Expand(src, dst []byte) {
-	dst = dst[:2*len(src)]
 	for len(src) >= 4 {
 		v := uint64(binary.LittleEndian.Uint32(src))
 		v = (v | v<<16) & 0x0000ffff0000ffff

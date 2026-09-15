@@ -96,6 +96,12 @@ func TestExpandMatchesBytewise(t *testing.T) {
 	}
 }
 
+func TestExpandShortDstPanics(t *testing.T) {
+	dst := make([]byte, 8)
+	require.Panics(t, func() { Expand([]byte{0xab, 0xcd, 0xef, 0x12}, dst[:7]) })
+	require.Panics(t, func() { Expand([]byte{0xab}, dst[:1]) })
+}
+
 func TestHexCompactRoundtrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
