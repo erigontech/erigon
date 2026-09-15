@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1185,9 +1186,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	var precompiles vm.PrecompiledContracts
 	if traceConfig != nil && traceConfig.StateOverrides != nil {
-		rules := blockCtx.Rules(chainConfig)
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+		precompiles, err = applyStateOverrides(ibs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig))
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -1227,6 +1227,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
+		if traceConfig != nil && traceConfig.StateOverrides != nil {
+			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
+				return nil, err
+			}
+		}
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
@@ -1241,6 +1246,16 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	return traceResult, nil
+}
+
+// applyStateOverrides applies overrides as synthetic pre-state. Each call needs its own
+// precompile set: Override consumes it via MovePrecompileTo, so a reused set fails.
+func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOverrides, rules *chain.Rules) (vm.PrecompiledContracts, error) {
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	if err := overrides.Override(ibs, precompiles, rules); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
 }
 
 // CallMany implements trace_callMany.
@@ -1353,15 +1368,18 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, traceConfig)
+		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
 
 	return trace, err
 }
 
+// advanceTxNum moves the history reader with the transaction index. Block
+// replay needs it; an ad-hoc bundle must not, or a call reads state left by a
+// real transaction it never executed.
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1398,7 +1416,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var tracingHooks *tracing.Hooks
 
 	for txIndex, msg := range msgs {
-		if isHistoricalStateReader {
+		if isHistoricalStateReader && advanceTxNum {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := common.Stopped(ctx.Done()); err != nil {
@@ -1451,9 +1469,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			if isHistoricalStateReader {
-				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
-			}
 			sdMap := make(map[accounts.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}
