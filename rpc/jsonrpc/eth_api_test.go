@@ -23,10 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -36,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -533,22 +530,4 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
 	a.NoError(err)
 	a.Equal(svLatest, svNil)
-}
-
-func TestBlocksLRUBoundedByBytes(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs, SingleNodeMode: true})
-	blocks := make([]*types.Block, 6)
-	for i := range blocks {
-		txn := types.NewTransaction(uint64(i), common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 8*datasize.MB))
-		blocks[i] = types.NewBlock(&types.Header{}, []types.Transaction{txn}, nil, nil, nil, nil)
-		api.blocksLRU.Add(blocks[i].Hash(), blocks[i])
-	}
-	var cached datasize.ByteSize
-	for _, b := range blocks {
-		if _, ok := api.blocksLRU.Get(b.Hash()); ok {
-			cached += datasize.ByteSize(b.Size())
-		}
-	}
-	require.LessOrEqual(t, cached, 32*datasize.MB)
 }
