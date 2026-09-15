@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
-var _ txnprovider.TxnProvider = (*Pool)(nil)
+var _ txnprovider.RevisionedTxnProvider = (*Pool)(nil)
 
 type Pool struct {
 	logger                  log.Logger
@@ -386,6 +386,14 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 
 	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
 	return append(txns, additionalTxns...), nil
+}
+
+func (p *Pool) TransactionSetRevision() uint64 {
+	baseProvider, ok := p.baseTxnProvider.(txnprovider.RevisionedTxnProvider)
+	if !ok {
+		return p.decryptedTxnsPool.TransactionSetRevision()
+	}
+	return baseProvider.TransactionSetRevision() + p.decryptedTxnsPool.TransactionSetRevision()
 }
 
 func (p *Pool) AllEncryptedTxns() []EncryptedTxnSubmission {

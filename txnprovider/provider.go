@@ -36,6 +36,12 @@ type TxnProvider interface {
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
 
+// RevisionedTxnProvider reports changes that can alter block-building input.
+type RevisionedTxnProvider interface {
+	TxnProvider
+	TransactionSetRevision() uint64
+}
+
 type ProvideOption func(opt *ProvideOptions)
 
 func WithParentBlockNum(blockNum uint64) ProvideOption {

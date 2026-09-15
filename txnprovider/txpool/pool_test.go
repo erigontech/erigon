@@ -520,11 +520,20 @@ func TestTransactionSetRevisionAdvancesWhenPendingTransactionsChange(t *testing.
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Zero(t, pool.TransactionSetRevision())
 
-	txn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-	txn.IDHash[0] = 1
+	queuedTxn := newTestTxnSlot(2, 0, 300_000, 300_000, 100_000)
+	queuedTxn.IDHash[0] = 1
 	var txns TxnSlots
-	txns.Append(txn, addr[:], true)
+	txns.Append(queuedTxn, addr[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Zero(t, pool.TransactionSetRevision())
+
+	pendingTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	pendingTxn.IDHash[0] = 2
+	txns.Resize(0)
+	txns.Append(pendingTxn, addr[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 	require.Equal(t, uint64(1), pool.TransactionSetRevision())

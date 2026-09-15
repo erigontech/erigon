@@ -935,10 +935,11 @@ func New(
 		backend.stopNode,
 		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
 		execmodule.WithPayloadTransactionsRevision(func() uint64 {
-			if backend.txPool == nil {
+			revisionProvider, ok := txnProvider.(txnprovider.RevisionedTxnProvider)
+			if !ok {
 				return 0
 			}
-			return backend.txPool.TransactionSetRevision()
+			return revisionProvider.TransactionSetRevision()
 		}),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)

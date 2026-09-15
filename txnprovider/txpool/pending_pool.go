@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -28,14 +29,21 @@ import (
 // It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
 // pending.best slice for mining (because we consider txns and metaTxn are immutable)
 type PendingPool struct {
-	best  *bestSlice
-	worst *WorstQueue
-	limit int
-	t     SubPoolType
+	best     *bestSlice
+	worst    *WorstQueue
+	limit    int
+	t        SubPoolType
+	revision *atomic.Uint64
 }
 
 func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
 	return &PendingPool{limit: limit, t: t, best: &bestSlice{ms: []*metaTxn{}}, worst: &WorstQueue{ms: []*metaTxn{}}}
+}
+
+func (p *PendingPool) changed() {
+	if p.revision != nil {
+		p.revision.Add(1)
+	}
 }
 
 func (p *PendingPool) EnforceWorstInvariants() {
@@ -64,11 +72,13 @@ func (p *PendingPool) PopWorst() *metaTxn { //nolint
 	if i.bestIndex >= 0 {
 		p.best.UnsafeRemove(i)
 	}
+	p.changed()
 	return i
 }
 
 func (p *PendingPool) Updated(mt *metaTxn) {
 	heap.Fix(p.worst, mt.worstIndex)
+	p.changed()
 }
 
 func (p *PendingPool) Len() int {
@@ -79,6 +89,7 @@ func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.Logger) {
 	if i.TxnSlot.Traced {
 		logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.TxnSlot.IDHash), "sender", i.TxnSlot.SenderID, "nonce", i.TxnSlot.Nonce, "reason", reason)
 	}
+	changed := i.worstIndex >= 0 || i.bestIndex >= 0
 	if i.worstIndex >= 0 {
 		heap.Remove(p.worst, i.worstIndex)
 	}
@@ -86,6 +97,9 @@ func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.Logger) {
 		p.best.UnsafeRemove(i)
 	}
 	i.currentSubPool = 0
+	if changed {
+		p.changed()
+	}
 }
 
 func (p *PendingPool) Add(i *metaTxn, logger log.Logger) {
@@ -95,6 +109,7 @@ func (p *PendingPool) Add(i *metaTxn, logger log.Logger) {
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
 	p.best.UnsafeAdd(i)
+	p.changed()
 }
 
 func (p *PendingPool) DebugPrint(prefix string) {

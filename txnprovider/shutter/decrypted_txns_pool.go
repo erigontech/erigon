@@ -20,6 +20,7 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -38,6 +39,7 @@ type TxnBatch struct {
 type DecryptedTxnsPool struct {
 	decryptedTxns  map[DecryptionMark]TxnBatch
 	decryptionCond *sync.Cond
+	revision       atomic.Uint64
 }
 
 func NewDecryptedTxnsPool() *DecryptedTxnsPool {
@@ -84,6 +86,7 @@ func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBa
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
 	p.decryptedTxns[mark] = txnBatch
+	p.revision.Add(1)
 	p.decryptionCond.Broadcast()
 	txnsLen := float64(len(txnBatch.Transactions))
 	decryptedTxnsPoolAdded.Add(txnsLen)
@@ -108,7 +111,14 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 	decryptedTxnsPoolDeleted.Add(float64(txnDeletions))
 	decryptedTxnsPoolTotalCount.Sub(float64(txnDeletions))
 	decryptedTxnsPoolTotalBytes.Sub(float64(totalBytes))
+	if markDeletions > 0 {
+		p.revision.Add(1)
+	}
 	return markDeletions, txnDeletions
+}
+
+func (p *DecryptedTxnsPool) TransactionSetRevision() uint64 {
+	return p.revision.Load()
 }
 
 func (p *DecryptedTxnsPool) AllDecryptedTxns() []types.Transaction {

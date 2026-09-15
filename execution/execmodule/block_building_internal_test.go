@@ -118,7 +118,8 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 	started := make(chan uint64, 2)
 	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		started <- params.PayloadId
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+		header := &types.Header{Extra: []byte{byte(revision.Load())}}
+		return &types.BlockWithReceipts{Block: types.NewBlock(header, nil, nil, nil, nil, nil)}, nil
 	})
 	WithPayloadTransactionsRevision(revision.Load)(module)
 
@@ -127,6 +128,9 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 	require.NoError(t, err)
 	require.Equal(t, first.PayloadID, <-started)
 	require.Eventually(t, module.builders[first.PayloadID].builder.Completed, time.Second, time.Millisecond)
+	firstBlock, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0}, firstBlock.Block.Block.Header().Extra)
 
 	unchanged, err := module.AssembleBlock(t.Context(), params.Copy())
 	require.NoError(t, err)
@@ -137,6 +141,10 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 	require.NoError(t, err)
 	require.NotEqual(t, first.PayloadID, refreshed.PayloadID)
 	require.Equal(t, refreshed.PayloadID, <-started)
+	require.Eventually(t, module.builders[refreshed.PayloadID].builder.Completed, time.Second, time.Millisecond)
+	refreshedBlock, err := module.GetAssembledBlock(t.Context(), refreshed.PayloadID)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, refreshedBlock.Block.Block.Header().Extra)
 }
 
 func TestAssembleBlockBoundsTransactionRefreshesPerPayload(t *testing.T) {

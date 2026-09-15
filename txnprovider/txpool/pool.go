@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,7 +89,7 @@ type Pool interface {
 }
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
-var _ txnprovider.TxnProvider = (*TxPool)(nil)
+var _ txnprovider.RevisionedTxnProvider = (*TxPool)(nil)
 
 // remoteSource carries the peer that delivered a remote txn slot so
 // processRemoteTxns can kick that peer on KZG-verify failure.
@@ -259,6 +258,7 @@ func New(
 		blobs:                   newBlobStore(),
 		senderLastActivity:      make(map[uint64]uint64),
 	}
+	res.pending.revision = &res.transactionSetRevision
 	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
 	// automatically after a few blocks, so the seed only affects the very first sweep interval.
 	res.avgBlockTimeMs.Store(12_000)
@@ -449,9 +449,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	if announcements.Len() > 0 {
-		p.transactionSetRevision.Add(1)
-	}
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxns <- p.promoted.Copy():
@@ -550,8 +547,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	transactionSetChanged := slices.Contains(reasons, txpoolcfg.NotSet)
-
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
@@ -568,9 +563,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
-	if transactionSetChanged {
-		p.transactionSetRevision.Add(1)
-	}
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
 		select {
@@ -1507,7 +1499,6 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	if err != nil {
 		return nil, err
 	}
-	transactionSetChanged := slices.Contains(addReasons, txpoolcfg.NotSet)
 	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
 	// Walk reasons and advance j only on slots that survived validation.
 	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
@@ -1531,9 +1522,6 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 			}
 			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
 		}
-	}
-	if transactionSetChanged {
-		p.transactionSetRevision.Add(1)
 	}
 	if p.promoted.Len() > 0 {
 		select {
