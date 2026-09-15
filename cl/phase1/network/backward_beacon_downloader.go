@@ -189,9 +189,6 @@ func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, bloc
 	if payload.PrevRandao != bid.PrevRandao {
 		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
 	}
-	if payload.FeeRecipient != bid.FeeRecipient {
-		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
-	}
 	if payload.GasLimit != bid.GasLimit {
 		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
 	}
@@ -1278,25 +1275,28 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("envelope fetch: HTTP %d", resp.StatusCode)
 	}
-	version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+	version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
 	if err != nil {
-		return nil, err
-	}
-	if version != clparams.GloasVersion {
-		return nil, fmt.Errorf("envelope version mismatch: expected %s, received %s", clparams.GloasVersion, version)
+		return nil, fmt.Errorf("envelope consensus version: %w", err)
 	}
 	if err := validateHTTPBlockVersion(b.beaconCfg, block.Block.Slot, version); err != nil {
 		return nil, err
 	}
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(b.beaconCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconCfg, version),
 	}
-	if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
 	}
-	if envelope.Message == nil || envelope.Message.BeaconBlockRoot != blockRoot {
-		return nil, fmt.Errorf("envelope block root mismatch: requested %v", blockRoot)
+	if envelope.Message == nil {
+		return nil, fmt.Errorf("envelope block root mismatch: requested %x", blockRoot)
+	}
+	if err := envelope.ValidateForConfig(b.beaconCfg); err != nil {
+		return nil, fmt.Errorf("envelope validation: %w", err)
+	}
+	if envelope.Message.BeaconBlockRoot != blockRoot {
+		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)
 	}
 	if b.validateGloasEnvelope != nil {
 		if err := b.validateGloasEnvelope(block, envelope); err != nil {
