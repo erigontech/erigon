@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -139,32 +138,17 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
-	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
+	start := time.Now()
 	src, err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger)
 	if err != nil {
 		return err
 	}
-	// The exclusive src stays open until the rename, so a process that doesn't take
-	// the datadir lock can't open the file that is being replaced. Windows can't
-	// rename over a file mdbx opened in exclusive mode.
-	closeSrc := sync.OnceFunc(src.Close)
-	defer closeSrc()
-	if runtime.GOOS == "windows" {
-		closeSrc()
-	}
-
-	// Mode and owner are applied before the rename, the last step that may fail.
-	copied := filepath.Join(tmpDir, dataFileName)
-	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
+	closeBeforeRename(src)
+	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before) // exclusive src stays open, so nobody opens the file being replaced
+	src.Close()
+	if err != nil {
 		return err
 	}
-	if err := restoreOwner(before, copied); err != nil {
-		return err
-	}
-	if err := os.Rename(copied, dataFile); err != nil {
-		return err
-	}
-	closeSrc()
 
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
@@ -172,10 +156,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.FsyncDir(dbDir); err != nil {
 		logger.Warn("[compact] fsync dir", "db", dbDir, "err", err)
 	}
-	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
-		logger.Warn("[compact] stale lock file left behind", "db", dbDir, "err", err)
-	}
-	args := []any{"label", label, "db", dbDir, "before", common.ByteCount(uint64(before.Size()))}
+	args := []any{"label", label, "db", dbDir, "took", time.Since(start), "before", common.ByteCount(uint64(before.Size()))}
 	if after, err := os.Stat(dataFile); err == nil {
 		args = append(args, "after", common.ByteCount(uint64(after.Size())))
 	} else {
@@ -185,9 +166,18 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	return nil
 }
 
-// copyToDir closes the copy before it returns: the caller moves it, which must not
-// happen while mdbx still holds it open. On success the exclusive src is returned
-// open, and the caller closes it.
+// moveOver gives the copy the mode and owner of the original, then renames it over the original.
+func moveOver(copied, original string, before os.FileInfo) error {
+	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := restoreOwner(before, copied); err != nil {
+		return err
+	}
+	return os.Rename(copied, original)
+}
+
+// copyToDir closes the copy before it returns and returns src still open.
 func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) (kv.RoDB, error) {
 	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, nil, logger)
 	if err != nil {
@@ -263,7 +253,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 			copiedRows += rows
 		}
 	}
-	logger.Info("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
+	logger.Debug("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
@@ -282,12 +272,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return 0, err
 	}
-	if total > 0 {
-		logger.Info("[db-copy] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
-	}
-
-	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
-	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
+	// Read-ahead warms pages (values too) just ahead of the copy cursor.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
