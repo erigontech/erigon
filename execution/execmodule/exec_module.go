@@ -513,6 +513,17 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		// crosses into validation space — the FCU that follows canonicalises it through the ordinary merge
 		// path, exactly as it would a block a follower had executed. Without the adopt the block is accepted
 		// but no candidate is installed, and the FCU falls through to re-executing it from canonical state.
+		//
+		// It is also where the block's data crosses over. The seal keeps the sealed block in pre-exec space; the fork
+		// choice looks its header up in the module context, so it is staged there now — here, and nowhere earlier.
+		if !e.semaphore.TryAcquire(1) {
+			return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+		}
+		stageErr := e.stageSealedForCanonicalLocked(ctx, blockHash, blockNumber)
+		e.semaphore.Release(1)
+		if stageErr != nil {
+			return ValidationResult{}, fmt.Errorf("ValidateChain: %w", stageErr)
+		}
 		adopted := e.forkValidator.AdoptPreExecuted(blockHash, blockNumber)
 		e.logger.Debug("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
 			"number", blockNumber, "hash", blockHash, "root", sealed.Root, "adopted", adopted)
@@ -535,7 +546,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 // a re-entrant TryAcquire that would return Busy. Callers MUST hold e.semaphore.
 func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
-	e.currentContext.ResetPendingUpdates()
+	if e.currentContext != nil {
+		e.currentContext.ResetPendingUpdates()
+	}
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -562,7 +575,9 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+		if header != nil && body != nil {
+			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+		}
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -575,7 +590,9 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 			if err != nil {
 				return err
 			}
-			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+			if header != nil && body != nil {
+				e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+			}
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 			return nil
 		}); err != nil {
@@ -589,18 +606,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		}, nil
 	}
 
-	// Flashblock detection: check whether this block is a prefix-extension
-	// of an in-progress flashblock before clearing the fork validator state.
-	// body.Transactions is needed for the prefix comparison.
-	flashUpdate := e.preExec.CheckUpdate(blockNumber, body.Transactions)
-	if flashUpdate.IsUpdate {
-		e.logger.Debug("[execmodule] flashblock update detected",
-			"number", blockNumber, "hash", blockHash,
-			"prevTxs", flashUpdate.PrefixLen,
-			"newTxs", len(body.Transactions))
-	} else {
-		e.forkValidator.ClearWithUnwind()
-	}
+	e.forkValidator.ClearWithUnwind()
 
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
 		return ValidationResult{
@@ -623,72 +629,25 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	}
 	defer roTx.Rollback()
 
-	// A flashblock CLOSE reuses the maintained accumulating SD (fv.sharedDom) directly as the
-	// validate SD — "the preexec SD becomes the validate SD." No fresh SD, no VersionedIO transfer:
-	// the block's whole body already executed into THIS SD across the PreExecute rounds, and its
-	// commitment trie has folded each round's diff. The close unsets FlashblockAccumulating (so the
-	// block-end task runs engine.Finalize) and resumes execution PAST the full prefix (SetPreExecStart
-	// at the block-end position) so no body tx re-executes — only the block-end/seal runs. The final
-	// ComputeCommitment folds any remaining diff and yields the SAME root a one-shot full execution
-	// would (the trie is a function of the final key→value set, not the fold order/splitting).
-	reuseClose := flashUpdate.IsUpdate && flashUpdate.SD != nil
+	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
+	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
+	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
+	// We Close explicitly only on the early-return error paths below.
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
-	var doms *execctx.SharedDomains
-	var tx kv.TemporalRwTx
-	if reuseClose {
-		doms = flashUpdate.SD
-		doms.BlockOverlay().UpdateTxn(roTx)
-		doms.SetInMemHistoryReads(true)
-		doms.SetFlashblockAccumulating(false)
-		// SINGLE-CHAIN ([[consensus_advance_untested_regression]]): resolve this block's Min txNum through
-		// the block OVERLAY, not the base roTx. On a frontier block the predecessor's MaxTxNum index entry
-		// lives only in the (copied) overlay — never the committed DB — so Min via roTx computes off stale
-		// committed state (Max(prev) misses the frontier predecessor) and lands the resume point inside the
-		// PRIOR block. The overlay merges the copied index → Min returns THIS block's true start.
-		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, doms.BlockOverlay(), blockNumber); merr == nil {
-			// minTxNum is the block-START system txNum. The maintained SD already ran block-start (and the
-			// PrefixLen already-executed regular txs) during the pre-exec rounds, so the close must resume PAST
-			// both: +1 skips the block-start txNum, +PrefixLen skips the executed regular prefix. Omitting the +1
-			// made an EMPTY block (PrefixLen==0) resume AT block-start and RE-RUN it; re-touching the block-start
-			// system keys re-folds the commitment and, for some account/trie layouts, yields a root that diverges
-			// from the pre-exec (open) root — the empty-successor seal flake. (For a non-empty block PrefixLen>=1
-			// pushed the resume past block-start, so the bug only surfaced on empty blocks.)
-			// The resume point is the LAST ALREADY-EXECUTED txNum, not the first one to run: the skip loop
-			// in exec3 drops every task with inputTxNum <= this, so execution begins one past it. The
-			// block's txNums are [minTxNum]=block-start, [minTxNum+1 .. minTxNum+PrefixLen]=the regular
-			// body, [minTxNum+PrefixLen+1]=block-end. So minTxNum+PrefixLen resumes AT the block-end, which
-			// is the whole point of the close.
-			//
-			// It was minTxNum+1+PrefixLen, which is the block-end's own txNum — and being <= the resume
-			// point, the block-end was skipped along with the body. Finalize therefore never ran at the
-			// close on the flashblock path, and withdrawals, which are credited there and nowhere else,
-			// were never applied: every venue block declared a withdrawals list in its header and credited
-			// none of it, so the state did not match what the header committed to.
-			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
-			defer doms.ClearPreExecStart()
-		}
-		tx = doms.BlockOverlay()
-	} else {
-		doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
-		if err != nil {
-			return ValidationResult{}, err
-		}
-		// NOTE: do NOT defer doms.Close(). On the success path, ownership of
-		// doms transfers to forkValidator.sharedDom inside ValidatePayload —
-		// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
-		// We Close explicitly only on the early-return error paths below.
-		doms.SetInMemHistoryReads(inMemHistoryReads)
+	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		doms.Close()
+		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
+	}
+	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-		if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
-			doms.Close()
-			return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
-		}
-		tx = doms.BlockOverlay()
-
-		// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
-		if e.currentContext != nil {
-			doms.SetParent(e.currentContext)
-		}
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	if e.currentContext != nil {
+		doms.SetParent(e.currentContext)
 	}
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
@@ -700,9 +659,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	// e.currentContext in an inconsistent state for UpdateForkChoice.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			if !reuseClose {
-				doms.Close()
-			}
+			doms.Close()
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
@@ -710,41 +667,18 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
-		if !reuseClose {
-			doms.Close()
-		}
+		doms.Close()
 		return ValidationResult{}, err
 	}
 
-	// A flashblock CLOSE is the PRODUCER finishing its own block, so it runs the producer's execution
-	// primitive. ValidatePayload is validation: it asks whether a block it is being shown is valid, and
-	// answers from validHashes and the canonical index — both of which already say yes, because the
-	// accumulation rounds put this very hash there. Routed through it, the close short-circuited as
-	// "already validated" and never executed, so block-end never ran and withdrawals were never credited.
-	//
-	// The previous guard against that short-circuit tested `sd == fv.sharedDom` — true while the producer's
-	// maintained SD sat in the validation slot, and never true once pre-exec moved into its own space. The
-	// answer is not to teach validation about pre-exec's SD. It is that the close was never a validation
-	// question: pre-exec has its own close, and it executes through its own path.
-	var (
-		status          engine_types.EngineStatus
-		lvh             common.Hash
-		validationError error
-		criticalError   error
-	)
-	if reuseClose {
-		status, _, validationError, criticalError = e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
-		lvh = header.Hash()
-	} else {
-		status, lvh, validationError, criticalError = e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
-	}
+	// Validation only. The producer's close of its own pre-executed block is not a validation question and does not
+	// come through here: pre-exec has its own close (closePreExecutedLocked).
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
 
-	// Record tx hashes for flashblock prefix detection on subsequent updates.
 	if status == engine_types.ValidStatus && body != nil {
-		e.preExec.RecordTxHashes(body.Transactions)
 
 		// Intra-block notification: tell subscribers these txs are validated.
 		// Noop when no subscribers (standard Ethereum). In flashblock mode
@@ -812,61 +746,26 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
-	// Surface the sealed output side ONLY on a successful close. On a FAILED validation the fork validator
-	// CLOSES the SD, so GetCommitmentContext() returns nil and reading the trie would nil-deref and crash
-	// the node — a bad block must return BadBlock, not panic. Read the sealed root off the validated SD's
-	// commitment trie (same pattern as preexecute.go), then seal the OUTPUT-SIDE header fields off the
-	// accumulated flashblock receipts (zero re-exec): block-end ran, so these are final. Each round used a
-	// per-round gas pool, so restamp CumulativeGasUsed as the running sum across the full body (else GasUsed
-	// AND ReceiptHash diverge from a one-shot full execution).
+	// The computed root ONLY on success: on a FAILED validation the fork validator CLOSES the SD, so
+	// GetCommitmentContext() returns nil and reading the trie would nil-deref — a bad block must return BadBlock.
 	if validationStatus == ExecutionStatusSuccess {
 		if cc := doms.GetCommitmentContext(); cc != nil {
 			if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
 				result.ComputedRoot = common.BytesToHash(root)
 			}
 		}
-		// FRONTIER POSITION SAVE ([[consensus_advance_untested_regression]], user 2026-08-24 "parent view"):
-		// the fork-validation close reads the root off the folded trie but — unlike the normal FCU path
-		// (computeAndCheckCommitmentV3) — never persists the commitment "state" marker (KeyCommitmentState)
-		// into THIS SD. On the frontier chain that SD is PARKED as the successor block's read-through parent,
-		// and BOTH the successor's SeekCommitment AND the FCU merge (otherTxNum) read block N's position from
-		// it. Without the marker they fall through to the predecessor's position → the successor builds on the
-		// wrong block and the merge is a zero-diff (the DB position never advances). Persist it here (trie is
-		// already folded → ComputeCommitment hits the updateCount==0 save-only path, cheap). reuseClose only:
-		// the frontier flow parks this SD; a plain fork-validation SD is discarded, so the write is harmless
-		// there but unnecessary.
-		if reuseClose {
-			bn := header.Number.Uint64()
-			if blockTxNum, terr := e.blockReader.TxnumReader().Max(ctx, tx, bn); terr == nil {
-				if _, cerr := doms.ComputeCommitment(ctx, tx, true, bn, blockTxNum, "frontier-close", nil); cerr != nil {
-					return ValidationResult{}, fmt.Errorf("frontier close: save commitment state: %w", cerr)
-				}
-			}
-		}
-		// Seal the OUTPUT-SIDE header fields off the accumulated flashblock receipts (zero re-exec).
-		// UNCONDITIONAL, including the EMPTY (0-tx heartbeat) block: DeriveSha(nil) = EmptyRootHash
-		// (0x56e81f17…) and CreateBloom(nil) = the zero bloom — exactly what a full re-execution +
-		// BlockPostValidation computes for an empty block. Gating this on len>0 left ReceiptHash at its
-		// ZERO value for an empty block, so the sealed header carried ReceiptHash=0x00.. and re-validation
-		// rejected it ("receiptHash mismatch: 56e81f17… != 0000…"). That is the cold-boot empty heartbeat
-		// block-1 that froze the DAG-L2 at block 0 (BlockAdvance only exercised NON-empty blocks, so it
-		// never caught this). GasUsed=0 and an empty bloom are the correct output side for a 0-tx block.
-		fbReceipts := doms.FlashblockReceipts()
+		// The output side of this validation's own execution, off the receipts it produced.
+		receipts := doms.FlashblockReceipts()
 		var cum uint64
-		for _, r := range fbReceipts {
+		for _, r := range receipts {
 			cum += r.GasUsed
 			r.CumulativeGasUsed = cum
 		}
-		result.FlashblockReceiptCount = len(fbReceipts)
+		result.FlashblockReceiptCount = len(receipts)
 		result.GasUsed = cum
-		result.ReceiptHash = types.DeriveSha(fbReceipts)
-		result.Bloom = types.CreateBloom(fbReceipts)
+		result.ReceiptHash = types.DeriveSha(receipts)
+		result.Bloom = types.CreateBloom(receipts)
 	}
-	// The CLOSE is pure COMPUTE (assemble): it runs block-end over the maintained SD and returns the
-	// sealed output side, but does NOT write the sealed block or re-key the fork validator. Writing the
-	// real-root header H1 into the overlay + re-pointing the extending fork is the newPayload step —
-	// IngestSealedFlashblock — so a proposer and its peers share ONE ingest path (getPayload assembles,
-	// newPayload ingests, FCU canonicalises).
 	return result, nil
 }
 
@@ -880,7 +779,9 @@ func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, co
 	if sd == nil || oldHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: no in-progress flashblock")
 	}
-	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
+	// From the generation's own overlay: the module context is the canonical path's, and a fork choice tears it down.
+	ov := e.generationOverlay(oldHash, number)
+	if ov == nil {
 		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: no block overlay")
 	}
 	roTx, err := e.db.BeginTemporalRo(ctx)
@@ -888,7 +789,6 @@ func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, co
 		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: begin ro: %w", err)
 	}
 	defer roTx.Rollback()
-	ov := e.currentContext.BlockOverlay()
 	ov.UpdateTxn(roTx)
 	body, err := e.blockReader.BodyWithTransactions(ctx, ov, oldHash, number)
 	if err != nil {
@@ -990,8 +890,16 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	}
 	defer roTx.Rollback()
 
-	ov := e.currentContext.BlockOverlay()
+	// Re-key in the generation's own overlay — where the rounds put the in-progress block, and where SealActive
+	// rewrites the head and canonical entries below. The module context is the canonical path's: a fork choice can
+	// have torn it down since the last round.
+	ov := e.generationOverlay(oldHash, number)
+	if ov == nil {
+		return fmt.Errorf("IngestSealedFlashblock: no block overlay for %x", oldHash)
+	}
 	ov.UpdateTxn(roTx)
+	// Pre-exec space only. The canonical path gets the sealed block when newPayload hands it over.
+	targets := []kv.RwTx{ov}
 
 	td, err := rawdb.ReadTd(ov, oldHash, number)
 	if err != nil {
@@ -1000,11 +908,13 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	if td == nil {
 		td = new(uint256.Int)
 	}
-	if err := rawdb.WriteHeader(ov, sealed); err != nil {
-		return fmt.Errorf("IngestSealedFlashblock: write header: %w", err)
-	}
-	if err := rawdb.WriteTd(ov, newHash, number, *td); err != nil {
-		return fmt.Errorf("IngestSealedFlashblock: write TD: %w", err)
+	for _, t := range targets {
+		if err := rawdb.WriteHeader(t, sealed); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: write header: %w", err)
+		}
+		if err := rawdb.WriteTd(t, newHash, number, *td); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: write TD: %w", err)
+		}
 	}
 	// RE-KEY the body, do not write a second copy. The sealed block carries EXACTLY the transactions of the
 	// in-progress block it closes — only the header hash changes — so its transactions are already in kv.EthTx,
@@ -1015,23 +925,32 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	// read back a mixture of its own body and its successor's, so it could not be re-executed ("nonce too
 	// high" on receipt derivation) even though its state was correct. Re-keying reuses the range the rounds
 	// already wrote — one record write instead of a full body rewrite per block.
-	if bfs, rerr := rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, oldHash)); rerr == nil && bfs != nil &&
-		bfs.TxCount == types.TxCountToTxAmount(len(body.Transactions)) {
-		if err := rawdb.WriteBodyForStorage(ov, newHash, number, bfs); err != nil {
+	bfs, rerr := rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, oldHash))
+	if rerr != nil || bfs == nil || bfs.TxCount != types.TxCountToTxAmount(len(body.Transactions)) {
+		// No in-progress record to re-key (or it disagrees with the sealed body) — write one. This is the
+		// allocating path above, so it is the fallback, not the norm, and it runs ONCE: into the generation, whose
+		// record every target then takes.
+		if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
+		}
+		if bfs, rerr = rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, newHash)); rerr != nil || bfs == nil {
+			return fmt.Errorf("IngestSealedFlashblock: read back written body: %v", rerr)
+		}
+	}
+	for _, t := range targets {
+		if err := rawdb.WriteBodyForStorage(t, newHash, number, bfs); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
-	} else if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
-		// No in-progress record to re-key (or it disagrees with the sealed body) — write one. This is the
-		// allocating path above, so it is the fallback, not the norm.
-		return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
 	}
 	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a
 	// normal newPayload: exactly ONE block at this height (the sealed H1). The deferred ibHash is a scratch
 	// artifact of the flashblock accumulation — leaving it would strand an orphan header/body/TD at height N.
-	rawdb.DeleteHeader(ov, oldHash, number)
-	rawdb.DeleteBody(ov, oldHash, number)
-	if err := ov.Delete(kv.HeaderTD, dbutils.HeaderKey(number, oldHash)); err != nil {
-		return fmt.Errorf("IngestSealedFlashblock: delete deferred TD: %w", err)
+	for _, t := range targets {
+		rawdb.DeleteHeader(t, oldHash, number)
+		rawdb.DeleteBody(t, oldHash, number)
+		if err := t.Delete(kv.HeaderTD, dbutils.HeaderKey(number, oldHash)); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: delete deferred TD: %w", err)
+		}
 	}
 	if err := e.preExec.SealActive(oldHash, newHash, number); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: seal in place: %w", err)
@@ -1046,6 +965,58 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	e.pendingBlockMu.Unlock()
 	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
 		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
+	return nil
+}
+
+// stageSealedForCanonicalLocked hands a block this node sealed over to the canonical path. newPayload is where a
+// pre-executed block crosses into it: the fork choice that follows resolves the head — and the next block's insert its
+// parent — from the module context, so the sealed header, TD and body record are copied there from the generation's
+// overlay, where the seal put them. The body is not rewritten: its transactions are already stored, and a second
+// write would allocate them a second id range. Caller holds e.semaphore.
+func (e *ExecModule) stageSealedForCanonicalLocked(ctx context.Context, hash common.Hash, number uint64) error {
+	gen := e.generationOverlay(hash, number)
+	if gen == nil {
+		// Not in pre-exec space (never there, or already retired): there is nothing to hand over.
+		return nil
+	}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return fmt.Errorf("stage sealed block: begin ro: %w", err)
+	}
+	defer roTx.Rollback()
+	gen.UpdateTxn(roTx)
+	mod, err := e.moduleContextLocked(ctx, roTx)
+	if err != nil {
+		return fmt.Errorf("stage sealed block: module context: %w", err)
+	}
+	dst := mod.BlockOverlay()
+	if dst == gen {
+		return nil
+	}
+	hdr := rawdb.ReadHeader(gen, hash, number)
+	if hdr == nil {
+		return fmt.Errorf("stage sealed block %d %x: header not in its generation", number, hash)
+	}
+	td, err := rawdb.ReadTd(gen, hash, number)
+	if err != nil {
+		return fmt.Errorf("stage sealed block: read TD: %w", err)
+	}
+	if td == nil {
+		td = new(uint256.Int)
+	}
+	bfs, err := rawdb.ReadBodyForStorageByKey(gen, dbutils.BlockBodyKey(number, hash))
+	if err != nil || bfs == nil {
+		return fmt.Errorf("stage sealed block %d %x: body record: %v", number, hash, err)
+	}
+	if err := rawdb.WriteHeader(dst, hdr); err != nil {
+		return fmt.Errorf("stage sealed block: write header: %w", err)
+	}
+	if err := rawdb.WriteTd(dst, hash, number, *td); err != nil {
+		return fmt.Errorf("stage sealed block: write TD: %w", err)
+	}
+	if err := rawdb.WriteBodyForStorage(dst, hash, number, bfs); err != nil {
+		return fmt.Errorf("stage sealed block: write body record: %w", err)
+	}
 	return nil
 }
 

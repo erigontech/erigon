@@ -39,71 +39,169 @@ func copyFrontierChainTables(src, dst *membatchwithdb.MemoryMutation, roTx kv.Te
 		}
 		c.Close()
 	}
+	// The transaction id sequence too. This block's body is allocated its ids after its parent's, and the parent
+	// allocated those in its own overlay and has not committed them: seeded from the DB alone, this overlay would hand
+	// the successor the parent's ids and its body would overwrite the parent's transactions. Only ever moved forward —
+	// a parent that has since committed leaves the DB's sequence ahead of it.
+	parentSeq, err := src.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	ownSeq, err := dst.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	if parentSeq > ownSeq {
+		return dst.ResetSequence(kv.EthTx, parentSeq)
+	}
 	return nil
 }
 
-// PreExecute is the flashblock PRE-EXECUTION entry, sitting beside ValidateChain and
-// sharing the same fork-validator SharedDomains so a subsequent ValidateChain / newPayload
-// finalises what it builds (and FCU commits it). It incrementally executes a block's NEW
-// transactions into the ONE MAINTAINED SharedDomains, carrying accumulated state forward
-// across rounds, firing execobserver.OnTx once per new tx — the generic flashblocks builder
-// (any tx source). It runs NO finished-block checks (root/gas belong to the seal/validate).
-//
-// The single-execution guarantee: because the SD is MAINTAINED (not recreated as ValidateChain
-// does), its committed txNum already reflects the prefix already executed, so exec3 resumes at
-// the new txs and does not re-run the prefix. PreExecute records the accumulated flashblock tx
-// hashes, so ValidateChain(sameBlock) later sees a 100%-prefix match (CheckFlashblockUpdate) and
-// validates the root over this SD with ZERO re-execution — one execution total.
-//
-// The caller InsertBlocks the growing in-progress block (fixed context: number/timestamp/parent
-// set once) before each PreExecute, exactly as it would before ValidateChain.
-func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
-	if !e.semaphore.TryAcquire(1) {
-		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+// closePreExecutedLocked is the pre-exec CLOSE: block-end over the block in progress, and its output side read off the
+// generation with ZERO body re-execution. It reads and executes only in pre-exec space — the block from its
+// generation's overlay, state from the generation — so a fork choice between the block's last round and its close
+// cannot take anything out from under it. Caller holds e.semaphore.
+func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+	ov := e.generationOverlay(blockHash, blockNumber)
+	if ov == nil {
+		return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
 	}
-	defer e.semaphore.Release(1)
-	return e.preExecuteLocked(ctx, blockHash, blockNumber)
-}
-
-// preExecuteLocked is PreExecute's body with the caller ALREADY holding e.semaphore. PreExecute TryAcquires and
-// calls this; the atomic assemble path (opening the successor flashblock inside SealBlock) calls it directly.
-func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
-	e.currentContext.ResetPendingUpdates()
-
-	var (
-		header *types.Header
-		body   *types.Body
-		err    error
-	)
-	// Read header/body from the in-progress block overlay (InsertBlocks writes there before flush).
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		overlay := e.currentContext.BlockOverlay()
-		roTx, rerr := e.db.BeginTemporalRo(ctx)
-		if rerr != nil {
-			return ValidationResult{}, rerr
-		}
-		defer roTx.Rollback()
-		overlay.UpdateTxn(roTx)
-		if header, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber); err != nil {
-			return ValidationResult{}, err
-		}
-		if body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber); err != nil {
-			return ValidationResult{}, err
-		}
-	} else {
-		if err = e.db.View(ctx, func(tx kv.Tx) error {
-			if header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber); err != nil {
-				return err
-			}
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-			return err
-		}); err != nil {
-			return ValidationResult{}, err
-		}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	defer roTx.Rollback()
+	ov.UpdateTxn(roTx)
+	header, err := e.blockReader.Header(ctx, ov, blockHash, blockNumber)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	body, err := e.blockReader.BodyWithTransactions(ctx, ov, blockHash, blockNumber)
+	if err != nil {
+		return ValidationResult{}, err
 	}
 	if header == nil || body == nil {
 		return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
 	}
+	flashUpdate := e.preExec.CheckUpdate(blockNumber, body.Transactions)
+	if !flashUpdate.IsUpdate || flashUpdate.SD == nil {
+		return ValidationResult{}, fmt.Errorf("pre-exec close: block %d %x is not the block in progress", blockNumber, blockHash)
+	}
+
+	// The close reuses the maintained accumulating SD: the block's whole body already executed into it across the
+	// rounds, and its commitment trie has folded each round's diff. It unsets FlashblockAccumulating (so the block-end
+	// task runs engine.Finalize) and resumes execution AT the block-end — past block-start and the executed prefix —
+	// so no body tx re-executes and the final ComputeCommitment yields the SAME root a one-shot execution would.
+	doms := flashUpdate.SD
+	tx := doms.BlockOverlay()
+	tx.UpdateTxn(roTx)
+	doms.SetInMemHistoryReads(true)
+	doms.SetFlashblockAccumulating(false)
+	// The block's Min txNum resolves through the block OVERLAY: on a frontier block the predecessor's MaxTxNum entry
+	// lives only there. minTxNum is the block-START system txNum, and the resume point is the LAST already-executed
+	// txNum (exec3's skip loop drops every task <= it): minTxNum+PrefixLen, which resumes AT the block-end. One past
+	// that skipped the block-end itself, so Finalize never ran and withdrawals were never credited.
+	if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, tx, blockNumber); merr == nil {
+		doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
+		defer doms.ClearPreExecStart()
+	}
+	doms.SetStateCache(e.stateCache)
+	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
+		return ValidationResult{}, err
+	}
+
+	status, _, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
+	if criticalError != nil {
+		return ValidationResult{}, criticalError
+	}
+	result := ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: header.Hash()}
+	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
+		result.ValidationStatus = ExecutionStatusBadBlock
+		if validationError != nil {
+			result.ValidationError = validationError.Error()
+		}
+		if e.stateCache != nil {
+			e.stateCache.ClearWithHash(header.ParentHash)
+		}
+		return result, nil
+	}
+	if status == engine_types.AcceptedStatus {
+		result.ValidationStatus = ExecutionStatusMissingSegment
+		return result, nil
+	}
+	e.preExec.RecordTxHashes(body.Transactions)
+	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
+		txHashes := make([]common.Hash, len(body.Transactions))
+		for i, t := range body.Transactions {
+			txHashes[i] = t.Hash()
+		}
+		dispatcher.OnTransactionValidated(txHashes)
+	}
+
+	if cc := doms.GetCommitmentContext(); cc != nil {
+		if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
+			result.ComputedRoot = common.BytesToHash(root)
+		}
+	}
+	// FRONTIER POSITION SAVE: the close reads the root off the folded trie but never persists the commitment "state"
+	// marker into THIS SD. It is parked as the successor's read-through parent, and both the successor's
+	// SeekCommitment and the FCU merge read the block's position from it — without the marker they fall through to the
+	// predecessor's position. The trie is already folded, so this hits the save-only path.
+	if blockTxNum, terr := e.blockReader.TxnumReader().Max(ctx, tx, blockNumber); terr == nil {
+		if _, cerr := doms.ComputeCommitment(ctx, tx, true, blockNumber, blockTxNum, "frontier-close", nil); cerr != nil {
+			return ValidationResult{}, fmt.Errorf("frontier close: save commitment state: %w", cerr)
+		}
+	}
+	// The output side off the accumulated receipts, including the EMPTY block: DeriveSha(nil) = EmptyRootHash and an
+	// empty bloom are exactly what a full re-execution computes. Each round used a per-round gas pool, so
+	// CumulativeGasUsed is restamped as the running sum across the whole body.
+	fbReceipts := doms.FlashblockReceipts()
+	var cum uint64
+	for _, r := range fbReceipts {
+		cum += r.GasUsed
+		r.CumulativeGasUsed = cum
+	}
+	result.FlashblockReceiptCount = len(fbReceipts)
+	result.GasUsed = cum
+	result.ReceiptHash = types.DeriveSha(fbReceipts)
+	result.Bloom = types.CreateBloom(fbReceipts)
+	return result, nil
+}
+
+// generationOverlay returns the overlay of the pre-exec generation holding (hash, number), or nil when the frontier
+// holds no such block. Pre-exec reads a block's data only from here — never from the module context, which is the
+// canonical flow's.
+func (e *ExecModule) generationOverlay(hash common.Hash, number uint64) *membatchwithdb.MemoryMutation {
+	if sd := e.preExec.Find(hash, number); sd != nil {
+		return sd.BlockOverlay()
+	}
+	return nil
+}
+
+// preExecuteLocked runs a pre-exec round: it stores the round's block in pre-exec state and executes the block's NEW
+// transactions into the ONE MAINTAINED SharedDomains of the block in progress (or a fresh one for a block's first
+// round), carrying accumulated state forward across rounds and firing execobserver.OnTx once per new tx. It runs NO
+// finished-block checks (root/gas belong to the close).
+//
+// The single-execution guarantee: because the SD is MAINTAINED, its committed txNum already reflects the prefix already
+// executed, so exec3 resumes at the new txs and does not re-run the prefix. The close later sees a 100%-prefix match
+// (CheckUpdate) and seals over this SD with ZERO re-execution — one execution total.
+//
+// Everything here is pre-exec space: the block goes into the round's own overlay, and nothing is read from or written to
+// the module context, which is the canonical flow's. Caller holds e.semaphore.
+func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock) (ValidationResult, error) {
+	header := block.Header
+	blockNumber := header.Number.Uint64()
+	txs := make([]types.Transaction, 0, len(block.Body.Transactions))
+	for i, rlp := range block.Body.Transactions {
+		txn, derr := types.DecodeTransaction(rlp)
+		if derr != nil {
+			return ValidationResult{}, fmt.Errorf("pre-exec block %d: decode tx %d: %w", blockNumber, i, derr)
+		}
+		txs = append(txs, txn)
+	}
+	body := &types.Body{Transactions: txs, Withdrawals: block.Body.Withdrawals}
+	var err error
 
 	// Flashblock prefix detection against the in-progress flashblock.
 	flashUpdate := e.preExec.CheckUpdate(blockNumber, body.Transactions)
@@ -193,13 +291,11 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	} else {
 		// Chain onto the predecessor's still-live pre-executed SD, captured BEFORE constructing this block's
 		// SD so its initial SeekCommitment resolves through the parent's LIVE commitment rather than the
-		// lagging DB (the predecessor has opened but not canonicalised). Falls back to currentContext
-		// (canonical) when there is no live ancestor — the first block after a restart.
+		// lagging DB (the predecessor has opened but not canonicalised). With no live ancestor — the first block
+		// after a restart — the parent is canonical, and its state is read from the DB beneath the SD: never from
+		// the module context, which is the canonical flow's.
 		frontierParent := e.preExec.ParentFor(blockNumber)
 		parent := frontierParent
-		if parent == nil {
-			parent = e.currentContext
-		}
 		frontierExtension = frontierParent != nil
 
 		// First round: fresh SD + overlay, exactly like ValidateChain opens one. The fresh SD starts
@@ -241,15 +337,13 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 
 	tx := doms.BlockOverlay()
 
-	// Flush the InsertBlocks overlay (this round's block header/body) into the exec overlay so
-	// unwindToCommonCanonical and the parallel exec goroutine see this block's data.
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		if err = e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			if !reuse {
-				doms.Close()
-			}
-			return ValidationResult{}, err
+	// The round's block goes into pre-exec state itself — the generation's overlay for a staged round, the fresh
+	// block's own otherwise — where execution, the close and the seal read it.
+	if err = e.writePreExecBlock(tx, roTx, block); err != nil {
+		if !reuse {
+			doms.Close()
 		}
+		return ValidationResult{}, fmt.Errorf("pre-exec block %d: %w", blockNumber, err)
 	}
 	doms.SetStateCache(e.stateCache)
 

@@ -161,7 +161,7 @@ func (e *ExecModule) AssembleInProgress(ctx context.Context) (*types.Header, boo
 	if !valid || hash == (common.Hash{}) {
 		return nil, false, nil
 	}
-	res, err := e.validateChainLocked(ctx, hash, num)
+	res, err := e.closePreExecutedLocked(ctx, hash, num)
 	if err != nil {
 		return nil, false, err
 	}
@@ -287,11 +287,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	header := BuildFlashHeader(inputs, body, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}}
-	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
-	if err != nil || status != ExecutionStatusSuccess {
-		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("PreExecuteFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(body), status, err)
-	}
-	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
+	vr, err := e.preExecuteLocked(ctx, rawBlock)
 	// A round that WON its commit claim is committed, even if its deadline passed while it merged: the
 	// caller saw the claim taken and is waiting for this result, so reporting it abandoned now would be
 	// the duplicate return the claim exists to prevent.
@@ -404,11 +400,7 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 	header := BuildFlashHeader(inputs, restored, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: restored, Withdrawals: inputs.Withdrawals}}
-	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
-	if err != nil || status != ExecutionStatusSuccess {
-		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("reopenFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(restored), status, err)
-	}
-	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
+	vr, err := e.preExecuteLocked(ctx, rawBlock)
 	if err != nil {
 		return nil, common.Hash{}, vr, err
 	}

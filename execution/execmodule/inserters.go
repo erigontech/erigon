@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -50,6 +51,87 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
 	}
 	sd.CloseBlockOverlay()
+	return nil
+}
+
+// moduleContextLocked returns the module context with its block overlay ready on roTx — where block data is staged
+// for the canonical path (InsertBlocks, the fork choice) — creating either if it does not exist: a fork choice tears
+// the context down. Caller holds e.semaphore.
+func (e *ExecModule) moduleContextLocked(ctx context.Context, roTx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd := e.currentContext
+	if sd == nil {
+		var err error
+		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
+		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
+		if err != nil {
+			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				return nil, fmt.Errorf("could not create shared domains: %s", err)
+			}
+			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
+		}
+		e.lock.Lock()
+		e.currentContext = sd
+		e.lock.Unlock()
+	}
+	if sd.BlockOverlay() == nil {
+		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			return nil, err
+		}
+	} else {
+		sd.BlockOverlay().UpdateTxn(roTx)
+	}
+	return sd, nil
+}
+
+// writePreExecBlock stores a pre-exec round's block — header, total difficulty, body — in the round's own overlay, where
+// its execution, the close and the seal read it. The parent is read from the pre-exec generation holding it when there
+// is one (before newPayload a sealed parent exists nowhere else), otherwise from canonical data beneath the overlay.
+// It never touches the module context: that is the canonical flow's. Caller holds e.semaphore.
+func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *types.RawBlock) error {
+	header := block.Header
+	number := header.Number.Uint64()
+	if gen := e.generationOverlay(header.ParentHash, number-1); gen != nil && kv.RwTx(gen) != tx {
+		// The block's execution verifies it against its parent in its own overlay, and raw tables do not read through
+		// to the parent generation, so the parent's header and TD are carried in.
+		gen.UpdateTxn(roTx)
+		parent := rawdb.ReadHeader(gen, header.ParentHash, number-1)
+		if parent == nil {
+			return fmt.Errorf("parent header %d %x not in its generation", number-1, header.ParentHash)
+		}
+		genTd, err := rawdb.ReadTd(gen, header.ParentHash, number-1)
+		if err != nil {
+			return fmt.Errorf("read parent TD: %w", err)
+		}
+		if genTd == nil {
+			return fmt.Errorf("parent TD %d %x not in its generation", number-1, header.ParentHash)
+		}
+		if err := rawdb.WriteHeader(tx, parent); err != nil {
+			return fmt.Errorf("carry parent header: %w", err)
+		}
+		if err := rawdb.WriteTd(tx, header.ParentHash, number-1, *genTd); err != nil {
+			return fmt.Errorf("carry parent TD: %w", err)
+		}
+	}
+	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, number-1)
+	if err != nil {
+		return fmt.Errorf("read parent TD: %w", err)
+	}
+	if parentTd == nil {
+		return fmt.Errorf("parent's total difficulty not found with hash %x and height %d", header.ParentHash, number-1)
+	}
+	var td uint256.Int
+	if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+		return fmt.Errorf("TD overflows uint256 at height %d hash %x", number, header.Hash())
+	}
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+	if err := rawdb.WriteTd(tx, header.Hash(), number, td); err != nil {
+		return fmt.Errorf("write TD: %w", err)
+	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
 	return nil
 }
 
@@ -85,27 +167,9 @@ func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.Raw
 	}
 	defer roTx.Rollback()
 
-	// Ensure currentContext has a block overlay for accumulating writes.
-	sd := e.currentContext
-	if sd == nil {
-		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
-		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
-		if err != nil {
-			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
-			}
-			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
-		}
-		e.lock.Lock()
-		e.currentContext = sd
-		e.lock.Unlock()
-	}
-	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
-		}
-	} else {
-		sd.BlockOverlay().UpdateTxn(roTx)
+	sd, err := e.moduleContextLocked(ctx, roTx)
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 	}
 	blockOverlay := sd.BlockOverlay()
 

@@ -179,17 +179,18 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 		e.logger.Debug("assemblePreconfirmed: no block open — from-scratch builder", "reqParent", params.ParentHash)
 		return nil, false, nil // no preconfirmed flashblock → from-scratch builder
 	}
-	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
-		e.logger.Debug("assemblePreconfirmed: no current context — from-scratch builder", "reqParent", params.ParentHash)
+	// Read the in-progress header+body the rounds accumulated — from the generation's own overlay, not the module
+	// context. That one is the canonical path's: a fork choice between the last round and the seal tears it down, and
+	// a seal reading from it then found nothing to close (live43, block 1).
+	ov := e.generationOverlay(oldHash, number)
+	if ov == nil {
+		e.logger.Debug("assemblePreconfirmed: in-progress block has no overlay — from-scratch builder", "reqParent", params.ParentHash)
 		return nil, false, nil
 	}
-
-	// Read the in-progress header+body the preconfirm rounds accumulated (from the overlay).
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	ov := e.currentContext.BlockOverlay()
 	ov.UpdateTxn(roTx)
 	inHdr, herr := e.blockReader.Header(ctx, ov, oldHash, number)
 	var body *types.Body
@@ -222,7 +223,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 
 	// CLOSE (seal): block-end over the maintained SD → the output side, zero body re-execution.
 	sealStart := time.Now()
-	res, err := e.validateChainLocked(ctx, oldHash, number)
+	res, err := e.closePreExecutedLocked(ctx, oldHash, number)
 	if err != nil {
 		return nil, false, err
 	}
@@ -629,7 +630,16 @@ func (e *ExecModule) headerByHashLocked(ctx context.Context, hash common.Hash) *
 // INTERNAL — the reconcile (SealBlock) and the boundary re-anchor (AssembleBlock) are its only callers, both
 // already under the semaphore.
 func (e *ExecModule) abandonExtendingForkLocked() {
+	e.flash.mu.Lock()
+	parent := e.flash.built.Parent
+	e.flash.mu.Unlock()
 	e.preExec.Abandon()
+	// The abandoned generation's state went into the shared state cache as it executed, and a re-open's candidate
+	// filter reads nonces from there before execution resets the cache for the block: the block's own transactions
+	// read as already applied and were dropped (live43, block 1: the close then failed "nonce too low").
+	if e.stateCache != nil && parent != (common.Hash{}) {
+		e.stateCache.ClearWithHash(parent)
+	}
 	// The driver re-opens the SAME block number FRESH after an abandon, so drop the maintained flashblock body
 	// too — otherwise PreExecuteFlashblock (which only auto-resets on a NEW number) would keep the stale body.
 	e.flash.mu.Lock()
@@ -800,9 +810,19 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	header := BuildFlashHeader(in, body, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: in.Withdrawals}}
-	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
-	if err != nil || status != ExecutionStatusSuccess {
-		return fmt.Errorf("restampWithdrawals: insert num=%d status=%v: %w", num, status, err)
+	// Into the generation's own overlay — the block is in pre-exec space.
+	_, _, sd := e.preExec.Active()
+	if sd == nil || sd.BlockOverlay() == nil {
+		return fmt.Errorf("restampWithdrawals: no block in progress for num=%d", num)
+	}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return fmt.Errorf("restampWithdrawals: begin ro: %w", err)
+	}
+	defer roTx.Rollback()
+	sd.BlockOverlay().UpdateTxn(roTx)
+	if err := e.writePreExecBlock(sd.BlockOverlay(), roTx, rawBlock); err != nil {
+		return fmt.Errorf("restampWithdrawals: num=%d: %w", num, err)
 	}
 	e.preExec.SetActiveHead(hash, num)
 
