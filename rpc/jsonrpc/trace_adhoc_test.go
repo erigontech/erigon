@@ -1337,6 +1337,36 @@ func TestReplayTransactionInvalidType(t *testing.T) {
 	require.Contains(t, err.Error(), "unrecognized trace type")
 }
 
+// theAddr receives 1e15 wei in block 1 and another 1e15 wei in block 2. With
+// parent block 1, a bundle call that touches theAddr must see the post-block-1
+// balance, never the one block 2's real transaction produced.
+func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	parentNum := rpc.BlockNumber(1)
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
+
+	const bundle = `[
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace"]],
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0100000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
+]`
+
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	diff, ok := results[1].StateDiff[internedAddress("0x0100000000000000000000000000000000000000")]
+	require.True(t, ok, "theAddr missing from the second call's stateDiff")
+	balance, ok := diff.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "unexpected balance diff shape %+v", diff.Balance)
+	require.Len(t, balance, 1)
+	for _, b := range balance {
+		require.Equal(t, uint64(1000000000000000), b.From.ToInt().Uint64(),
+			"second bundle call read state past the parent boundary")
+		require.Equal(t, uint64(1000000000000001), b.To.ToInt().Uint64())
+	}
+}
+
 func TestOeTracerMcopyMemory(t *testing.T) {
 	for _, tc := range []struct {
 		name string

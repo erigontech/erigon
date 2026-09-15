@@ -1368,15 +1368,18 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, traceConfig)
+		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
 
 	return trace, err
 }
 
+// advanceTxNum moves the history reader with the transaction index. Block
+// replay needs it; an ad-hoc bundle must not, or a call reads state left by a
+// real transaction it never executed.
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1413,7 +1416,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var tracingHooks *tracing.Hooks
 
 	for txIndex, msg := range msgs {
-		if isHistoricalStateReader {
+		if isHistoricalStateReader && advanceTxNum {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := common.Stopped(ctx.Done()); err != nil {
@@ -1466,9 +1469,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			if isHistoricalStateReader {
-				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
-			}
 			sdMap := make(map[accounts.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}
