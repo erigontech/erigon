@@ -907,6 +907,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
+		s.recordStateReadError(r.err)
 		return uint256.Int{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -994,6 +995,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
+		s.recordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1149,6 +1151,7 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
+		s.recordStateReadError(r.err)
 		return nil, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1226,6 +1229,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
+		s.recordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1278,6 +1282,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
+		s.recordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err
 	}
 	switch r.outcome {

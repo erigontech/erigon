@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -368,6 +369,12 @@ func (e *ErrLoopExhausted) Error() string {
 func (e *ErrLoopExhausted) Is(err error) bool {
 	var errExhausted *ErrLoopExhausted
 	return errors.As(err, &errExhausted)
+}
+
+// IsOnlyLoopExhausted reports whether err is non-nil and every branch of its
+// unwrap tree reaches a loop-exhausted boundary (no other error mixed in).
+func IsOnlyLoopExhausted(err error) bool {
+	return commonerrors.IsOnly(err, &ErrLoopExhausted{})
 }
 
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {

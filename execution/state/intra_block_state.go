@@ -192,6 +192,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
 	// prior-tx SD writes, stable within one execution attempt. sdProbeEpoch is
@@ -365,6 +366,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 }
 
 // Release Deprecated use Close
@@ -3161,6 +3163,16 @@ func (sdb *IntraBlockState) HadInvalidRead() bool {
 
 func (sdb *IntraBlockState) DepTxIndex() int {
 	return sdb.dep
+}
+
+func (sdb *IntraBlockState) StateReadError() error {
+	return sdb.stateReadErr
+}
+
+func (sdb *IntraBlockState) recordStateReadError(err error) {
+	if err != nil && sdb.stateReadErr == nil {
+		sdb.stateReadErr = err
+	}
 }
 
 func (sdb *IntraBlockState) SetVersion(inc int) {
