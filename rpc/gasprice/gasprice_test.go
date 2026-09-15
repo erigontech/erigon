@@ -236,6 +236,7 @@ type mockOracleBackend struct {
 	canonicalErr   error
 	prepareForkErr error
 	headerCalls    atomic.Int32
+	forkCalls      atomic.Int32
 	safeBlock      uint64
 	finalizedBlock uint64
 
@@ -332,6 +333,7 @@ func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.H
 }
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
+	m.forkCalls.Add(1)
 	return nil, nil, nil // sequential mode
 }
 
@@ -416,6 +418,27 @@ func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
 	require.Empty(t, backend.resolvedRanges())
 	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
 		"the second request must be served from number-keyed cache entries")
+}
+
+// A fork opens a read transaction, which takes the database's reader-slot lock; a fully
+// cached range must not pay for one.
+func TestFeeHistory_CachedRangeDoesNotFork(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	forksAfterFirst := backend.forkCalls.Load()
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 5)
+	require.Equal(t, forksAfterFirst, backend.forkCalls.Load())
 }
 
 // TestFeeHistory_WindowStraddlingFrozenBoundary pins the mixed regime: one
