@@ -208,7 +208,7 @@ func TestEstimateGasStateOverrideFundsSender(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	balance := (*hexutil.Big)(big.NewInt(1e18))
+	balance := (*hexutil.U256)(uint256.NewInt(1e18))
 	args := &ethapi.CallArgs{
 		From:         &poor,
 		To:           &receiverAddr,
@@ -327,7 +327,7 @@ func TestEstimateGasStateOverrideLowersSenderBalance(t *testing.T) {
 	_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
 	require.NoError(t, err)
 
-	poorBalance := (*hexutil.Big)(big.NewInt(feePerGas * allowance))
+	poorBalance := (*hexutil.U256)(uint256.NewInt(feePerGas * allowance))
 	_, err = api.EstimateGas(context.Background(), args, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(bankAddr): {Balance: &poorBalance},
 	}, nil)
@@ -423,7 +423,7 @@ func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
-	dust := (*hexutil.Big)(big.NewInt(1000))
+	dust := (*hexutil.U256)(uint256.NewInt(1000))
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From:         &poor,
 		To:           &receiverAddr,
@@ -464,16 +464,16 @@ func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
 
 	const feePerGas = 1e9
 	const allowance = 25_000 // below what the contract call needs
-	blobFee := new(big.Int).Mul(big.NewInt(feePerGas), new(big.Int).SetUint64(params.GasPerBlob))
+	blobFee := new(uint256.Int).Mul(uint256.NewInt(feePerGas), uint256.NewInt(params.GasPerBlob))
 
 	for _, tc := range []struct {
 		name    string
-		balance *big.Int
+		balance *uint256.Int
 		wantErr string
 	}{
 		{
 			name:    "funds left over cap the allowance",
-			balance: new(big.Int).Add(blobFee, big.NewInt(feePerGas*allowance)),
+			balance: new(uint256.Int).Add(blobFee, uint256.NewInt(feePerGas*allowance)),
 			wantErr: fmt.Sprintf("gas required exceeds allowance (%d)", allowance),
 		},
 		{
@@ -484,7 +484,7 @@ func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			callData := hexutil.Bytes(contractInvocationData(1))
-			balance := (*hexutil.Big)(tc.balance)
+			balance := (*hexutil.U256)(tc.balance)
 			_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 				From:                &bankAddr,
 				To:                  &contractAddr,
