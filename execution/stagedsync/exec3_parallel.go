@@ -162,6 +162,9 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSetBlock = 0
 }
 
+// execShutdownStallRounds counts pre-exec rounds for dbg.ExecShutdownStallEvery.
+var execShutdownStallRounds atomic.Uint64
+
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -722,6 +725,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 	}()
 
+	// Test-only (dbg.ExecShutdownStall): stall a pre-exec ACCUMULATION round here, never the seal's close or a
+	// validation, so the round cut can be exercised without the block itself becoming unsealable.
+	if stall := dbg.ExecShutdownStall; stall > 0 && pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating() {
+		if every := uint64(max(dbg.ExecShutdownStallEvery, 1)); execShutdownStallRounds.Add(1)%every == 0 {
+			time.Sleep(stall)
+		}
+	}
 	executorCancel(nil)
 
 	if !hasLoggedExecution {

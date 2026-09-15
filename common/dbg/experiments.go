@@ -123,6 +123,13 @@ var (
 	// application (FCU / applying-blocks) is unaffected. Temporary until the flashblock flow +
 	// slot-end assembly land — see cocoon venue_exec_on_round_plan.
 	FlashblockSkipPostValidation = EnvBool("FLASHBLOCK_SKIP_POSTVALIDATION", false)
+
+	// ExecShutdownStall holds a fork-validation execution for this long just before it stops its workers —
+	// the point where a stall under system or I/O pressure was measured (2.3s, live37 block 1774). Test-only:
+	// it reproduces that stall so the pre-exec round cut can be shown to abandon the round anyway.
+	ExecShutdownStall = EnvDuration("EXEC_SHUTDOWN_STALL", 0)
+	// ExecShutdownStallEvery applies the stall to one pre-exec round in this many (1 = every round).
+	ExecShutdownStallEvery = EnvInt("EXEC_SHUTDOWN_STALL_EVERY", 1)
 	// FlashblockSkipBlockEnd strips the per-round block-END (engine.Finalize: withdrawals +
 	// end-of-block system calls) on the FORK-VALIDATION / PreExecute path only. The cocoon DAG
 	// flashblock flow PreExecutes each committed round into ONE accumulating SharedDomains; the
