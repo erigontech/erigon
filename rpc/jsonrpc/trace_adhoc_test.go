@@ -135,7 +135,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -171,7 +171,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -281,7 +281,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -316,7 +316,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -359,7 +359,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[2].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -396,7 +396,7 @@ func TestReplayTransaction(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
 	addrDiff := results.StateDiff[internedAddress("0x0000000000000006000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -413,7 +413,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
 	addrDiff := results[0].StateDiff[internedAddress("0x0000000000000001000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -605,7 +605,7 @@ func TestRawTransactionStateDiff(t *testing.T) {
 
 	// Receiver balance must increase: either a new account ("+") or a change ("*" with To > From).
 	switch v := receiverDiff.Balance.(type) {
-	case map[string]*hexutil.Big:
+	case map[string]*hexutil.U256:
 		val, exists := v["+"]
 		require.True(t, exists, "new receiver account balance must use '+' key")
 		require.Positive(t, val.ToInt().Sign(), "receiver initial balance must be positive")
@@ -737,7 +737,7 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	require.NotNil(t, sender)
 	balance, ok := sender.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "sender balance must be reported as changed, got %v", sender.Balance)
-	require.Equal(t, (*big.Int)(overriddenBalance).String(), (*big.Int)(balance["*"].From).String())
+	require.Equal(t, (*big.Int)(overriddenBalance).String(), balance["*"].From.ToInt().String())
 }
 
 func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {

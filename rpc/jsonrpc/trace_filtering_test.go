@@ -408,8 +408,8 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 
-	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
-	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.U256)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.U256, got %T", wdDiff.Balance)
 	finalBal := balMap["+"]
 	require.NotNil(t, finalBal, "balance missing \"+\" key")
 
@@ -454,8 +454,8 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 
-	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
-	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.U256)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.U256, got %T", wdDiff.Balance)
 	finalBal := balMap["+"]
 	require.NotNil(t, finalBal, "balance missing \"+\" key")
 
