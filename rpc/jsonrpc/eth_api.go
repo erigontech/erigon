@@ -19,13 +19,14 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -145,7 +147,7 @@ type EthAPI interface {
 type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
-	blocksLRU  *lru.Cache[common.Hash, *types.Block]
+	blocksLRU  *cache.ByteLRU[*types.Block]
 
 	filters                   *rpchelper.Filters
 	_chainConfig              atomic.Pointer[chain.Config]
@@ -180,15 +182,12 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRUSize := 128 // ~32Mb
+	blocksLRUBytes := 32 * datasize.MB
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !conf.SingleNodeMode {
-		blocksLRUSize *= 5
+		blocksLRUBytes *= 5
 	}
-	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
-	if err != nil {
-		panic(err)
-	}
+	blocksLRU := cache.NewByteLRU(blocksLRUBytes, func(_ uint64, b *types.Block) int64 { return int64(b.Size()) + cache.ByteLRUEntryOverheadBytes })
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
@@ -305,11 +304,32 @@ func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, numb
 	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
+// cachedBlock compares the full hash: the cache key is only its first 8 bytes.
+func (api *BaseAPI) cachedBlock(hash common.Hash) *types.Block {
+	if api.blocksLRU == nil {
+		return nil
+	}
+	if block, ok := api.blocksLRU.Get(binary.BigEndian.Uint64(hash[:])); ok && block.Hash() == hash {
+		return block
+	}
+	return nil
+}
+
+// cacheBlock computes the lazy hashes first, because cached blocks are read concurrently.
+func (api *BaseAPI) cacheBlock(block *types.Block) {
+	if api.blocksLRU == nil {
+		return
+	}
+	for _, txn := range block.Transactions() {
+		txn.Hash()
+	}
+	hash := block.Hash()
+	api.blocksLRU.Add(binary.BigEndian.Uint64(hash[:]), block)
+}
+
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it, nil
-		}
+	if it := api.cachedBlock(hash); it != nil {
+		return it, nil
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
@@ -323,10 +343,8 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it, nil
-		}
+	if it := api.cachedBlock(hash); it != nil {
+		return it, nil
 	}
 	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
@@ -340,22 +358,13 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	if block.Transactions().Len() == 0 {
 		return block, nil
 	}
-	if api.blocksLRU != nil {
-		// calc fields before put to cache
-		for _, txn := range block.Transactions() {
-			txn.Hash()
-		}
-		block.Hash()
-		api.blocksLRU.Add(hash, block)
-	}
+	api.cacheBlock(block)
 	return block, nil
 }
 
 func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
-	if api.blocksLRU != nil {
-		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
-			return block.HeaderNoCopy(), nil
-		}
+	if block := api.cachedBlock(hash); block != nil {
+		return block.HeaderNoCopy(), nil
 	}
 	return api._blockReader.Header(ctx, tx, hash, number)
 }
@@ -372,10 +381,8 @@ func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, n
 }
 
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.NumberU64(), nil
-		}
+	if it := api.cachedBlock(hash); it != nil {
+		return it.NumberU64(), nil
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
@@ -395,10 +402,8 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	if err != nil {
 		return nil, false, err
 	}
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.HeaderNoCopy(), isLatest, nil
-		}
+	if it := api.cachedBlock(hash); it != nil {
+		return it.HeaderNoCopy(), isLatest, nil
 	}
 
 	overlayTx := api.filters.WithOverlay(tx)
@@ -440,10 +445,8 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.HeaderNoCopy(), nil
-		}
+	if it := api.cachedBlock(hash); it != nil {
+		return it.HeaderNoCopy(), nil
 	}
 
 	overlayTx := api.filters.WithOverlay(tx)

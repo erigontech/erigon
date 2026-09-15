@@ -23,8 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -530,4 +533,35 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
 	a.NoError(err)
 	a.Equal(svLatest, svNil)
+}
+
+func TestBlocksLRUBoundedByBytes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs, SingleNodeMode: true})
+	blocks := make([]*types.Block, 6)
+	for i := range blocks {
+		txn := types.NewTransaction(uint64(i), common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 8*datasize.MB))
+		blocks[i] = types.NewBlock(&types.Header{}, []types.Transaction{txn}, nil, nil, nil, nil)
+		api.cacheBlock(blocks[i])
+	}
+	var cached datasize.ByteSize
+	for _, b := range blocks {
+		if api.cachedBlock(b.Hash()) != nil {
+			cached += datasize.ByteSize(b.Size())
+		}
+	}
+	require.LessOrEqual(t, cached, 32*datasize.MB)
+}
+
+func TestCachedBlockMissesForeignHash(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	txn := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)
+	block := types.NewBlock(&types.Header{}, []types.Transaction{txn}, nil, nil, nil, nil)
+	api.cacheBlock(block)
+	require.Same(t, block, api.cachedBlock(block.Hash()))
+
+	foreign := block.Hash()
+	foreign[31]++
+	require.Nil(t, api.cachedBlock(foreign))
 }
