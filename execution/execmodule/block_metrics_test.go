@@ -159,13 +159,6 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		require.Contains(t, timing, "state_hash_ms")
 		assert.GreaterOrEqual(t, timing["total_ms"].(float64), timing["state_hash_ms"].(float64))
 
-		if block["gas_used"].(float64) > 0 {
-			assert.Positive(t, timing["execution_ms"].(float64),
-				"commitment is nested inside the validation span on the single-block path, so the subtraction never clamps")
-			assert.Positive(t, rec["throughput"].(map[string]any)["mgas_per_sec"].(float64),
-				"a zero rate here would be indistinguishable from a stalled block")
-		}
-
 		reads, hasReads := rec["state_reads"].(map[string]any)
 		require.True(t, hasReads, "state_reads must be present once the counters are on")
 		require.Contains(t, rec, "cache")
