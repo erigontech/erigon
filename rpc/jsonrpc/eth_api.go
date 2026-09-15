@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -177,6 +178,12 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
+// blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
+// transaction struct per transaction, which hold inline integers and hash and sender caches.
+func blockHeapSize(b *types.Block) int64 {
+	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
@@ -186,7 +193,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if !conf.SingleNodeMode {
 		blocksLRUBytes *= 5
 	}
-	blocksLRU := cache.NewHashByteLRU(blocksLRUBytes, func(b *types.Block) int64 { return int64(b.EncodingSize()) })
+	blocksLRU := cache.NewHashByteLRU(blocksLRUBytes, blockHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
