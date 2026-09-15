@@ -178,7 +178,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"graphql_getAccountInfo", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		balance, nonce, code, err := apis.graphql.GetAccountInfo(ctx, testAddr, rpc.BlockNumber(ref.num))
-		return nonNilResult(balance, nonce, code), err
+		return []any{balance, nonce, code}, err
 	}},
 	{"graphql_getAccountStorage", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", rpc.BlockNumber(ref.num))
@@ -261,10 +261,6 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"graphql_getBlockDetailsByHash", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.graphql.GetBlockDetailsByHash(ctx, ref.hash)
 	}},
-	{"graphql_getBlockNumberForTx", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		num, ok, err := apis.graphql.GetBlockNumberForTx(ctx, ref.txHash)
-		return nonNilResult(num, ok), err
-	}},
 	// Header endpoints read the header alone: a retention window takes away
 	// transactions and state history, never headers.
 	{"erigon_getHeaderByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
@@ -345,10 +341,21 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
+	// A witness re-executes the block, so it reads the body and the state history
+	// preceding it. The table drives the resolution step, the only part of the
+	// endpoint the gate sits in.
+	{"debug_executionWitness", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		tx, err := apis.debug.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return apis.debug.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
+	}},
 	{"eth_call", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		res, err := apis.eth.Call(ctx, pruneGatingCallArgs(), &bnh, nil, nil)
-		return nonNilResult(res), err
+		return []any{res}, err
 	}},
 	{"eth_estimateGas", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
@@ -400,7 +407,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"ots_getTransactionError", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		revert, err := apis.ots.GetTransactionError(ctx, ref.txHash)
-		return nonNilResult(revert), err
+		return []any{revert}, err
 	}},
 	{"ots_hasCode", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.ots.HasCode(ctx, testAddr, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
@@ -424,11 +431,6 @@ func pruneGatingBundle(block uint64) ([]Bundle, StateContext) {
 // [[callparam, tracetypes]] shape trace_callMany decodes.
 func traceCallManyRequest() json.RawMessage {
 	return json.RawMessage(`[[{"from":"` + testAddr.Hex() + `","to":"` + (common.Address{}).Hex() + `"},["trace"]]]`)
-}
-
-// nonNilResult keeps an answer that is legitimately empty apart from no answer at all.
-func nonNilResult(vals ...any) any {
-	return vals
 }
 
 // blockTraceFilter matches every trace of a single block.

@@ -68,7 +68,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, nil
 		}
 
-		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
+		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -90,6 +90,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		return nil, err
+	}
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, stateBlockNumber); err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
