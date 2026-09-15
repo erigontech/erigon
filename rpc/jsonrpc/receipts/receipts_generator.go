@@ -163,9 +163,13 @@ var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
 // PersistedReceipt returns the receipt from the persistent cache without generating it; ok is false
 // when the receipt is not served from there.
-func (g *Generator) PersistedReceipt(tx kv.TemporalTx, header *types.Header, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, header *types.Header, txIndex int, txNum uint64) (*types.Receipt, bool, error) {
 	if !PersistedReceiptsServed() {
 		return nil, false, nil
+	}
+	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txIndex)
+	if err != nil || !ok {
+		return nil, false, err
 	}
 	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
 	if err != nil || !ok {
