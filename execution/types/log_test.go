@@ -444,10 +444,6 @@ func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
 	}
 }
 
-// decodeLogsForStorage hands out pointers into one shared block, which is only
-// safe because nothing retains a single *Log past its receipt. The RPC
-// conversion is the path that outlives it, so it must copy the value out
-// rather than alias.
 func TestAppendFilteredRPCLogsCopiesTheLog(t *testing.T) {
 	t.Parallel()
 	src := Logs{{Address: common.Address{1}, Index: 7}}
