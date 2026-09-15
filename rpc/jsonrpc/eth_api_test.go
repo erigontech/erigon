@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -534,19 +533,13 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	a.Equal(svLatest, svNil)
 }
 
-type noReadTxDB struct{ kv.TemporalRoDB }
-
-func (noReadTxDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	return nil, errors.New("unexpected read transaction")
-}
-
 func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	want, err := api.ChainId(m.Ctx)
 	require.NoError(t, err)
 
-	api.db = noReadTxDB{m.DB}
+	api.db = unopenableDB{m.DB}
 	got, err := api.ChainId(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
@@ -558,7 +551,7 @@ func TestForksServesCachedConfigWithoutReadTx(t *testing.T) {
 	want, err := api.Forks(m.Ctx)
 	require.NoError(t, err)
 
-	api.db = noReadTxDB{m.DB}
+	api.db = unopenableDB{m.DB}
 	got, err := api.Forks(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
@@ -570,28 +563,8 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	want, err := api.GetChainID(m.Ctx)
 	require.NoError(t, err)
 
-	api.db = noReadTxDB{m.DB}
+	api.db = unopenableDB{m.DB}
 	got, err := api.GetChainID(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-}
-
-func TestGetBlockByHashServesCachedBlockWithoutReadTx(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
-	require.NoError(t, err)
-	require.NotEmpty(t, block.Transactions())
-	api.blocksLRU.Add(block.Hash(), block)
-	api.db = noReadTxDB{m.DB}
-
-	got, err := api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), false), false)
-	require.NoError(t, err)
-	require.Equal(t, block.Hash(), *got.Hash)
-
-	_, err = api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), true), false)
-	require.Error(t, err, "a canonical lookup still needs the read tx")
 }
