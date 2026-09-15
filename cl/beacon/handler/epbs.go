@@ -893,6 +893,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
+			if persistedKnown && persisted == nil {
+				persisted, _ = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+			}
 			if persistedKnown && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 				return

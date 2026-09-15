@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -901,6 +902,48 @@ func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *
 	select {
 	case event := <-events:
 		t.Fatalf("unvalidated envelope emitted event %s", event.Event)
+	default:
+	}
+	token, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, claimErr)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+}
+
+func TestExecutionPayloadServiceIgnoresIndicesPendingWhenRevalidationCrossesFinality(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
+	validationStarted := make(chan struct{})
+	releaseValidation := make(chan struct{})
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		close(validationStarted)
+		<-releaseValidation
+		finalizedSlot := fcu.FinalizedCheckpointVal.Epoch * cfg.SlotsPerEpoch
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", forkchoice.ErrIgnore, envelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	done := make(chan error, 1)
+	go func() { done <- service.ProcessMessage(t.Context(), nil, envelope) }()
+	<-validationStarted
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+	close(releaseValidation)
+
+	err := <-done
+	require.ErrorIs(t, err, ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+	select {
+	case event := <-events:
+		t.Fatalf("finalized envelope emitted event %s", event.Event)
 	default:
 	}
 	token, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)

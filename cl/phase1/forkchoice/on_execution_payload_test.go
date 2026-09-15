@@ -130,6 +130,11 @@ type boundedGossipValidationForkGraph struct {
 	releaseFirst chan struct{}
 }
 
+type panickingGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+	panicIn string
+}
+
 type concurrentPayloadValidationForkGraph struct {
 	dataAvailabilityForkGraph
 	stateReads  atomic.Int32
@@ -303,6 +308,20 @@ func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.
 	return g.state.Copy()
 }
 
+func (g *panickingGossipValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	if g.panicIn == "state" {
+		panic("injected state panic")
+	}
+	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+}
+
+func (g *panickingGossipValidationForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if g.panicIn == "block" {
+		panic("injected block panic")
+	}
+	return g.dataAvailabilityForkGraph.GetBlock(root)
+}
+
 func (g dumpFailingForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope) error {
 	return g.err
 }
@@ -471,14 +490,16 @@ func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testi
 	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), root, 42)
 
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+	persisted, persistedKnown := PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
+	require.True(t, persistedKnown)
+	require.Nil(t, persisted)
 	select {
 	case <-readEntered:
 		t.Fatal("persisted envelope presence triggered a disk read")
 	default:
 	}
-	token, err := store.envelopeGossipAdmissions.TryClaim(root, 42)
-	require.NoError(t, err)
-	store.envelopeGossipAdmissions.Finish(token, false)
+	_, err = store.envelopeGossipAdmissions.TryClaim(root, 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
@@ -2191,7 +2212,62 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 	}
 	close(releaseState)
 	<-writerDone
-	require.ErrorContains(t, <-validationDone, "before finalized slot")
+	err := <-validationDone
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "before finalized slot")
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraphPanic(t *testing.T) {
+	for _, panicIn := range []string{"state", "block"} {
+		t.Run(panicIn, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			graph := &panickingGossipValidationForkGraph{
+				dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+				panicIn:                   panicIn,
+			}
+			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_ = store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+			}()
+
+			require.NotNil(t, recovered)
+			require.True(t, store.mu.TryLock())
+			store.mu.Unlock()
+			select {
+			case store.executionPayloadValidation <- struct{}{}:
+				<-store.executionPayloadValidation
+			default:
+				t.Fatal("validation capacity leaked after panic")
+			}
+		})
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	for _, tc := range []struct {
+		name      string
+		graph     dataAvailabilityForkGraph
+		wantError string
+	}{
+		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state"},
+		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: tc.graph}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+			err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorContains(t, err, tc.wantError)
+			require.True(t, store.mu.TryLock())
+			store.mu.Unlock()
+		})
+	}
 }
 
 func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
@@ -4306,6 +4382,9 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 				}
 				if tc.wantErr {
 					require.ErrorContains(t, err, "before finalized slot 64")
+					if validator == "gossip" {
+						require.ErrorIs(t, err, ErrIgnore)
+					}
 				} else {
 					require.NoError(t, err)
 				}

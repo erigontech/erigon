@@ -686,7 +686,11 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		return err
 	}
 	validationHeld := true
+	lockHeld := true
 	defer func() {
+		if lockHeld {
+			f.mu.RUnlock()
+		}
 		if validationHeld {
 			releaseValidation()
 		}
@@ -694,17 +698,17 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	root := signedEnvelope.Message.BeaconBlockRoot
 	blockState, err := f.forkGraph.GetState(root, true)
 	if err != nil || blockState == nil {
-		f.mu.RUnlock()
-		return fmt.Errorf("beacon block state %v is unavailable", root)
+		return fmt.Errorf("%w: beacon block state %v is unavailable", ErrIgnore, root)
 	}
 	block, ok := f.forkGraph.GetBlock(root)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	f.mu.RUnlock()
+	lockHeld = false
 	if !ok || block == nil || block.Block == nil {
-		return fmt.Errorf("beacon block %v is unavailable", root)
+		return fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
 	}
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
 		releaseValidation()
@@ -714,10 +718,12 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	releaseValidation()
 	validationHeld = false
 	f.mu.RLock()
+	lockHeld = true
 	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	f.mu.RUnlock()
+	lockHeld = false
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	return nil
 }
@@ -738,7 +744,7 @@ func (f *ForkChoiceStore) acquireExecutionPayloadValidationRead(ctx context.Cont
 		}
 		<-f.executionPayloadValidation
 		f.mu.RLock()
-		f.mu.RUnlock()
+		f.mu.RUnlock() //nolint:gocritic,staticcheck // This pair waits for a queued writer before retrying.
 	}
 }
 
@@ -750,16 +756,13 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 	if err := ctx.Err(); err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
-	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
-	}
 	token, err := f.envelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		f.envelopeGossipAdmissions.Finish(token, true)
-		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+		return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(nil)
 	}
 	if err := ctx.Err(); err != nil {
 		f.envelopeGossipAdmissions.Finish(token, false)
@@ -772,16 +775,13 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
-	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
-	}
 	token, err := f.envelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		f.envelopeGossipAdmissions.Finish(token, true)
-		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+		return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(nil)
 	}
 	return token, nil
 }

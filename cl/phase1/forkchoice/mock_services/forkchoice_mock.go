@@ -487,16 +487,13 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 	if err := ctx.Err(); err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
-	if f.HasEnvelope(beaconBlockRoot) {
-		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
-	}
 	token, err := f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.HasEnvelope(beaconBlockRoot) {
 		f.EnvelopeGossipAdmissions.Finish(token, true)
-		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.NewExecutionPayloadEnvelopeAlreadySeenError(nil)
 	}
 	if err := ctx.Err(); err != nil {
 		f.EnvelopeGossipAdmissions.Finish(token, false)
@@ -512,16 +509,13 @@ func (f *ForkChoiceStorageMock) TryClaimExecutionPayloadEnvelopeForGossip(
 	if f.TryClaimExecutionPayloadEnvelopeForGossipFunc != nil {
 		return f.TryClaimExecutionPayloadEnvelopeForGossipFunc(beaconBlockRoot, builderIndex)
 	}
-	if f.HasEnvelope(beaconBlockRoot) {
-		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
-	}
 	token, err := f.EnvelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.HasEnvelope(beaconBlockRoot) {
 		f.EnvelopeGossipAdmissions.Finish(token, true)
-		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.NewExecutionPayloadEnvelopeAlreadySeenError(nil)
 	}
 	return token, nil
 }

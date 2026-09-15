@@ -666,7 +666,7 @@ func TestPostExecutionPayloadEnvelopeRejectsMismatchedBuilderBeforePersistedRead
 	require.Zero(t, reads.Load())
 }
 
-func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutReads(t *testing.T) {
+func TestPostExecutionPayloadEnvelopePreservesConcurrentStoredDuplicateResponses(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -675,7 +675,7 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
 	fcu.SetEnvelope(envelope.Message.BeaconBlockRoot, envelope)
 	const requests = 16
-	storeEntered := make(chan struct{}, requests)
+	storeEntered := make(chan struct{})
 	releaseStore := make(chan struct{})
 	t.Cleanup(func() {
 		select {
@@ -686,9 +686,10 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	})
 	var storeCalls atomic.Int32
 	fcu.HasEnvelopeFunc = func(common.Hash) bool {
-		storeCalls.Add(1)
-		storeEntered <- struct{}{}
-		<-releaseStore
+		if storeCalls.Add(1) == 1 {
+			close(storeEntered)
+			<-releaseStore
+		}
 		return true
 	}
 	var reads atomic.Int32
@@ -699,27 +700,29 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 
-	start := make(chan struct{})
 	responses := make(chan int, requests)
-	for range requests {
+	post := func() {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		responses <- recorder.Code
+	}
+	go post()
+	<-storeEntered
+	for range requests - 1 {
 		go func() {
-			<-start
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-			request.Header.Set("Eth-Blob-Data-Included", "false")
-			recorder := httptest.NewRecorder()
-			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
-			responses <- recorder.Code
+			post()
 		}()
 	}
-	close(start)
-	for range requests {
-		<-storeEntered
+	for range requests - 2 {
+		require.Equal(t, http.StatusServiceUnavailable, <-responses)
 	}
 	close(releaseStore)
 	badRequest, unavailable := 0, 0
-	for range requests {
+	for range 2 {
 		switch <-responses {
 		case http.StatusBadRequest:
 			badRequest++
@@ -727,13 +730,12 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 			unavailable++
 		}
 	}
-	require.Equal(t, requests, badRequest)
+	require.Equal(t, 2, badRequest)
 	require.Zero(t, unavailable)
-	require.Equal(t, int32(requests), storeCalls.Load())
-	require.Zero(t, reads.Load())
-	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-	require.NoError(t, err)
-	fcu.EnvelopeGossipAdmissions.Finish(token, false)
+	require.Equal(t, int32(1), storeCalls.Load())
+	require.Equal(t, int32(1), reads.Load())
+	_, err = fcu.EnvelopeGossipAdmissions.TryClaim(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
@@ -802,7 +804,7 @@ func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEn
 	differentBody, err := json.Marshal(different)
 	require.NoError(t, err)
 	second := post(differentBody)
-	require.Equal(t, http.StatusBadRequest, second.Code, second.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeAllowsOnlyOneRetryInFlight(t *testing.T) {
@@ -1446,7 +1448,7 @@ func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 	select {
 	case event := <-events:
 		t.Fatalf("unexpected event %s", event.Event)
