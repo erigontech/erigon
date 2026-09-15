@@ -172,7 +172,7 @@ class MermaidSpliceTests(unittest.TestCase):
 
     def test_fence_is_extracted_from_source(self):
         src = 'intro\n\n```mermaid\ngraph TD\n  A --> B\n```\n\ntail\n'
-        self.assertEqual([("", 0, "intro", "", "```mermaid\ngraph TD\n  A --> B\n```")],
+        self.assertEqual([("", 0, "```mermaid\ngraph TD\n  A --> B\n```")],
                          g.mermaid_blocks(src))
 
     def test_no_mermaid_yields_nothing(self):
@@ -283,11 +283,11 @@ class MermaidFenceSafetyTests(unittest.TestCase):
     def test_shorter_closer_does_not_end_the_block(self):
         out = g.mermaid_blocks("````mermaid\ngraph TD\n```\n")
         self.assertEqual(1, len(out))
-        self.assertTrue(out[0][4].startswith("````mermaid"))
+        self.assertTrue(out[0][2].startswith("````mermaid"))
 
     def test_diagram_is_extracted(self):
         self.assertEqual(
-            [("", 0, "x", "", "```mermaid\ngraph TD\n A-->B\n```")],
+            [("", 0, "```mermaid\ngraph TD\n A-->B\n```")],
             g.mermaid_blocks("x\n\n```mermaid\ngraph TD\n A-->B\n```\n\ny\n"),
         )
 
@@ -550,7 +550,7 @@ class MermaidLivenessTests(unittest.TestCase):
     def test_an_indented_fence_is_still_a_diagram(self):
         # MDX has no indented code blocks, so indentation does not demote a
         # fence; this site's build renders such a block as a diagram.
-        self.assertEqual([("", 0, "", "    ", "```mermaid\ngraph TD\n```")],
+        self.assertEqual([("", 0, "```mermaid\ngraph TD\n```")],
                          g.mermaid_blocks("    ```mermaid\n    graph TD\n    ```\n"))
 
     def test_delimiters_in_code_do_not_comment_out_a_diagram(self):
@@ -559,7 +559,7 @@ class MermaidLivenessTests(unittest.TestCase):
         # must not see delimiters that are themselves code.
         src = ("# P\n\nWrite `{/*` to open.\n\n## Live\n\n"
                "```mermaid\ngraph TD; A-->B;\n```\n\nclose with `*/}`.\n")
-        self.assertEqual([("Live", 0, "", "", "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("Live", 0, "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
     def test_delimiters_inside_a_fence_do_not_comment_out_a_diagram(self):
@@ -572,7 +572,7 @@ class MermaidLivenessTests(unittest.TestCase):
 
     def test_live_diagram_is_still_found(self):
         self.assertEqual(
-            [("", 0, "", "", "```mermaid\ngraph TD\n```")],
+            [("", 0, "```mermaid\ngraph TD\n```")],
             g.mermaid_blocks("```mermaid\ngraph TD\n```\n")
         )
 
@@ -745,7 +745,7 @@ class RenderingFidelityTests(unittest.TestCase):
     # -- mermaid ------------------------------------------------------------
     def test_diagram_records_the_heading_above_it(self):
         src = "## At a glance\n\n```mermaid\ngraph TD\n```\n\nEvery box above...\n"
-        self.assertEqual([("At a glance", 0, "", "", "```mermaid\ngraph TD\n```")],
+        self.assertEqual([("At a glance", 0, "```mermaid\ngraph TD\n```")],
                          g.mermaid_blocks(src))
 
     def test_diagram_is_spliced_under_its_heading_not_appended(self):
@@ -776,12 +776,12 @@ class RenderingFidelityTests(unittest.TestCase):
         # `>` is legal inside a diagram, so peeling container markers from a
         # fence that was never quoted would edit the diagram's source.
         out = g.mermaid_blocks("```mermaid\ngraph TD\n> a label\n```\n")
-        self.assertIn("> a label", out[0][4])
+        self.assertIn("> a label", out[0][2])
 
     def test_diagram_inside_a_blockquote_is_still_found(self):
         out = g.mermaid_blocks("> ```mermaid\n> graph TD\n>   A-->B\n> ```\n")
         self.assertEqual(1, len(out))
-        self.assertIn("graph TD", out[0][4])
+        self.assertIn("graph TD", out[0][2])
 
     # -- first_description fence tracking -----------------------------------
     def test_four_backtick_fence_does_not_desync_the_description(self):
@@ -971,7 +971,7 @@ class ContainerRelativeFenceTests(unittest.TestCase):
 
     def test_a_mermaid_fence_inside_a_list_item_is_found(self):
         src = "## H\n\n1. Step\n\n    ```mermaid\n    graph TD; A-->B;\n    ```\n"
-        self.assertEqual([("H", 0, "1. Step", "    ", "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("H", 0, "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
     def test_a_four_space_fence_at_top_level_is_a_diagram(self):
@@ -979,7 +979,7 @@ class ContainerRelativeFenceTests(unittest.TestCase):
         # no indented code blocks: this site's production build renders such a
         # fence as a diagram, so rejecting it dropped the graph from the corpus.
         src = "## H\n\n    ```mermaid\n    graph TD; A-->B;\n    ```\n"
-        self.assertEqual([("H", 0, "", "    ", "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("H", 0, "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
 
@@ -994,30 +994,14 @@ class DiagramSpliceTests(unittest.TestCase):
         src = f"## Setup\n\n{a}\n\n## Other\n\nx\n\n## Setup\n\n{b}\n"
         found = g.mermaid_blocks(src)
         self.assertEqual([("Setup", 0), ("Setup", 1)],
-                         [(h, o) for h, o, _, _, _ in found])
+                         [(h, o) for h, o, _ in found])
         body = "# T\n\n## Setup\n\nfirst\n\n## Other\n\nx\n\n## Setup\n\nsecond\n"
-        for heading, occurrence, preceding, container, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence, preceding,
-                                    container)
+        for heading, occurrence, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence)
         sections = body.split("## ")
         self.assertIn("A-->B", sections[1], "first diagram left its section")
         self.assertIn("C-->D", sections[3], "second diagram went to the wrong one")
         self.assertNotIn("C-->D", sections[1])
-
-    def test_a_diagram_keeps_the_prose_that_preceded_it(self):
-        # Anchoring on the heading alone puts the diagram at the top of its
-        # section, turning `heading -> prose -> diagram` into
-        # `heading -> diagram -> prose`.
-        d = "```mermaid\ngraph TD; A-->B;\n```"
-        src = f"## Flow\n\nIntro prose here.\n\n{d}\n\nAfter prose.\n"
-        found = g.mermaid_blocks(src)
-        self.assertEqual("Intro prose here.", found[0][2])
-        body = "# T\n\n## Flow\n\nIntro prose here.\n\nAfter prose.\n"
-        for heading, occurrence, preceding, container, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence, preceding,
-                                    container)
-        self.assertLess(body.index("Intro prose here."), body.index("A-->B"))
-        self.assertLess(body.index("A-->B"), body.index("After prose."))
 
     def test_a_diagram_under_a_later_heading_is_not_moved_to_the_first(self):
         # The occurrence has to count headings, not diagrams. Counting diagrams
@@ -1027,11 +1011,10 @@ class DiagramSpliceTests(unittest.TestCase):
         d = "```mermaid\ngraph TD; X-->Y;\n```"
         src = f"## Setup\n\nprose\n\n## Other\n\nx\n\n## Setup\n\n{d}\n"
         found = g.mermaid_blocks(src)
-        self.assertEqual([("Setup", 1)], [(h, o) for h, o, _, _, _ in found])
+        self.assertEqual([("Setup", 1)], [(h, o) for h, o, _ in found])
         body = "# T\n\n## Setup\n\nFIRST\n\n## Other\n\nx\n\n## Setup\n\nSECOND\n"
-        for heading, occurrence, preceding, container, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence, preceding,
-                                    container)
+        for heading, occurrence, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence)
         sections = body.split("## ")
         self.assertNotIn("X-->Y", sections[1], "diagram moved to the first section")
         self.assertIn("X-->Y", sections[3])
@@ -1040,11 +1023,10 @@ class DiagramSpliceTests(unittest.TestCase):
         block = "```mermaid\ngraph TD; A-->B;\n```"
         src = f"## One\n\n{block}\n\n## Two\n\n{block}\n"
         found = g.mermaid_blocks(src)
-        self.assertEqual([("One", 0, "", "", block), ("Two", 0, "", "", block)], found)
+        self.assertEqual([("One", 0, block), ("Two", 0, block)], found)
         body = "# T\n\n## One\n\nprose\n\n## Two\n\nprose\n"
-        for heading, occurrence, preceding, container, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence, preceding,
-                                    container)
+        for heading, occurrence, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence)
         self.assertEqual(2, body.count("graph TD; A-->B;"))
 
 
@@ -1157,34 +1139,14 @@ class SourceFenceContainmentTests(unittest.TestCase):
             contained += parser.count
         self.assertGreater(contained, 0, "no contained <pre> found; check the scan")
 
-        # Mermaid diagrams are the one kind of block the HTML side cannot see:
-        # Docusaurus draws them client-side, so the built page holds no <pre>
-        # for them, while the corpus holds the fence the generator splices back.
-        # Counting only <pre> therefore reports a *correctly* contained diagram
-        # as a missing one and turns valid documentation red. The source says
-        # which diagrams were written inside a container, so add those to the
-        # expectation and keep both sides counting the same set of blocks.
-        contained_diagrams = 0
-        for _, base_dir, _ in g.SECTIONS:
-            sources = sorted(set(list(base_dir.rglob("*.md"))
-                                 + list(base_dir.rglob("*.mdx"))))
-            for fpath in sources:
-                text = fpath.read_text(encoding="utf-8")
-                meta, _ = g.parse_frontmatter(text)
-                if str(meta.get("draft", "")).lower() == "true":
-                    continue          # a draft page is in neither artifact
-                for *_rest, container, _block in g.mermaid_blocks(text):
-                    if container:
-                        contained_diagrams += 1
-
+        # A diagram is never contained: it is placed at the top level of its
+        # section, so it adds nothing to either side of this comparison.
         _, full, _ = g.build()
-        expected = contained + contained_diagrams
         in_container = _contained_fences(full)
         self.assertEqual(
-            expected, in_container,
+            contained, in_container,
             f"the built pages put {contained} fenced blocks inside a list item "
-            f"or blockquote and the sources add {contained_diagrams} contained "
-            f"diagram(s), but {in_container} are contained in the corpus: a "
+            f"or blockquote, but {in_container} are contained in the corpus: a "
             f"fence has escaped its container")
 
 
@@ -1311,96 +1273,24 @@ class JsxCommentFenceTests(unittest.TestCase):
         # closer — the diagram vanished from the corpus entirely.
         src = "# T\n\n{/*\n```\n*/}\n\n```mermaid\ngraph TD; A-->B\n```\n"
         self.assertEqual(["graph TD; A-->B"],
-                         [b.split("\n")[1] for _, _, _, _, b in g.mermaid_blocks(src)])
+                         [b.split("\n")[1] for _, _, b in g.mermaid_blocks(src)])
 
     def test_a_commented_out_diagram_is_still_dropped(self):
         src = ("# T\n\n{/*\n```mermaid\ndead\n```\n*/}\n\n"
                "```mermaid\nlive\n```\n")
         self.assertEqual(["live"],
-                         [b.split("\n")[1] for _, _, _, _, b in g.mermaid_blocks(src)])
+                         [b.split("\n")[1] for _, _, b in g.mermaid_blocks(src)])
 
     def test_delimiters_shown_in_inline_code_are_prose(self):
         # The page documenting `{/*` and `*/}` sits either side of a diagram.
         src = "# T\n\nWrite `{/*` and `*/}` around it.\n\n```mermaid\nlive\n```\n"
         self.assertEqual(["live"],
-                         [b.split("\n")[1] for _, _, _, _, b in g.mermaid_blocks(src)])
+                         [b.split("\n")[1] for _, _, b in g.mermaid_blocks(src)])
 
     def test_a_delimiter_inside_a_fenced_block_is_code(self):
         src = "# T\n\n```js\n// {/*\n```\n\n```mermaid\nlive\n```\n"
         self.assertEqual(["live"],
-                         [b.split("\n")[1] for _, _, _, _, b in g.mermaid_blocks(src)])
-
-
-class DiagramContainerTests(unittest.TestCase):
-    """A diagram goes back inside the container it was written in."""
-
-    def splice_one(self, src, body):
-        (heading, occurrence, preceding, container, block), = \
-            g.mermaid_blocks(src)
-        return g.splice_diagram(body, heading, block, occurrence, preceding,
-                                container)
-
-    def test_a_diagram_in_a_list_item_does_not_end_the_item(self):
-        # Spliced at column zero it closed item 1, so the ordered list restarted
-        # and "2." became a second list numbered from one.
-        src = ("## Steps\n\n1. Run this:\n\n   ```mermaid\n   graph TD; A-->B\n"
-               "   ```\n\n2. Then that.\n")
-        out = self.splice_one(src, "## Steps\n\n1. Run this:\n\n2. Then that.")
-        self.assertEqual(
-            "## Steps\n\n1. Run this:\n\n   ```mermaid\n   graph TD; A-->B\n"
-            "   ```\n\n2. Then that.", out)
-
-    def test_a_diagram_in_a_blockquote_keeps_the_quote(self):
-        src = ("## Note\n\n> Look at this:\n>\n> ```mermaid\n> graph TD; A-->B\n"
-               "> ```\n")
-        out = self.splice_one(src, "## Note\n\n> Look at this:")
-        self.assertEqual(
-            "## Note\n\n> Look at this:\n>\n> ```mermaid\n> graph TD; A-->B\n"
-            "> ```", out)
-
-    def test_a_nested_item_indents_past_both_markers(self):
-        src = ("## N\n\n1. Outer\n   - Inner step:\n\n     ```mermaid\n"
-               "     graph TD; A-->B\n     ```\n")
-        out = self.splice_one(src, "## N\n\n1. Outer\n   - Inner step:")
-        self.assertIn("\n     ```mermaid\n     graph TD; A-->B\n     ```", out)
-
-    def test_a_top_level_diagram_is_not_indented(self):
-        src = "## Plain\n\nSome prose.\n\n```mermaid\ngraph TD; A-->B\n```\n"
-        out = self.splice_one(src, "## Plain\n\nSome prose.")
-        self.assertEqual(
-            "## Plain\n\nSome prose.\n\n```mermaid\ngraph TD; A-->B\n```", out)
-
-    def test_a_hard_wrapped_paragraph_still_anchors_the_diagram(self):
-        # `preceding` is one source line but the rendered paragraph is one
-        # joined line, so an exact comparison never matched and the diagram was
-        # placed at the top of the section, ahead of the prose introducing it.
-        src = ("## Section\n\nIntro prose\ncontinues here.\n\n```mermaid\n"
-               "graph TD; A-->B\n```\n")
-        out = self.splice_one(src, "## Section\n\nIntro prose continues here.")
-        self.assertEqual(
-            "## Section\n\nIntro prose continues here.\n\n```mermaid\n"
-            "graph TD; A-->B\n```", out)
-
-    def test_an_unrelated_line_ending_the_same_way_does_not_win(self):
-        # Anchoring on a line that merely *ends* with the source tail put the
-        # diagram after the first line that happened to close that way.
-        src = ("## S\n\nactual intro\nthe tail.\n\n```mermaid\n"
-               "graph TD; A-->B\n```\n")
-        body = "## S\n\nunrelated the tail.\n\nactual intro the tail."
-        out = self.splice_one(src, body)
-        self.assertEqual(
-            "## S\n\nunrelated the tail.\n\nactual intro the tail.\n\n"
-            "```mermaid\ngraph TD; A-->B\n```", out)
-
-    def test_a_paragraph_inside_a_list_item_keeps_the_item_indent(self):
-        # A continuation paragraph carries indentation but no marker; dropping
-        # it would splice the diagram out of the item it belonged to.
-        src = ("## N\n\n1. Outer\n\n   Some prose here.\n\n   ```mermaid\n"
-               "   graph TD; A-->B\n   ```\n")
-        out = self.splice_one(src, "## N\n\n1. Outer\n\n   Some prose here.")
-        self.assertEqual(
-            "## N\n\n1. Outer\n\n   Some prose here.\n\n   ```mermaid\n"
-            "   graph TD; A-->B\n   ```", out)
+                         [b.split("\n")[1] for _, _, b in g.mermaid_blocks(src)])
 
 
 class ContainedFencePatternTests(unittest.TestCase):
@@ -1420,30 +1310,13 @@ class ContainedFencePatternTests(unittest.TestCase):
     def test_a_top_level_block_does_not_count(self):
         self.assertEqual(0, self.contained("```bash\necho hi\n```\n"))
 
-    def test_a_correctly_contained_diagram_counts_as_contained(self):
-        # The built page has no <pre> for a diagram at all, so this is the only
-        # side that can see one. A diagram indented back into its list item has
-        # to read as contained here, or the whole-corpus comparison reports a
-        # correctly placed diagram as one that escaped.
-        src = ("## Steps\n\n1. Inspect this graph:\n\n"
-               "   ```mermaid\n   graph TD; Inspect-->Continue\n   ```\n\n"
-               "   Continue inside this step.\n")
-        body = ("## Steps\n\n1. Inspect this graph:\n\n"
-                "   Continue inside this step.")
-        (heading, occurrence, preceding, container, block), = g.mermaid_blocks(src)
-        out = g.splice_diagram(body, heading, block, occurrence, preceding,
-                               container)
-        self.assertEqual(1, self.contained(out))
-
 
 class ConsecutiveDiagramTests(unittest.TestCase):
-    """A run of diagrams under one heading keeps its source order and place."""
+    """A run of diagrams under one heading keeps its source order."""
 
     def splice_all(self, src, body):
-        for heading, occurrence, preceding, container, block in \
-                g.mermaid_blocks(src):
-            body = g.splice_diagram(body, heading, block, occurrence, preceding,
-                                    container)
+        for heading, occurrence, block in g.mermaid_blocks(src):
+            body = g.splice_diagram(body, heading, block, occurrence)
         return body
 
     @staticmethod
@@ -1451,23 +1324,24 @@ class ConsecutiveDiagramTests(unittest.TestCase):
         return [ln.strip() for ln in out.split("\n")
                 if "-->" in ln or ln.startswith(("#", "This", "Intro", "Tail"))]
 
-    def test_consecutive_diagrams_stay_after_their_introduction(self):
-        # Only the first diagram of a run has prose to anchor to: the line
-        # before each of the others closes the previous fence. Sending those to
-        # the heading put the run in reverse order and ahead of the very
-        # paragraph that introduces it.
-        src = ("## Flow\n\nThis introduction belongs before both diagrams.\n\n"
+    def test_a_run_keeps_its_source_order(self):
+        # Each diagram of a run is placed by heading alone, so every one of them
+        # lands at the top of the section. Inserting each at the heading itself
+        # would emit the run in reverse; each goes after the last one already
+        # placed there instead. The section's prose follows the run, which is
+        # the placement this corpus trades the prose anchor for.
+        src = ("## Flow\n\nThis introduction is section prose.\n\n"
                "```mermaid\ngraph TD; First-->Diagram\n```\n\n"
                "```mermaid\ngraph TD; Second-->Diagram\n```\n\n"
-               "This conclusion belongs after both diagrams.\n")
-        body = ("## Flow\n\nThis introduction belongs before both diagrams.\n\n"
-                "This conclusion belongs after both diagrams.")
+               "This conclusion is section prose.\n")
+        body = ("## Flow\n\nThis introduction is section prose.\n\n"
+                "This conclusion is section prose.")
         self.assertEqual(
             ["## Flow",
-             "This introduction belongs before both diagrams.",
              "graph TD; First-->Diagram",
              "graph TD; Second-->Diagram",
-             "This conclusion belongs after both diagrams."],
+             "This introduction is section prose.",
+             "This conclusion is section prose."],
             self.shape(self.splice_all(src, body)))
 
     def test_a_run_does_not_reach_into_the_next_section(self):
@@ -1479,10 +1353,10 @@ class ConsecutiveDiagramTests(unittest.TestCase):
                "## Beta\n\nIntro beta.\n\n"
                "```mermaid\ngraph TD; B1-->x\n```\n\n"
                "```mermaid\ngraph TD; B2-->x\n```\n\nTail.\n")
-        body = ("## Alpha\n\nIntro alpha.\n\n## Beta\n\nIntro beta.\n\nTail.")
+        body = "## Alpha\n\nIntro alpha.\n\n## Beta\n\nIntro beta.\n\nTail."
         self.assertEqual(
-            ["## Alpha", "Intro alpha.", "graph TD; A1-->x", "graph TD; A2-->x",
-             "## Beta", "Intro beta.", "graph TD; B1-->x", "graph TD; B2-->x",
+            ["## Alpha", "graph TD; A1-->x", "graph TD; A2-->x", "Intro alpha.",
+             "## Beta", "graph TD; B1-->x", "graph TD; B2-->x", "Intro beta.",
              "Tail."],
             self.shape(self.splice_all(src, body)))
 
@@ -1493,68 +1367,9 @@ class ConsecutiveDiagramTests(unittest.TestCase):
                "```mermaid\ngraph TD; Three-->x\n```\n\nTail.\n")
         body = "## Flow\n\nIntro.\n\nTail."
         self.assertEqual(
-            ["## Flow", "Intro.", "graph TD; One-->x", "graph TD; Two-->x",
-             "graph TD; Three-->x", "Tail."],
+            ["## Flow", "graph TD; One-->x", "graph TD; Two-->x",
+             "graph TD; Three-->x", "Intro.", "Tail."],
             self.shape(self.splice_all(src, body)))
-
-
-class SourceContainmentTests(unittest.TestCase):
-    """Containment comes from the fence's own line, not from what precedes it."""
-
-    def splice_one(self, src, body):
-        (heading, occurrence, preceding, container, block), = \
-            g.mermaid_blocks(src)
-        return g.splice_diagram(body, heading, block, occurrence, preceding,
-                                container)
-
-    def test_a_top_level_diagram_after_a_list_stays_top_level(self):
-        # Deriving the container from the matched paragraph pulled a top-level
-        # diagram into the bullet that merely happened to precede it.
-        src = "## S\n\n- Finish the prerequisite.\n\n```mermaid\ngraph TD; A-->B\n```\n"
-        out = self.splice_one(src, "## S\n\n- Finish the prerequisite.")
-        self.assertEqual(
-            "## S\n\n- Finish the prerequisite.\n\n```mermaid\ngraph TD; A-->B\n```",
-            out)
-
-    def test_a_top_level_diagram_after_a_blockquote_is_not_quoted(self):
-        src = "## S\n\n> Note this.\n\n```mermaid\ngraph TD; A-->B\n```\n"
-        out = self.splice_one(src, "## S\n\n> Note this.")
-        self.assertEqual(
-            "## S\n\n> Note this.\n\n```mermaid\ngraph TD; A-->B\n```", out)
-
-    def test_the_container_is_read_from_the_fence_line(self):
-        self.assertEqual(
-            ["", "> ", "  ", "    "],
-            [g.mermaid_blocks(src)[0][3] for src in (
-                "```mermaid\nx\n```\n",
-                "> ```mermaid\n> x\n> ```\n",
-                "- ```mermaid\n  x\n  ```\n",
-                "    ```mermaid\n    x\n    ```\n",
-            )])
-
-
-class RenderedAnchorTests(unittest.TestCase):
-    """An anchor is compared after the transformations a build applies."""
-
-    def test_a_linked_introduction_still_anchors_the_diagram(self):
-        # `preceding` holds source Markdown while the built page has the link
-        # target resolved, so an exact comparison failed and the heading
-        # fallback put the diagram ahead of the sentence introducing it.
-        src = ("## Diagram\n\nRead [Architecture](/fundamentals/architecture) "
-               "before this diagram.\n\n```mermaid\ngraph TD; A-->B\n```\n")
-        body = ("## Diagram\n\nRead [Architecture]"
-                "(https://docs.erigon.tech/fundamentals/architecture) "
-                "before this diagram.")
-        (h, o, p, c, blk), = g.mermaid_blocks(src)
-        self.assertEqual(body + "\n\n```mermaid\ngraph TD; A-->B\n```",
-                         g.splice_diagram(body, h, blk, o, p, c))
-
-    def test_emphasis_rewritten_by_the_build_still_anchors(self):
-        src = "## S\n\nSee the _fast_ path.\n\n```mermaid\ngraph TD; A-->B\n```\n"
-        body = "## S\n\nSee the *fast* path."
-        (h, o, p, c, blk), = g.mermaid_blocks(src)
-        self.assertEqual(body + "\n\n```mermaid\ngraph TD; A-->B\n```",
-                         g.splice_diagram(body, h, blk, o, p, c))
 
 
 class QuotedListIndentTests(unittest.TestCase):
