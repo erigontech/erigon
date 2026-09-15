@@ -17,7 +17,6 @@
 package shutter
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -79,10 +78,15 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 }
 
 func (p *DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (TxnBatch, bool) {
+	txnBatch, _, ok := p.DecryptedTxnsWithRevision(mark)
+	return txnBatch, ok
+}
+
+func (p *DecryptedTxnsPool) DecryptedTxnsWithRevision(mark DecryptionMark) (TxnBatch, uint64, bool) {
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
 	txnBatch, ok := p.decryptedTxns[mark]
-	return txnBatch, ok
+	return txnBatch, p.decryptedTxnRevisions[mark], ok
 }
 
 func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBatch) {
@@ -119,30 +123,10 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 	return markDeletions, txnDeletions
 }
 
-func (p *DecryptedTxnsPool) TransactionSetRevision(slot uint64) uint64 {
+func (p *DecryptedTxnsPool) TransactionSetRevision(mark DecryptionMark) uint64 {
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
-
-	marks := make([]DecryptionMark, 0, len(p.decryptedTxns))
-	for mark := range p.decryptedTxns {
-		if mark.Slot == slot {
-			marks = append(marks, mark)
-		}
-	}
-	if len(marks) == 0 {
-		return 0
-	}
-	slices.SortFunc(marks, func(a, b DecryptionMark) int { return cmp.Compare(a.Eon, b.Eon) })
-
-	hasher := sha256.New()
-	var word [8]byte
-	for _, mark := range marks {
-		binary.LittleEndian.PutUint64(word[:], uint64(mark.Eon))
-		_, _ = hasher.Write(word[:])
-		binary.LittleEndian.PutUint64(word[:], p.decryptedTxnRevisions[mark])
-		_, _ = hasher.Write(word[:])
-	}
-	return binary.LittleEndian.Uint64(hasher.Sum(nil))
+	return p.decryptedTxnRevisions[mark]
 }
 
 func txnBatchRevision(batch TxnBatch) uint64 {

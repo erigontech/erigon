@@ -187,7 +187,7 @@ func (p *Pool) Run(ctx context.Context) error {
 func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	if p.stopped.Load() {
 		p.logger.Error("cannot provide shutter transactions - pool stopped")
-		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+		return p.provideBaseTxns(ctx, 0, opts...)
 	}
 
 	provideOpts := txnprovider.ApplyProvideOptions(opts...)
@@ -217,7 +217,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	eon, ok := p.eonTracker.EonByBlockNum(parentBlockNum)
 	if !ok {
 		p.logger.Warn("unknown eon for block num, falling back to base txn provider", "blockNum", parentBlockNum)
-		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+		return p.provideBaseTxns(ctx, 0, opts...)
 	}
 
 	slot, err := p.slotCalculator.CalcSlot(blockTime)
@@ -262,7 +262,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 					"timeout", decryptionMarkWaitTimeout,
 				)
 
-				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+				return p.provideBaseTxns(ctx, 0, opts...)
 			}
 
 			return nil, err
@@ -272,7 +272,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		decryptionMarkOnTime.Inc()
 	}
 
-	decryptedTxns, ok := p.decryptedTxnsPool.DecryptedTxns(decryptionMark)
+	decryptedTxns, decryptedRevision, ok := p.decryptedTxnsPool.DecryptedTxnsWithRevision(decryptionMark)
 	if !ok {
 		p.logger.Warn(
 			"decryption keys missing, falling back to base txn provider",
@@ -284,7 +284,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		)
 
 		decryptionMarkMissed.Inc()
-		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+		return p.provideBaseTxns(ctx, 0, opts...)
 	}
 
 	isAmsterdam := p.chainConfig.IsAmsterdam(blockTime)
@@ -381,7 +381,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 
 	p.logger.Debug("providing decrypted txns", "count", len(txns), "gas", decryptedTxnsGas)
 	opts = append(opts, txnprovider.WithGasTarget(availableGas)) // overrides option
-	additionalTxns, err := p.baseTxnProvider.ProvideTxns(ctx, opts...)
+	additionalTxns, err := p.provideBaseTxns(ctx, decryptedRevision, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -390,17 +390,43 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	return append(txns, additionalTxns...), nil
 }
 
-func (p *Pool) TransactionSetRevision(blockTime uint64) uint64 {
-	var baseRevision uint64
-	baseProvider, ok := p.baseTxnProvider.(txnprovider.RevisionedTxnProvider)
-	if ok {
-		baseRevision = baseProvider.TransactionSetRevision(blockTime)
-	}
+func (p *Pool) TransactionSetRevision(blockTime, parentBlockNum uint64) uint64 {
+	baseRevision := p.baseTransactionSetRevision(blockTime, parentBlockNum)
 
 	var decryptedRevision uint64
-	if slot, err := p.slotCalculator.CalcSlot(blockTime); err == nil {
-		decryptedRevision = p.decryptedTxnsPool.TransactionSetRevision(slot)
+	if p.stopped.Load() {
+		return combineTransactionSetRevisions(baseRevision, 0)
 	}
+	slot, slotErr := p.slotCalculator.CalcSlot(blockTime)
+	eon, eonFound := p.eonTracker.EonByBlockNum(parentBlockNum)
+	if slotErr == nil && eonFound {
+		decryptedRevision = p.decryptedTxnsPool.TransactionSetRevision(DecryptionMark{Slot: slot, Eon: eon.Index})
+	}
+	return combineTransactionSetRevisions(baseRevision, decryptedRevision)
+}
+
+func (p *Pool) baseTransactionSetRevision(blockTime, parentBlockNum uint64) uint64 {
+	baseProvider, ok := p.baseTxnProvider.(txnprovider.RevisionedTxnProvider)
+	if !ok {
+		return 0
+	}
+	return baseProvider.TransactionSetRevision(blockTime, parentBlockNum)
+}
+
+func (p *Pool) provideBaseTxns(ctx context.Context, decryptedRevision uint64, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	provideOpts := txnprovider.ApplyProvideOptions(opts...)
+	baseRevision := &atomic.Uint64{}
+	baseRevision.Store(p.baseTransactionSetRevision(provideOpts.BlockTime, provideOpts.ParentBlockNum))
+	baseCtx := txnprovider.WithTxnRevisionObserver(ctx, baseRevision.Store)
+	txns, err := p.baseTxnProvider.ProvideTxns(baseCtx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	txnprovider.ObserveTxnRevision(ctx, combineTransactionSetRevisions(baseRevision.Load(), decryptedRevision))
+	return txns, nil
+}
+
+func combineTransactionSetRevisions(baseRevision, decryptedRevision uint64) uint64 {
 	var revisions [16]byte
 	binary.LittleEndian.PutUint64(revisions[:8], baseRevision)
 	binary.LittleEndian.PutUint64(revisions[8:], decryptedRevision)

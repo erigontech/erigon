@@ -197,7 +197,7 @@ type ExecModule struct {
 	builderFunc          builder.BlockBuilderFunc
 	builders             map[uint64]*builderEntry
 	buildersByTimestamp  map[uint64]uint64
-	payloadTxnRevision   func(uint64) uint64
+	payloadTxnRevision   func(uint64, uint64) uint64
 	transientBuilders    int
 	transientAdmission   chan struct{}
 	transientAdmissionMu sync.Mutex
@@ -264,7 +264,7 @@ func WithConditionalForkChoiceReadyHook(hook func() error) ExecModuleOption {
 }
 
 // WithPayloadTransactionsRevision supplies a request-scoped token for the builder's transaction source.
-func WithPayloadTransactionsRevision(revision func(timestamp uint64) uint64) ExecModuleOption {
+func WithPayloadTransactionsRevision(revision func(timestamp, parentBlockNum uint64) uint64) ExecModuleOption {
 	return func(e *ExecModule) {
 		e.payloadTxnRevision = revision
 	}

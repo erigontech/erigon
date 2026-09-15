@@ -950,6 +950,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		}
 	}
 
+	finishPendingChanges()
+	txnprovider.ObserveTxnRevision(ctx, p.transactionSetRevision.Load())
 	return true, count, nil
 }
 
@@ -1002,7 +1004,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) TransactionSetRevision(uint64) uint64 {
+func (p *TxPool) TransactionSetRevision(uint64, uint64) uint64 {
 	return p.transactionSetRevision.Load()
 }
 

@@ -43,7 +43,12 @@ func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
 
 func (p *PendingPool) trackChanges() func() {
 	before := p.fingerprint
+	finished := false
 	return func() {
+		if finished {
+			return
+		}
+		finished = true
 		if p.revision != nil && p.fingerprint != before {
 			p.revision.Add(1)
 		}

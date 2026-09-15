@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -100,17 +102,24 @@ func sameBuildRequest(previous, current *builder.Parameters) bool {
 type builderEntry struct {
 	builder      *builder.BlockBuilder
 	params       *builder.Parameters
-	txnRevision  uint64
+	txnRevision  *atomic.Uint64
 	txnRefreshes uint8
 }
 
 const maxPayloadTxnRefreshesPerRequest = 2
 
-func (e *ExecModule) currentPayloadTxnRevision(timestamp uint64) uint64 {
+func (e *ExecModule) currentPayloadTxnRevision(timestamp, parentBlockNum uint64) uint64 {
 	if e.payloadTxnRevision == nil {
 		return 0
 	}
-	return e.payloadTxnRevision(timestamp)
+	return e.payloadTxnRevision(timestamp, parentBlockNum)
+}
+
+func payloadTxnRevision(entry *builderEntry) uint64 {
+	if entry == nil || entry.txnRevision == nil {
+		return 0
+	}
+	return entry.txnRevision.Load()
 }
 
 // isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
@@ -374,6 +383,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			return AssembleBlockResult{}, err
 		}
 	}
+	var parentBlockNum uint64
 	if !params.TransientPayload && e.db != nil {
 		tx, cleanup, err := e.beginOverlayOrRo(ctx)
 		if err != nil {
@@ -381,10 +391,15 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 		forkchoiceHead := rawdb.ReadForkchoiceHead(tx)
 		blockHead := rawdb.ReadHeadBlockHash(tx)
+		parentBlockNumPtr := rawdb.ReadHeaderNumber(tx, params.ParentHash)
 		cleanup()
 		if forkchoiceHead != params.ParentHash || blockHead != params.ParentHash {
 			return AssembleBlockResult{Busy: true}, nil
 		}
+		if parentBlockNumPtr == nil {
+			return AssembleBlockResult{Busy: true}, nil
+		}
+		parentBlockNum = *parentBlockNumPtr
 	}
 
 	if params.TransientPayload {
@@ -393,7 +408,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
-	txnRevision := e.currentPayloadTxnRevision(params.Timestamp)
+	txnRevision := e.currentPayloadTxnRevision(params.Timestamp, parentBlockNum)
 	var txnRefreshes uint8
 	// A stopped builder is reusable until its transaction source changes. Only one that cannot
 	// produce - failed, or discarded with its work still winding down - has to be passed over.
@@ -404,7 +419,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 				txnRefreshes = previous.txnRefreshes
 			}
 			if sameRequest && previous.builder != nil && !previous.builder.Failed() && !previous.builder.Discarded() {
-				needsRefresh := hasCompletedPayload(previous) && previous.txnRevision != txnRevision
+				needsRefresh := hasCompletedPayload(previous) && payloadTxnRevision(previous) != txnRevision
 				if !needsRefresh || txnRefreshes >= maxPayloadTxnRefreshesPerRequest {
 					if !hasCompletedPayload(previous) {
 						e.dropTransientBuilders()
@@ -433,12 +448,15 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	if params.TransientPayload {
 		buildCtx = ctx
 	}
+	observedTxnRevision := &atomic.Uint64{}
+	observedTxnRevision.Store(txnRevision)
+	buildCtx = txnprovider.WithTxnRevisionObserver(buildCtx, observedTxnRevision.Store)
 	blockBuilder := builder.NewBlockBuilder(buildCtx, e.builderFunc, ownedParams,
 		buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot))
 	e.builders[e.nextPayloadId] = &builderEntry{
 		builder:      blockBuilder,
 		params:       ownedParams,
-		txnRevision:  txnRevision,
+		txnRevision:  observedTxnRevision,
 		txnRefreshes: txnRefreshes,
 	}
 	if params.TransientPayload {

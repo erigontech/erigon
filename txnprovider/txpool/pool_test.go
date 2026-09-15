@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -518,7 +520,7 @@ func TestTransactionSetRevisionAdvancesWhenPendingTransactionsChange(t *testing.
 		}},
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	require.Zero(t, pool.TransactionSetRevision(0))
+	require.Zero(t, pool.TransactionSetRevision(0, 0))
 
 	queuedTxn := newTestTxnSlot(2, 0, 300_000, 300_000, 100_000)
 	queuedTxn.IDHash[0] = 1
@@ -527,20 +529,29 @@ func TestTransactionSetRevisionAdvancesWhenPendingTransactionsChange(t *testing.
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	require.Zero(t, pool.TransactionSetRevision(0))
+	require.Zero(t, pool.TransactionSetRevision(0, 0))
 
 	pendingTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	pendingTxn.IDHash[0] = 2
+	pendingTxn.Rlp = []byte{1}
+	pendingTxn.Size = 1
 	txns.Resize(0)
 	txns.Append(pendingTxn, addr[:], true)
 	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	require.Equal(t, uint64(1), pool.TransactionSetRevision(0))
+	require.Equal(t, uint64(1), pool.TransactionSetRevision(0, 0))
 
 	_, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), pool.TransactionSetRevision(0))
+	require.Equal(t, uint64(1), pool.TransactionSetRevision(0, 0))
+
+	var observedRevision atomic.Uint64
+	providerCtx := txnprovider.WithTxnRevisionObserver(ctx, observedRevision.Store)
+	provided, err := pool.ProvideTxns(providerCtx, txnprovider.WithAmount(1))
+	require.NoError(t, err)
+	require.Len(t, provided, 1)
+	require.Equal(t, pool.TransactionSetRevision(0, 0), observedRevision.Load())
 
 	queuedAfterPending := newTestTxnSlot(3, 0, 300_000, 300_000, 100_000)
 	queuedAfterPending.IDHash[0] = 3
@@ -548,7 +559,7 @@ func TestTransactionSetRevisionAdvancesWhenPendingTransactionsChange(t *testing.
 	txns.Append(queuedAfterPending, addr[:], true)
 	_, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), pool.TransactionSetRevision(0))
+	require.Equal(t, uint64(1), pool.TransactionSetRevision(0, 0))
 }
 
 func TestNonceFromAddress(t *testing.T) {

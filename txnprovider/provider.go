@@ -39,7 +39,25 @@ type TxnProvider interface {
 // RevisionedTxnProvider reports a request-scoped token for block-building input.
 type RevisionedTxnProvider interface {
 	TxnProvider
-	TransactionSetRevision(blockTime uint64) uint64
+	TransactionSetRevision(blockTime, parentBlockNum uint64) uint64
+}
+
+type txnRevisionObserverKey struct{}
+
+// WithTxnRevisionObserver records the provider snapshot used by a block build.
+func WithTxnRevisionObserver(ctx context.Context, observer func(uint64)) context.Context {
+	if observer == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, txnRevisionObserverKey{}, observer)
+}
+
+// ObserveTxnRevision reports the transaction snapshot returned by a provider.
+func ObserveTxnRevision(ctx context.Context, revision uint64) {
+	observer, ok := ctx.Value(txnRevisionObserverKey{}).(func(uint64))
+	if ok {
+		observer(revision)
+	}
 }
 
 type ProvideOption func(opt *ProvideOptions)

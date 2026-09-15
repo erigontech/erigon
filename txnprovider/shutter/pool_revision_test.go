@@ -35,9 +35,18 @@ func (p *revisionTxnProvider) ProvideTxns(context.Context, ...txnprovider.Provid
 	return nil, nil
 }
 
-func (p *revisionTxnProvider) TransactionSetRevision(uint64) uint64 {
+func (p *revisionTxnProvider) TransactionSetRevision(uint64, uint64) uint64 {
 	return p.revision.Load()
 }
+
+type revisionEonTracker struct{}
+
+func (revisionEonTracker) Run(context.Context) error { return nil }
+func (revisionEonTracker) CurrentEon() (Eon, bool)   { return Eon{Index: 1}, true }
+func (revisionEonTracker) RecentEon(index EonIndex) (Eon, bool) {
+	return Eon{Index: index}, true
+}
+func (revisionEonTracker) EonByBlockNum(uint64) (Eon, bool) { return Eon{Index: 1}, true }
 
 func TestPoolTransactionSetRevisionIncludesBaseAndDecryptedTransactions(t *testing.T) {
 	base := &revisionTxnProvider{}
@@ -46,18 +55,19 @@ func TestPoolTransactionSetRevisionIncludesBaseAndDecryptedTransactions(t *testi
 		baseTxnProvider:   base,
 		decryptedTxnsPool: decrypted,
 		slotCalculator:    NewBeaconChainSlotCalculator(0, 12),
+		eonTracker:        revisionEonTracker{},
 	}
 
-	initial := pool.TransactionSetRevision(12)
+	initial := pool.TransactionSetRevision(12, 100)
 	base.revision.Add(1)
-	baseChanged := pool.TransactionSetRevision(12)
+	baseChanged := pool.TransactionSetRevision(12, 100)
 	require.NotEqual(t, initial, baseChanged)
 
-	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 2, Eon: 1}, TxnBatch{})
-	require.Equal(t, baseChanged, pool.TransactionSetRevision(12))
-	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 3, Eon: 1}, TxnBatch{})
-	require.Equal(t, baseChanged, pool.TransactionSetRevision(12))
+	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 1, Eon: 2}, TxnBatch{})
+	require.Equal(t, baseChanged, pool.TransactionSetRevision(12, 100))
+	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 1, Eon: 3}, TxnBatch{})
+	require.Equal(t, baseChanged, pool.TransactionSetRevision(12, 100))
 
 	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 1, Eon: 1}, TxnBatch{})
-	require.NotEqual(t, baseChanged, pool.TransactionSetRevision(12))
+	require.NotEqual(t, baseChanged, pool.TransactionSetRevision(12, 100))
 }

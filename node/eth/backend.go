@@ -934,12 +934,12 @@ func New(
 		backend.readAheader,
 		backend.stopNode,
 		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
-		execmodule.WithPayloadTransactionsRevision(func(timestamp uint64) uint64 {
+		execmodule.WithPayloadTransactionsRevision(func(timestamp, parentBlockNum uint64) uint64 {
 			revisionProvider, ok := txnProvider.(txnprovider.RevisionedTxnProvider)
 			if !ok {
 				return 0
 			}
-			return revisionProvider.TransactionSetRevision(timestamp)
+			return revisionProvider.TransactionSetRevision(timestamp, parentBlockNum)
 		}),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
