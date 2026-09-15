@@ -254,7 +254,7 @@ func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash commo
 	// eth_getBlockByHash returns non-canonical blocks too — verify canonicality
 	// by fetching the canonical block at this height and comparing hashes.
 	var canonical *types.Header
-	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeBig(header.Number.ToBig()), false); err != nil {
+	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeUint64(header.Number.Uint64()), false); err != nil {
 		return false, fmt.Errorf("eth_getBlockByNumber failed: %w", err)
 	}
 	return canonical != nil && canonical.Hash() == hash, nil
