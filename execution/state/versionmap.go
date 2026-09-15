@@ -1592,7 +1592,13 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		// An empty code hash is an absent value only while the account is alive:
+		// a destroyed, unrevived account reads the nil hash, so an empty one is
+		// stale there and must go through the destruct check.
+		absentCodeHashLive := func(ch accounts.CodeHash) bool {
+			return absentCodeHash(ch) && (ch.IsZero() || !vm.destroyedAndUnrevived(a, txIdx))
+		}
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHashLive, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
