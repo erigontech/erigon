@@ -132,6 +132,7 @@ type HexPatriciaHashed struct {
 	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
 	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
+	witnessPath   [128]uint16   // For each row, bitmap of cells on a proven key's path
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -157,6 +158,9 @@ type HexPatriciaHashed struct {
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
 	memoizationOff bool // if true, do not rely on memoized hashes
+	// readOnlyWitness marks a witness fold that serves proofs only: cells off the proven paths keep their stored hashes,
+	// since a proof needs just their hashes, and no branch is written back.
+	readOnlyWitness bool
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
@@ -1171,7 +1175,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
-	if hph.memoizationOff {
+	if hph.memoizationOff && !hph.readOnlyWitness { // a read-only witness fold drops hashes in prepareBranchCells
 		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
 	}
 	if cell.storageAddrLen > 0 {
@@ -1610,7 +1614,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
-	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
+	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row], hph.witnessPath[row] = 0, 0, false, 0
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
@@ -1763,11 +1767,13 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
+	switch {
+	case hph.readOnlyWitness:
+	case hph.branchEncoder.DeferUpdatesEnabled():
 		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
-	} else {
+	default:
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1903,7 +1909,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
 
-		if hph.memoizationOff {
+		if hph.memoizationOff && (!hph.readOnlyWitness || hph.witnessPath[row]&bit != 0) {
 			cell.stateHashLen = 0
 		}
 		/* memoization of state hashes*/
@@ -2448,8 +2454,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
-// WitnessNodesByHash folds like Witnesses, but returns the captured nodes keyed by their hash.
+// WitnessNodesByHash folds like Witnesses, but read-only, and returns the captured nodes keyed by their hash. The set
+// holds the proven paths only: nodes off them are referenced by their stored hashes.
 func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+	hph.readOnlyWitness = true
+	defer func() { hph.readOnlyWitness = false }()
 	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
 	if err != nil {
 		return nil, nil, err
@@ -2521,6 +2530,11 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 				if err := hph.unfold(hashedKey, 1); err != nil {
 					return fmt.Errorf("extra unfold: %w", err)
 				}
+			}
+		}
+		for row := range hph.activeRows {
+			if d := int(hph.depths[row]); d <= len(hashedKey) {
+				hph.witnessPath[row] |= uint16(1) << hashedKey[d-1]
 			}
 		}
 		return nil
