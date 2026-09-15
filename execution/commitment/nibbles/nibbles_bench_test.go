@@ -44,16 +44,6 @@ func BenchmarkKeybytesToHex(b *testing.B) {
 	}
 }
 
-func BenchmarkKeybytesToHex32(b *testing.B) {
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i * 37)
-	}
-	for b.Loop() {
-		KeybytesToHex(key)
-	}
-}
-
 func BenchmarkHexToKeybytes(b *testing.B) {
 	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
 	for b.Loop() {

@@ -81,16 +81,18 @@ func TestKeybytesHex(t *testing.T) {
 	}
 }
 
-func TestKeybytesToHexAllLengths(t *testing.T) {
+func TestExpandMatchesBytewise(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for n := range 70 {
-		key := make([]byte, n)
-		rng.Read(key)
-		want := make([]byte, 0, 2*n+1)
-		for _, b := range key {
+		src := make([]byte, n)
+		rng.Read(src)
+		want := make([]byte, 0, 2*n)
+		for _, b := range src {
 			want = append(want, b>>4, b&0x0f)
 		}
-		require.Equal(t, append(want, Terminator), KeybytesToHex(key), "len %d", n)
+		got := make([]byte, 2*n)
+		Expand(src, got)
+		require.Equal(t, want, got, "len %d", n)
 	}
 }
 

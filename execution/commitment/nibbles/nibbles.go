@@ -83,7 +83,10 @@ func CompactToHex(compact []byte) []byte {
 func KeybytesToHex(str []byte) []byte {
 	l := len(str)*2 + 1
 	var nibbles = make([]byte, l)
-	Expand(str, nibbles)
+	for i, b := range str {
+		nibbles[i*2] = b / Terminator
+		nibbles[i*2+1] = b % Terminator
+	}
 	nibbles[l-1] = Terminator
 	return nibbles
 }
