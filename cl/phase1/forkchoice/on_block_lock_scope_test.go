@@ -39,7 +39,7 @@ const lockScopeTimeout = 5 * time.Second
 
 // blockingEngine returns a mock whose NewPayload signals entry and then blocks until
 // the returned release channel is closed, so a test can hold OnBlock inside the EL call.
-func blockingEngineReturning(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
+func blockingEngine(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
 	tb.Helper()
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(tb))
 	entered := make(chan struct{}, times)
@@ -67,7 +67,7 @@ func awaitSignal(t *testing.T, ch <-chan struct{}, what string) {
 // OnBlock must not hold f.mu across the EL NewPayload call: an unrelated fork-choice
 // writer has to be able to make progress while the EL is still working.
 func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	store, block := buildExAnteStorePendingLast(t, engine)
 
 	onBlockDone := make(chan error, 1)
@@ -99,9 +99,9 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 // A GetHead that runs while f.mu is released caches a head computed without the
 // incoming block, so OnBlock has to drop that cache again after it resumes.
 func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
-	// An EL error returns before markPayloadStatus, which resets the head cache itself on a
-	// status change and would otherwise mask a missing invalidation here.
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusNone, errors.New("el unavailable"))
+	// A VALID status with an error is rejected before markPayloadStatus, which would
+	// otherwise reset the head cache itself and mask a missing invalidation here.
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, errors.New("el unavailable"))
 	store, block := buildExAnteStorePendingLast(t, engine)
 
 	onBlockDone := make(chan error, 1)
@@ -134,7 +134,7 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 // gated entry into OnBlock have to be redone before the block is committed.
 func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 	t.Run("finalized past the block", func(t *testing.T) {
-		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
+		store, block, run := startOnBlockInsideEL(t, execution_client.PayloadStatusValidated, nil)
 		// Epoch 1 starts at slot 32, above the block's slot.
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
 		require.NoError(t, run())
@@ -142,7 +142,7 @@ func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 	})
 
 	t.Run("finalized onto another branch", func(t *testing.T) {
-		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
+		store, block, run := startOnBlockInsideEL(t, execution_client.PayloadStatusValidated, nil)
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
 		require.ErrorIs(t, run(), ErrNotFinalizedDescendant)
 		requireBlockNotAdded(t, store, block)
@@ -151,9 +151,9 @@ func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 
 // startOnBlockInsideEL parks an OnBlock call inside the EL NewPayload call with f.mu
 // released. run releases the EL and returns OnBlock's error.
-func startOnBlockInsideELReturning(t *testing.T, status execution_client.PayloadStatus, retErr error) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
+func startOnBlockInsideEL(t *testing.T, status execution_client.PayloadStatus, retErr error) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
 	t.Helper()
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, status, retErr)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, status, retErr)
 	store, block := buildExAnteStorePendingLast(t, engine)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, true, true, false) }()
@@ -185,31 +185,31 @@ func requireBlockNotAdded(t *testing.T, store *ForkChoiceStore, block *cltypes.S
 // inserted, so the guard has to be redone after the EL call. Whichever finishes second
 // must be rejected.
 func TestOnBlockRejectsEquivocationRegisteredDuringNewPayload(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
-	store, first := buildExAnteStorePendingLast(t, engine)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, sibling := buildExAnteStorePendingLast(t, engine)
 
-	// A sibling with the same slot and proposer but a different root.
-	second := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	require.NoError(t, utils.DecodeSSZSnappy(second, diffBlockd4Enc, int(clparams.AltairVersion)))
-	second.Block.StateRoot = common.HexToHash("0xfeed")
-	firstRoot, err := first.Block.HashSSZ()
+	// Same slot and proposer as the sibling, but a different root.
+	parked := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(parked, diffBlockd4Enc, int(clparams.AltairVersion)))
+	parked.Block.StateRoot = common.HexToHash("0xfeed")
+	siblingRoot, err := sibling.Block.HashSSZ()
 	require.NoError(t, err)
-	secondRoot, err := second.Block.HashSSZ()
+	parkedRoot, err := parked.Block.HashSSZ()
 	require.NoError(t, err)
-	require.NotEqual(t, firstRoot, secondRoot, "the two blocks must have distinct roots")
-	require.Equal(t, first.Block.Slot, second.Block.Slot)
-	require.Equal(t, first.Block.ProposerIndex, second.Block.ProposerIndex)
+	require.NotEqual(t, siblingRoot, parkedRoot, "the two blocks must have distinct roots")
+	require.Equal(t, sibling.Block.Slot, parked.Block.Slot)
+	require.Equal(t, sibling.Block.ProposerIndex, parked.Block.ProposerIndex)
 
-	// The first block is parked inside the EL with f.mu released, so nothing is inserted yet.
+	// Park one block inside the EL with f.mu released, so nothing is inserted yet.
 	done := make(chan error, 1)
 	go func() {
-		done <- store.OnBlockWithEquivocationCheck(context.Background(), second, true, true, false)
+		done <- store.OnBlockWithEquivocationCheck(context.Background(), parked, true, true, false)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start for the equivocating block")
 
-	// Insert the sibling while the first caller is still in the EL.
-	require.NoError(t, store.OnBlock(context.Background(), first, false, true, false))
-	_, ok := store.forkGraph.GetHeader(firstRoot)
+	// Register the sibling while the parked caller is still in the EL.
+	require.NoError(t, store.OnBlock(context.Background(), sibling, false, true, false))
+	_, ok := store.forkGraph.GetHeader(siblingRoot)
 	require.True(t, ok, "the sibling must be registered before the EL call returns")
 
 	close(releaseEL)
@@ -220,17 +220,15 @@ func TestOnBlockRejectsEquivocationRegisteredDuringNewPayload(t *testing.T) {
 	case <-time.After(lockScopeTimeout):
 		t.Fatal("OnBlockWithEquivocationCheck did not finish")
 	}
-	_, ok = store.forkGraph.GetHeader(secondRoot)
+	_, ok = store.forkGraph.GetHeader(parkedRoot)
 	require.False(t, ok, "the equivocating block must not be inserted")
 }
 
 // Finality moving during the EL call must not swallow the EL's own verdict: the error is
-// still reported, it is only the commit that is dropped. (The INVALIDATED arm is not
-// covered here: upstream now derives an RLP header on that path, which these Altair
-// fixtures cannot satisfy.)
+// still reported, it is only the commit that is dropped.
 func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 	t.Run("engine error", func(t *testing.T) {
-		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNone, errors.New("el unavailable"))
+		store, block, run := startOnBlockInsideEL(t, execution_client.PayloadStatusNone, errors.New("el unavailable"))
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
 
 		require.ErrorIs(t, run(), ErrNewPayloadNoStatus)
@@ -242,7 +240,7 @@ func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 // is unvalidated, so the root stays optimistic. Cleanup is not finality-driven — it waits
 // for a later validated payload with a higher execution block number.
 func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
-	store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNotValidated, nil)
+	store, block, run := startOnBlockInsideEL(t, execution_client.PayloadStatusNotValidated, nil)
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
 
 	require.NoError(t, run())
@@ -261,7 +259,7 @@ func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *tes
 // means the finishing caller cannot publish after relock, so if the marker is set by the
 // time the token comes free, it was published under the token.
 func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	store, block := buildExAnteStorePendingLast(t, engine)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -298,7 +296,7 @@ func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
 
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
-func TestNewPayloadWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
+func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	verified, err := lru.New[common.Hash, struct{}](8)
 	require.NoError(t, err)

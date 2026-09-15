@@ -275,6 +275,22 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 
 // getHead returns the head using pre-GLOAS fork choice rules.
 func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
+	for {
+		head, headSlot, ok, err := f.getHeadOnce(auxilliaryState)
+		if err != nil {
+			return ForkChoiceNode{}, 0, err
+		}
+		if ok {
+			return head, headSlot, nil
+		}
+	}
+}
+
+// getHeadOnce computes the head for one snapshot of the justified checkpoint. It reports
+// ok=false when the checkpoint moved while it waited for f.mu, so the caller retries:
+// caching a head computed from a superseded checkpoint would leave it stale until the next
+// attestation, tick or block clears it.
+func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, bool, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error
@@ -284,11 +300,14 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (Fo
 		// goroutine if done under the lock.
 		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
 		if err != nil {
-			return ForkChoiceNode{}, 0, err
+			return ForkChoiceNode{}, 0, false, err
 		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
+		return ForkChoiceNode{}, 0, false, nil
+	}
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
@@ -314,11 +333,11 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (Fo
 		if len(children) == 0 {
 			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
-				return ForkChoiceNode{}, 0, errors.New("no slot for head is stored")
+				return ForkChoiceNode{}, 0, false, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
 			f.publishSelectedHead(f.headHash, f.headSlot)
-			return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, nil
+			return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, true, nil
 		}
 
 		// Average case scenario.
