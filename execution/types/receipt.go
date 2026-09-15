@@ -382,18 +382,6 @@ func (r *Receipt) LogsBloom() Bloom {
 	return b
 }
 
-// Size returns the approximate memory held by the receipt and its logs.
-func (r *Receipt) Size() int {
-	n := int(unsafe.Sizeof(*r)) + len(r.PostState)
-	if r.BlockNumber != nil {
-		n += int(unsafe.Sizeof(*r.BlockNumber))
-	}
-	for _, l := range r.Logs {
-		n += int(unsafe.Sizeof(l)) + int(unsafe.Sizeof(*l)) + len(l.Topics)*length.Hash + len(l.Data)
-	}
-	return n
-}
-
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
 	if r == nil {
