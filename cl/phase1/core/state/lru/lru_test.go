@@ -56,18 +56,46 @@ func TestCacheWithTTLCloseIsIdempotent(t *testing.T) {
 	require.NotPanics(t, c.Close)
 }
 
-func TestCacheWithTTLZeroTTLStartsNoSweep(t *testing.T) {
-	before := surviving(t)
-
-	c := NewWithTTL[uint64, uint64]("zero_ttl", 16, 0)
+func TestCacheWithTTLReadsAfterClose(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("reads_after_close", 16, time.Hour)
 	c.Add(1, 1)
-
-	require.LessOrEqual(t, surviving(t), before, "a cache without a ttl started a sweep goroutine")
+	c.Close()
 
 	v, ok := c.Get(1)
-	require.True(t, ok, "an entry in a cache without a ttl must not expire")
+	require.True(t, ok, "a closed cache must still serve what it holds")
 	require.Equal(t, uint64(1), v)
-	c.Close()
+
+	c.Add(2, 2)
+	v, ok = c.Get(2)
+	require.True(t, ok, "closing stops the sweep, not the cache")
+	require.Equal(t, uint64(2), v)
+}
+
+func TestCacheWithTTLStartsNoSweepWithoutTTL(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"zero", 0},
+		{"negative", -time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before := surviving(t)
+
+			c := NewWithTTL[uint64, uint64]("no_ttl_"+tt.name, 16, tt.ttl)
+			t.Cleanup(c.Close)
+			c.Add(1, 1)
+
+			require.LessOrEqual(t, surviving(t), before, "a cache without a ttl started a sweep goroutine")
+
+			v, ok := c.Get(1)
+			require.True(t, ok, "an entry in a cache without a ttl must not expire")
+			require.Equal(t, uint64(1), v)
+
+			c.removeExpired(time.Now().Add(100 * 365 * 24 * time.Hour))
+			require.Equal(t, 1, c.Len(), "an entry without a deadline must survive any sweep")
+		})
+	}
 }
 
 // TestCacheWithTTLGetMissesExpiredEntry (control): read semantics do not depend on the sweep and
@@ -93,9 +121,9 @@ func TestCacheWithTTLEvictsBySize(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("evicts_by_size", 2, time.Hour)
 	t.Cleanup(c.Close)
 
-	c.Add(1, 1)
-	c.Add(2, 2)
-	c.Add(3, 3)
+	require.False(t, c.Add(1, 1))
+	require.False(t, c.Add(2, 2))
+	require.True(t, c.Add(3, 3), "adding past the size must report an eviction")
 
 	require.Equal(t, 2, c.Len())
 	_, ok := c.Get(1)
@@ -118,6 +146,17 @@ func TestCacheWithTTLAddRenewsExpiry(t *testing.T) {
 	require.Equal(t, uint64(2), v)
 }
 
+// TestCacheWithTTLRemove (control): Remove reports whether the key was held, as before.
+func TestCacheWithTTLRemove(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("remove", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	require.True(t, c.Remove(1))
+	require.False(t, c.Remove(1), "removing a key the cache does not hold must report false")
+	require.Equal(t, 0, c.Len())
+}
+
 func TestCacheWithTTLSweepReclaimsExpiredEntries(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("sweep_reclaims", 16, 100*time.Millisecond)
 	t.Cleanup(c.Close)
@@ -129,9 +168,12 @@ func TestCacheWithTTLSweepReclaimsExpiredEntries(t *testing.T) {
 		"the sweep must reclaim an expired entry without a Get on it")
 }
 
-func TestCacheWithTTLRemoveExpiredStopsAtLiveTail(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("remove_expired_tail", 16, time.Hour)
+func TestCacheWithTTLRemoveExpired(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("remove_expired", 16, time.Hour)
 	t.Cleanup(c.Close)
+
+	c.removeExpired(time.Now())
+	require.Equal(t, 0, c.Len(), "sweeping an empty cache must be a no-op")
 
 	c.Add(1, 1)
 	c.Add(2, 2)
@@ -139,14 +181,30 @@ func TestCacheWithTTLRemoveExpiredStopsAtLiveTail(t *testing.T) {
 	c.removeExpired(time.Now())
 	require.Equal(t, 2, c.Len(), "unexpired entries must survive a sweep")
 
+	// The sweep stops at the first live entry, so a newer entry ahead of an expired one is kept
+	// until the expired one reaches the tail.
 	c.removeExpired(time.Now().Add(2 * time.Hour))
 	require.Equal(t, 0, c.Len(), "entries past their deadline must be reclaimed")
+}
+
+func TestCacheWithTTLGetReclaimsExpiredEntry(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("get_reclaims", 16, 10*time.Millisecond)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	time.Sleep(50 * time.Millisecond)
+
+	_, ok := c.Get(1)
+	require.False(t, ok)
+	require.Equal(t, 0, c.Len(), "a Get that finds an entry expired must drop it")
 }
 
 func TestSweepInterval(t *testing.T) {
 	require.Equal(t, 10*time.Millisecond, sweepInterval(time.Second))
 	require.Equal(t, minSweepInterval, sweepInterval(sweepsPerTTL*minSweepInterval),
 		"an interval equal to the floor must not be used")
+	require.Equal(t, 2*minSweepInterval, sweepInterval(2*sweepsPerTTL*minSweepInterval),
+		"an interval one step past the floor must be used")
 	require.Equal(t, minSweepInterval, sweepInterval(time.Nanosecond),
 		"a ttl too short to divide must not produce a non-positive ticker interval")
 }
