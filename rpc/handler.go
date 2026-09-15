@@ -241,29 +241,14 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	})
 }
 
-// sendBatchAnswers joins the per-item answers into one JSON array and sends it.
-// It owns the stream for the whole call, so the pool gets it back on any exit.
+// sendBatchAnswers sends the answers in request order, leaving out calls that have none.
 func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
-	out := jsonstream.Get(nil)
-	defer jsonstream.Put(out)
-
-	out.WriteArrayStart()
-	wrote := false
-	for _, answer := range answers {
-		if answer == nil {
-			continue
-		}
-		if wrote {
-			out.WriteMore()
-		}
-		wrote = true
-		out.WriteRawBytes(answer)
+	batch := slices.DeleteFunc(answers, func(answer []byte) bool { return answer == nil })
+	if len(batch) == 0 {
+		return
 	}
-	out.WriteArrayEnd()
-	if wrote {
-		if err := h.conn.WriteJSON(ctx, rawResponse(out.Buffer())); err != nil {
-			h.logger.Debug("Failed to write RPC batch response", "err", err)
-		}
+	if err := h.conn.WriteJSON(ctx, rawBatch(batch)); err != nil {
+		h.logger.Debug("Failed to write RPC batch response", "err", err)
 	}
 }
 
