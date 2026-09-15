@@ -498,7 +498,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// Post-processing is serial: all goroutines have finished, no races.
 	firstMissing := len(blockResults)
 	blobGasUsedRatio := make([]float64, len(blockResults))
-	for i, r := range blockResults {
+	for i := range blockResults {
+		r := &blockResults[i]
 		if r.missing || !r.hasResult {
 			if i < firstMissing {
 				firstMissing = i
