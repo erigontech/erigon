@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"runtime"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ type Generator struct {
 	// executed at a time - all parallel requests for same hash will wait for results
 	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we're facing many similar parallel requests
 	blockExecMutex *loaderMutex[common.Hash]
+	blockExecGroup singleflight.Group
 	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
 
 	execSem chan struct{} // limits concurrent block executions to bound memory usage
@@ -501,7 +503,34 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+// Prototype knobs for the dedup A/B: RECEIPTS_DEDUP=mutex|singleflight, RECEIPTS_PRECHECK probes the cache before dedup.
+var (
+	receiptsDedup    = dbg.EnvString("RECEIPTS_DEDUP", "mutex")
+	receiptsPrecheck = dbg.EnvBool("RECEIPTS_PRECHECK", false)
+)
+
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (types.Receipts, error) {
+	blockHash := block.Hash()
+	if receiptsPrecheck {
+		if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+			return receipts, nil
+		}
+	}
+	if receiptsDedup == "singleflight" {
+		v, err, _ := g.blockExecGroup.Do(string(blockHash[:]), func() (any, error) {
+			return g.getReceipts(ctx, cfg, tx, block, opts)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return v.(types.Receipts), nil
+	}
+	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
+	defer g.blockExecMutex.unlock(mu, blockHash)
+	return g.getReceipts(ctx, cfg, tx, block, opts)
+}
+
+func (g *Generator) getReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -517,8 +546,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}()
 
-	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
-	defer g.blockExecMutex.unlock(mu, blockHash)
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
