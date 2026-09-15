@@ -854,7 +854,7 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	// compares against the value that came with rr.
 	live, rr, ok := readLive(vm, addr, key, txIndex)
 	matchesLive := func() bool { return ok && eq(readVal, live) }
-	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
+	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, false, checkVersion, traceInvalid, tracePrefix, false)
 }
 
 // Typed live-value readers (uniform signature so validateRead can thread them
@@ -867,12 +867,6 @@ func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int
 }
 func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadIncarnation(a, tx)
-}
-func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
-	return vm.ReadCodeHash(a, tx)
-}
-func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
-	return vm.ReadAddress(a, tx)
 }
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadStorage(a, k, tx)
@@ -893,7 +887,7 @@ func eqAccount(a, b *accounts.Account) bool {
 // no recorded value of its own and must not invalidate on a bare Done entry.
 func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	rr ReadResult,
-	matchesLive func() bool,
+	matchesLive func() bool, absent bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
@@ -934,8 +928,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		}
 		// A later tx self-destructed the account (no revival), so a read predating
 		// the destruct is stale; checkVersion alone misses it because the SD doesn't
-		// write the read's own path.
-		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
+		// write the read's own path. An already absent value stays valid.
+		if valid == VersionValid && !absent && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
 				destructTxIndex := sdRR.DepIdx()
@@ -963,7 +957,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, false, checkVersion, traceInvalid, tracePrefix, true)
 		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
@@ -974,16 +968,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, false, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
 						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, false, checkVersion, traceInvalid, tracePrefix, true)
 					} else {
 						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, false, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, false, checkVersion, traceInvalid, tracePrefix, true)
 
 					// A prior tx re-creating this account makes a nil AddressPath
 					// storage read stale; IncarnationPath is the specific signal
@@ -1037,18 +1031,23 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// check is authoritative. One ReadStatus, no value comparison.
 	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
 		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			vm.ReadStatus(addr, path, key, txIdx), nil, checkVersion, traceInvalid, tracePrefix, false)
+			vm.ReadStatus(addr, path, key, txIdx), nil, false, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
-	// Value paths go through the generic validateRead so the recorded value stays
-	// typed (never boxed) and the single typed read supplies both status and the
-	// tiebreaker value.
 	for a, tr := range rs.address {
 		var rv *accounts.Account
 		if tr.Val != nil {
 			rv = tr.Val.Account()
 		}
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, checkVersion, traceInvalid, tracePrefix)) {
+		live, rr, exists := vm.ReadAddress(a, txIdx)
+		if tr.Source == MapRead && rv == nil && rr.Status() == MVReadResultNone {
+			// Without an account record, the self-destruct supplies the absent read's version.
+			if destructed, sdRes, exists := vm.ReadSelfDestruct(a, txIdx); exists && sdRes.Status() == MVReadResultDone && destructed {
+				rr = sdRes
+			}
+		}
+		matchesLive := func() bool { return exists && eqAccount(rv, live) }
+		if !ok(vm.validateReadImpl(txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rr, matchesLive, false, checkVersion, traceInvalid, tracePrefix, false)) {
 			return
 		}
 	}
@@ -1068,7 +1067,10 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		live, rr, exists := vm.ReadCodeHash(a, txIdx)
+		matchesLive := func() bool { return exists && eqCodeHash(tr.Val, live) }
+		absent := tr.Val.IsEmpty() || tr.Val.IsZero()
+		if !ok(vm.validateReadImpl(txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, rr, matchesLive, absent, checkVersion, traceInvalid, tracePrefix, false)) {
 			return
 		}
 	}

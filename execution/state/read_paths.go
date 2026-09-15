@@ -191,7 +191,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// at a strictly higher TxIndex; per-path (not account-wide) so a field with
 		// no post-self-destruct write correctly reads as the fresh account's zero.
 		revived := false
-		if pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
+		pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex)
+		if pathRevival.DepIdx() > destructTxIndex &&
 			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
 			revived = true
 		}
@@ -230,6 +231,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					if path == AddressPath {
+						readVersion := sdVersion
+						if pathRevival.Status() == MVReadResultDone {
+							readVersion = pathRevival.Version()
+						}
+						s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
+							ReadHeader: ReadHeader{Source: MapRead, Version: readVersion},
+						})
+					}
 					r.outcome = outcomeReturnZero
 					r.source = MapRead
 					r.version = sdVersion
