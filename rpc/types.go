@@ -204,8 +204,7 @@ type BlockNumberOrHash struct {
 }
 
 func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) > 0 && trimmed[0] == '{' {
+	if len(data) > 0 && data[0] == '{' {
 		type erased BlockNumberOrHash
 		e := erased{}
 		if err := json.Unmarshal(data, &e); err == nil {
@@ -221,7 +220,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 			return nil
 		}
 	}
-	if len(trimmed) > 0 && trimmed[0] != '"' {
+	if len(data) > 0 && data[0] != '"' {
 		blckNum, err := strconv.ParseUint(string(data), 10, 64)
 		if err == nil {
 			if blckNum > math.MaxInt64 {
@@ -233,8 +232,8 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		}
 	}
 	var input string
-	if n := len(trimmed); n >= 2 && trimmed[0] == '"' && trimmed[n-1] == '"' && bytes.IndexByte(trimmed, '\\') < 0 {
-		input = string(trimmed[1 : n-1])
+	if n := len(data); n >= 2 && data[0] == '"' && data[n-1] == '"' && bytes.IndexByte(data, '\\') < 0 {
+		input = string(data[1 : n-1])
 	} else if err := json.Unmarshal(data, &input); err != nil {
 		return err
 	}
