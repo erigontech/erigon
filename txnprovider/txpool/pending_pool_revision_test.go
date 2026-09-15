@@ -29,14 +29,40 @@ func TestPendingPoolRevisionTracksMembershipChanges(t *testing.T) {
 	var revision atomic.Uint64
 	pool := NewPendingSubPool(PendingSubPool, 2)
 	pool.revision = &revision
-	txn := newMetaTxn(newTestTxnSlot(0, 0, 300_000, 300_000, 100_000), true, 0)
+	txnSlot := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	txnSlot.IDHash[0] = 1
+	txn := newMetaTxn(txnSlot, true, 0)
 
+	finish := pool.trackChanges()
 	pool.Add(txn, log.New())
+	finish()
 	require.Equal(t, uint64(1), revision.Load())
 
+	transientSlot := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
+	transientSlot.IDHash[0] = 2
+	transient := newMetaTxn(transientSlot, true, 0)
+	finish = pool.trackChanges()
+	pool.Add(transient, log.New())
+	pool.Remove(transient, "test", log.New())
+	finish()
+	require.Equal(t, uint64(1), revision.Load())
+
+	finish = pool.trackChanges()
 	pool.Remove(txn, "test", log.New())
+	finish()
 	require.Equal(t, uint64(2), revision.Load())
 
+	finish = pool.trackChanges()
 	pool.Remove(txn, "test", log.New())
+	finish()
 	require.Equal(t, uint64(2), revision.Load())
+
+	var overflowRevision atomic.Uint64
+	overflowPool := NewPendingSubPool(PendingSubPool, 1)
+	overflowPool.revision = &overflowRevision
+	finish = overflowPool.trackChanges()
+	overflowPool.Add(transient, log.New())
+	require.Same(t, transient, overflowPool.PopWorst())
+	finish()
+	require.Zero(t, overflowRevision.Load())
 }

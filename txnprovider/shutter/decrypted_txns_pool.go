@@ -17,10 +17,12 @@
 package shutter
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"slices"
 	"sync"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -37,16 +39,17 @@ type TxnBatch struct {
 }
 
 type DecryptedTxnsPool struct {
-	decryptedTxns  map[DecryptionMark]TxnBatch
-	decryptionCond *sync.Cond
-	revision       atomic.Uint64
+	decryptedTxns         map[DecryptionMark]TxnBatch
+	decryptedTxnRevisions map[DecryptionMark]uint64
+	decryptionCond        *sync.Cond
 }
 
 func NewDecryptedTxnsPool() *DecryptedTxnsPool {
 	var mu sync.Mutex
 	return &DecryptedTxnsPool{
-		decryptedTxns:  make(map[DecryptionMark]TxnBatch),
-		decryptionCond: sync.NewCond(&mu),
+		decryptedTxns:         make(map[DecryptionMark]TxnBatch),
+		decryptedTxnRevisions: make(map[DecryptionMark]uint64),
+		decryptionCond:        sync.NewCond(&mu),
 	}
 }
 
@@ -83,10 +86,11 @@ func (p *DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (TxnBatch, bool) 
 }
 
 func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBatch) {
+	revision := txnBatchRevision(txnBatch)
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
 	p.decryptedTxns[mark] = txnBatch
-	p.revision.Add(1)
+	p.decryptedTxnRevisions[mark] = revision
 	p.decryptionCond.Broadcast()
 	txnsLen := float64(len(txnBatch.Transactions))
 	decryptedTxnsPoolAdded.Add(txnsLen)
@@ -105,20 +109,61 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 			txnDeletions += uint64(len(txnBatch.Transactions))
 			totalBytes += txnBatch.TotalBytes
 			delete(p.decryptedTxns, mark)
+			delete(p.decryptedTxnRevisions, mark)
 		}
 	}
 
 	decryptedTxnsPoolDeleted.Add(float64(txnDeletions))
 	decryptedTxnsPoolTotalCount.Sub(float64(txnDeletions))
 	decryptedTxnsPoolTotalBytes.Sub(float64(totalBytes))
-	if markDeletions > 0 {
-		p.revision.Add(1)
-	}
 	return markDeletions, txnDeletions
 }
 
-func (p *DecryptedTxnsPool) TransactionSetRevision() uint64 {
-	return p.revision.Load()
+func (p *DecryptedTxnsPool) TransactionSetRevision(slot uint64) uint64 {
+	p.decryptionCond.L.Lock()
+	defer p.decryptionCond.L.Unlock()
+
+	marks := make([]DecryptionMark, 0, len(p.decryptedTxns))
+	for mark := range p.decryptedTxns {
+		if mark.Slot == slot {
+			marks = append(marks, mark)
+		}
+	}
+	if len(marks) == 0 {
+		return 0
+	}
+	slices.SortFunc(marks, func(a, b DecryptionMark) int { return cmp.Compare(a.Eon, b.Eon) })
+
+	hasher := sha256.New()
+	var word [8]byte
+	for _, mark := range marks {
+		binary.LittleEndian.PutUint64(word[:], uint64(mark.Eon))
+		_, _ = hasher.Write(word[:])
+		binary.LittleEndian.PutUint64(word[:], p.decryptedTxnRevisions[mark])
+		_, _ = hasher.Write(word[:])
+	}
+	return binary.LittleEndian.Uint64(hasher.Sum(nil))
+}
+
+func txnBatchRevision(batch TxnBatch) uint64 {
+	hasher := sha256.New()
+	var word [8]byte
+	binary.LittleEndian.PutUint64(word[:], batch.TotalGasLimit)
+	_, _ = hasher.Write(word[:])
+	binary.LittleEndian.PutUint64(word[:], uint64(batch.TotalBytes))
+	_, _ = hasher.Write(word[:])
+	binary.LittleEndian.PutUint64(word[:], uint64(len(batch.Transactions)))
+	_, _ = hasher.Write(word[:])
+	for _, txn := range batch.Transactions {
+		if txn == nil {
+			_, _ = hasher.Write([]byte{0})
+			continue
+		}
+		_, _ = hasher.Write([]byte{1})
+		hash := txn.Hash()
+		_, _ = hasher.Write(hash[:])
+	}
+	return binary.LittleEndian.Uint64(hasher.Sum(nil))
 }
 
 func (p *DecryptedTxnsPool) AllDecryptedTxns() []types.Transaction {

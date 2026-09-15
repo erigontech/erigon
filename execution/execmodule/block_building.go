@@ -106,11 +106,11 @@ type builderEntry struct {
 
 const maxPayloadTxnRefreshesPerRequest = 2
 
-func (e *ExecModule) currentPayloadTxnRevision() uint64 {
+func (e *ExecModule) currentPayloadTxnRevision(timestamp uint64) uint64 {
 	if e.payloadTxnRevision == nil {
 		return 0
 	}
-	return e.payloadTxnRevision()
+	return e.payloadTxnRevision(timestamp)
 }
 
 // isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
@@ -393,7 +393,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
-	txnRevision := e.currentPayloadTxnRevision()
+	txnRevision := e.currentPayloadTxnRevision(params.Timestamp)
 	var txnRefreshes uint8
 	// A stopped builder is reusable until its transaction source changes. Only one that cannot
 	// produce - failed, or discarded with its work still winding down - has to be passed over.

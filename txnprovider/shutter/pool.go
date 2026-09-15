@@ -20,6 +20,8 @@ package shutter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -388,12 +390,22 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	return append(txns, additionalTxns...), nil
 }
 
-func (p *Pool) TransactionSetRevision() uint64 {
+func (p *Pool) TransactionSetRevision(blockTime uint64) uint64 {
+	var baseRevision uint64
 	baseProvider, ok := p.baseTxnProvider.(txnprovider.RevisionedTxnProvider)
-	if !ok {
-		return p.decryptedTxnsPool.TransactionSetRevision()
+	if ok {
+		baseRevision = baseProvider.TransactionSetRevision(blockTime)
 	}
-	return baseProvider.TransactionSetRevision() + p.decryptedTxnsPool.TransactionSetRevision()
+
+	var decryptedRevision uint64
+	if slot, err := p.slotCalculator.CalcSlot(blockTime); err == nil {
+		decryptedRevision = p.decryptedTxnsPool.TransactionSetRevision(slot)
+	}
+	var revisions [16]byte
+	binary.LittleEndian.PutUint64(revisions[:8], baseRevision)
+	binary.LittleEndian.PutUint64(revisions[8:], decryptedRevision)
+	hash := sha256.Sum256(revisions[:])
+	return binary.LittleEndian.Uint64(hash[:])
 }
 
 func (p *Pool) AllEncryptedTxns() []EncryptedTxnSubmission {

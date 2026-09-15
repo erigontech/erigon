@@ -35,19 +35,29 @@ func (p *revisionTxnProvider) ProvideTxns(context.Context, ...txnprovider.Provid
 	return nil, nil
 }
 
-func (p *revisionTxnProvider) TransactionSetRevision() uint64 {
+func (p *revisionTxnProvider) TransactionSetRevision(uint64) uint64 {
 	return p.revision.Load()
 }
 
 func TestPoolTransactionSetRevisionIncludesBaseAndDecryptedTransactions(t *testing.T) {
 	base := &revisionTxnProvider{}
 	decrypted := NewDecryptedTxnsPool()
-	pool := &Pool{baseTxnProvider: base, decryptedTxnsPool: decrypted}
+	pool := &Pool{
+		baseTxnProvider:   base,
+		decryptedTxnsPool: decrypted,
+		slotCalculator:    NewBeaconChainSlotCalculator(0, 12),
+	}
 
-	require.Zero(t, pool.TransactionSetRevision())
+	initial := pool.TransactionSetRevision(12)
 	base.revision.Add(1)
-	require.Equal(t, uint64(1), pool.TransactionSetRevision())
+	baseChanged := pool.TransactionSetRevision(12)
+	require.NotEqual(t, initial, baseChanged)
+
+	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 2, Eon: 1}, TxnBatch{})
+	require.Equal(t, baseChanged, pool.TransactionSetRevision(12))
+	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 3, Eon: 1}, TxnBatch{})
+	require.Equal(t, baseChanged, pool.TransactionSetRevision(12))
 
 	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 1, Eon: 1}, TxnBatch{})
-	require.Equal(t, uint64(2), pool.TransactionSetRevision())
+	require.NotEqual(t, baseChanged, pool.TransactionSetRevision(12))
 }

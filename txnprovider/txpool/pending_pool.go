@@ -29,20 +29,30 @@ import (
 // It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
 // pending.best slice for mining (because we consider txns and metaTxn are immutable)
 type PendingPool struct {
-	best     *bestSlice
-	worst    *WorstQueue
-	limit    int
-	t        SubPoolType
-	revision *atomic.Uint64
+	best        *bestSlice
+	worst       *WorstQueue
+	limit       int
+	t           SubPoolType
+	revision    *atomic.Uint64
+	fingerprint [32]byte
 }
 
 func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
 	return &PendingPool{limit: limit, t: t, best: &bestSlice{ms: []*metaTxn{}}, worst: &WorstQueue{ms: []*metaTxn{}}}
 }
 
-func (p *PendingPool) changed() {
-	if p.revision != nil {
-		p.revision.Add(1)
+func (p *PendingPool) trackChanges() func() {
+	before := p.fingerprint
+	return func() {
+		if p.revision != nil && p.fingerprint != before {
+			p.revision.Add(1)
+		}
+	}
+}
+
+func (p *PendingPool) toggle(txn *metaTxn) {
+	for i, b := range txn.TxnSlot.IDHash {
+		p.fingerprint[i] ^= b
 	}
 }
 
@@ -72,13 +82,12 @@ func (p *PendingPool) PopWorst() *metaTxn { //nolint
 	if i.bestIndex >= 0 {
 		p.best.UnsafeRemove(i)
 	}
-	p.changed()
+	p.toggle(i)
 	return i
 }
 
 func (p *PendingPool) Updated(mt *metaTxn) {
 	heap.Fix(p.worst, mt.worstIndex)
-	p.changed()
 }
 
 func (p *PendingPool) Len() int {
@@ -98,7 +107,7 @@ func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.Logger) {
 	}
 	i.currentSubPool = 0
 	if changed {
-		p.changed()
+		p.toggle(i)
 	}
 }
 
@@ -109,7 +118,7 @@ func (p *PendingPool) Add(i *metaTxn, logger log.Logger) {
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
 	p.best.UnsafeAdd(i)
-	p.changed()
+	p.toggle(i)
 }
 
 func (p *PendingPool) DebugPrint(prefix string) {

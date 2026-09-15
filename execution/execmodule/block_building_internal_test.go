@@ -121,7 +121,7 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 		header := &types.Header{Extra: []byte{byte(revision.Load())}}
 		return &types.BlockWithReceipts{Block: types.NewBlock(header, nil, nil, nil, nil, nil)}, nil
 	})
-	WithPayloadTransactionsRevision(revision.Load)(module)
+	WithPayloadTransactionsRevision(func(uint64) uint64 { return revision.Load() })(module)
 
 	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
 	first, err := module.AssembleBlock(t.Context(), params)
@@ -154,7 +154,7 @@ func TestAssembleBlockBoundsTransactionRefreshesPerPayload(t *testing.T) {
 		started <- params.PayloadId
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
-	WithPayloadTransactionsRevision(revision.Load)(module)
+	WithPayloadTransactionsRevision(func(uint64) uint64 { return revision.Load() })(module)
 	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
 
 	var latest AssembleBlockResult
@@ -187,7 +187,7 @@ func TestAssembleBlockReusesRunningPayloadAcrossTransactionRevision(t *testing.T
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
-	WithPayloadTransactionsRevision(revision.Load)(module)
+	WithPayloadTransactionsRevision(func(uint64) uint64 { return revision.Load() })(module)
 	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
 
 	first, err := module.AssembleBlock(t.Context(), params)
@@ -209,7 +209,7 @@ func TestAssembleBlockResetsTransactionRefreshLimitForNewRequest(t *testing.T) {
 		started <- params.PayloadId
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
-	WithPayloadTransactionsRevision(revision.Load)(module)
+	WithPayloadTransactionsRevision(func(uint64) uint64 { return revision.Load() })(module)
 	timestamp := newTestTimestamp()
 	params := &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}}
 
@@ -244,7 +244,7 @@ func TestAssembleBlockPreservesTransactionRefreshLimitAcrossFailure(t *testing.T
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
-	WithPayloadTransactionsRevision(revision.Load)(module)
+	WithPayloadTransactionsRevision(func(uint64) uint64 { return revision.Load() })(module)
 	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
 
 	first, err := module.AssembleBlock(t.Context(), params)

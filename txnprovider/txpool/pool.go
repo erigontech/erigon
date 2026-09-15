@@ -349,7 +349,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	p.lock.Lock()
+	finishPendingChanges := p.pending.trackChanges()
 	defer func() {
+		finishPendingChanges()
 		if err == nil {
 			p.lastSeenBlock.Store(block)
 			p.lastSeenCond.Broadcast()
@@ -522,7 +524,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	finishPendingChanges := p.pending.trackChanges()
+	defer func() {
+		finishPendingChanges()
+		p.lock.Unlock()
+	}()
 
 	l := len(p.unprocessedRemoteTxns.Txns)
 	if l == 0 {
@@ -806,7 +812,11 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	}
 	defer tx.Rollback()
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	finishPendingChanges := p.pending.trackChanges()
+	defer func() {
+		finishPendingChanges()
+		p.lock.Unlock()
+	}()
 
 	best := p.pending.best
 
@@ -992,7 +1002,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) TransactionSetRevision() uint64 {
+func (p *TxPool) TransactionSetRevision(uint64) uint64 {
 	return p.transactionSetRevision.Load()
 }
 
@@ -1480,7 +1490,11 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	}
 
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	finishPendingChanges := p.pending.trackChanges()
+	defer func() {
+		finishPendingChanges()
+		p.lock.Unlock()
+	}()
 
 	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
 		return nil, err

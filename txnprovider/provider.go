@@ -36,10 +36,10 @@ type TxnProvider interface {
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
 
-// RevisionedTxnProvider reports changes that can alter block-building input.
+// RevisionedTxnProvider reports a request-scoped token for block-building input.
 type RevisionedTxnProvider interface {
 	TxnProvider
-	TransactionSetRevision() uint64
+	TransactionSetRevision(blockTime uint64) uint64
 }
 
 type ProvideOption func(opt *ProvideOptions)
