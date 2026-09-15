@@ -231,6 +231,8 @@ linters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
+      - execution/vm/contracts_lightclient\.go
       - builtin$
       - examples$
       - testdata
@@ -246,6 +248,8 @@ formatters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
+      - execution/vm/contracts_lightclient\.go
       - builtin$
       - examples$
       - testdata

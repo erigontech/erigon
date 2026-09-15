@@ -71,6 +71,10 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
+	case chainRules.IsParlia:
+		// BSC base cross-chain precompiles. Later BSC-fork sets (Nano+, Cancun
+		// KZG, Prague BLS) are added as those forks are reached.
+		return PrecompiledContractsIstanbulForBSC
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
 	case chainRules.IsPrague:
@@ -192,14 +196,24 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// PrecompiledContractsIstanbulForBSC is the Istanbul set plus BSC's cross-chain
+// light-client precompiles (0x64/0x65), active from Chapel genesis.
+var PrecompiledContractsIstanbulForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsIstanbul)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidate{}
+	return m
+}()
+
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
-	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesOsaka          []accounts.Address
+	PrecompiledAddressesPrague         []accounts.Address
+	PrecompiledAddressesCancun         []accounts.Address
+	PrecompiledAddressesBerlin         []accounts.Address
+	PrecompiledAddressesIstanbul       []accounts.Address
+	PrecompiledAddressesIstanbulForBSC []accounts.Address
+	PrecompiledAddressesByzantium      []accounts.Address
+	PrecompiledAddressesHomestead      []accounts.Address
 )
 
 func init() {
@@ -211,6 +225,9 @@ func init() {
 	}
 	for k := range PrecompiledContractsIstanbul {
 		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
+	}
+	for k := range PrecompiledContractsIstanbulForBSC {
+		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
 	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
@@ -229,6 +246,8 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
+	case rules.IsParlia:
+		return PrecompiledAddressesIstanbulForBSC
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
 	case rules.IsPrague:
