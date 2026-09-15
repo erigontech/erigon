@@ -215,14 +215,24 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	return api
 }
 
+func (api *BaseAPI) tryChainConfig() (*chain.Config, bool) {
+	cc := api._chainConfig.Load()
+	return cc, cc != nil
+}
+
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
 	cfg, _, err := api.chainConfigWithGenesis(ctx, tx)
 	return cfg, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+func (api *BaseAPI) tryChainConfigWithGenesis() (*chain.Config, *types.Block, bool) {
 	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
-	if cc != nil && genesisBlock != nil {
+	return cc, genesisBlock, cc != nil && genesisBlock != nil
+}
+
+func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+	cc, genesisBlock, ok := api.tryChainConfigWithGenesis()
+	if ok {
 		return cc, genesisBlock, nil
 	}
 
