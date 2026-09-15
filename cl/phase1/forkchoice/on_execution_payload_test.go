@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -414,11 +415,7 @@ type countingEnvelopeReadForkGraph struct {
 type admissionEnvelopeReadForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope atomic.Bool
-	envelope    *cltypes.SignedExecutionPayloadEnvelope
 	readEntered chan struct{}
-	releaseRead chan struct{}
-	readErr     error
-	clearOnRead bool
 }
 
 func (g *admissionEnvelopeReadForkGraph) HasEnvelope(common.Hash) bool {
@@ -426,16 +423,8 @@ func (g *admissionEnvelopeReadForkGraph) HasEnvelope(common.Hash) bool {
 }
 
 func (g *admissionEnvelopeReadForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	if g.readEntered != nil {
-		close(g.readEntered)
-	}
-	if g.releaseRead != nil {
-		<-g.releaseRead
-	}
-	if g.clearOnRead {
-		g.hasEnvelope.Store(false)
-	}
-	return g.envelope, g.readErr
+	close(g.readEntered)
+	return nil, errors.New("unexpected persisted envelope read")
 }
 
 type replacingPendingForkGraph struct {
@@ -446,6 +435,22 @@ type replacingPendingForkGraph struct {
 type missingBlockForkGraph struct {
 	pendingRetryForkGraph
 	state *state2.CachingBeaconState
+}
+
+func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testing.T) {
+	readEntered := make(chan struct{})
+	graph := &admissionEnvelopeReadForkGraph{readEntered: readEntered}
+	graph.hasEnvelope.Store(true)
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
+
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+	select {
+	case <-readEntered:
+		t.Fatal("persisted envelope presence triggered a disk read")
+	default:
+	}
 }
 
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
@@ -480,68 +485,6 @@ func (g *transientPersistingEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root com
 func (g *countingEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	g.reads.Add(1)
 	return g.pendingRetryForkGraph.ReadEnvelopeFromDisk(root)
-}
-
-func TestEnvelopeGossipClaimStopsAfterCancellationDuringPersistedRead(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{
-		readEntered: make(chan struct{}),
-		releaseRead: make(chan struct{}),
-		readErr:     errors.New("injected envelope read failure"),
-	}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-	ctx, cancel := context.WithCancel(t.Context())
-	result := make(chan error, 1)
-	go func() {
-		_, err := store.ClaimExecutionPayloadEnvelopeForGossip(ctx, common.HexToHash("0x1234"), 42)
-		result <- err
-	}()
-	<-graph.readEntered
-	cancel()
-	close(graph.releaseRead)
-	require.ErrorIs(t, <-result, context.Canceled)
-
-	graph.hasEnvelope.Store(false)
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
-}
-
-func TestEnvelopeGossipClaimTreatsPersistedReadFailureAsBusy(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{readErr: errors.New("injected envelope read failure")}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
-
-	graph.hasEnvelope.Store(false)
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
-}
-
-func TestEnvelopeGossipClaimDescribesIncompletePersistedEnvelope(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
-	require.ErrorContains(t, err, "persisted execution payload envelope is incomplete")
-}
-
-func TestEnvelopeGossipClaimRepairsPersistedEnvelopeClearedByRead(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{
-		readErr:     errors.New("corrupt envelope"),
-		clearOnRead: true,
-	}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
 func TestApplyLocalSelfBuildEnvelopeRejectsNilPayloadAtIngress(t *testing.T) {
@@ -2183,7 +2126,44 @@ func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.
 	require.Equal(t, int32(2), db.calls.Load())
 }
 
-// TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
+func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockRelease(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	releaseState := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseState:
+		default:
+			close(releaseState)
+		}
+	})
+	graph := &blockingValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		blockedRoot:               envelope.Message.BeaconBlockRoot,
+		stateRead:                 make(chan struct{}),
+		release:                   releaseState,
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	validationDone := make(chan error, 1)
+	go func() { validationDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+	<-graph.stateRead
+
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		store.mu.Lock()
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: envelope.Message.Payload.SlotNumber/cfg.SlotsPerEpoch + 1})
+		store.mu.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	runtime.Gosched()
+	close(releaseState)
+	<-writerDone
+	require.ErrorContains(t, <-validationDone, "before finalized slot")
+}
+
 func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) {
 	blockedRoot := common.Hash{1}
 	otherRoot := common.Hash{2}

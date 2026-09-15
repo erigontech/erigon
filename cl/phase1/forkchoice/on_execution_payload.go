@@ -681,23 +681,30 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		return err
 	}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mu.RLock()
 	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, false)
+	blockState, err := f.forkGraph.GetState(root, true)
 	if err != nil || blockState == nil {
+		f.mu.RUnlock()
 		return fmt.Errorf("beacon block state %v is unavailable", root)
 	}
 	block, ok := f.forkGraph.GetBlock(root)
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+	f.mu.RUnlock()
 	if !ok || block == nil || block.Block == nil {
 		return fmt.Errorf("beacon block %v is unavailable", root)
 	}
-	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+	}
+	f.mu.RLock()
+	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+	f.mu.RUnlock()
+	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	return nil
 }
@@ -712,23 +719,8 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		envelope, readErr := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
-		if err := ctx.Err(); err != nil {
-			f.envelopeGossipAdmissions.Finish(token, false)
-			return ExecutionPayloadEnvelopeAdmissionToken{}, err
-		}
-		if readErr != nil || envelope == nil || envelope.Message == nil {
-			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-				f.envelopeGossipAdmissions.Finish(token, false)
-				if readErr == nil {
-					readErr = errors.New("persisted execution payload envelope is incomplete")
-				}
-				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %w", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
-			}
-		} else {
-			f.envelopeGossipAdmissions.Finish(token, true)
-			return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(envelope)
-		}
+		f.envelopeGossipAdmissions.Finish(token, true)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
 	}
 	if err := ctx.Err(); err != nil {
 		f.envelopeGossipAdmissions.Finish(token, false)
