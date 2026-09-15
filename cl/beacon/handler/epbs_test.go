@@ -666,7 +666,7 @@ func TestPostExecutionPayloadEnvelopeRejectsMismatchedBuilderBeforePersistedRead
 	require.Zero(t, reads.Load())
 }
 
-func TestPostExecutionPayloadEnvelopeCoalescesConcurrentStoredDuplicates(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutReads(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -674,14 +674,9 @@ func TestPostExecutionPayloadEnvelopeCoalescesConcurrentStoredDuplicates(t *test
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
 	fcu.SetEnvelope(envelope.Message.BeaconBlockRoot, envelope)
-	readEntered := make(chan struct{})
-	releaseRead := make(chan struct{})
 	var reads atomic.Int32
 	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-		if reads.Add(1) == 1 {
-			close(readEntered)
-		}
-		<-releaseRead
+		reads.Add(1)
 		return envelope, nil
 	}
 	body, err := json.Marshal(envelope)
@@ -703,9 +698,6 @@ func TestPostExecutionPayloadEnvelopeCoalescesConcurrentStoredDuplicates(t *test
 		}()
 	}
 	close(start)
-	<-readEntered
-	require.Never(t, func() bool { return reads.Load() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
-	close(releaseRead)
 	badRequest, unavailable := 0, 0
 	for range requests {
 		switch <-responses {
@@ -715,9 +707,9 @@ func TestPostExecutionPayloadEnvelopeCoalescesConcurrentStoredDuplicates(t *test
 			unavailable++
 		}
 	}
-	require.Equal(t, 2, badRequest)
-	require.Equal(t, requests-2, unavailable)
-	require.EqualValues(t, 1, reads.Load())
+	require.Equal(t, requests, badRequest)
+	require.Zero(t, unavailable)
+	require.Zero(t, reads.Load())
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
@@ -786,7 +778,7 @@ func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEn
 	differentBody, err := json.Marshal(different)
 	require.NoError(t, err)
 	second := post(differentBody)
-	require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())
+	require.Equal(t, http.StatusBadRequest, second.Code, second.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeAllowsOnlyOneRetryInFlight(t *testing.T) {
@@ -1430,7 +1422,7 @@ func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	select {
 	case event := <-events:
 		t.Fatalf("unexpected event %s", event.Event)

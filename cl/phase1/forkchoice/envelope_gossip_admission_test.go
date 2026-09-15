@@ -129,3 +129,20 @@ func TestExecutionPayloadEnvelopeAdmissionsBoundsDistinctOwners(t *testing.T) {
 		admissions.Finish(token, false)
 	}
 }
+
+func TestExecutionPayloadEnvelopeAdmissionsTryClaimNeverWaits(t *testing.T) {
+	var admissions ExecutionPayloadEnvelopeAdmissions
+	root := common.HexToHash("0x1234")
+	owner, err := admissions.Claim(t.Context(), root, 42)
+	require.NoError(t, err)
+
+	_, err = admissions.TryClaim(root, 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
+	other, err := admissions.TryClaim(common.HexToHash("0x5678"), 42)
+	require.NoError(t, err)
+	admissions.Finish(other, false)
+
+	admissions.Finish(owner, true)
+	_, err = admissions.TryClaim(root, 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+}

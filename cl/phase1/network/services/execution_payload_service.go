@@ -148,7 +148,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	if s.now != nil {
 		receivedAt = s.now()
 	}
-	err := s.processMessage(ctx, signedEnvelope, receivedAt)
+	err := s.processMessage(ctx, signedEnvelope, receivedAt, false)
 	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
 		errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -157,7 +157,12 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return err
 }
 
-func (s *executionPayloadService) processMessage(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) error {
+func (s *executionPayloadService) processMessage(
+	ctx context.Context,
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	receivedAt time.Time,
+	nonblockingAdmission bool,
+) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
@@ -221,7 +226,15 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 
-	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	var (
+		admissionToken forkchoice.ExecutionPayloadEnvelopeAdmissionToken
+		err            error
+	)
+	if nonblockingAdmission {
+		admissionToken, err = s.forkchoiceStore.TryClaimExecutionPayloadEnvelopeForGossip(beaconBlockRoot, builderIndex)
+	} else {
+		admissionToken, err = s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	}
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) {
 			queued, queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt)
@@ -256,21 +269,21 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 			seen = true
 			return nil
 		}
-		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
-			s.emitExecutionPayloadGossip(block, envelope)
-			s.seenEnvelopesCache.Add(seenKey, struct{}{})
-			seen = true
-			return nil
+		if !errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) &&
+			!errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
-		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
-			s.emitExecutionPayloadGossip(block, envelope)
-			return nil
-		}
-		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
 	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
 	if envelope.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
+	}
+	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
+		errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+		s.emitExecutionPayloadGossip(block, envelope)
+		s.seenEnvelopesCache.Add(seenKey, struct{}{})
+		seen = true
+		return nil
 	}
 	seen = true
 
@@ -362,7 +375,7 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
 		return pendingJobKeep
 	}
-	err := s.processMessage(ctx, job.envelope, job.receivedAt)
+	err := s.processMessage(ctx, job.envelope, job.receivedAt, true)
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
 		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&

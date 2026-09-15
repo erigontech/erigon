@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2158,7 +2157,9 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 		close(writerDone)
 	}()
 	<-writerStarted
-	runtime.Gosched()
+	for store.mu.TryRLock() {
+		store.mu.RUnlock()
+	}
 	close(releaseState)
 	<-writerDone
 	require.ErrorContains(t, <-validationDone, "before finalized slot")
