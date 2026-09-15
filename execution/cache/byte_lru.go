@@ -27,15 +27,16 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
-// byteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
+// ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
 // caller's weigher, instead of by an entry count over an assumed average size.
-// The ceiling rises one chunk at a time out of the shared cachebudget envelope
-// and stops for good once the envelope refuses a chunk.
+// A budgeted cache (newByteLRU) raises its limit one chunk at a time out of the shared
+// cachebudget envelope, up to maxBytes, and stops asking once the envelope refuses a chunk,
+// until Purge or Close; an unbudgeted one (NewByteLRU) holds maxBytes from the start.
 //
 // The synchronous executor orders InvalidateAll but not eviction against Add,
 // so a layer can sit over its ceiling until the next write; CleanUp forces a
 // drain. Eviction is W-TinyLFU, so a newcomer can be rejected outright.
-type byteLRU[V any] struct {
+type ByteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64
 	maxBytes int64
@@ -45,12 +46,22 @@ type byteLRU[V any] struct {
 	onEvict atomic.Pointer[func(uint64, V)]
 
 	resident atomic.Int64
-	limit    atomic.Int64 // bytes reserved from the envelope; also otter's maximum
+	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
 	closed bool
+	// unbudgeted holds maxBytes from the start and never touches the envelope.
+	unbudgeted bool
 }
+
+// otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
+// value. Omitting it undercounts a cache of small entries ~1.6x.
+const otterEntryOverheadBytes = 64
+
+// ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:
+// the uint64 key and otter's bookkeeping. Weighers add it to every entry.
+const ByteLRUEntryOverheadBytes = 8 + otterEntryOverheadBytes
 
 const (
 	// Taken unconditionally, so it must stay small: every short-lived cache pays
@@ -59,8 +70,8 @@ const (
 	byteLRUChunkBytes = int64(32 * datasize.MB)
 )
 
-func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *byteLRU[V] {
-	b := &byteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
+func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -68,8 +79,23 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = otter.Must(&otter.Options[uint64, V]{
-		MaximumWeight: uint64(floor),
+	b.c = b.newOtter(floor, weigh)
+	return b
+}
+
+// NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
+// from the start and needs no Close, for owners that have no teardown.
+func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
+	b.limit.Store(b.maxBytes)
+	b.ceiling.Store(b.maxBytes)
+	b.c = b.newOtter(b.maxBytes, weigh)
+	return b
+}
+
+func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
+	return otter.Must(&otter.Options[uint64, V]{
+		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
 		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
 			b.resident.Add(-weigh(e.Key, e.Value))
@@ -79,15 +105,14 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 		},
 		Executor: func(fn func()) { fn() },
 	})
-	return b
 }
 
-func (b *byteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
+func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it exceeds the whole
 // budget, and onEvict never fires for it, so the caller must refund its charge.
-func (b *byteLRU[V]) Add(key uint64, value V) bool {
+func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
 		return false
@@ -102,7 +127,7 @@ func (b *byteLRU[V]) Add(key uint64, value V) bool {
 
 // grow re-tests the caller's condition under the lock: without it every writer
 // piled up at a full limit reserves its own chunk, draining the envelope at once.
-func (b *byteLRU[V]) grow(w int64) {
+func (b *ByteLRU[V]) grow(w int64) {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	lim, ceil := b.limit.Load(), b.ceiling.Load()
@@ -118,17 +143,17 @@ func (b *byteLRU[V]) grow(w int64) {
 	b.c.SetMaximum(uint64(lim + chunk))
 }
 
-func (b *byteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
-func (b *byteLRU[V]) Len() int          { return b.c.EstimatedSize() }
+func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
+func (b *ByteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
-// Purge empties the cache and returns the grown reservation, keeping the floor
-// so the cache is never left disabled.
-func (b *byteLRU[V]) Purge() {
+// Purge empties the cache. A budgeted cache also returns its grown reservation, keeping
+// the floor so it is never left disabled.
+func (b *ByteLRU[V]) Purge() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	b.c.InvalidateAll()
 	b.resident.Store(0)
-	if b.closed {
+	if b.closed || b.unbudgeted {
 		return
 	}
 	floor := min(byteLRUFloorBytes, b.maxBytes)
@@ -138,8 +163,8 @@ func (b *byteLRU[V]) Purge() {
 	b.c.SetMaximum(uint64(floor))
 }
 
-// Close returns this cache's envelope reservation. Idempotent.
-func (b *byteLRU[V]) Close() {
+// Close empties the cache and returns a budgeted cache's envelope reservation. Idempotent.
+func (b *ByteLRU[V]) Close() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	if b.closed {
@@ -150,7 +175,9 @@ func (b *byteLRU[V]) Close() {
 	b.c.InvalidateAll()
 	b.onEvict.Store(nil)
 	b.resident.Store(0)
-	cachebudget.Global.Release(b.limit.Load())
+	if !b.unbudgeted {
+		cachebudget.Global.Release(b.limit.Load())
+	}
 	b.limit.Store(0)
 	b.ceiling.Store(0)
 }

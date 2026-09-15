@@ -802,3 +802,19 @@ func TestBodyDecodeRejectsWrappedLegacyTransaction(t *testing.T) {
 	err = rlp.DecodeBytes(bodyRLP, &body)
 	require.ErrorIs(t, err, ErrInvalidTxType)
 }
+
+func TestHeaderMarshalJSONQuantities(t *testing.T) {
+	h := &Header{Number: *uint256.NewInt(0x18c5467), Difficulty: *uint256.NewInt(0), BaseFee: uint256.NewInt(1_000_000_000)}
+	enc, err := json.Marshal(h)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(enc, &got))
+	require.Equal(t, "0x18c5467", got["number"])
+	require.Equal(t, "0x0", got["difficulty"])
+	require.Equal(t, "0x3b9aca00", got["baseFeePerGas"])
+
+	h.BaseFee = nil
+	enc, err = json.Marshal(h)
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"baseFeePerGas":null`)
+}
