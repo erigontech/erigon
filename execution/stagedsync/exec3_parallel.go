@@ -3052,7 +3052,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// worker coinbase write, and downstream BALANCE(coinbase) reads
 		// across this window are rare. Value-aware validation would close
 		// the gap if it surfaces.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil && !txTask.Rules().IsParlia {
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil && be.tasks[tx].shouldDelayFeeCalc {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
