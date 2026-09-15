@@ -502,46 +502,6 @@ func TestPBinWitnessStatelessRemovesOnTreeAccount(t *testing.T) {
 	require.NotEqual(t, common.BytesToHash(root), got, "the removal does not move the root, so the test proves nothing")
 }
 
-// TestPBinWitnessStatelessHasStorageZoneProbe: the probe slot is what the
-// builder touches to bring an account's storage zone into the witness, so a
-// zone slot the block never read still answers the CREATE-collision predicate —
-// and the probe's own key is not the slot that holds the value.
-func TestPBinWitnessStatelessHasStorageZoneProbe(t *testing.T) {
-	t.Parallel()
-
-	state := newPBinStatelessState()
-	zoneSlot := pbinStatelessAddr(0x52)
-	bare := pbinStatelessAddr(0x53)
-	for _, addr := range []common.Address{zoneSlot, bare} {
-		state.setAccount(addr, 0, 1, nil)
-	}
-	state.setStorage(zoneSlot, pbinStatelessSlot(1<<20), 9)
-
-	both := [][]byte{zoneSlot[:], bare[:]}
-	pbinStatelessProcess(t, state, append(slices.Clone(both),
-		append(bytes.Clone(zoneSlot[:]), pbinStatelessSlotBytes(1<<20)...)))
-
-	probe := commitment.PBinStorageZoneProbeSlot()
-	nodes, root := pbinStatelessWitness(t, state, append(slices.Clone(both),
-		append(bytes.Clone(zoneSlot[:]), probe[:]...),
-		append(bytes.Clone(bare[:]), probe[:]...)))
-	stateless := pbinStatelessVerifierOver(t, nodes, root)
-
-	has, err := stateless.HasStorage(accounts.InternAddress(zoneSlot))
-	require.NoError(t, err)
-	require.True(t, has, "the probe proves the zone occupied even though it names another slot")
-
-	has, err = stateless.HasStorage(accounts.InternAddress(bare))
-	require.NoError(t, err)
-	require.False(t, has, "the probe proves an empty zone empty")
-}
-
-// TestPBinWitnessStatelessHasStorage: EIP-7610's CREATE-collision predicate is
-// answered from the leaves, so a pre-state slot the block never wrote still
-// counts. The header slots resolve off the account's own proof path; the storage
-// zone answers for a witness whose keys walked into it, which is what the
-// builder's probe is for, and never reports a neighbour's zone as this
-// account's.
 func TestPBinWitnessStatelessHasStorage(t *testing.T) {
 	t.Parallel()
 
@@ -560,68 +520,58 @@ func TestPBinWitnessStatelessHasStorage(t *testing.T) {
 		append(bytes.Clone(headerSlot[:]), pbinStatelessSlotBytes(3)...),
 		append(bytes.Clone(zoneSlot[:]), pbinStatelessSlotBytes(1<<20)...)))
 
-	// The block reads the three accounts and no slot, which is what a CREATE
-	// colliding on an address touches.
 	nodes, root := pbinStatelessWitness(t, state, accounts3)
 	stateless := pbinStatelessVerifierOver(t, nodes, root)
+	require.True(t, stateless.state.HasStorage(headerSlot[:]), "a header slot sits on the account's own proof path")
+	require.False(t, stateless.state.HasStorage(bare[:]))
 
-	has, err := stateless.HasStorage(accounts.InternAddress(headerSlot))
-	require.NoError(t, err)
-	require.True(t, has, "a header slot sits on the account's own proof path")
-
-	has, err = stateless.HasStorage(accounts.InternAddress(bare))
-	require.NoError(t, err)
-	require.False(t, has)
-
-	require.NoError(t, stateless.WriteAccountStorage(accounts.InternAddress(bare), 0,
-		accounts.InternKey(pbinStatelessSlot(1<<20)), uint256.Int{}, *uint256.NewInt(1)))
-	has, err = stateless.HasStorage(accounts.InternAddress(bare))
-	require.NoError(t, err)
-	require.True(t, has, "the block's own write counts")
-
-	// A block that does touch the slot puts the storage zone in the witness, and
-	// the zone answers for the account that owns it and no other.
-	zoneNodes, zoneRoot := pbinStatelessWitness(t, state, append(slices.Clone(accounts3),
-		append(bytes.Clone(zoneSlot[:]), pbinStatelessSlotBytes(1<<20)...)))
-	withZone := pbinStatelessVerifierOver(t, zoneNodes, zoneRoot)
-
-	has, err = withZone.HasStorage(accounts.InternAddress(zoneSlot))
-	require.NoError(t, err)
-	require.True(t, has)
-
-	has, err = withZone.HasStorage(accounts.InternAddress(bare))
-	require.NoError(t, err)
-	require.False(t, has, "a neighbour's zone leaf is not this account's storage")
+	removedNodes, removedRoot := pbinStatelessWitnessRemoving(t, state, accounts3, []common.Address{zoneSlot, bare})
+	removing := pbinStatelessVerifierOver(t, removedNodes, removedRoot)
+	require.True(t, removing.state.HasStorage(zoneSlot[:]), "a removal walks the account's storage zone")
+	require.False(t, removing.state.HasStorage(bare[:]), "a neighbour's zone leaf is not this account's storage")
 }
 
-// TestPBinWitnessStatelessCreateOverStoredAccountRefused: the chain drops an
-// address's whole storage prefix on CREATE, which no plain-key update here can
-// express. A create over storage the witness proves is refused rather than
-// answered with a root that keeps the leaves the chain removed.
-func TestPBinWitnessStatelessCreateOverStoredAccountRefused(t *testing.T) {
+func TestPBinWitnessStatelessCreateOverStoredAccountWipesStorage(t *testing.T) {
 	t.Parallel()
 
 	state := newPBinStatelessState()
-	stored := pbinStatelessAddr(0x61)
-	bare := pbinStatelessAddr(0x62)
-	for _, addr := range []common.Address{stored, bare} {
+	header := pbinStatelessAddr(0x61)
+	zone := pbinStatelessAddr(0x62)
+	bare := pbinStatelessAddr(0x63)
+	created := []common.Address{header, zone, bare}
+	for _, addr := range created {
 		state.setAccount(addr, 0, 1, nil)
 	}
-	state.setStorage(stored, pbinStatelessSlot(3), 9)
+	state.setStorage(header, pbinStatelessSlot(3), 9)
+	state.setStorage(zone, pbinStatelessSlot(1<<20), 9)
 
-	both := [][]byte{stored[:], bare[:]}
-	pbinStatelessProcess(t, state, append(slices.Clone(both),
-		append(bytes.Clone(stored[:]), pbinStatelessSlotBytes(3)...)))
+	accessed := [][]byte{header[:], zone[:], bare[:]}
+	keys := append(slices.Clone(accessed),
+		append(bytes.Clone(header[:]), pbinStatelessSlotBytes(3)...),
+		append(bytes.Clone(zone[:]), pbinStatelessSlotBytes(1<<20)...))
+	pbinStatelessProcess(t, state, keys)
 
-	nodes, root := pbinStatelessWitness(t, state, both)
+	nodes, root := pbinStatelessWitnessRemoving(t, state, accessed, []common.Address{header, zone})
 	stateless := pbinStatelessVerifierOver(t, nodes, root)
 
-	require.NoError(t, stateless.CreateContract(accounts.InternAddress(bare)),
-		"a create over an account with no storage is the ordinary case")
+	for _, addr := range created {
+		address := accounts.InternAddress(addr)
+		require.NoError(t, stateless.CreateContract(address))
+		require.NoError(t, stateless.UpdateAccountData(address, nil,
+			&accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}))
+	}
 
-	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(stored), nil))
-	require.Error(t, stateless.CreateContract(accounts.InternAddress(stored)),
-		"an in-block removal does not make the pre-state leaves go away")
+	got, err := stateless.Finalize(context.Background())
+	require.NoError(t, err)
+
+	full := state.clone()
+	for _, addr := range created {
+		full.dropAccount(addr)
+		full.setAccount(addr, 1, 1, nil)
+	}
+	want := pbinStatelessProcess(t, full, keys)
+
+	require.Equal(t, common.BytesToHash(want), got)
 }
 
 // TestPBinWitnessStatelessRemovesAccountCreatedInBlock: an account the witness

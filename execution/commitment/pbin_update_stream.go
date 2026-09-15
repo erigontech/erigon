@@ -48,6 +48,7 @@ type pbinUpdateStream struct {
 	// See chunkSource and removesAccount.
 	witness     PBinWitnessBlock
 	witnessPass bool
+	wiped       map[string]struct{}
 
 	// pendingRemoval holds storage-subtree prefixes waiting for the walk to reach
 	// their zone. Removals are queued in account order, which is prefix order.
@@ -116,6 +117,7 @@ func (s *pbinUpdateStream) release() {
 	s.reset()
 	s.keyDigest = pbinDigestCache{}
 	s.witness = PBinWitnessBlock{}
+	s.wiped = nil
 }
 
 // processKey expands an account into its header leaves. Code chunks are delayed
@@ -182,6 +184,9 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 	if s.witnessPass {
 		_, removed := s.witness.Removed[string(plainKey)]
 		return removed
+	}
+	if _, wiped := s.wiped[string(plainKey)]; wiped {
+		return true
 	}
 	return update.Deleted()
 }

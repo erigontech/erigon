@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,11 +57,6 @@ type RecordingState struct {
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
-	// PreStateHasStorage holds the accounts whose pre-state storage the EIP-7610
-	// CREATE-collision check found non-empty. The binary trie commits no
-	// per-account storage root, so a verifier can only re-derive that answer from
-	// a proof of the account's storage zone (see accessedState.pbinStorageProbes).
-	PreStateHasStorage map[common.Address]struct{}
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -95,7 +91,6 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
 		createdCodeHashes:     make(map[common.Hash]struct{}),
-		PreStateHasStorage:    make(map[common.Address]struct{}),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -1021,27 +1016,7 @@ type accessedState struct {
 	// ModifiedCode is the code the block writes, per address. The binary trie
 	// commits code, so a witness for it has to cover the chunk keys these imply.
 	ModifiedCode map[common.Address][]byte
-	// StorageZoneProbes names the accounts whose storage the CREATE-collision
-	// check read out of pre-state (RecordingState.PreStateHasStorage).
-	StorageZoneProbes map[common.Address]struct{}
-}
-
-// pbinStorageProbes returns one plain storage key per account the
-// CREATE-collision check found storage on. Touching them brings those accounts'
-// storage zones into the witness, without which a binary-trie verifier reads a
-// zone slot as no storage at all: the tree commits no per-account storage root,
-// and the zone sits off the proof path the account's own leaves lie on.
-func (a *accessedState) pbinStorageProbes() [][]byte {
-	probe := commitment.PBinStorageZoneProbeSlot()
-	keys := make([][]byte, 0, len(a.StorageZoneProbes))
-	for addr := range a.StorageZoneProbes {
-		key := make([]byte, 0, len(addr)+len(probe))
-		key = append(key, addr[:]...)
-		key = append(key, probe[:]...)
-		keys = append(keys, key)
-	}
-	slices.SortFunc(keys, bytes.Compare)
-	return keys
+	Created      map[common.Address]struct{}
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1085,11 +1060,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	}
 }
 
-// touchAll touches every accessed account, storage slot, and code address on the
-// commitment context. Order matches the original inline implementation: accounts
-// first, then storage, then code. Bin additionally touches the storage-zone
-// probes; hex needs none, since an MPT account leaf carries its storage root.
-func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext, binTrie bool) {
+func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
 	for addr := range a.Addresses {
 		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
@@ -1102,11 +1073,28 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	for addr := range a.CodeAddrs {
 		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
-	if binTrie {
-		for _, probe := range a.pbinStorageProbes() {
-			sdCtx.TouchKey(kv.StorageDomain, string(probe), nil)
+}
+
+func preStateHasStorage(tx kv.TemporalTx, addr common.Address, txNum uint64) (bool, error) {
+	to, ok := kv.NextSubtree(addr[:])
+	if !ok {
+		to = nil
+	}
+	it, err := tx.RangeAsOf(kv.StorageDomain, addr[:], to, txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return false, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		var v []byte
+		if _, v, err = it.Next(); err != nil {
+			return false, err
+		}
+		if len(v) > 0 {
+			return true, nil
 		}
 	}
+	return false, nil
 }
 
 // collectAccessedState rolls the RecordingState maps into an accessedState.
@@ -1122,15 +1110,14 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		CodeReads:    make(map[common.Hash]witnesstypes.CodeWithHash),
 		ModifiedCode: make(map[common.Address][]byte),
 		Deleted:      make(map[common.Address]struct{}),
-
-		StorageZoneProbes: make(map[common.Address]struct{}, len(rs.PreStateHasStorage)),
+		Created:      make(map[common.Address]struct{}, len(rs.CreatedContracts)),
 	}
 
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
 	}
-	for addr := range rs.PreStateHasStorage {
-		out.StorageZoneProbes[addr] = struct{}{}
+	for addr := range rs.CreatedContracts {
+		out.Created[addr] = struct{}{}
 	}
 
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
@@ -1404,7 +1391,7 @@ func buildWitnessTrie(
 	}
 	domains.SetTxNum(seekTxNum)
 
-	accessed.touchAll(sdCtx, binTrie)
+	accessed.touchAll(sdCtx)
 
 	// The pass walks the parent state, which holds neither the code the block
 	// deploys nor any sign of which accounts it removed — and under bin both
@@ -1419,6 +1406,15 @@ func buildWitnessTrie(
 		}
 		for addr := range accessed.Deleted {
 			block.Removed[string(addr[:])] = struct{}{}
+		}
+		for addr := range accessed.Created {
+			var wiped bool
+			if wiped, err = preStateHasStorage(tx, addr, firstTxNumInBlock); err != nil {
+				return nil, fmt.Errorf("read pre-state storage of created account %x: %w", addr, err)
+			}
+			if wiped {
+				block.Removed[string(addr[:])] = struct{}{}
+			}
 		}
 		sdCtx.SetWitnessBlock(block)
 	}

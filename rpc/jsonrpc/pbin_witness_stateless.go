@@ -96,6 +96,7 @@ type pbinWitnessStateless struct {
 	accountUpdates map[common.Address]*accounts.Account
 	storageWrites  map[common.Address]map[common.Hash]uint256.Int
 	deleted        map[common.Address]struct{}
+	wiped          map[common.Address]struct{}
 
 	// preimages the witness supplied during re-exec; keys[] must cover these
 	usedTrieAddrs map[common.Address]struct{}
@@ -124,6 +125,7 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		accountUpdates: make(map[common.Address]*accounts.Account),
 		storageWrites:  make(map[common.Address]map[common.Hash]uint256.Int),
 		deleted:        make(map[common.Address]struct{}),
+		wiped:          make(map[common.Address]struct{}),
 		usedTrieAddrs:  make(map[common.Address]struct{}),
 		usedTrieSlots:  make(map[common.Hash]struct{}),
 	}, nil
@@ -214,24 +216,6 @@ func (s *pbinWitnessStateless) ReadAccountIncarnation(address accounts.Address) 
 	return 0, nil
 }
 
-// HasStorage answers EIP-7610's CREATE-collision predicate. The binary tree
-// commits no per-account storage root, so the witness's own leaves are the
-// source: the header slots resolve off the proof path the account's leaves sit
-// on, and the storage zone off the probe the builder touches for it (see
-// accessedState.pbinStorageProbes).
-func (s *pbinWitnessStateless) HasStorage(address accounts.Address) (bool, error) {
-	addr := address.Value()
-	if _, ok := s.deleted[addr]; ok {
-		return false, nil
-	}
-	for _, v := range s.storageWrites[addr] {
-		if !v.IsZero() {
-			return true, nil
-		}
-	}
-	return s.state.HasStorage(addr[:]), nil
-}
-
 func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addr := address.Value()
 	if account == nil {
@@ -283,16 +267,10 @@ func (s *pbinWitnessStateless) WriteAccountStorage(address accounts.Address, inc
 	return nil
 }
 
-// CreateContract un-deletes the address: a create over an account dropped
-// earlier in the block puts its leaves back. Pre-state storage under it is the
-// one case this cannot express — the chain drops the whole storage prefix here,
-// and no plain-key update reaches that subtree without also dropping the header
-// the create rewrites. EIP-7610 keeps a create off such an account, so the case
-// is refused rather than answered with a root that keeps the leaves.
 func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
 	addr := address.Value()
 	if s.state.HasStorage(addr[:]) {
-		return fmt.Errorf("create over account %x whose pre-state storage the witness proves", addr)
+		s.wiped[addr] = struct{}{}
 	}
 	delete(s.deleted, addr)
 	return nil
@@ -303,7 +281,11 @@ func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error
 	if err != nil {
 		return common.Hash{}, err
 	}
-	root, err := s.state.Root(ctx, plainKeys, updates)
+	removed := make(map[string]struct{}, len(s.wiped))
+	for addr := range s.wiped {
+		removed[string(addr[:])] = struct{}{}
+	}
+	root, err := s.state.Root(ctx, plainKeys, updates, removed)
 	if err != nil {
 		return common.Hash{}, err
 	}

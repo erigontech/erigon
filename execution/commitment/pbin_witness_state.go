@@ -152,12 +152,13 @@ func (s *PBinWitnessState) Code(addr []byte) ([]byte, bool, error) {
 
 // Root applies the block's writes over the witness and returns the post-state
 // root.
-func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates []Update) ([]byte, error) {
+func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates []Update, removed map[string]struct{}) ([]byte, error) {
 	if len(plainKeys) != len(updates) {
 		return nil, fmt.Errorf("pbin: %d plain keys for %d updates", len(plainKeys), len(updates))
 	}
 	trie := NewPBinPatriciaHashed(s.ctx)
 	defer trie.Release()
+	trie.updateStream.wiped = removed
 
 	upd := NewUpdates(ModeUpdate, "", trie.setHashSuite(pbinSelectedSum))
 	for i := range plainKeys {

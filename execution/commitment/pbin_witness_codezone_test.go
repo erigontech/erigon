@@ -216,7 +216,7 @@ func TestPBinWitnessDeployIntoPopulatedCodeZone(t *testing.T) {
 			require.NoError(t, err)
 			state.SetCode(pbinOracleAddr(71), code)
 
-			got, err := state.Root(context.Background(), deploy.plainKeys, deploy.updates)
+			got, err := state.Root(context.Background(), deploy.plainKeys, deploy.updates, nil)
 			require.NoError(t, err, "the witness must carry every node the deploy descends through")
 
 			deploy.applyTo(t, ms)
