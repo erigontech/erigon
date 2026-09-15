@@ -1194,7 +1194,32 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+
+	// Without this the dump cannot tell "no blobs" from "count row missing": a slot whose row is
+	// absent reads as zero and is written as an empty entry, silently freezing a hole.
+	blobCountFn := func(slot uint64) (uint64, error) {
+		block, err := snr.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+		if err != nil {
+			return 0, err
+		}
+		if block == nil {
+			return 0, nil
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			return 0, nil
+		}
+		return uint64(commitments.Len()), nil
+	}
+
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), blobCountFn, log.LvlInfo, log.Root())
 }
 
 type CheckBlobsSnapshots struct {
