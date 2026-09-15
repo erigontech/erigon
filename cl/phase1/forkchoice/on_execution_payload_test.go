@@ -1844,13 +1844,12 @@ func TestExecutionPayloadIndexWriteHasSingleNotificationOwner(t *testing.T) {
 		results <- result{notify: notify, err: err}
 	}()
 	<-db.started
-	secondStarted := make(chan struct{})
+	waiterCtx := &observedContext{Context: t.Context(), doneObserved: make(chan struct{})}
 	go func() {
-		close(secondStarted)
-		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(t.Context(), blockRoot, envelope, true)
+		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, true)
 		results <- result{notify: notify, err: err}
 	}()
-	<-secondStarted
+	<-waiterCtx.doneObserved
 	close(db.release)
 
 	first := <-results
