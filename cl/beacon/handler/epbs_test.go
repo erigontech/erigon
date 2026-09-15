@@ -674,6 +674,23 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
 	fcu.SetEnvelope(envelope.Message.BeaconBlockRoot, envelope)
+	const requests = 16
+	storeEntered := make(chan struct{}, requests)
+	releaseStore := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseStore:
+		default:
+			close(releaseStore)
+		}
+	})
+	var storeCalls atomic.Int32
+	fcu.HasEnvelopeFunc = func(common.Hash) bool {
+		storeCalls.Add(1)
+		storeEntered <- struct{}{}
+		<-releaseStore
+		return true
+	}
 	var reads atomic.Int32
 	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 		reads.Add(1)
@@ -682,7 +699,6 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 
-	const requests = 16
 	start := make(chan struct{})
 	responses := make(chan int, requests)
 	for range requests {
@@ -698,6 +714,10 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 		}()
 	}
 	close(start)
+	for range requests {
+		<-storeEntered
+	}
+	close(releaseStore)
 	badRequest, unavailable := 0, 0
 	for range requests {
 		switch <-responses {
@@ -709,7 +729,11 @@ func TestPostExecutionPayloadEnvelopeRejectsConcurrentStoredDuplicatesWithoutRea
 	}
 	require.Equal(t, requests, badRequest)
 	require.Zero(t, unavailable)
+	require.Equal(t, int32(requests), storeCalls.Load())
 	require.Zero(t, reads.Load())
+	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+	require.NoError(t, err)
+	fcu.EnvelopeGossipAdmissions.Finish(token, false)
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {

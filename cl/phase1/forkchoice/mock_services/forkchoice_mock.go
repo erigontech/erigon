@@ -83,6 +83,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	envelopesMu                                        sync.RWMutex
+	HasEnvelopeFunc                                    func(common.Hash) bool
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
 	OnBlockErr                                         error
@@ -483,6 +484,12 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 	if f.ClaimExecutionPayloadEnvelopeForGossipFunc != nil {
 		return f.ClaimExecutionPayloadEnvelopeForGossipFunc(ctx, beaconBlockRoot, builderIndex)
 	}
+	if err := ctx.Err(); err != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
+	}
 	token, err := f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -504,6 +511,9 @@ func (f *ForkChoiceStorageMock) TryClaimExecutionPayloadEnvelopeForGossip(
 ) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
 	if f.TryClaimExecutionPayloadEnvelopeForGossipFunc != nil {
 		return f.TryClaimExecutionPayloadEnvelopeForGossipFunc(beaconBlockRoot, builderIndex)
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
 	}
 	token, err := f.EnvelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
@@ -634,6 +644,9 @@ func (f *ForkChoiceStorageMock) GetBlock(
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
+	if f.HasEnvelopeFunc != nil {
+		return f.HasEnvelopeFunc(blockRoot)
+	}
 	f.envelopesMu.RLock()
 	defer f.envelopesMu.RUnlock()
 	_, ok := f.Envelopes[blockRoot]

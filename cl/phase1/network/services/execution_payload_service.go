@@ -394,10 +394,13 @@ func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64)
 // tryProcessPendingEnvelope retains queue ownership until validation finishes or forkchoice takes over.
 func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, job *pendingEnvelopeJob) pendingJobDecision {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
-	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
+	if !ok || block == nil || !job.processing.CompareAndSwap(false, true) {
 		return pendingJobKeep
 	}
 	if job.envelope == nil || job.envelope.Message == nil || job.envelope.Message.BeaconBlockRoot != key.blockRoot {
+		return pendingJobRemoveThenProcess
+	}
+	if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, job.envelope); err != nil {
 		return pendingJobRemoveThenProcess
 	}
 	admissionToken, err := s.forkchoiceStore.TryClaimExecutionPayloadEnvelopeForGossip(

@@ -121,6 +121,15 @@ type blockingValidationForkGraph struct {
 	once        sync.Once
 }
 
+type boundedGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+	stateCopies  atomic.Int32
+	activeCopies atomic.Int32
+	peakCopies   atomic.Int32
+	firstEntered chan struct{}
+	releaseFirst chan struct{}
+}
+
 type concurrentPayloadValidationForkGraph struct {
 	dataAvailabilityForkGraph
 	stateReads  atomic.Int32
@@ -276,6 +285,22 @@ func (g *blockingValidationForkGraph) GetState(root common.Hash, alwaysCopy bool
 		<-g.release
 	}
 	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+}
+
+func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	active := g.activeCopies.Add(1)
+	defer g.activeCopies.Add(-1)
+	for {
+		peak := g.peakCopies.Load()
+		if active <= peak || g.peakCopies.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	if g.stateCopies.Add(1) == 1 {
+		close(g.firstEntered)
+		<-g.releaseFirst
+	}
+	return g.state.Copy()
 }
 
 func (g dumpFailingForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -441,8 +466,9 @@ func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testi
 	graph := &admissionEnvelopeReadForkGraph{readEntered: readEntered}
 	graph.hasEnvelope.Store(true)
 	store := &ForkChoiceStore{forkGraph: graph}
+	root := common.HexToHash("0x1234")
 
-	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
+	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), root, 42)
 
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 	select {
@@ -450,6 +476,9 @@ func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testi
 		t.Fatal("persisted envelope presence triggered a disk read")
 	default:
 	}
+	token, err := store.envelopeGossipAdmissions.TryClaim(root, 42)
+	require.NoError(t, err)
+	store.envelopeGossipAdmissions.Finish(token, false)
 }
 
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
@@ -2163,6 +2192,78 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 	close(releaseState)
 	<-writerDone
 	require.ErrorContains(t, <-validationDone, "before finalized slot")
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	secondEnvelope := *envelope
+	secondMessage := *envelope.Message
+	secondEnvelope.Message = &secondMessage
+	secondEnvelope.Message.BeaconBlockRoot[0]++
+	resignAdmissionEnvelope(t, cfg, blockState, &secondEnvelope)
+	releaseFirst := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseFirst:
+		default:
+			close(releaseFirst)
+		}
+		select {
+		case <-releaseWriter:
+		default:
+			close(releaseWriter)
+		}
+	})
+	graph := &boundedGossipValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		firstEntered:              make(chan struct{}),
+		releaseFirst:              releaseFirst,
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.executionPayloadValidationOnce.Do(func() {
+		store.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+	<-graph.firstEntered
+
+	limiterHeld := true
+	select {
+	case store.executionPayloadValidation <- struct{}{}:
+		<-store.executionPayloadValidation
+		limiterHeld = false
+	default:
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- store.ValidateExecutionPayloadEnvelopeForGossip(&secondEnvelope) }()
+
+	writerStarted := make(chan struct{})
+	writerAcquired := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		store.mu.Lock()
+		close(writerAcquired)
+		<-releaseWriter
+		store.mu.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	for store.mu.TryRLock() {
+		store.mu.RUnlock()
+	}
+	close(releaseFirst)
+	<-writerAcquired
+	close(releaseWriter)
+	<-writerDone
+
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	require.True(t, limiterHeld)
+	require.Equal(t, int32(2), graph.stateCopies.Load())
+	require.Equal(t, int32(1), graph.peakCopies.Load())
 }
 
 func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) {

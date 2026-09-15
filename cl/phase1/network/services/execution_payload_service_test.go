@@ -604,7 +604,8 @@ func TestExecutionPayloadServicePendingBusyEnvelopeDefersTerminalValidation(t *t
 	impl := service.(*executionPayloadService)
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 2)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.OnExecutionPayloadErr = forkchoice.ErrInvalidExecutionPayloadEnvelope
 	owner, err := fcu.EnvelopeGossipAdmissions.Claim(t.Context(), blockRoot, 1)
 	require.NoError(t, err)
 	defer fcu.EnvelopeGossipAdmissions.Finish(owner, false)
@@ -622,10 +623,51 @@ func TestExecutionPayloadServicePendingBusyEnvelopeDefersTerminalValidation(t *t
 	impl.pending.processPending(t.Context())
 
 	require.Zero(t, impl.pending.count.Load())
-	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.True(t, fcu.OnExecutionPayloadCalled)
 	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
 	require.NoError(t, err)
 	fcu.EnvelopeGossipAdmissions.Finish(token, false)
+}
+
+func TestExecutionPayloadServicePendingRejectsBuilderMismatchBeforeAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block func() *cltypes.SignedBeaconBlock
+	}{
+		{name: "builder mismatch", block: func() *cltypes.SignedBeaconBlock { return newTestGloasBlock(100, 2) }},
+		{name: "incomplete block", block: func() *cltypes.SignedBeaconBlock { return &cltypes.SignedBeaconBlock{} }},
+		{name: "missing bid", block: func() *cltypes.SignedBeaconBlock {
+			block := newTestGloasBlock(100, 1)
+			block.Block.Body.SignedExecutionPayloadBid = nil
+			return block
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			impl := service.(*executionPayloadService)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+			require.Equal(t, int32(1), impl.pending.count.Load())
+			fcu.Blocks[blockRoot] = tc.block()
+			var tryClaims atomic.Int32
+			fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+				tryClaims.Add(1)
+				return fcu.EnvelopeGossipAdmissions.TryClaim(root, builderIndex)
+			}
+
+			impl.pending.processPending(t.Context())
+
+			require.Zero(t, impl.pending.count.Load())
+			require.Zero(t, tryClaims.Load())
+			require.False(t, fcu.OnExecutionPayloadCalled)
+			require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			token, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			require.NoError(t, err)
+			fcu.EnvelopeGossipAdmissions.Finish(token, false)
+		})
+	}
 }
 
 func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {

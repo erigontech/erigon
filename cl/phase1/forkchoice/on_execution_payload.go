@@ -681,7 +681,16 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		return err
 	}
 
-	f.mu.RLock()
+	releaseValidation, err := f.acquireExecutionPayloadValidationRead(context.Background())
+	if err != nil {
+		return err
+	}
+	validationHeld := true
+	defer func() {
+		if validationHeld {
+			releaseValidation()
+		}
+	}()
 	root := signedEnvelope.Message.BeaconBlockRoot
 	blockState, err := f.forkGraph.GetState(root, true)
 	if err != nil || blockState == nil {
@@ -698,8 +707,12 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
+		releaseValidation()
+		validationHeld = false
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
+	releaseValidation()
+	validationHeld = false
 	f.mu.RLock()
 	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	f.mu.RUnlock()
@@ -709,11 +722,37 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	return nil
 }
 
+// acquireExecutionPayloadValidationRead returns with f.mu held and never waits for it while holding validation capacity.
+func (f *ForkChoiceStore) acquireExecutionPayloadValidationRead(ctx context.Context) (func(), error) {
+	f.executionPayloadValidationOnce.Do(func() {
+		f.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	for {
+		select {
+		case f.executionPayloadValidation <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if f.mu.TryRLock() {
+			return func() { <-f.executionPayloadValidation }, nil
+		}
+		<-f.executionPayloadValidation
+		f.mu.RLock()
+		f.mu.RUnlock()
+	}
+}
+
 func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 	ctx context.Context,
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if err := ctx.Err(); err != nil {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+	}
 	token, err := f.envelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -733,6 +772,9 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+	}
 	token, err := f.envelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -1267,18 +1309,15 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, 
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
-	f.executionPayloadValidationOnce.Do(func() {
-		f.executionPayloadValidation = make(chan struct{}, 1)
-	})
-	select {
-	case f.executionPayloadValidation <- struct{}{}:
-		defer func() { <-f.executionPayloadValidation }()
-	case <-ctx.Done():
-		return ctx.Err()
+	releaseValidation, err := f.acquireExecutionPayloadValidationRead(ctx)
+	if err != nil {
+		return err
 	}
+	defer func() {
+		f.mu.RUnlock()
+		releaseValidation()
+	}()
 	blockRoot := common.Hash(signedEnvelope.Message.BeaconBlockRoot)
-	f.mu.RLock()
-	defer f.mu.RUnlock()
 	block, ok := f.forkGraph.GetBlock(blockRoot)
 	if !ok || block == nil {
 		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
