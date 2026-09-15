@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1185,9 +1186,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	var precompiles vm.PrecompiledContracts
 	if traceConfig != nil && traceConfig.StateOverrides != nil {
-		rules := blockCtx.Rules(chainConfig)
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+		precompiles, err = applyStateOverrides(ibs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig))
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -1227,6 +1227,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
+		if traceConfig != nil && traceConfig.StateOverrides != nil {
+			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
+				return nil, err
+			}
+		}
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
@@ -1241,6 +1246,16 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	return traceResult, nil
+}
+
+// applyStateOverrides applies overrides as synthetic pre-state. Each call needs its own
+// precompile set: Override consumes it via MovePrecompileTo, so a reused set fails.
+func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOverrides, rules *chain.Rules) (vm.PrecompiledContracts, error) {
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	if err := overrides.Override(ibs, precompiles, rules); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
 }
 
 // CallMany implements trace_callMany.
