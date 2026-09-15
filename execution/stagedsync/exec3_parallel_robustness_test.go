@@ -1835,9 +1835,9 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 	}
 }
 
-// Operational faults surface unconditionally; a coincident verdict is still
-// recorded for the withholding log. The block-ranked candidate holds verdicts
-// only, so an infrastructure fault can never be displaced by one.
+// Genuine operational failures take precedence over verdicts; cancellation-only
+// errors are ignored. A coincident verdict stays recorded for the withholding
+// log, while operational failures stay outside the block-ranked candidate.
 func TestClassifyApplyFailures(t *testing.T) {
 	t.Parallel()
 	verdictErr := fmt.Errorf("%w: bad receipts, block=3", rules.ErrInvalidBlock)

@@ -452,15 +452,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// verdict, so it is recorded and surfaced only after applyResults closes
 		// (once exec has had its say) — see failCandidate.consider.
 		var fail failCandidate
-		// infraErr collects operational faults (worker, apply-side, and calculator
-		// errors), kept OUT of the block-ranked candidate so a
-		// coincident verdict can never displace them: they surface with
-		// unconditional precedence and the verdict is withheld upstream.
+		// infraErr keeps infrastructure errors separate from block-ranked verdicts.
+		// classifyApplyFailures filters cancellation-only noise at channel close.
 		var infraErr error
-		// finalized flips once a terminal outcome is known: an operational fault,
-		// an exec verdict, or clean exec confirming a deferred wrong-root.
-		// Remaining results are then drained without re-validation so a post-
-		// cancel block can't mask the recorded failure.
+		// finalized stops further block validation once a terminal outcome is
+		// recorded, but errors received while draining are still collected.
+		// A later genuine operational failure can still withhold a verdict.
 		finalized := false
 
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
@@ -479,8 +476,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// A wrong root is routed through the fail/finalized machinery, so the
 		// reported failure and block hash are chosen after execution has had its
 		// say. With fold-ahead, a commitment wrong root can arrive before the
-		// block's execution verdict. The actual unwind happens at finalization
-		// with the implicated block's own hash.
+		// block's execution verdict. The stage wrapper performs any unwind
+		// using the implicated block's own hash.
 		handleCommitResult := func(cr commitmentResult) error {
 			if cr.err != nil {
 				// Lazy-load / ComputeCommitment errors from the calculator
@@ -587,7 +584,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// set has no reader left, whatever the block's verdict.
 					applyResult.superseded.release()
 					// A terminal error still completes the block's result stream.
-					// Keep verdicts block-ranked and operational faults unconditional.
+					// Keep operational faults separate from block-ranked verdicts.
 					if applyResult.Err != nil {
 						appliedBlocks[blockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
