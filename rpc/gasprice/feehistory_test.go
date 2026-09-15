@@ -230,35 +230,47 @@ func TestFeeHistoryValues(t *testing.T) {
 		return types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, gwei(gasPriceGwei), nil)
 	}
 
-	backend := &feeChain{
-		blocks: []*types.Block{
-			types.NewBlock(header(0, 30_000_000, 15_000_000, 8, 0), nil, nil, nil, nil, nil),
-			// Unsorted effective tips 3, 1 (legacy 9-8) and 2 (fee cap 10-8), weighted by gas used.
-			types.NewBlock(header(1, 252_000, 126_000, 8, 0), []types.Transaction{dynamicFee(3, 100), legacy(9), dynamicFee(5, 10)}, nil, nil, nil, nil),
-			types.NewBlock(header(2, 30_000_000, 0, 8, 0), nil, nil, nil, nil, nil),
-			types.NewBlock(header(3, 30_000_000, 30_000_000, 7, params.GasPerBlob), []types.Transaction{legacy(11)}, nil, nil, nil, nil),
-		},
-		receipts: map[uint64]types.Receipts{
-			1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
-			3: {{GasUsed: 30_000_000}},
-		},
+	newBackend := func() *feeChain {
+		return &feeChain{
+			blocks: []*types.Block{
+				types.NewBlock(header(0, 30_000_000, 15_000_000, 8, 0), nil, nil, nil, nil, nil),
+				// Unsorted effective tips 3, 1 (legacy 9-8) and 2 (fee cap 10-8), weighted by gas used.
+				types.NewBlock(header(1, 252_000, 126_000, 8, 0), []types.Transaction{dynamicFee(3, 100), legacy(9), dynamicFee(5, 10)}, nil, nil, nil, nil),
+				types.NewBlock(header(2, 30_000_000, 0, 8, 0), nil, nil, nil, nil, nil),
+				types.NewBlock(header(3, 30_000_000, 30_000_000, 7, params.GasPerBlob), []types.Transaction{legacy(11)}, nil, nil, nil, nil),
+			},
+			receipts: map[uint64]types.Receipts{
+				1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
+				3: {{GasUsed: 30_000_000}},
+			},
+		}
 	}
-	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 	maxBlobGas := chain.AllProtocolChanges.GetMaxBlobGasPerBlock(0)
 
+	all := []float64{0, 25, 50, 75, 100}
+	rewards := [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}
 	cases := []struct {
 		name        string
+		warm        [][]float64 // requests served first by the same oracle
 		percentiles []float64
 		wantReward  [][]uint64 // gwei
 		wantFetches int32
 	}{
-		{"gas-weighted percentiles", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 3},
-		{"repeated request served from cache", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 0},
-		{"other percentiles are not served from the first entry", []float64{50}, [][]uint64{{2}, {0}, {4}}, 3},
-		{"no percentiles", nil, nil, 3},
+		{"gas-weighted percentiles", nil, all, rewards, 3},
+		{"no percentiles", nil, nil, nil, 3},
+		{"header-only entries do not serve rewards", [][]float64{nil}, all, rewards, 3},
+		{"repeated request served from cache", [][]float64{all}, all, rewards, 0},
+		{"other percentiles are served from the same entry", [][]float64{all}, []float64{50}, [][]uint64{{2}, {0}, {4}}, 0},
+		{"no percentiles are served from an entry with rewards", [][]float64{all}, nil, nil, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			backend := newBackend()
+			oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
+			for _, w := range c.warm {
+				_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 3, rpc.BlockNumber(3), w)
+				require.NoError(t, err)
+			}
 			before := backend.fetches.Load()
 			oldest, reward, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(t.Context(), 3, rpc.BlockNumber(3), c.percentiles)
 			require.NoError(t, err)
@@ -283,21 +295,48 @@ func TestFeeHistoryValues(t *testing.T) {
 	}
 }
 
-// The mining feed delivers a pending block without receipts; its reward row must still encode as [].
-func TestFeeHistoryPendingBlockWithoutReceiptsHasEmptyRewardRow(t *testing.T) {
+// pendingFeeChain has head 1 and a pending block 2 with one transaction; the mining feed sends no receipts.
+func pendingFeeChain() *feeChain {
 	header := func(number, gasUsed uint64) *types.Header {
 		return &types.Header{Number: *uint256.NewInt(number), GasLimit: 30_000_000, GasUsed: gasUsed, BaseFee: uint256.NewInt(common.GWei)}
 	}
 	tip := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, uint256.NewInt(2*common.GWei), nil)
-	backend := &feeChain{
+	return &feeChain{
 		blocks:  []*types.Block{types.NewBlock(header(0, 0), nil, nil, nil, nil, nil), types.NewBlock(header(1, 0), nil, nil, nil, nil, nil)},
 		pending: types.NewBlock(header(2, 21000), []types.Transaction{tip}, nil, nil, nil, nil),
 	}
-	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
+}
+
+// The reward row of a pending block without receipts must still encode as [].
+func TestFeeHistoryPendingBlockWithoutReceiptsHasEmptyRewardRow(t *testing.T) {
+	oracle := gasprice.NewOracle(pendingFeeChain(), gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 
 	_, reward, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.PendingBlockNumber, []float64{50})
 	require.NoError(t, err)
 	got, err := json.Marshal(reward)
 	require.NoError(t, err)
 	require.JSONEq(t, `[[]]`, string(got))
+}
+
+type errorCounter struct{ errors atomic.Int32 }
+
+func (h *errorCounter) Log(r *log.Record) error {
+	if r.Lvl == log.LvlError {
+		h.errors.Add(1)
+	}
+	return nil
+}
+
+func (h *errorCounter) Enabled(context.Context, log.Lvl) bool { return true }
+
+func TestFeeHistoryPendingBlockWithoutPercentilesSkipsRewards(t *testing.T) {
+	errs := &errorCounter{}
+	logger := log.New()
+	logger.SetHandler(errs)
+	oracle := gasprice.NewOracle(pendingFeeChain(), gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), logger)
+
+	_, reward, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	require.Nil(t, reward)
+	require.Zero(t, errs.errors.Load(), "no rewards were requested, so missing receipts are not an error")
 }
