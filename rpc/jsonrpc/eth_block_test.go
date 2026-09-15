@@ -185,10 +185,7 @@ func TestGetHeaderByNumber(t *testing.T) {
 	header, err := api.GetHeaderByNumber(ctx, rpc.LatestBlockNumber)
 	require.NoError(t, err)
 	require.NotNil(t, header)
-	assert.Equal(t, common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae"), header["hash"])
-	assert.NotContains(t, header, "size")
-	assert.NotContains(t, header, "totalDifficulty")
-	assert.NotContains(t, header, "transactions")
+	assert.Equal(t, common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae"), *header.Hash)
 
 	for _, blockNum := range []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber} {
 		header, err = api.GetHeaderByNumber(ctx, blockNum)
@@ -220,8 +217,7 @@ func TestGetHeaderByHash(t *testing.T) {
 	header, err := api.GetHeaderByHash(ctx, latestHash)
 	require.NoError(t, err)
 	require.NotNil(t, header)
-	assert.Equal(t, latestHash, header["hash"])
-	assert.NotContains(t, header, "size")
+	assert.Equal(t, latestHash, *header.Hash)
 
 	header, err = api.GetHeaderByHash(ctx, common.HexToHash("0xdeadbeef"))
 	require.NoError(t, err)
@@ -237,7 +233,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
-	assert.Equal(t, expected, b["hash"])
+	assert.Equal(t, expected, *b.Hash)
 }
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
@@ -267,7 +263,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
@@ -297,7 +293,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
 	expectedNum := (*hexutil.U256)(uint256.NewInt(uint64(expected)))
-	assert.Equal(t, expectedNum, b["number"])
+	assert.Equal(t, expectedNum, b.Number)
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
@@ -341,7 +337,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
@@ -385,7 +381,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockTransactionCountByHash(t *testing.T) {
