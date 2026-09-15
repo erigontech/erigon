@@ -18,10 +18,11 @@ package types
 
 import (
 	"encoding/binary"
-	"github.com/holiman/uint256"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/rlp"
 )
