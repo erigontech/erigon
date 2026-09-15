@@ -266,13 +266,16 @@ func (s *Service) slotLoop(ctx context.Context) {
 		default:
 		}
 
-		now := uint64(time.Now().Unix())
-		if now < genesisTime {
-			time.Sleep(time.Until(time.Unix(int64(genesisTime), 0)))
+		genesis := time.Unix(int64(genesisTime), 0)
+		if time.Now().Before(genesis) {
+			time.Sleep(time.Until(genesis))
 			continue
 		}
 
-		currentSlot := (now - genesisTime) / secPerSlot
+		// Round to the nearest slot. The sleep to the next slot start runs on the monotonic clock but the
+		// slot is read from the wall clock, so the wake can land just short of the boundary; truncating
+		// would put it back in the slot just done and propose that slot again.
+		currentSlot := uint64((time.Since(genesis) + slotDuration/2) / slotDuration)
 		slotStart := time.Unix(int64(genesisTime+currentSlot*secPerSlot), 0)
 		nextSlotStart := slotStart.Add(slotDuration)
 
