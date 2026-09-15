@@ -104,8 +104,6 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
-	// borrowedSdCtx marks sdCtx as another SD's — see AdoptCommitmentContext. Close leaves it to its owner.
-	borrowedSdCtx bool
 
 	stepSize uint64
 
@@ -807,29 +805,8 @@ func (sd *SharedDomains) Close() {
 
 	sd.CloseBlockOverlay()
 
-	if !sd.borrowedSdCtx {
-		sd.sdCtx.Close()
-	}
+	sd.sdCtx.Close()
 	sd.sdCtx = nil
-}
-
-// AdoptCommitmentContext points this SD's commitment at another's, without taking ownership: closing this SD
-// leaves the context to its owner.
-//
-// The commitment trie belongs to the BLOCK, not to a round. Execution advances it as it runs, cumulatively
-// across the block's rounds, so a staging SD that built its OWN context would advance a fresh trie seeded at
-// the parent's root and hand back that same root — the round's work invisible, looking exactly like a merge
-// that dropped the commitment. Adopting the block's context means the round advances the block's trie, which
-// is what makes a staged round's root correct.
-func (sd *SharedDomains) AdoptCommitmentContext(owner *SharedDomains) {
-	if owner == nil || owner.sdCtx == nil {
-		return
-	}
-	if sd.sdCtx != nil && !sd.borrowedSdCtx {
-		sd.sdCtx.Close()
-	}
-	sd.sdCtx = owner.sdCtx
-	sd.borrowedSdCtx = true
 }
 
 // Flush writes the batch to tx without committing and does not refresh the BranchCache.

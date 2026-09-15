@@ -251,16 +251,23 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		// not treat it as correct.
 		stagingBase = flashUpdate.SD
 		if stagingBase != nil {
+			// The round's commitment is parented like the rest of its state: its own context, restored from the
+			// block's saved commitment state through its parent, folding only its own trie — so a round that is
+			// dropped, or still calculating when it is cut, cannot touch the block's (live46: a round computing on
+			// the block's borrowed context left the block sealing a root it could not back, and closes failing
+			// "empty branch data read during unfold"). Only the merge carries the round's commitment into the block.
+			//
+			// The block's last deferred branch update is written into the block's own domain first, so the round
+			// reads those branches through its parent like any other block data.
+			if err = stagingBase.FlushPendingUpdates(ctx, roTx); err != nil {
+				return ValidationResult{}, fmt.Errorf("pre-exec round num=%d: flush the block's pending commitment: %w", blockNumber, err)
+			}
 			if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(stagingBase)); err != nil {
 				return ValidationResult{}, err
 			}
-			// The overlay and the COMMITMENT belong to the BLOCK, not the round. Execution advances the
-			// commitment trie as it runs, cumulatively across the block's rounds, so the child adopts the
-			// block's context — a child with its own context would advance a fresh trie seeded at the parent's
-			// root and hand that same root straight back, the round's work invisible. The overlay likewise
-			// carries block metadata written by the insert, identical whether the round is kept or dropped.
+			// The overlay is the block's: it carries block metadata written by the insert, identical whether the
+			// round is kept or dropped.
 			doms.BorrowBlockOverlay(stagingBase)
-			doms.AdoptCommitmentContext(stagingBase)
 		} else {
 			doms = flashUpdate.SD
 		}
@@ -448,6 +455,12 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		if stagingBase != nil {
 			if merr := stagingBase.Merge(ctx, stagingBase.TxNum(), doms, doms.TxNum(), true); merr != nil {
 				return ValidationResult{}, fmt.Errorf("commit pre-exec round num=%d: %w", blockNumber, merr)
+			}
+			// The merge carries the round's commitment into the block: its branch writes and saved trie state are
+			// now the block's, and the block's trie is restored from that state — otherwise it still stands where
+			// it was before the round, and the root the block reports does not advance with its body.
+			if _, _, serr := stagingBase.GetCommitmentContext().SeekCommitment(ctx, roTx); serr != nil {
+				return ValidationResult{}, fmt.Errorf("commit pre-exec round num=%d: restore the block's commitment: %w", blockNumber, serr)
 			}
 			registered = true
 			doms = stagingBase
