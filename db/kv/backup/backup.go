@@ -144,7 +144,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 		return err
 	}
 	closeBeforeRename(src)
-	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before) // exclusive src stays open, so nobody opens the file being replaced
+	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before)
 	src.Close()
 	if err != nil {
 		return err
@@ -153,6 +153,9 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
 	// skip the datadir's remaining databases.
+	if err := restoreOwner(before, filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
+		logger.Warn("[compact] restore lock file owner", "db", dbDir, "err", err)
+	}
 	if err := dir.FsyncDir(dbDir); err != nil {
 		logger.Warn("[compact] fsync dir", "db", dbDir, "err", err)
 	}
