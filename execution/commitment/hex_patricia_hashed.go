@@ -160,11 +160,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
-	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
-	// applies deferred updates inline.
-	leaveDeferredForCaller bool
-
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
@@ -182,15 +177,6 @@ type HexPatriciaHashed struct {
 	// can exist on disk beneath it.
 	lastUpdateCellWasEmpty bool
 	hadToLoadL             map[uint64]skipStat
-}
-
-// Clones current trie state to allow concurrent processing.
-func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	subCfg := hph.cfg.Subtrie()
-	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
-
-	subTrie.mountTo(hph, forNibble)
-	return subTrie
 }
 
 var hphPool sync.Pool
@@ -213,7 +199,6 @@ func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
-	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
 	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
@@ -280,7 +265,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
-	hph.leaveDeferredForCaller = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -2658,7 +2642,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.cfg.LeaveDeferredForCaller {
 		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
@@ -2720,7 +2704,6 @@ func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	if hph.branchEncoder.pendingPrefixes != nil {
 		hph.branchEncoder.pendingPrefixes.Clear()
 	}
-	ResetDeferredUpdateMetrics()
 	return deferred
 }
 
@@ -2741,7 +2724,7 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
-	hph.leaveDeferredForCaller = leave
+	hph.cfg.LeaveDeferredForCaller = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
@@ -2836,12 +2819,10 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 }
 
 func (s *state) Decode(buf []byte) error {
-	aux := bytes.NewBuffer(buf)
-	var rootFlags stateRootFlag
-	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
-		return fmt.Errorf("rootFlags: %w", err)
+	if len(buf) < 3 {
+		return fmt.Errorf("state header: %w", io.ErrUnexpectedEOF)
 	}
-
+	rootFlags := stateRootFlag(buf[0])
 	if rootFlags&stateRootPresent != 0 {
 		s.RootPresent = true
 	}
@@ -2852,34 +2833,22 @@ func (s *state) Decode(buf []byte) error {
 		s.RootChecked = true
 	}
 
-	var rootSize uint16
-	if err := binary.Read(aux, binary.BigEndian, &rootSize); err != nil {
-		return fmt.Errorf("root size: %w", err)
+	rootSize := int(binary.BigEndian.Uint16(buf[1:]))
+	buf = buf[3:]
+	if len(buf) < rootSize+len(s.Depths)+2*len(s.TouchMap)+2*len(s.AfterMap)+16 {
+		return fmt.Errorf("state body: %w", io.ErrUnexpectedEOF)
 	}
 	s.Root = make([]byte, rootSize)
-	if _, err := aux.Read(s.Root); err != nil {
-		return fmt.Errorf("root: %w", err)
+	buf = buf[copy(s.Root, buf):]
+	for i := range s.Depths {
+		s.Depths[i] = int16(buf[i])
 	}
-	d := make([]byte, len(s.Depths))
-	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
-		return fmt.Errorf("depths: %w", err)
+	buf = buf[len(s.Depths):]
+	for i := range s.TouchMap {
+		s.TouchMap[i], s.AfterMap[i] = binary.BigEndian.Uint16(buf[2*i:]), binary.BigEndian.Uint16(buf[2*len(s.TouchMap)+2*i:])
 	}
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(d[i])
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
-		return fmt.Errorf("afterMap: %w", err)
-	}
-	var branch1, branch2 uint64
-	if err := binary.Read(aux, binary.BigEndian, &branch1); err != nil {
-		return fmt.Errorf("branchBefore1: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &branch2); err != nil {
-		return fmt.Errorf("branchBefore2: %w", err)
-	}
+	buf = buf[4*len(s.TouchMap):]
+	branch1, branch2 := binary.BigEndian.Uint64(buf), binary.BigEndian.Uint64(buf[8:])
 
 	for i := range 64 {
 		if branch1&(1<<i) != 0 {
