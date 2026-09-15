@@ -887,7 +887,7 @@ func eqAccount(a, b *accounts.Account) bool {
 // no recorded value of its own and must not invalidate on a bare Done entry.
 func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	rr ReadResult,
-	matchesLive func() bool, absent bool,
+	matchesLive func() bool, emptyCodeHash bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
@@ -926,10 +926,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
-		// A later tx self-destructed the account (no revival), so a read predating
-		// the destruct is stale; checkVersion alone misses it because the SD doesn't
-		// write the read's own path. An already absent value stays valid.
-		if valid == VersionValid && !absent && path != SelfDestructPath && path != AddressPath &&
+		// Self-destruct can invalidate a read without writing the read's own path.
+		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
 				destructTxIndex := sdRR.DepIdx()
@@ -940,6 +938,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 							revived = true
 							break
+						}
+					}
+					// A preserved balance keeps the account alive with empty code, but nonce and storage are wiped.
+					if !revived && emptyCodeHash && path == CodeHashPath {
+						if balance, balanceRR, ok := vm.ReadBalance(addr, txIndex); ok && balanceRR.Status() == MVReadResultDone &&
+							balanceRR.DepIdx() >= destructTxIndex && !balance.IsZero() {
+							revived = true
 						}
 					}
 					if !revived {
@@ -1069,8 +1074,8 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	for a, tr := range rs.codeHash {
 		live, rr, exists := vm.ReadCodeHash(a, txIdx)
 		matchesLive := func() bool { return exists && eqCodeHash(tr.Val, live) }
-		absent := tr.Val.IsEmpty() || tr.Val.IsZero()
-		if !ok(vm.validateReadImpl(txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, rr, matchesLive, absent, checkVersion, traceInvalid, tracePrefix, false)) {
+		emptyCodeHash := tr.Val.IsEmpty() || tr.Val.IsZero()
+		if !ok(vm.validateReadImpl(txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, rr, matchesLive, emptyCodeHash, checkVersion, traceInvalid, tracePrefix, false)) {
 			return
 		}
 	}
