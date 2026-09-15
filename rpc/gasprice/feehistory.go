@@ -75,7 +75,7 @@ type cacheKey struct {
 // processedFees holds the computed fee data for a single block.
 // This is what gets stored in the LRU cache.
 type processedFees struct {
-	reward                       []*big.Int
+	reward                       []uint256.Int
 	baseFee, nextBaseFee         *uint256.Int
 	blobBaseFee, nextBlobBaseFee *uint256.Int
 	gasUsedRatio                 float64
@@ -189,13 +189,9 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 		return
 	}
 
-	bf.results.reward = make([]*big.Int, len(percentiles))
+	bf.results.reward = make([]uint256.Int, len(percentiles))
 	if len(bf.block.Transactions()) == 0 {
-		// return an all zero row if there are no transactions to gather data from
-		for i := range bf.results.reward {
-			bf.results.reward[i] = new(big.Int)
-		}
-		return
+		return // an all zero row: there are no transactions to gather data from
 	}
 
 	sorter := make(sortGasAndReward, len(bf.block.Transactions()))
@@ -217,7 +213,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			txIndex++
 			sumGasUsed += sorter[txIndex].gasUsed
 		}
-		bf.results.reward[i] = sorter[txIndex].reward.ToBig()
+		bf.results.reward[i] = sorter[txIndex].reward
 	}
 }
 
@@ -309,7 +305,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*uint256.Int, []float64, []*uint256.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]uint256.Int, []*uint256.Int, []float64, []*uint256.Int, []float64, error) {
 	if blocks < 1 {
 		return common.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
@@ -365,7 +361,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	var (
 		blockResults = make([]blockResult, blocks)
-		reward       = make([][]*big.Int, blocks)
+		reward       = make([][]uint256.Int, blocks)
 		baseFee      = make([]*uint256.Int, blocks+1)
 		gasUsedRatio = make([]float64, blocks)
 		blobBaseFee  = make([]*uint256.Int, blocks+1)

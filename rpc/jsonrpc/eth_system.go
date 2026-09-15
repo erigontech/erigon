@@ -353,10 +353,10 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, er
 
 type feeHistoryResult struct {
 	OldestBlock      *hexutil.Big     `json:"oldestBlock"`
-	Reward           [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee          []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	Reward           [][]hexutil.U256 `json:"reward,omitempty"`
+	BaseFee          []hexutil.U256   `json:"baseFeePerGas,omitempty"`
 	GasUsedRatio     []float64        `json:"gasUsedRatio"`
-	BlobBaseFee      []*hexutil.Big   `json:"baseFeePerBlobGas,omitempty"`
+	BlobBaseFee      []hexutil.U256   `json:"baseFeePerBlobGas,omitempty"`
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
@@ -377,24 +377,24 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 		GasUsedRatio: gasUsed,
 	}
 	if reward != nil {
-		results.Reward = make([][]*hexutil.Big, len(reward))
+		results.Reward = make([][]hexutil.U256, len(reward))
 		for i, w := range reward {
-			results.Reward[i] = make([]*hexutil.Big, len(w))
-			for j, v := range w {
-				results.Reward[i][j] = (*hexutil.Big)(v)
+			results.Reward[i] = make([]hexutil.U256, len(w))
+			for j := range w {
+				results.Reward[i][j] = hexutil.U256(w[j])
 			}
 		}
 	}
 	if baseFee != nil {
-		results.BaseFee = make([]*hexutil.Big, len(baseFee))
+		results.BaseFee = make([]hexutil.U256, len(baseFee))
 		for i, v := range baseFee {
-			results.BaseFee[i] = (*hexutil.Big)(v.ToBig())
+			results.BaseFee[i] = hexutil.U256(*v)
 		}
 	}
 	if blobBaseFee != nil {
-		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
+		results.BlobBaseFee = make([]hexutil.U256, len(blobBaseFee))
 		for i, v := range blobBaseFee {
-			results.BlobBaseFee[i] = (*hexutil.Big)(v.ToBig())
+			results.BlobBaseFee[i] = hexutil.U256(*v)
 		}
 	}
 	if blobGasUsedRatio != nil {
