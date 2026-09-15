@@ -104,9 +104,11 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	Coinbase          accounts.Address
-	TxIn              state.ReadSet
-	TxOut             *state.WriteSet
+	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
+	Operational bool
+	Coinbase    accounts.Address
+	TxIn        state.ReadSet
+	TxOut       *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -585,6 +587,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
+				if _, ok := errors.AsType[*protocol.ErrExecPanic](applyErr); ok {
+					result.Operational = true
+					return evmtypes.ExecutionResult{}, applyErr
+				}
 				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
@@ -608,6 +614,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
+	}
+	if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		result.Operational = true
+		result.Err = stateErr
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {

@@ -46,7 +46,7 @@ type ExecutionPayload struct {
 	GasUsed         hexutil.Uint64        `json:"gasUsed"`
 	Timestamp       hexutil.Uint64        `json:"timestamp"`
 	ExtraData       hexutil.Bytes         `json:"extraData"`
-	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas"`
+	BaseFeePerGas   *hexutil.U256         `json:"baseFeePerGas"`
 	BlockHash       common.Hash           `json:"blockHash"`
 	Transactions    []hexutil.Bytes       `json:"transactions"`
 	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
@@ -74,13 +74,6 @@ type PayloadAttributes struct {
 	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
 	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
 	SSZVersion            clparams.StateVersion `json:"-"`
-}
-
-// TransitionConfiguration represents the correct configurations of the CL and the EL
-type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty"`
-	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"`
-	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"`
 }
 
 // BlobsBundle holds the blobs of an execution payload.
@@ -166,7 +159,7 @@ type ForkChoiceUpdatedResponse struct {
 
 type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlockValue            *hexutil.U256     `json:"blockValue"`
 	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
@@ -264,7 +257,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -306,7 +299,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
