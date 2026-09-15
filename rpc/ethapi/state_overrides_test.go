@@ -1,7 +1,9 @@
 package ethapi
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,5 +106,23 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, uint64(0x2a), value.Uint64())
 		})
+	}
+}
+
+func TestStateOverridesBalanceDecoding(t *testing.T) {
+	maxU256 := strings.Repeat("f", 64)
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	var so StateOverrides
+	require.NoError(t, json.Unmarshal([]byte(`{"0x00000000000000000000000000000000000000aa":{"balance":"0x`+maxU256+`"}}`), &so))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{}))
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, maxU256, balance.Hex()[2:])
+
+	for _, bad := range []string{`"0x1` + strings.Repeat("0", 64) + `"`, `"0x01"`, `"0x"`, `"1"`, `1`} {
+		var so StateOverrides
+		require.Error(t, json.Unmarshal([]byte(`{"0x00000000000000000000000000000000000000aa":{"balance":`+bad+`}}`), &so), bad)
 	}
 }
