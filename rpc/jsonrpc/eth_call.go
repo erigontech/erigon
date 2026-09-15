@@ -904,6 +904,10 @@ type accessListResult struct {
 // same comparison the executor makes before running it. The message carries the
 // effective gas limit, RPC gas cap included, and the cost follows the block's fork
 // rules, so a gas figure eth_estimateGas returned is never rejected here.
+//
+// It stops at that comparison on purpose. The EIP-7825 cap the executor applies
+// beside it is gated on CheckGas, which ToMessage leaves false, so enforcing it
+// here would reject calls the executor would run.
 func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	contractCreation := msg.To().IsNil()
 	accessList := msg.AccessList()
