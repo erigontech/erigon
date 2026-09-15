@@ -176,7 +176,9 @@ type gloasBlockCollector interface {
 
 func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
 	err := store.OnExecutionPayload(ctx, envelope, false, validate)
-	if err != nil && !(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope)) {
+	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
+		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
+	if err != nil && !persisted {
 		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		return err
 	}

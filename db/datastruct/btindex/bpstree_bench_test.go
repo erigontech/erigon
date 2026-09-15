@@ -27,7 +27,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, DefaultBtreeM, DefaultBtreeStartSkip)
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
@@ -65,7 +65,7 @@ func BenchmarkBpsTreeGet(t *testing.B) {
 	keyCount := 100_000
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
@@ -227,7 +227,7 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 				blob = append(blob, hdr[:]...)
 				blob = append(blob, k...)
 			}
-			nodeOfftEF, _, err := decodeNodes(blob, uint64(nodeCount))
+			nd, _, err := decodeNodes(blob, uint64(nodeCount))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -239,7 +239,8 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 			}
 			ef.Build()
 
-			bt := &BpsTree{M: uint64(cfg.M), offt: ef, keysBlob: blob, nodeOfftEF: nodeOfftEF, nodeStride: uint64(cfg.M)}
+			bt := &BpsTree{M: uint64(cfg.M), offt: ef, keysBlob: blob, nodeOfft: nd.nodeOfft, nodeStride: uint64(cfg.M)}
+			bt.setPrefixIndex(nd)
 
 			lookupKeys := make([][]byte, 10000)
 			for i := range lookupKeys {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -32,6 +33,11 @@ func TestEnvelopeContentsAuthenticateBeforeBlobProcessing(t *testing.T) {
 	want := errors.New("invalid envelope signature")
 	forkchoice.ValidateExecutionPayloadEnvelopeErr = want
 	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, 0)
+	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
 
 	err := handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents)
 
