@@ -279,7 +279,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.Receip
 		func(emit func(payload any), protoReceipt *remoteproto.SubscribeReceiptsReply) {
 			if protoReceipt != nil {
 				receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
-				emit([]map[string]any{receipt})
+				emit([]*ethutils.RPCReceipt{receipt})
 			}
 		},
 		"[rpc] receipts channel was closed")

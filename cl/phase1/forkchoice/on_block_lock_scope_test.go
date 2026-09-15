@@ -18,9 +18,11 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -97,7 +99,9 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 // A GetHead that runs while f.mu is released caches a head computed without the
 // incoming block, so OnBlock has to drop that cache again after it resumes.
 func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	// An EL error returns before markPayloadStatus, which resets the head cache itself on a
+	// status change and would otherwise mask a missing invalidation here.
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusNone, errors.New("el unavailable"))
 	store, block := buildExAnteStorePendingLast(t, engine)
 
 	onBlockDone := make(chan error, 1)
@@ -118,7 +122,7 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 	require.NotEqual(t, common.Hash{}, cachedHead, "GetHead should have cached a head during the released-lock window")
 
 	close(releaseEL)
-	require.NoError(t, <-onBlockDone)
+	require.Error(t, <-onBlockDone)
 
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -220,15 +224,91 @@ func TestOnBlockRejectsEquivocationRegisteredDuringNewPayload(t *testing.T) {
 	require.False(t, ok, "the equivocating block must not be inserted")
 }
 
+// Finality moving during the EL call must not swallow the EL's own verdict: the error is
+// still reported, it is only the commit that is dropped. (The INVALIDATED arm is not
+// covered here: upstream now derives an RLP header on that path, which these Altair
+// fixtures cannot satisfy.)
+func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
+	t.Run("engine error", func(t *testing.T) {
+		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNone, errors.New("el unavailable"))
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+
+		require.ErrorIs(t, run(), ErrNewPayloadNoStatus)
+		requireBlockNotAdded(t, store, block)
+	})
+}
+
+// A NOT_VALIDATED verdict is kept even when finality drops the block: the payload really
+// is unvalidated, so the root stays optimistic. Cleanup is not finality-driven — it waits
+// for a later validated payload with a higher execution block number.
+func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
+	store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNotValidated, nil)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+
+	require.NoError(t, run())
+	requireBlockNotAdded(t, store, block)
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, store.IsRootOptimistic(blockRoot), "an unvalidated payload stays optimistic")
+
+	block.Block.Body.ExecutionPayload.BlockNumber++
+	require.NoError(t, store.optimisticStore.ValidateBlock(common.HexToHash("0xfeed"), block.Block))
+	require.False(t, store.IsRootOptimistic(blockRoot), "a later validated payload sweeps the entry")
+}
+
+// The VALID result must be published before the admission token is released. Pinning f.mu
+// means the finishing caller cannot publish after relock, so if the marker is set by the
+// time the token comes free, it was published under the token.
+func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+
+	// Pin f.mu so the caller cannot reach any post-relock publishing.
+	pinned, unpin := make(chan struct{}), make(chan struct{})
+	go func() {
+		store.mu.Lock()
+		close(pinned)
+		<-unpin
+		store.mu.Unlock()
+	}()
+	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+	close(releaseEL)
+
+	// Sending into the admission channel blocks until the caller hands the token back.
+	store.payloadValidationAdmission <- struct{}{}
+	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot),
+		"the validated payload must be published before the admission token is released")
+	<-store.payloadValidationAdmission
+
+	close(unpin)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("OnBlock did not finish")
+	}
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	f := &ForkChoiceStore{engine: engine}
+	verified, err := lru.New[common.Hash, struct{}](8)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{engine: engine, verifiedExecutionPayload: verified}
+	blockRoot := common.HexToHash("0xabc")
+	verified.Add(blockRoot, struct{}{})
 
 	f.mu.Lock()
-	status, err := f.newPayloadWhileYieldingForkChoiceLock(context.Background(),
-		func() bool { return true }, nil, nil, nil, nil, nil)
+	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		blockRoot, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 

@@ -62,6 +62,7 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope        bool
 	dumpedEnvelope     *common.Hash
+	dumpEnvelopeErr    error
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
