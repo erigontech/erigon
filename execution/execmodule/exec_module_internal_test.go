@@ -195,3 +195,7 @@ func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
 	require.Equal(t, 20*time.Millisecond, rec.Validation)
 	require.Zero(t, sd.TakeCommitmentTime(), "a commitment time left behind is reported again by the next block")
 }
+
+func (fv *ForkValidator) LastValidationExecStageTiming() time.Duration {
+	return fv.executor.lastValidationExecStageTiming()
+}

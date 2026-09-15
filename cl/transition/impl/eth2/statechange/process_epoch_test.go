@@ -22,10 +22,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/abstract"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 type processFunc func(s abstract.BeaconState) error
@@ -33,6 +34,8 @@ type processFunc func(s abstract.BeaconState) error
 func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpected []byte, f processFunc) {
 	testState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(testState, sszSnappyTest, int(clparams.BellatrixVersion)))
+	_, err := testState.HashSSZ()
+	require.NoError(t, err)
 	expectedState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
 	// Make up state transistor

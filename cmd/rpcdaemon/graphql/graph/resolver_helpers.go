@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	ethapi "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
@@ -137,38 +137,37 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.GraphQLReceipt) *model.Transaction {
 	trans := &model.Transaction{
 		Block:             block,
-		CumulativeGasUsed: common.NewUint64(uint64(receipt.CumulativeGasUsed)),
+		CumulativeGasUsed: ptr(uint64(receipt.CumulativeGasUsed)),
 		Gas:               receipt.Gas,
 		InputData:         hexutil.Encode(receipt.Data),
-		GasUsed:           common.NewUint64(uint64(receipt.GasUsed)),
+		GasUsed:           ptr(uint64(receipt.GasUsed)),
 		Hash:              receipt.TransactionHash.String(),
-		Index:             common.NewUint64(uint64(receipt.TransactionIndex)),
+		Index:             ptr(uint64(receipt.TransactionIndex)),
 		Nonce:             hexutil.EncodeUint64(receipt.Nonce),
-		Type:              common.NewUint64(uint64(receipt.Type)),
+		Type:              ptr(uint64(receipt.Type)),
 		Value:             receipt.Value.Hex(),
 	}
-	str := func(s string) *string { return &s }
 	if receipt.EffectiveGasPrice != nil {
-		trans.EffectiveGasPrice = str(receipt.EffectiveGasPrice.String())
+		trans.EffectiveGasPrice = ptr(receipt.EffectiveGasPrice.String())
 		trans.GasPrice = *trans.EffectiveGasPrice
 	}
 	if receipt.MaxFeePerGas != nil {
-		trans.MaxFeePerGas = str(receipt.MaxFeePerGas.Hex())
+		trans.MaxFeePerGas = ptr(receipt.MaxFeePerGas.Hex())
 	}
 	if receipt.MaxPriorityFeePerGas != nil {
-		trans.MaxPriorityFeePerGas = str(receipt.MaxPriorityFeePerGas.Hex())
+		trans.MaxPriorityFeePerGas = ptr(receipt.MaxPriorityFeePerGas.Hex())
 	}
 	if receipt.MaxFeePerBlobGas != nil {
-		trans.MaxFeePerBlobGas = str(receipt.MaxFeePerBlobGas.String())
+		trans.MaxFeePerBlobGas = ptr(receipt.MaxFeePerBlobGas.String())
 	}
 	if receipt.BlobGasUsed != nil {
-		trans.BlobGasUsed = common.NewUint64(uint64(*receipt.BlobGasUsed))
+		trans.BlobGasUsed = ptr(uint64(*receipt.BlobGasUsed))
 	}
 	if receipt.BlobGasPrice != nil {
-		trans.BlobGasPrice = str(receipt.BlobGasPrice.String())
+		trans.BlobGasPrice = ptr(receipt.BlobGasPrice.String())
 	}
 	if receipt.Status != nil {
-		trans.Status = common.NewUint64(uint64(*receipt.Status))
+		trans.Status = ptr(uint64(*receipt.Status))
 	}
 
 	trans.Logs = make([]*model.Log, 0, len(receipt.Logs))
