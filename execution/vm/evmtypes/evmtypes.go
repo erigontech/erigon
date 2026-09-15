@@ -80,6 +80,7 @@ type ExecutionResult struct {
 	SenderInitBalance     uint256.Int
 	CoinbaseInitBalance   uint256.Int
 	FeeTipped             uint256.Int
+	FeeBlob               uint256.Int // Parlia routes this to SystemAddress post-Cancun; burnt elsewhere
 	FeeBurnt              uint256.Int
 	BurntContractAddress  accounts.Address
 }
