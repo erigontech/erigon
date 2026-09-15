@@ -134,12 +134,15 @@ does not count. At a fork point with prefix `P` the walker:
    its `grid[0]`, with `mountWall = len(P)+1`. The clone walks its own subtree, forking
    again where the grain allows, and `foldMounted(nibble)` folds back to the fork row and
    returns `grid[0][nibble]`.
-4. **Returns its execution context across the wait** and takes one back after, so a
-   parked walker holds none and every held context belongs to a running walker. Contexts
-   are leases from the round's `ctxLeasePool` of `min(numWorkers, GOMAXPROCS)` entries,
-   each opened on first use and closed when the round ends. The fork starts
-   `min(children, leases)` goroutines; each takes a lease and claims unstarted children
-   until none are left.
+4. **Walks children on its own lease and hands the rest to idle leases.** Contexts are
+   leases from the round's `ctxLeasePool` of `min(numWorkers, GOMAXPROCS)` entries, each
+   opened on first use and closed when the round ends. The forking walker claims unstarted
+   children one at a time on the lease it holds; before each claim it starts a helper for
+   every lease it can take without waiting, at most `children − 1` in all, and each helper
+   claims children until none are left. With helpers running, the walker returns its lease
+   across the wait and takes one back after, so a parked walker holds none and every held
+   context belongs to a running walker. With no idle lease, the walker runs every child
+   itself, and no goroutine waits for a lease.
 5. **Stitches and continues.** `stitchSplitCells` overlays the cells of the children
    that touched their nibble onto the fork row, with the touch and presence bits each
    child's own fold set, and the walk resumes; the walker's next `fold` of that row writes `P`'s branch
@@ -169,11 +172,12 @@ any hot contract whose storage node spreads `G` or more touched slots over its n
 whether or not the account itself was touched; a bulk round of a million keys at 16 workers
 gets `G ≈ 15.6k`, so the root and every depth-1 node fork and depth-2 nodes do not.
 
-No separate bound is needed for walkers parked on their children: a walker returns its
-lease before `Wait`, so the pool alone bounds the open read transactions —
+No separate bound is needed for walkers parked on their children: a walker with running
+helpers returns its lease before `Wait`, so the pool alone bounds the open read transactions —
 `min(numWorkers, GOMAXPROCS)` leases plus the base trie's own context, which
 `ParallelCommitmentReadTxs` declares as `parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1`.
-A fork needs no permit and never falls back to walking inline. Under-declaring the
+A fork needs no permit: it starts helpers only on idle leases and otherwise walks its
+children inline. Under-declaring the
 budget is not a slowdown but a hang: the production factory
 (`concurrentTrieContextFactory`) blocks in `beginWorkerRo`, so a child that cannot open a
 transaction blocks while holding a lease.

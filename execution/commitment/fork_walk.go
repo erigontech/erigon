@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -75,6 +76,15 @@ func (p *ctxLeasePool) acquire(ctx context.Context) (*ctxLease, error) {
 
 func (p *ctxLeasePool) release(l *ctxLease) { p.free <- l }
 
+func (p *ctxLeasePool) tryAcquire() *ctxLease {
+	select {
+	case l := <-p.free:
+		return l
+	default:
+		return nil
+	}
+}
+
 func (p *ctxLeasePool) context(l *ctxLease) PatriciaContext {
 	if !l.made {
 		l.ctx, l.cleanup = p.factory(p.round)
@@ -107,6 +117,7 @@ type forkWalk struct {
 	traceW        io.Writer
 	grain         uint32
 	forks         atomic.Uint64
+	helpers       atomic.Uint64
 }
 
 func (fw *forkWalk) attach(ctx context.Context, wk *walker) error {
@@ -214,38 +225,86 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		bm &^= uint16(1) << nib
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
-	fw.detach(wk)
-	var claimed atomic.Int32
-	for range min(n, len(fw.leases.entries)) {
-		g.Go(func() error {
-			l, aerr := fw.leases.acquire(gctx)
-			if aerr != nil {
-				return aerr
-			}
-			held := &walker{lease: l, bindsCtx: true}
-			defer func() {
-				if held.lease != nil {
-					fw.leases.release(held.lease)
-				}
-			}()
-			for {
-				i := int(claimed.Add(1)) - 1
-				if i >= n {
-					return nil
-				}
-				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &touched, &present); cerr != nil {
-					return cerr
-				}
-			}
+	cctx, cancel := context.WithCancel(ctx)
+	var g errgroup.Group
+	defer func() {
+		cancel()
+		_ = g.Wait()
+	}()
+	var (
+		claimed  atomic.Int32
+		failOnce sync.Once
+		firstErr error
+	)
+	fail := func(err error) {
+		failOnce.Do(func() {
+			firstErr = err
+			cancel()
 		})
 	}
-
-	if werr := g.Wait(); werr != nil {
-		return werr
+	next := func() int { return int(claimed.Add(1)) - 1 }
+	run := func(cw *walker, i int) error {
+		return fw.runChild(cctx, w, cw, node, i, int(nibs[i]), path, cells, &touched, &present)
 	}
-	if aerr := fw.attach(ctx, wk); aerr != nil {
-		return aerr
+
+	own := &walker{lease: wk.lease, bindsCtx: true}
+	if wk.bindsCtx {
+		w.ResetContext(nil)
+	}
+	wk.lease = nil
+	started := 0
+	for {
+		for started < n-1 && int(claimed.Load()) < n-1 {
+			l := fw.leases.tryAcquire()
+			if l == nil {
+				break
+			}
+			started++
+			fw.helpers.Add(1)
+			g.Go(func() error {
+				held := &walker{lease: l, bindsCtx: true}
+				defer func() {
+					if held.lease != nil {
+						fw.leases.release(held.lease)
+					}
+				}()
+				for i := next(); i < n; i = next() {
+					if err := run(held, i); err != nil {
+						fail(err)
+						return nil
+					}
+				}
+				return nil
+			})
+		}
+		i := next()
+		if i >= n {
+			break
+		}
+		if err := run(own, i); err != nil {
+			fail(err)
+			break
+		}
+	}
+
+	if started > 0 && own.lease != nil {
+		fw.leases.release(own.lease)
+		own.lease = nil
+	}
+	_ = g.Wait()
+	if firstErr != nil {
+		wk.lease = own.lease
+		return firstErr
+	}
+	if started > 0 {
+		if err := fw.attach(ctx, wk); err != nil {
+			return err
+		}
+	} else {
+		wk.lease = own.lease
+		if wk.bindsCtx {
+			w.ResetContext(fw.leases.context(wk.lease))
+		}
 	}
 	var touchedBits, presentBits uint16
 	for nib := range 16 {
