@@ -37,6 +37,15 @@ func surviving(t *testing.T) int {
 	return count
 }
 
+// deadlineOf reads the deadline the cache stored for a key, so a test can sweep at an exact
+// instant rather than race the wall clock.
+func deadlineOf[K comparable, V any](t *testing.T, c *CacheWithTTL[K, V], k K) time.Time {
+	t.Helper()
+	e, ok := c.cache.Peek(k)
+	require.True(t, ok, "no entry held for the key")
+	return e.expiresAt
+}
+
 func TestCacheWithTTLCloseStopsSweep(t *testing.T) {
 	before := surviving(t)
 
@@ -181,10 +190,52 @@ func TestCacheWithTTLRemoveExpired(t *testing.T) {
 	c.removeExpired(time.Now())
 	require.Equal(t, 2, c.Len(), "unexpired entries must survive a sweep")
 
-	// The sweep stops at the first live entry, so a newer entry ahead of an expired one is kept
-	// until the expired one reaches the tail.
 	c.removeExpired(time.Now().Add(2 * time.Hour))
 	require.Equal(t, 0, c.Len(), "entries past their deadline must be reclaimed")
+}
+
+// TestCacheWithTTLSweepReclaimsPromotedEntry pins the case the eviction order hides: a Get moves an
+// entry to the front without renewing its deadline, so it expires while a newer, still live entry
+// sits behind it at the tail. The sweep has to reach it wherever it sits.
+func TestCacheWithTTLSweepReclaimsPromotedEntry(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("sweep_reclaims_promoted", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	first := deadlineOf(t, c, 1)
+	// Separate the two deadlines by more than any clock's resolution, so the instant swept at
+	// below is unambiguously between them.
+	time.Sleep(time.Millisecond)
+	c.Add(2, 2)
+	require.True(t, deadlineOf(t, c, 2).After(first), "the later entry must hold the later deadline")
+
+	// A Get promotes the older entry to the front, leaving the newer, still live one at the tail.
+	_, ok := c.Get(1)
+	require.True(t, ok)
+
+	// Past the promoted entry's deadline, well before the other's.
+	c.removeExpired(first.Add(time.Nanosecond))
+
+	require.Equal(t, 1, c.Len(), "a promoted entry past its deadline must still be reclaimed")
+	_, ok = c.Get(1)
+	require.False(t, ok, "the reclaimed entry must be the expired one")
+	_, ok = c.Get(2)
+	require.True(t, ok, "the entry still within its deadline must be kept")
+}
+
+// TestCacheWithTTLSweepKeepsRecency (control): the sweep reads every entry it walks, and reading
+// must not count as use, or a sweep would keep the tail alive and break size eviction.
+func TestCacheWithTTLSweepKeepsRecency(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("sweep_keeps_recency", 2, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	c.Add(2, 2)
+	c.removeExpired(time.Now())
+
+	require.True(t, c.Add(3, 3), "adding past the size must still report an eviction after a sweep")
+	_, ok := c.Get(1)
+	require.False(t, ok, "a sweep must not make the oldest entry look recently used")
 }
 
 func TestCacheWithTTLGetReclaimsExpiredEntry(t *testing.T) {
@@ -197,6 +248,39 @@ func TestCacheWithTTLGetReclaimsExpiredEntry(t *testing.T) {
 	_, ok := c.Get(1)
 	require.False(t, ok)
 	require.Equal(t, 0, c.Len(), "a Get that finds an entry expired must drop it")
+}
+
+func TestCacheWithTTLExpiryAtExactDeadline(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("expiry_at_exact_deadline", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	deadline := deadlineOf(t, c, 1)
+
+	c.removeExpired(deadline.Add(-time.Nanosecond))
+	require.Equal(t, 1, c.Len(), "one tick before its deadline an entry must live")
+
+	c.removeExpired(deadline)
+	require.Equal(t, 1, c.Len(), "at exactly its deadline an entry must live")
+
+	c.removeExpired(deadline.Add(time.Nanosecond))
+	require.Equal(t, 0, c.Len(), "one tick past its deadline an entry must be reclaimed")
+}
+
+func TestCacheWithTTLPointerValueZeroOnMiss(t *testing.T) {
+	type entry struct{ n int }
+	c := NewWithTTL[uint64, *entry]("pointer_value_zero_on_miss", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, &entry{n: 7})
+	hit, ok := c.Get(1)
+	require.True(t, ok)
+	require.NotNil(t, hit)
+	require.Equal(t, 7, hit.n)
+
+	miss, ok := c.Get(2)
+	require.False(t, ok)
+	require.Nil(t, miss, "a miss on a pointer value must read as nil")
 }
 
 func TestSweepInterval(t *testing.T) {

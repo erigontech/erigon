@@ -169,16 +169,17 @@ func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
 	}
 }
 
-// removeExpired drops the expired tail. An entry that a Get moved back to the front outlives the
-// sweep and is reclaimed by the Get that finds it expired, or once it reaches the tail again.
+// removeExpired drops every entry past its deadline. Deadlines are not ordered by position: a Get
+// moves an entry to the front of the eviction list without renewing it, so an expired entry can sit
+// anywhere, and the whole list has to be walked.
 func (c *CacheWithTTL[K, V]) removeExpired(now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for {
-		k, e, ok := c.cache.GetOldest()
-		if !ok || !e.expired(now) {
-			return
+	// Keys is a snapshot, so removing while walking it is safe, and Peek reads an entry without
+	// moving it, so a sweep does not make anything look recently used.
+	for _, k := range c.cache.Keys() {
+		if e, ok := c.cache.Peek(k); ok && e.expired(now) {
+			c.cache.Remove(k)
 		}
-		c.cache.Remove(k)
 	}
 }
