@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -97,8 +96,8 @@ type StateDiffAccount struct {
 }
 
 type StateDiffBalance struct {
-	From *hexutil.Big `json:"from"`
-	To   *hexutil.Big `json:"to"`
+	From *hexutil.U256 `json:"from"`
+	To   *hexutil.U256 `json:"to"`
 }
 
 type StateDiffCode struct {
@@ -403,7 +402,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
-		trace.Result = &TraceResult{GasUsed: (*hexutil.Big)(big.NewInt(0))}
+		trace.Result = &TraceResult{GasUsed: new(hexutil.U256)}
 		trace.Type = CALL
 	}
 	if deep {
@@ -414,9 +413,11 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		if typ == vm.DELEGATECALL {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
-				value, _ = uint256.FromBig(action.Value.ToInt())
+				v := uint256.Int(action.Value)
+				value = &v
 			case *CallTraceAction:
-				value, _ = uint256.FromBig(action.Value.ToInt())
+				v := uint256.Int(action.Value)
+				value = &v
 			}
 		}
 		if typ == vm.STATICCALL {
@@ -430,9 +431,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
-		action.Gas.ToInt().SetUint64(gas)
+		action.Gas = hexutil.U256(*uint256.NewInt(gas))
 		action.Init = bytes.Clone(input)
-		action.Value.ToInt().Set(value.ToBig())
+		action.Value = hexutil.U256(*value)
 		trace.Action = &action
 	case typ == vm.SELFDESTRUCT:
 		trace.Type = SUICIDE
@@ -440,7 +441,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := &SuicideTraceAction{}
 		action.Address = from.Value()
 		action.RefundAddress = to.Value()
-		action.Balance.ToInt().Set(value.ToBig())
+		action.Balance = hexutil.U256(*value)
 		trace.Action = action
 	default:
 		action := CallTraceAction{}
@@ -456,9 +457,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		action.From = from.Value()
 		action.To = to.Value()
-		action.Gas.ToInt().SetUint64(gas)
+		action.Gas = hexutil.U256(*uint256.NewInt(gas))
 		action.Input = bytes.Clone(input)
-		action.Value.ToInt().Set(value.ToBig())
+		action.Value = hexutil.U256(*value)
 		trace.Action = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
@@ -505,12 +506,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			topTrace.Error = "Reverted"
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 				topTrace.Result.(*TraceResult).Output = bytes.Clone(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 				topTrace.Result.(*CreateTraceResult).Code = bytes.Clone(output)
 			}
 		} else {
@@ -528,11 +527,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		}
 		switch topTrace.Type {
 		case CALL:
-			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 		case CREATE:
-			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -760,17 +757,15 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				fromBalance := ifromBalance.ToBig()
 				itoBalance, err := ibs.GetBalance(addr)
 				if err != nil {
 					return err
 				}
-				toBalance := itoBalance.ToBig()
-				if fromBalance.Cmp(toBalance) == 0 {
+				if ifromBalance.Eq(&itoBalance) {
 					accountDiff.Balance = "="
 				} else {
 					m := make(map[string]*StateDiffBalance)
-					m["*"] = &StateDiffBalance{From: (*hexutil.Big)(fromBalance), To: (*hexutil.Big)(toBalance)}
+					m["*"] = &StateDiffBalance{From: (*hexutil.U256)(&ifromBalance), To: (*hexutil.U256)(&itoBalance)}
 					accountDiff.Balance = m
 					allEqual = false
 				}
@@ -815,8 +810,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					if err != nil {
 						return err
 					}
-					m := make(map[string]*hexutil.Big)
-					m["-"] = (*hexutil.Big)(balance.ToBig())
+					m := make(map[string]*hexutil.U256)
+					m["-"] = (*hexutil.U256)(&balance)
 					accountDiff.Balance = m
 				}
 				{
@@ -844,8 +839,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				m := make(map[string]*hexutil.Big)
-				m["+"] = (*hexutil.Big)(balance.ToBig())
+				m := make(map[string]*hexutil.U256)
+				m["+"] = (*hexutil.U256)(&balance)
 				accountDiff.Balance = m
 			}
 			{
@@ -1014,16 +1009,14 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			if entry, ok := sdMap[addr]; ok {
 				if wd.existed {
 					bal := entry.Balance.(map[string]*StateDiffBalance)["*"]
-					var cur uint256.Int
-					cur.SetFromBig(bal.To.ToInt())
+					cur := uint256.Int(*bal.To)
 					cur.Add(&cur, &wd.amount)
-					bal.To = (*hexutil.Big)(cur.ToBig())
+					bal.To = (*hexutil.U256)(&cur)
 				} else {
-					balMap := entry.Balance.(map[string]*hexutil.Big)
-					var cur uint256.Int
-					cur.SetFromBig(balMap["+"].ToInt())
+					balMap := entry.Balance.(map[string]*hexutil.U256)
+					cur := uint256.Int(*balMap["+"])
 					cur.Add(&cur, &wd.amount)
-					balMap["+"] = (*hexutil.Big)(cur.ToBig())
+					balMap["+"] = (*hexutil.U256)(&cur)
 				}
 			} else {
 				var to uint256.Int
@@ -1032,8 +1025,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 					sdMap[addr] = &StateDiffAccount{
 						Balance: map[string]*StateDiffBalance{
 							"*": {
-								From: (*hexutil.Big)(wd.prev.ToBig()),
-								To:   (*hexutil.Big)(to.ToBig()),
+								From: (*hexutil.U256)(&wd.prev),
+								To:   (*hexutil.U256)(&to),
 							},
 						},
 						Code:    "=",
@@ -1042,7 +1035,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 					}
 				} else {
 					sdMap[addr] = &StateDiffAccount{
-						Balance: map[string]*hexutil.Big{"+": (*hexutil.Big)(to.ToBig())},
+						Balance: map[string]*hexutil.U256{"+": (*hexutil.U256)(&to)},
 						Code:    map[string]hexutil.Bytes{"+": {}},
 						Nonce:   map[string]hexutil.Uint64{"+": 0},
 						Storage: map[common.Hash]map[string]any{},
