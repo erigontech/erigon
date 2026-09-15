@@ -34,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -898,6 +900,38 @@ type accessListResult struct {
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
+// checkIntrinsicGas rejects a message that cannot cover its own intrinsic gas, the
+// same comparison the executor makes before running it. The message carries the
+// effective gas limit, RPC gas cap included, and the cost follows the block's fork
+// rules, so a gas figure eth_estimateGas returned is never rejected here.
+func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
+	contractCreation := msg.To().IsNil()
+	accessList := msg.AccessList()
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
+		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+		HasValue:           !msg.Value().IsZero(),
+		IsEIP2:             chainRules.IsHomestead,
+		IsEIP2028:          chainRules.IsIstanbul,
+		IsEIP3860:          chainRules.IsShanghai,
+		IsEIP7623:          chainRules.IsPrague,
+		IsEIP7976:          chainRules.IsAmsterdam,
+		IsEIP7981:          chainRules.IsAmsterdam,
+		IsEIP2780:          chainRules.IsAmsterdam,
+	})
+	if overflow {
+		return protocol.ErrGasUintOverflow
+	}
+	if required := max(intrinsic.ExecutionGas, intrinsic.FloorGasCost); msg.Gas() < required {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	}
+	return nil
+}
+
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
@@ -1011,6 +1045,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
 	if len(args.AuthorizationList) > 0 {
 		rules := blockCtx.Rules(chainConfig)
+		// Each entry below costs an ECDSA recovery, so refuse a list the executor
+		// would reject for intrinsic gas anyway before paying for them.
+		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkIntrinsicGas(msg, rules); err != nil {
+			return nil, err
+		}
 		for i := range args.AuthorizationList {
 			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()

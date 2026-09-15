@@ -1841,6 +1841,68 @@ func TestCreateAccessListAuthGas(t *testing.T) {
 	})
 }
 
+// TestCreateAccessListAuthorizationsAffordable pins that a list too large for the gas
+// it may spend is refused by the intrinsic gas check. Every entry that reaches the
+// exclusion loop costs an ECDSA recovery, so the request must not pay for them.
+func TestCreateAccessListAuthorizationsAffordable(t *testing.T) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	// One signature replicated: recovery costs the same per entry either way, and
+	// signing each of them would dominate the test instead.
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(t, err)
+	signed := func(n int) []types.JsonAuthorization {
+		auths := make([]types.JsonAuthorization, n)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+		}
+		return auths
+	}
+
+	t.Run("gas below the intrinsic cost is refused", func(t *testing.T) {
+		gas := hexutil.Uint64(params.TxGas)
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			Gas:               &gas,
+			AuthorizationList: signed(64),
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+	})
+
+	t.Run("the rpc gas cap bounds a request that sends no gas", func(t *testing.T) {
+		// Without a gas field the effective limit is the RPC gas cap, which leaves
+		// room for far fewer authorizations than this.
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: signed(4096),
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+	})
+
+	t.Run("rejecting does not pay for the recoveries", func(t *testing.T) {
+		args := ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: signed(65536),
+		}
+
+		start := time.Now()
+		_, err := api.CreateAccessList(context.Background(), args, nil, nil, nil)
+		elapsed := time.Since(start)
+
+		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+		// Recovering this many authorities runs into seconds, while the check that
+		// replaces them is arithmetic. The bound is loose enough to survive a slow
+		// machine and still tell the two apart.
+		require.Less(t, elapsed, time.Second, "authorities were recovered before the request was rejected")
+	})
+}
+
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
 // pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
 // meaningful concept there, regardless of whether the caller supplied one or
