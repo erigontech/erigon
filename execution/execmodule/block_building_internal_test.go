@@ -147,7 +147,7 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 	require.Equal(t, []byte{1}, refreshedBlock.Block.Block.Header().Extra)
 }
 
-func TestAssembleBlockBoundsTransactionRefreshesPerPayload(t *testing.T) {
+func TestAssembleBlockContinuesRefreshingAfterMultipleTransactionChanges(t *testing.T) {
 	var revision atomic.Uint64
 	started := make(chan uint64, 4)
 	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
@@ -157,20 +157,18 @@ func TestAssembleBlockBoundsTransactionRefreshesPerPayload(t *testing.T) {
 	WithPayloadTransactionsRevision(func(uint64, uint64) uint64 { return revision.Load() })(module)
 	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
 
-	var latest AssembleBlockResult
-	for range 3 {
+	var previous AssembleBlockResult
+	for range 4 {
 		result, err := module.AssembleBlock(t.Context(), params.Copy())
 		require.NoError(t, err)
+		if previous.PayloadID != 0 {
+			require.NotEqual(t, previous.PayloadID, result.PayloadID)
+		}
 		require.Equal(t, result.PayloadID, <-started)
 		require.Eventually(t, module.builders[result.PayloadID].builder.Completed, time.Second, time.Millisecond)
-		latest = result
+		previous = result
 		revision.Add(1)
 	}
-
-	capped, err := module.AssembleBlock(t.Context(), params.Copy())
-	require.NoError(t, err)
-	require.Equal(t, latest.PayloadID, capped.PayloadID)
-	require.Empty(t, started)
 }
 
 func TestAssembleBlockReusesRunningPayloadAcrossTransactionRevision(t *testing.T) {
@@ -202,7 +200,7 @@ func TestAssembleBlockReusesRunningPayloadAcrossTransactionRevision(t *testing.T
 	module.builders[first.PayloadID].builder.Discard()
 }
 
-func TestAssembleBlockResetsTransactionRefreshLimitForNewRequest(t *testing.T) {
+func TestAssembleBlockRefreshesTransactionChangesForNewRequest(t *testing.T) {
 	var revision atomic.Uint64
 	started := make(chan uint64, 5)
 	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
@@ -233,7 +231,7 @@ func TestAssembleBlockResetsTransactionRefreshLimitForNewRequest(t *testing.T) {
 	require.Equal(t, refreshedOnNewParent.PayloadID, <-started)
 }
 
-func TestAssembleBlockPreservesTransactionRefreshLimitAcrossFailure(t *testing.T) {
+func TestAssembleBlockRetriesFailedTransactionRefresh(t *testing.T) {
 	var revision atomic.Uint64
 	var builds atomic.Uint32
 	started := make(chan uint64, 4)
@@ -270,13 +268,13 @@ func TestAssembleBlockPreservesTransactionRefreshLimitAcrossFailure(t *testing.T
 	require.Eventually(t, module.builders[lastRefresh.PayloadID].builder.Completed, time.Second, time.Millisecond)
 
 	revision.Add(1)
-	capped, err := module.AssembleBlock(t.Context(), params.Copy())
+	refreshedAgain, err := module.AssembleBlock(t.Context(), params.Copy())
 	require.NoError(t, err)
-	require.Equal(t, lastRefresh.PayloadID, capped.PayloadID)
-	require.Empty(t, started)
+	require.NotEqual(t, lastRefresh.PayloadID, refreshedAgain.PayloadID)
+	require.Equal(t, refreshedAgain.PayloadID, <-started)
 }
 
-func TestAssembleBlockDoesNotSpendRefreshesForRevisionsObservedDuringBuild(t *testing.T) {
+func TestAssembleBlockUsesRevisionObservedDuringBuild(t *testing.T) {
 	var revision atomic.Uint64
 	var builds atomic.Uint32
 	started := make(chan uint64, 3)
@@ -311,6 +309,33 @@ func TestAssembleBlockDoesNotSpendRefreshesForRevisionsObservedDuringBuild(t *te
 		require.NoError(t, err)
 		require.Equal(t, latest.PayloadID, repeated.PayloadID)
 	}
+}
+
+func TestAssembleBlockRefreshesAfterLaterProviderSnapshot(t *testing.T) {
+	var revision atomic.Uint64
+	revision.Store(1)
+	started := make(chan uint64, 2)
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- params.PayloadId
+		firstRevision := revision.Load()
+		txnprovider.ObserveTxnRevision(ctx, firstRevision)
+		revision.Add(1)
+		txnprovider.ObserveTxnRevision(ctx, revision.Load())
+		header := &types.Header{Extra: []byte{byte(firstRevision)}}
+		return &types.BlockWithReceipts{Block: types.NewBlock(header, nil, nil, nil, nil, nil)}, nil
+	})
+	WithPayloadTransactionsRevision(func(uint64, uint64) uint64 { return revision.Load() })(module)
+	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
+
+	first, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	require.Equal(t, first.PayloadID, <-started)
+	require.Eventually(t, module.builders[first.PayloadID].builder.Completed, time.Second, time.Millisecond)
+
+	refreshed, err := module.AssembleBlock(t.Context(), params.Copy())
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, refreshed.PayloadID)
+	require.Equal(t, refreshed.PayloadID, <-started)
 }
 
 func TestTransientPayloadCollectionDoesNotHoldModuleSemaphore(t *testing.T) {

@@ -560,6 +560,16 @@ func TestTransactionSetRevisionAdvancesWhenPendingTransactionsChange(t *testing.
 	_, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), pool.TransactionSetRevision(0, 0))
+
+	pool.lock.Lock()
+	pool.byHash[string(pendingTxn.IDHash[:])].TxnSlot.Rlp = nil
+	pool.lock.Unlock()
+	observedRevision.Store(0)
+	provided, err = pool.ProvideTxns(providerCtx, txnprovider.WithAmount(1))
+	require.NoError(t, err)
+	require.Empty(t, provided)
+	require.Equal(t, uint64(2), pool.TransactionSetRevision(0, 0))
+	require.Equal(t, pool.TransactionSetRevision(0, 0), observedRevision.Load())
 }
 
 func TestNonceFromAddress(t *testing.T) {
