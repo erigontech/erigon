@@ -582,7 +582,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	if !msg.isUnsubscribe() && h.isMethodAllowedByGranularControl(msg.Method) {
 		if e, ok := h.reg.invokerFor(msg.Method); ok {
 			start := time.Now()
-			answer := h.runTypedMethod(cp.ctx, msg, e.inv)
+			answer := h.runTypedMethod(cp.ctx, msg, e.inv, stream)
 			recordRPCMetrics(answer, start, e.timerSuccess, e.timerFailure)
 			return answer
 		}
@@ -611,12 +611,15 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	return answer
 }
 
-func (h *handler) runTypedMethod(ctx context.Context, msg *jsonrpcMessage, inv invoker) *jsonrpcMessage {
+func (h *handler) runTypedMethod(ctx context.Context, msg *jsonrpcMessage, inv invoker, stream jsonstream.Stream) *jsonrpcMessage {
 	result, err := inv.invoke(ctx, msg.Params)
 	if err != nil {
 		return msg.errorResponse(remapDBOverload(ctx, err))
 	}
-	return msg.response(result)
+	if msg.isNotification() {
+		return nil
+	}
+	return msg.writeResponse(stream, result)
 }
 
 // recordRPCMetrics records request count and latency for a completed RPC call.
