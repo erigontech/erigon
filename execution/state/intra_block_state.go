@@ -1285,13 +1285,11 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive nil AddressPath read means this tx already consumed the
-			// account's absence, so reconstructing from cells flushed since would
-			// fork its view out of validation's sight — abort and re-execute.
-			// Exempt only an absence concluded from this destruct itself,
-			// recorded as a MapRead at the destruct cell's exact version.
+			// A definitive absence consumed before the destruct must force a retry.
+			// A wiped MapRead can use an older AddressPath cell's version because
+			// self-destruct snapshots omit the account record.
 			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
+				!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
 				if sdRes.DepIdx() > sdb.dep {
 					sdb.dep = sdRes.DepIdx()
 				}
