@@ -65,6 +65,9 @@ func TestForkChoiceReorgsToRetainedSideBlock(t *testing.T) {
 	header, err := m.ExecModule.GetHeader(t.Context(), &hash, &number)
 	require.NoError(t, err)
 	require.NotNil(t, header)
+	has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+	require.NoError(t, err)
+	require.True(t, has)
 
 	updateForkChoiceTo(t, m, side)
 	requireCanonicalWithTransactions(t, m, side)
@@ -100,6 +103,38 @@ func TestRetainedSideBlockTransactionsSurviveLaterCommits(t *testing.T) {
 		for _, block := range canonical {
 			requireStoredTransactions(t, tx, block)
 		}
+		return nil
+	}))
+}
+
+func TestConsecutiveForkChoicesKeepTransactions(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	canonical := generateTransferBlocks(t, m, key, 2, 0x0a)
+	for _, block := range canonical {
+		insertAndValidateBlocks(t, m, block)
+		updateForkChoiceTo(t, m, block)
+	}
+	for _, block := range canonical {
+		requireCanonicalWithTransactions(t, m, block)
+	}
+}
+
+func TestRetainedBlockAboveCommittedSequenceKeepsTransactions(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	chainA := generateTransferBlocks(t, m, key, 2, 0x0a)
+	chainB := generateTransferBlocks(t, m, key, 2, 0x0b)
+	insertAndValidateBlocks(t, m, chainA[0], chainB[0])
+	updateForkChoiceTo(t, m, chainA[0])
+	updateForkChoiceTo(t, m, chainB[0])
+	insertAndValidateBlocks(t, m, chainB[1])
+	updateForkChoiceTo(t, m, chainA[0])
+	insertAndValidateBlocks(t, m, chainA[1])
+	updateForkChoiceTo(t, m, chainB[1])
+
+	requireCanonicalWithTransactions(t, m, chainB[0])
+	requireCanonicalWithTransactions(t, m, chainB[1])
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		requireStoredTransactions(t, tx, chainA[0])
 		return nil
 	}))
 }

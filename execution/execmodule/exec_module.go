@@ -786,11 +786,11 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if blockHash == nil {
 		return false, errors.New("block hash is nil, HasBlock supports lookup by hash only")
 	}
-	tx, err := e.db.BeginRo(ctx)
+	tx, done, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer done()
 
 	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 	if num == nil {

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/binary"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 )
 
 const retainedBlockLimit = 16
@@ -68,21 +70,9 @@ func (e *ExecModule) copyPendingChain(tx kv.Tx, dst kv.RwTx, head common.Hash) (
 }
 
 func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash) error {
-	for _, hash := range committed {
-		delete(e.pendingBlocks, hash)
-	}
-	side := make([]common.Hash, 0, len(e.pendingBlocks))
-	for hash := range e.pendingBlocks {
-		side = append(side, hash)
-	}
-	slices.SortFunc(side, func(a, b common.Hash) int {
-		return cmp.Compare(e.pendingBlocks[b].number, e.pendingBlocks[a].number)
-	})
-	for _, hash := range side[min(len(side), retainedBlockLimit):] {
-		delete(e.pendingBlocks, hash)
-	}
+	side := sideBlocksToRetain(e.pendingBlocks, committed)
 	src := e.pendingBlocksView(tx)
-	if len(e.pendingBlocks) == 0 || src == nil {
+	if len(side) == 0 || src == nil {
 		e.dropPendingBlocks()
 		return nil
 	}
@@ -90,7 +80,7 @@ func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash)
 	if err != nil {
 		return err
 	}
-	for hash, block := range e.pendingBlocks {
+	for hash, block := range side {
 		if err := copyBlockRows(src, retained, hash, block.number); err != nil {
 			retained.Close()
 			return err
@@ -101,7 +91,37 @@ func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash)
 		return err
 	}
 	retained.DetachDB()
+	e.pendingBlocks = side
 	e.swapRetainedBlocks(retained)
+	return nil
+}
+
+func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash) map[common.Hash]pendingBlock {
+	hashes := make([]common.Hash, 0, len(pending))
+	for hash := range pending {
+		if !slices.Contains(committed, hash) {
+			hashes = append(hashes, hash)
+		}
+	}
+	slices.SortFunc(hashes, func(a, b common.Hash) int {
+		return cmp.Compare(pending[b].number, pending[a].number)
+	})
+	hashes = hashes[:min(len(hashes), retainedBlockLimit)]
+	side := make(map[common.Hash]pendingBlock, len(hashes))
+	for _, hash := range hashes {
+		side[hash] = pending[hash]
+	}
+	return side
+}
+
+func (e *ExecModule) initSeededOverlay(tx kv.TemporalTx, sd *execctx.SharedDomains) error {
+	if err := sd.InitBlockOverlay(tx, tx.Debug().Dirs().Tmp); err != nil {
+		return err
+	}
+	if err := e.seedRetainedBlocks(tx, sd.BlockOverlay()); err != nil {
+		sd.CloseBlockOverlay()
+		return fmt.Errorf("seed retained blocks: %w", err)
+	}
 	return nil
 }
 

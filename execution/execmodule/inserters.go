@@ -76,7 +76,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 
 	// Ensure currentContext has a block overlay for accumulating writes.
 	sd := e.currentContext
-	if sd == nil {
+	fresh := sd == nil
+	if fresh {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
 		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
@@ -85,19 +86,21 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
-		e.lock.Lock()
-		e.currentContext = sd
-		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		if err := e.initSeededOverlay(roTx, sd); err != nil {
+			if fresh {
+				sd.Close()
+			}
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
-		}
-		if err := e.seedRetainedBlocks(roTx, sd.BlockOverlay()); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: seed retained blocks: %w", err)
 		}
 	} else {
 		sd.BlockOverlay().UpdateTxn(roTx)
+	}
+	if fresh {
+		e.lock.Lock()
+		e.currentContext = sd
+		e.lock.Unlock()
 	}
 	blockOverlay := sd.BlockOverlay()
 
