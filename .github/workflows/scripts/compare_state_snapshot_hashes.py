@@ -56,6 +56,18 @@ class Comparison:
         self.local_only = local_only
         self.published_only = published_only
 
+    @property
+    def compared(self):
+        return len(self.matched) + len(self.mismatched)
+
+    @property
+    def published(self):
+        return self.compared + len(self.published_only)
+
+    @property
+    def built(self):
+        return self.compared + len(self.local_only)
+
     def __repr__(self):
         return (f"Comparison(matched={len(self.matched)}, mismatched={len(self.mismatched)}, "
                 f"local_only={len(self.local_only)}, published_only={len(self.published_only)})")
@@ -112,19 +124,31 @@ def subdir_of(name):
     return name.split("/", 1)[0]
 
 
-def verdict(comparison):
-    matched, mismatched = len(comparison.matched), len(comparison.mismatched)
-    comparable = matched + mismatched
+def compared_by_subdir(comparison, dirs):
+    names = comparison.matched + [m.name for m in comparison.mismatched]
+    return {d: sum(1 for n in names if subdir_of(n) == d) for d in dirs}
 
-    if comparable == 0:
-        result = Result("ERROR", "no state snapshot name is present on both sides, nothing to compare", 1)
+
+def headline(comparison):
+    if comparison.compared == 0:
+        return "no file is present on both sides, nothing was compared"
+    if comparison.mismatched:
+        return (f"{len(comparison.mismatched)} of the {comparison.compared} compared files "
+                f"differ from the published ones")
+    return f"all {comparison.compared} compared files match the published ones"
+
+
+def verdict(comparison, dirs=STATE_DIRS):
+    matched, mismatched = len(comparison.matched), len(comparison.mismatched)
+
+    if comparison.compared == 0:
+        result = Result("ERROR", headline(comparison), 1)
     elif mismatched:
         names = ", ".join(m.name for m in comparison.mismatched[:5])
         suffix = ", ..." if mismatched > 5 else ""
-        result = Result("FAILURE", f"{mismatched}/{comparable} state snapshots differ from the "
-                                   f"published ones: {names}{suffix}", 1)
+        result = Result("FAILURE", f"{headline(comparison)}: {names}{suffix}", 1)
     else:
-        result = Result("SUCCESS", f"all {matched} comparable state snapshots match the published ones", 0)
+        result = Result("SUCCESS", headline(comparison), 0)
 
     result.add_measure("matched", matched)
     result.add_measure("mismatched", mismatched)
@@ -134,6 +158,8 @@ def verdict(comparison):
                          | set(subdir_of(m.name) for m in comparison.mismatched)):
         result.add_measure(f"mismatched_{subdir}",
                            sum(1 for m in comparison.mismatched if subdir_of(m.name) == subdir))
+    for subdir, count in compared_by_subdir(comparison, dirs).items():
+        result.add_measure(f"compared_{subdir}", count)
     return result
 
 
@@ -157,16 +183,78 @@ def load_published(args, repo_root):
         return resp.read().decode("utf-8"), url
 
 
-def render_summary(result, comparison, source, chain, cap=50):
+def natural_key(name):
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+def file_statuses(comparison, one_side_only, one_side_label):
+    statuses = [("identical", n) for n in comparison.matched]
+    statuses += [("DIFFERENT", m.name) for m in comparison.mismatched]
+    statuses += [(one_side_label, n) for n in one_side_only]
+    return sorted(statuses, key=lambda s: natural_key(s[1]))
+
+
+def file_lists(comparison):
+    return [(f"Built locally ({comparison.built})",
+             file_statuses(comparison, comparison.local_only, "not published")),
+            (f"Published ({comparison.published})",
+             file_statuses(comparison, comparison.published_only, "not built"))]
+
+
+def uncompared_subdirs(comparison, dirs):
+    return [d for d, count in compared_by_subdir(comparison, dirs).items() if count == 0]
+
+
+def format_by_subdir(comparison, dirs):
+    return ", ".join(f"{d} {count}" for d, count in compared_by_subdir(comparison, dirs).items())
+
+
+def render_console(result, comparison, source, chain, dirs, exts):
+    def row(label, count, note=""):
+        return f"  {label:<22}{count:>5}{note}"
+
+    lines = [f"State snapshot hash check — {chain}",
+             f"  published hashes from: {source}",
+             f"  compared file types:   {', '.join(exts) if exts else 'all'} in {', '.join(dirs)}", ""]
+    for title, statuses in file_lists(comparison):
+        lines.append(f"{title}:")
+        lines += [f"  {status:<14} {name}" for status, name in statuses]
+        lines.append("")
+    lines += [row("published:", comparison.published),
+             row("built locally:", comparison.built),
+             row("in both (compared):", comparison.compared,
+                 f"  ->  {len(comparison.matched)} identical, {len(comparison.mismatched)} DIFFERENT"),
+             f"    compared by subdir: {format_by_subdir(comparison, dirs)}",
+             row("built, not published:", len(comparison.local_only), "  (not compared)"),
+             row("published, not built:", len(comparison.published_only), "  (not compared)"), ""]
+    uncompared = uncompared_subdirs(comparison, dirs)
+    if uncompared and comparison.compared:
+        lines += [f"WARNING: no {', '.join(uncompared)} file was compared, so this check says nothing about them", ""]
+    lines.append(f"{result.outcome}: {headline(comparison)}")
+    width = max((len(m.name) for m in comparison.mismatched), default=0)
+    lines += [f"  {m.name:<{width}}  built={m.local}  published={m.published}" for m in comparison.mismatched]
+    return "\n".join(lines)
+
+
+def render_summary(result, comparison, source, chain, dirs, exts, cap=50):
     badge = {"SUCCESS": "✅", "FAILURE": "❌"}.get(result.outcome, "⚠️")
+    file_types = ", ".join(f"`{e}`" for e in exts) if exts else "all"
     lines = [f"## {badge} State snapshot hashes — {chain}", "",
-             result.reason, "",
+             f"**{headline(comparison)}**", "",
+             f"Compared file types: {file_types} in {', '.join(f'`{d}`' for d in dirs)}. "
              f"Published hashes from `{source}`.", "",
-             "| | count |", "|---|---|",
-             f"| match | {len(comparison.matched)} |",
-             f"| differ | {len(comparison.mismatched)} |",
-             f"| built locally only | {len(comparison.local_only)} |",
-             f"| published only | {len(comparison.published_only)} |", ""]
+             "| | files | |", "|---|---:|---|",
+             f"| published | {comparison.published} | |",
+             f"| built locally | {comparison.built} | |",
+             f"| **in both (compared)** | **{comparison.compared}** | "
+             f"{len(comparison.matched)} identical, {len(comparison.mismatched)} different |",
+             f"| built, not published | {len(comparison.local_only)} | not compared |",
+             f"| published, not built | {len(comparison.published_only)} | not compared |", "",
+             f"Compared by subdir: {format_by_subdir(comparison, dirs)}", ""]
+    uncompared = uncompared_subdirs(comparison, dirs)
+    if uncompared and comparison.compared:
+        lines += [f"> ⚠️ No {', '.join(f'`{d}`' for d in uncompared)} file was compared, "
+                  f"so this check says nothing about them.", ""]
     if comparison.mismatched:
         lines += ["### Differing files", "", "| file | built | published |", "|---|---|---|"]
         for m in comparison.mismatched[:cap]:
@@ -174,6 +262,10 @@ def render_summary(result, comparison, source, chain, cap=50):
         if len(comparison.mismatched) > cap:
             lines.append(f"| ... | {len(comparison.mismatched) - cap} more | |")
         lines.append("")
+    for title, statuses in file_lists(comparison):
+        lines += [f"<details><summary>{title}</summary>", "", "| status | file |", "|---|---|"]
+        lines += [f"| {status} | `{name}` |" for status, name in statuses]
+        lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 
@@ -213,25 +305,17 @@ def main():
     published = state_entries(parse_hash_toml(published_text), dirs, exts)
 
     comparison = compare(local, published)
-    result = verdict(comparison)
+    result = verdict(comparison, dirs)
     result.add_measure("local_state_files", len(local))
     result.add_measure("published_state_files", len(published))
 
-    print(f"published hashes: {source}")
-    print(f"comparing subdirs: {', '.join(dirs)}")
-    print(f"comparing extensions: {', '.join(exts) if exts else 'all'}")
-    print(f"state snapshots: {len(local)} built, {len(published)} published")
-    print(f"match: {len(comparison.matched)}, differ: {len(comparison.mismatched)}, "
-          f"built locally only: {len(comparison.local_only)}, published only: {len(comparison.published_only)}")
-    for m in comparison.mismatched:
-        print(f"DIFFERS {m.name} built={m.local} published={m.published}")
-    print(result.reason)
+    print(render_console(result, comparison, source, args.chain, dirs, exts))
 
     if args.result_file:
         result.write_to_json_file(args.result_file)
     if args.summary_file:
         with open(args.summary_file, "a", encoding="utf-8") as fh:
-            fh.write(render_summary(result, comparison, source, args.chain) + "\n")
+            fh.write(render_summary(result, comparison, source, args.chain, dirs, exts) + "\n")
 
     return result.exit_code
 

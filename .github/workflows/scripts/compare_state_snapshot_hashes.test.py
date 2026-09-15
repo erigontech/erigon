@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -195,6 +196,103 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main writes the result file", json.load(open(res))["outcome"] == "FAILURE")
     check("summary names the offending file", "domain/a.kv" in open(summary).read())
     check("console output names the offending file", "domain/a.kv" in out, out)
+
+# --- report layout -----------------------------------------------------------
+
+REPORT_LOCAL = """\
+'domain/v3.0-accounts.0-64.kv' = 'a'
+'idx/v3.0-tracesfrom.0-256.ef' = '1'
+'idx/v3.0-logaddrs.0-256.ef' = 'built-hash'
+"""
+REPORT_PUBLISHED = """\
+'domain/v3.0-accounts.0-1024.kv' = 'b'
+'history/v3.0-accounts.0-1024.v' = 'c'
+'idx/v3.0-tracesfrom.0-256.ef' = '1'
+'idx/v3.0-logaddrs.0-256.ef' = 'published-hash'
+"""
+
+
+def report_line(out, pattern):
+    return re.search(pattern, out, re.MULTILINE) is not None
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    local = write(tmp, "hashes.txt", REPORT_LOCAL)
+    published = write(tmp, "preverified.toml", REPORT_PUBLISHED)
+    res = os.path.join(tmp, "result.json")
+    summary = os.path.join(tmp, "summary.md")
+    code, out = run_main(["--local-hashes", local, "--published-toml", published, "--chain", "gnosis",
+                          "--dirs", "domain,history,idx", "--exts", "kv,v,ef",
+                          "--result-file", res, "--summary-file", summary])
+
+    check("console shows the published total", report_line(out, r"^\s*published:\s+4$"), out)
+    check("console shows the built total", report_line(out, r"^\s*built locally:\s+3$"), out)
+    check("console shows the compared set and its split",
+          report_line(out, r"^\s*in both \(compared\):\s+2\s+->\s+1 identical, 1 DIFFERENT$"), out)
+    check("console marks built-only files as not compared",
+          report_line(out, r"^\s*built, not published:\s+1\s+\(not compared\)$"), out)
+    check("console marks published-only files as not compared",
+          report_line(out, r"^\s*published, not built:\s+2\s+\(not compared\)$"), out)
+    check("console breaks the compared files down by subdir, zeros included",
+          report_line(out, r"^\s*compared by subdir:\s+domain 0, history 0, idx 2$"), out)
+    check("console warns about subdirs that were not compared at all",
+          report_line(out, r"^WARNING: no domain, history file was compared"), out)
+    check("console verdict states how many of the compared files differ",
+          report_line(out, r"^FAILURE: 1 of the 2 compared files differ from the published ones$"), out)
+
+    measures = json.load(open(res))["measures"]
+    check("result counts compared files per subdir, zeros included",
+          (measures.get("compared_domain"), measures.get("compared_history"), measures.get("compared_idx"))
+          == (0, 0, 2), measures)
+
+    md = open(summary).read()
+    check("summary shows the compared set and its split",
+          "| **in both (compared)** | **2** | 1 identical, 1 different |" in md, md)
+    check("summary marks built-only files as not compared", "| built, not published | 1 | not compared |" in md, md)
+    check("summary breaks the compared files down by subdir", "domain 0, history 0, idx 2" in md, md)
+    check("summary warns about subdirs that were not compared at all",
+          "No `domain`, `history` file was compared" in md, md)
+
+    check("console lists every built file with its status",
+          all(report_line(out, p) for p in (
+              r"^Built locally \(3\):$",
+              r"^\s+not published\s+domain/v3\.0-accounts\.0-64\.kv$",
+              r"^\s+DIFFERENT\s+idx/v3\.0-logaddrs\.0-256\.ef$",
+              r"^\s+identical\s+idx/v3\.0-tracesfrom\.0-256\.ef$")), out)
+    check("console lists every published file with its status",
+          all(report_line(out, p) for p in (
+              r"^Published \(4\):$",
+              r"^\s+not built\s+domain/v3\.0-accounts\.0-1024\.kv$",
+              r"^\s+not built\s+history/v3\.0-accounts\.0-1024\.v$",
+              r"^\s+DIFFERENT\s+idx/v3\.0-logaddrs\.0-256\.ef$",
+              r"^\s+identical\s+idx/v3\.0-tracesfrom\.0-256\.ef$")), out)
+    check("console prints both lists before the counts",
+          out.find("Built locally (3):") < out.find("Published (4):") < out.find("in both (compared):"), out)
+
+    check("summary lists built files in a collapsible block",
+          "<summary>Built locally (3)</summary>" in md and "| not published | `domain/v3.0-accounts.0-64.kv` |" in md, md)
+    check("summary lists published files in a collapsible block",
+          "<summary>Published (4)</summary>" in md and "| not built | `history/v3.0-accounts.0-1024.v` |" in md, md)
+    check("summary keeps the verdict and counts above the lists",
+          md.find("in both (compared)") < md.find("<summary>Built locally"), md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    local = write(tmp, "hashes.txt", "'idx/v3.0-logaddrs.1024-2048.ef' = '1'\n'idx/v3.0-logaddrs.256-512.ef' = '2'\n")
+    published = write(tmp, "preverified.toml", "'idx/v3.0-logaddrs.256-512.ef' = '2'\n")
+    code, out = run_main(["--local-hashes", local, "--published-toml", published, "--chain", "gnosis"])
+    check("lists order step ranges numerically",
+          out.find("logaddrs.256-512.ef") < out.find("logaddrs.1024-2048.ef"), out)
+
+with tempfile.TemporaryDirectory() as tmp:
+    local = write(tmp, "hashes.txt", "'domain/a.kv' = '1'\n'idx/b.ef' = '2'\n")
+    published = write(tmp, "preverified.toml", "'domain/a.kv' = '1'\n'idx/b.ef' = '2'\n")
+    summary = os.path.join(tmp, "summary.md")
+    code, out = run_main(["--local-hashes", local, "--published-toml", published, "--chain", "gnosis",
+                          "--dirs", "domain,idx", "--summary-file", summary])
+    check("console success verdict names the compared count",
+          report_line(out, r"^SUCCESS: all 2 compared files match the published ones$"), out)
+    check("no warning when every subdir was compared", "WARNING" not in out, out)
+    check("summary has no warning when every subdir was compared", "No `" not in open(summary).read())
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
