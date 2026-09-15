@@ -166,6 +166,13 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
+// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
+// was released caches a head that predates this block.
+func (f *ForkChoiceStore) invalidateCachedHead() {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
 func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -245,8 +252,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
@@ -346,8 +352,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
-			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, executionBlockHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			f.invalidateCachedHead()
 			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
 				return validationErr
 			}
@@ -397,6 +404,15 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
+			}
+			// f.mu was released for the EL call, so every admission condition checked on
+			// entry can have gone stale: another caller may have inserted an equivocating
+			// header, and finality may have moved past this block.
+			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
 			}
 		}
 	}
