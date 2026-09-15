@@ -204,3 +204,24 @@ func TestHexToCompactInto(t *testing.T) {
 		require.Equal(t, want, HexToCompactInto(nil, hex))
 	})
 }
+
+func TestDecodeNibblesMatchesBytewise(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for n := range 131 {
+		in := make([]byte, n)
+		rng.Read(in)
+		if n > 0 && in[n-1] == Terminator {
+			in[n-1]++
+		}
+		want := make([]byte, (n+1)/2)
+		for i := 0; i+1 < n; i += 2 {
+			want[i/2] = in[i]<<4 | in[i+1]
+		}
+		if n&1 == 1 {
+			want[n/2] = in[n-1] << 4
+		}
+		got := make([]byte, (n+1)/2)
+		decodeNibbles(in, got)
+		require.Equal(t, want, got, "len %d", n)
+	}
+}
