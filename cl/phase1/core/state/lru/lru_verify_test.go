@@ -193,11 +193,9 @@ func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
 	const closers = 4
 	var wg sync.WaitGroup
 	for range closers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			require.NotPanics(t, c.Close, "closing a cache whose sweep is running must be safe")
-		}()
+		})
 	}
 	wg.Wait()
 
