@@ -60,7 +60,10 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xe2})
 	vm := NewVersionMap(nil)
+	// Model a real create+SELFDESTRUCT: the destroying tx marks the account
+	// destructed and zeroes its balance at the same version.
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)

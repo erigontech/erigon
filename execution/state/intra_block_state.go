@@ -544,11 +544,16 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
 		// skipping createObject and its AddressPath write that OCC needs.
-		// The empty verdict depends on the balance being zero; record that read on
-		// the destruct so a later funding tx invalidates this reader.
+		// The empty verdict depends on the balance being zero; record that balance
+		// read anchored on the destruct so a later funding write invalidates this
+		// reader. The destruct records a balance-clear write at this version (real
+		// SELFDESTRUCT and EIP-161 removal alike), so the read matches the cell and
+		// only a funding write bumps it. It is conflict-detection only — Empty on an
+		// absent account is not a real EVM balance access, so it stays out of the
+		// block access list.
 		if destructed, sdRes, ok := sdb.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
 			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
-				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
+				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}, internal: true},
 			})
 		}
 		return true, nil
@@ -2522,6 +2527,14 @@ func (sdb *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
 			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: sdb.Version()},
 			Val:         true,
+		})
+		// Record the balance clear as a versioned write, as a real SELFDESTRUCT
+		// does, so a reader that observed the account empty depends on it and a
+		// later funding write invalidates that read. A zero write over a zero
+		// balance is a no-op for the BAL and keeps the domain leaf pure-deleted.
+		writes.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: sdb.Version()},
+			Val:         uint256.Int{},
 		})
 	}
 }
