@@ -166,6 +166,11 @@ func (e *ExecModule) hasRunningProductionBuilder() bool {
 	return false
 }
 
+func hasCompletedPayload(entry *builderEntry) bool {
+	return entry != nil && entry.builder != nil && entry.builder.Completed() &&
+		!entry.builder.Failed() && !entry.builder.Discarded() && entry.builder.Block() != nil
+}
+
 func (e *ExecModule) acquireProduction(ctx context.Context) (bool, error) {
 	e.transientAdmissionMu.Lock()
 	if e.semaphore.TryAcquire(1) {
@@ -350,7 +355,9 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 		e.releaseProduction()
 	}()
-	e.dropTransientBuilders()
+	if params.TransientPayload {
+		e.dropTransientBuilders()
+	}
 	if !params.TransientPayload {
 		if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 			return AssembleBlockResult{}, err
@@ -382,6 +389,9 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
+				if !hasCompletedPayload(previous) {
+					e.dropTransientBuilders()
+				}
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
@@ -391,6 +401,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
 	// payload that is still growing.
 	if !params.TransientPayload {
+		e.dropTransientBuilders()
 		e.evictOldBuilders()
 	}
 
@@ -471,7 +482,9 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		// A competing owner removes transient builders before beginning production work.
 		return result, err
 	}
-	e.dropTransientBuilders()
+	if !hasCompletedPayload(entry) {
+		e.dropTransientBuilders()
+	}
 	defer e.releaseProduction()
 	return e.assembledBlockResult(ctx, payloadID, entry)
 }
