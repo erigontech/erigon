@@ -2442,11 +2442,33 @@ var witnessMemo = dbg.EnvBool("WITNESS_MEMO", false)
 
 // witnessKeepsSiblingHashes reports whether a witness fold reuses the stored hashes of cells off the proven paths:
 // a proof needs their hashes only, not their leaf nodes, so their state is not loaded and hashed again.
-func (hph *HexPatriciaHashed) witnessKeepsSiblingHashes() bool { return witnessMemo && hph.witness.active() }
+func (hph *HexPatriciaHashed) witnessKeepsSiblingHashes() bool {
+	return witnessMemo && hph.witness.active()
+}
 
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+	set, provedKeys, rootHash, err := hph.witnessNodeSet(ctx, updates, produceExclusionProofs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if nodes, err = set.nodes(rootHash); err != nil {
+		return nil, nil, nil, err
+	}
+	return nodes, provedKeys, rootHash, nil
+}
+
+// WitnessNodesByHash folds like Witnesses, but returns the captured nodes keyed by their hash.
+func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return set.byHash, rootHash, nil
+}
+
+func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updates, produceExclusionProofs bool) (set *witnessNodeSet, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
-	set := newWitnessNodeSet()
+	set = newWitnessNodeSet()
 	hph.witness.tracer = set
 	defer hph.witness.reset()
 
@@ -2531,11 +2553,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	nodes, err = set.nodes(rootHash)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return nodes, provedKeys, rootHash, nil
+	return set, provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {

@@ -339,6 +339,15 @@ func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, p
 	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
 }
 
+// WitnessNodesByHash returns the witness nodes of the touched keys keyed by their hash, and the root hash.
+func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	return hexPatriciaHashed.WitnessNodesByHash(ctx, sdc.updates)
+}
+
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
