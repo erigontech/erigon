@@ -424,6 +424,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 		misses++
 	}
+	if err := ctx.Err(); err != nil {
+		return common.Big0, nil, nil, nil, nil, nil, err
+	}
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
