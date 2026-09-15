@@ -441,6 +441,23 @@ func TestFeeHistory_CachedRangeDoesNotFork(t *testing.T) {
 	require.Equal(t, forksAfterFirst, backend.forkCalls.Load())
 }
 
+func TestFeeHistory_CachedRangeHonorsCancelledContext(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, _, _, _, _, err = oracle.FeeHistory(ctx, 4, rpc.LatestBlockNumber, nil)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 // TestFeeHistory_WindowStraddlingFrozenBoundary pins the mixed regime: one
 // request whose window spans the frozen boundary keys the frozen part by
 // number and the hot part by hash, with the hash scan covering only the hot
