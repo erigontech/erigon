@@ -230,36 +230,47 @@ func TestFeeHistoryValues(t *testing.T) {
 		return types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, gwei(gasPriceGwei), nil)
 	}
 
-	backend := &feeChain{
-		blocks: []*types.Block{
-			types.NewBlock(header(0, 30_000_000, 15_000_000, 8, 0), nil, nil, nil, nil, nil),
-			// Unsorted effective tips 3, 1 (legacy 9-8) and 2 (fee cap 10-8), weighted by gas used.
-			types.NewBlock(header(1, 252_000, 126_000, 8, 0), []types.Transaction{dynamicFee(3, 100), legacy(9), dynamicFee(5, 10)}, nil, nil, nil, nil),
-			types.NewBlock(header(2, 30_000_000, 0, 8, 0), nil, nil, nil, nil, nil),
-			types.NewBlock(header(3, 30_000_000, 30_000_000, 7, params.GasPerBlob), []types.Transaction{legacy(11)}, nil, nil, nil, nil),
-		},
-		receipts: map[uint64]types.Receipts{
-			1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
-			3: {{GasUsed: 30_000_000}},
-		},
+	newBackend := func() *feeChain {
+		return &feeChain{
+			blocks: []*types.Block{
+				types.NewBlock(header(0, 30_000_000, 15_000_000, 8, 0), nil, nil, nil, nil, nil),
+				// Unsorted effective tips 3, 1 (legacy 9-8) and 2 (fee cap 10-8), weighted by gas used.
+				types.NewBlock(header(1, 252_000, 126_000, 8, 0), []types.Transaction{dynamicFee(3, 100), legacy(9), dynamicFee(5, 10)}, nil, nil, nil, nil),
+				types.NewBlock(header(2, 30_000_000, 0, 8, 0), nil, nil, nil, nil, nil),
+				types.NewBlock(header(3, 30_000_000, 30_000_000, 7, params.GasPerBlob), []types.Transaction{legacy(11)}, nil, nil, nil, nil),
+			},
+			receipts: map[uint64]types.Receipts{
+				1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
+				3: {{GasUsed: 30_000_000}},
+			},
+		}
 	}
-	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 	maxBlobGas := chain.AllProtocolChanges.GetMaxBlobGasPerBlock(0)
 
+	all := []float64{0, 25, 50, 75, 100}
+	rewards := [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}
 	cases := []struct {
 		name        string
+		warm        [][]float64 // requests served first by the same oracle
 		percentiles []float64
 		wantReward  [][]uint64 // gwei
 		wantFetches int32
 	}{
-		{"no percentiles", nil, nil, 3},
-		{"header-only entries do not serve rewards", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 3},
-		{"repeated request served from cache", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 0},
-		{"other percentiles are served from the same entry", []float64{50}, [][]uint64{{2}, {0}, {4}}, 0},
-		{"no percentiles are served from an entry with rewards", nil, nil, 0},
+		{"gas-weighted percentiles", nil, all, rewards, 3},
+		{"no percentiles", nil, nil, nil, 3},
+		{"header-only entries do not serve rewards", [][]float64{nil}, all, rewards, 3},
+		{"repeated request served from cache", [][]float64{all}, all, rewards, 0},
+		{"other percentiles are served from the same entry", [][]float64{all}, []float64{50}, [][]uint64{{2}, {0}, {4}}, 0},
+		{"no percentiles are served from an entry with rewards", [][]float64{all}, nil, nil, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			backend := newBackend()
+			oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
+			for _, w := range c.warm {
+				_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 3, rpc.BlockNumber(3), w)
+				require.NoError(t, err)
+			}
 			before := backend.fetches.Load()
 			oldest, reward, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(t.Context(), 3, rpc.BlockNumber(3), c.percentiles)
 			require.NoError(t, err)
