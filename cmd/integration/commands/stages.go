@@ -252,7 +252,7 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		if chaindata == filepath.Join(datadirCli, "chaindata") {
+		if isDefaultChaindata(chaindata, datadirCli) {
 			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
 				logger.Error("Apply migrations", "error", err)
 				return

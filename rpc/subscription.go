@@ -173,9 +173,20 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
 func (n *RemoteNotifier) Notify(id ID, data any) error {
-	enc, err := json.Marshal(data)
+	var (
+		enc []byte
+		err error
+	)
+	if fm, ok := data.(fastJSONResult); ok {
+		enc, err = fm.MarshalFastJSON()
+	} else {
+		enc, err = json.Marshal(data)
+	}
 	if err != nil {
 		return err
+	}
+	if len(enc) == 0 {
+		enc = null
 	}
 
 	n.mu.Lock()
