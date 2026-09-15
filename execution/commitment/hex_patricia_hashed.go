@@ -2877,13 +2877,9 @@ func (s *state) Decode(buf []byte) error {
 	}
 	buf = buf[len(s.Depths):]
 	for i := range s.TouchMap {
-		s.TouchMap[i] = binary.BigEndian.Uint16(buf[2*i:])
+		s.TouchMap[i], s.AfterMap[i] = binary.BigEndian.Uint16(buf[2*i:]), binary.BigEndian.Uint16(buf[2*len(s.TouchMap)+2*i:])
 	}
-	buf = buf[2*len(s.TouchMap):]
-	for i := range s.AfterMap {
-		s.AfterMap[i] = binary.BigEndian.Uint16(buf[2*i:])
-	}
-	buf = buf[2*len(s.AfterMap):]
+	buf = buf[4*len(s.TouchMap):]
 	branch1, branch2 := binary.BigEndian.Uint64(buf), binary.BigEndian.Uint64(buf[8:])
 
 	for i := range 64 {
