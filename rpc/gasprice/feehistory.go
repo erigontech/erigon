@@ -76,9 +76,9 @@ type processedFees struct {
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
 	gasUsed                      uint64
-	// tips serves the rewards of any percentile set, so one entry per block covers every request.
-	tips    []txGasAndReward
-	hasTips bool
+	// tips serves the rewards of any percentile set, so one entry per block covers every request;
+	// nil when the block's transactions were not loaded.
+	tips []txGasAndReward
 }
 
 // FeeHistoryCache is an opaque LRU cache for fee history block data.
@@ -170,11 +170,6 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
 		return
 	}
-	bf.results.hasTips = true
-	if len(bf.block.Transactions()) == 0 {
-		return
-	}
-
 	sorter := make(sortGasAndReward, len(bf.block.Transactions()))
 	baseFee := uint256.NewInt(0)
 	if bf.block.BaseFee() != nil {
@@ -192,16 +187,18 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 	bf.results.tips = sorter
 }
 
-// rewards fills out with the tip at each percentile of the block's gas used.
-func (p *processedFees) rewards(percentiles []float64, out []hexutil.U256) {
+// rewards returns the tip at each percentile of the block's gas used.
+func (p *processedFees) rewards(percentiles []float64) []hexutil.U256 {
+	out := make([]hexutil.U256, len(percentiles))
 	if len(p.tips) == 0 {
-		return
+		return out
 	}
 	for i, pct := range percentiles {
 		threshold := uint64(float64(p.gasUsed) * pct / 100)
 		idx := sort.Search(len(p.tips)-1, func(j int) bool { return p.tips[j].gasUsed >= threshold })
 		out[i] = hexutil.U256(p.tips[idx].reward)
 	}
+	return out
 }
 
 // resolveBlockRange resolves the specified block range to absolute block numbers while also
@@ -410,7 +407,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			continue
 		}
 		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
-			if cached, ok := oracle.historyCache.get(key); ok && (cached.hasTips || len(rewardPercentiles) == 0) {
+			if cached, ok := oracle.historyCache.get(key); ok && (cached.tips != nil || len(rewardPercentiles) == 0) {
 				blockResults[blockNumber-oldestBlock] = blockResult{processed: cached, hasResult: true}
 				continue
 			}
@@ -515,7 +512,6 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// Post-processing is serial: all goroutines have finished, no races.
 	firstMissing := len(blockResults)
 	blobGasUsedRatio := make([]float64, len(blockResults))
-	rewardRows := make([]hexutil.U256, len(blockResults)*len(rewardPercentiles))
 	for i := range blockResults {
 		r := &blockResults[i]
 		if r.missing || !r.hasResult {
@@ -525,10 +521,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			continue
 		}
 		p := &r.processed
-		if n := len(rewardPercentiles); n != 0 {
-			if p.hasTips {
-				reward[i] = rewardRows[i*n : (i+1)*n : (i+1)*n]
-				p.rewards(rewardPercentiles, reward[i])
+		if len(rewardPercentiles) != 0 {
+			if p.tips != nil {
+				reward[i] = p.rewards(rewardPercentiles)
 			} else {
 				reward[i] = []hexutil.U256{} // block or receipts missing: an empty row, not null
 			}
