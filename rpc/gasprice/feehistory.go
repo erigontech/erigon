@@ -396,17 +396,48 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 	}
 
+	cacheKeyOf := func(blockNumber uint64) (key cacheKey, byHash, cacheable bool) {
+		isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
+		cacheable = !isPending && oracle.historyCache != nil
+		key = cacheKey{number: blockNumber, percentiles: percentileKey}
+		if cacheable && blockNumber > frozenBound {
+			hotIdx := int(blockNumber - hotFrom)
+			if hotIdx < len(hotHashes) && hotHashes[hotIdx] != (common.Hash{}) {
+				key.hash = hotHashes[hotIdx]
+				byHash = true
+			} else {
+				cacheable = false
+			}
+		}
+		return key, byHash, cacheable
+	}
+
+	// Cache hits are served here: every fetcher forks a read transaction, and a fork
+	// takes the database's reader-slot lock.
+	misses := 0
+	for blockNumber := oldestBlock; blockNumber <= lastBlock; blockNumber++ {
+		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
+			if cached, ok := oracle.historyCache.get(key); ok {
+				blockResults[blockNumber-oldestBlock] = blockResult{processed: cached, hasResult: true}
+				continue
+			}
+		}
+		misses++
+	}
+
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
 	// When Fork is not supported (returns nil backend), a single goroutine falls back
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
-	if err := oracle.backend.PrepareFork(ctx); err != nil {
-		oracle.log.Debug("fee history: parent identity unresolved, serving sequentially", "err", err)
+	if misses > 0 {
+		if err := oracle.backend.PrepareFork(ctx); err != nil {
+			oracle.log.Debug("fee history: parent identity unresolved, serving sequentially", "err", err)
+		}
 	}
 	g, fetchCtx := errgroup.WithContext(ctx)
 	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
-	for range maxBlockFetchers {
+	for range min(maxBlockFetchers, misses) {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
 			if forkErr != nil {
@@ -433,28 +464,14 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					return nil
 				}
 				idx := int(blockNumber - oldestBlock)
+				if blockResults[idx].hasResult {
+					continue
+				}
 
 				// The pending block comes from the mining cache and is rebuilt
 				// continuously, so its results are never memoized.
 				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
-				cacheable := !isPending && oracle.historyCache != nil
-				byHash := false
-				key := cacheKey{number: blockNumber, percentiles: percentileKey}
-				if cacheable && blockNumber > frozenBound {
-					hotIdx := int(blockNumber - hotFrom)
-					if hotIdx < len(hotHashes) && hotHashes[hotIdx] != (common.Hash{}) {
-						key.hash = hotHashes[hotIdx]
-						byHash = true
-					} else {
-						cacheable = false
-					}
-				}
-				if cacheable {
-					if cached, ok := oracle.historyCache.get(key); ok {
-						blockResults[idx] = blockResult{processed: cached, hasResult: true}
-						continue
-					}
-				}
+				key, byHash, cacheable := cacheKeyOf(blockNumber)
 
 				// Fetch by the resolved pair to skip a second canonical resolution.
 				fees := &blockFees{blockNumber: blockNumber}
