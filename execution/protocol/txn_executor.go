@@ -814,6 +814,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		SenderInitBalance:     senderInitBalance,
 		CoinbaseInitBalance:   coinbaseInitBalance,
 		FeeTipped:             tipAmount,
+		FeeBlob:               fees.blobGasVal,
 		FeeBurnt:              burnAmount,
 	}
 
