@@ -344,9 +344,9 @@ func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
 	return cache.NewDefaultStateCache()
 }
 
-// Close releases the domain state cache's reservation in the shared memory
-// envelope.
+// Close releases retained candidates and the domain state cache.
 func (e *ExecModule) Close() {
+	e.forkValidator.ClearWithUnwind()
 	if e.stateCache != nil {
 		e.stateCache.Close()
 	}
@@ -498,7 +498,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	defer e.semaphore.Release(1)
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -573,9 +572,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	// Do not defer doms.Close(): on the success path ownership transfers to
-	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
-	// so we Close explicitly only on the early-return error paths below.
+	// ValidatePayload takes ownership of doms; close it on earlier errors.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 		doms.Close()
@@ -650,6 +647,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
 	// pages against concurrent readers.
 	if isInvalidChain {
+		e.forkValidator.ClearWithUnwind()
 		purgeTx, err := e.db.BeginTemporalRwNosync(ctx)
 		if err != nil {
 			return ValidationResult{}, err

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -247,10 +248,17 @@ func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 		"a forkchoice that unwinds commits more than this block's writes, so commit_ms would not be this block's")
 }
 
-func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
-	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
+func TestSlowBlockMetricsReuseRetainedValidation(t *testing.T) {
+	m, privKey, _ := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 	send := func(value uint64) func(int, *blockgen.BlockGen) {
-		return sendTo(t, m, privKey, senderAddr, value)
+		return func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(
+				types.NewTransaction(uint64(i), common.Address{0xab}, uint256.NewInt(value), 1_000_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
 	}
 
 	siblingA, err := m.GenerateChainFrom(m.Genesis, 1, send(1_000))
@@ -261,29 +269,43 @@ func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
 	status, err := m.InsertBlocks(t.Context(), siblingA.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	status, err = m.InsertBlocks(t.Context(), siblingB.Blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tipA := siblingA.Blocks[len(siblingA.Blocks)-1].Header()
 	tipB := siblingB.Blocks[len(siblingB.Blocks)-1].Header()
+	require.NotEqual(t, tipA.Root, tipB.Root)
 
-	// Both validate at the same height, so both leave a record; B validates
-	// last, so the extending fork head is B when the forkchoice picks A.
 	resultA, err := m.ValidateChain(t.Context(), tipA)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, resultA.ValidationStatus)
+	status, err = m.InsertBlocks(t.Context(), siblingB.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	resultB, err := m.ValidateChain(t.Context(), tipB)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, resultB.ValidationStatus)
+
+	_, _, retainedB := m.ForkValidator.ExtendingFork()
+	var sequence uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		sequence, err = retainedB.BlockOverlay().NewReadView(tx).ReadSequence(kv.EthTx)
+		return err
+	}))
 
 	collector := installCollector(t)
 
 	_, err = m.UpdateForkChoice(t.Context(), tipA)
 	require.NoError(t, err)
 
-	assert.Empty(t, collector.records(t),
-		"A's state was discarded when B became the extending fork, so RunLoop re-executes A; the cached record describes the run that was thrown away")
+	records := collector.records(t)
+	require.Len(t, records, 1)
+	require.Equal(t, tipA.Hash().Hex(), records[0]["block"].(map[string]any)["hash"])
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		actual, err := tx.ReadSequence(kv.EthTx)
+		require.NoError(t, err)
+		require.Equal(t, sequence, actual)
+		return nil
+	}))
 }
 
 func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {
