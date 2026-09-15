@@ -397,8 +397,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 
 	cacheKeyOf := func(blockNumber uint64) (key cacheKey, byHash, cacheable bool) {
-		isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
-		cacheable = !isPending && oracle.historyCache != nil
+		cacheable = oracle.historyCache != nil
 		key = cacheKey{number: blockNumber, percentiles: percentileKey}
 		if cacheable && blockNumber > frozenBound {
 			hotIdx := int(blockNumber - hotFrom)
@@ -416,6 +415,17 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// takes the database's reader-slot lock.
 	misses := 0
 	for blockNumber := oldestBlock; blockNumber <= lastBlock; blockNumber++ {
+		// The pending block comes from the mining cache and is rebuilt
+		// continuously, so its results are never memoized.
+		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
+			fees := &blockFees{blockNumber: blockNumber, block: pendingBlock, receipts: pendingReceipts, header: pendingBlock.Header()}
+			oracle.processBlock(fees, rewardPercentiles, chainconfig)
+			if fees.err != nil {
+				return common.Big0, nil, nil, nil, nil, nil, fees.err
+			}
+			blockResults[blockNumber-oldestBlock] = blockResult{processed: fees.results, hasResult: true}
+			continue
+		}
 		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
 			if cached, ok := oracle.historyCache.get(key); ok {
 				blockResults[blockNumber-oldestBlock] = blockResult{processed: cached, hasResult: true}
@@ -471,16 +481,11 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					continue
 				}
 
-				// The pending block comes from the mining cache and is rebuilt
-				// continuously, so its results are never memoized.
-				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
 				key, byHash, cacheable := cacheKeyOf(blockNumber)
 
 				// Fetch by the resolved pair to skip a second canonical resolution.
 				fees := &blockFees{blockNumber: blockNumber}
 				switch {
-				case isPending:
-					fees.block, fees.receipts = pendingBlock, pendingReceipts
 				case len(rewardPercentiles) != 0:
 					if byHash {
 						fees.block, fees.err = localBackend.BlockByHashNumber(fetchCtx, key.hash, blockNumber)
