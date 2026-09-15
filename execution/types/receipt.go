@@ -27,6 +27,7 @@ import (
 	"io"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -79,6 +80,9 @@ type Receipt struct {
 	TransactionIndex uint         `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
+
+	// derivedBloom caches LogsBloom; Bloom is never written because cached receipts are shared.
+	derivedBloom atomic.Pointer[Bloom]
 }
 
 type receiptMarshaling struct {
@@ -142,7 +146,7 @@ func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
-func (r Receipt) EncodeRLP(w io.Writer) error {
+func (r *Receipt) EncodeRLP(w io.Writer) error {
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
@@ -163,7 +167,7 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 // ETH69 uses a uniform list encoding for all receipt types:
 //
 //	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
-func (r Receipt) EncodeRLP69(w io.Writer) error {
+func (r *Receipt) EncodeRLP69(w io.Writer) error {
 	if r.Type != LegacyTxType && !hasStandardReceiptPayload(r.Type) {
 		return ErrTxTypeNotSupported
 	}
@@ -194,6 +198,7 @@ func (r *Receipt) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary decodes the consensus encoding of receipts.
 // It supports legacy RLP receipts and EIP-2718 typed receipts.
 func (r *Receipt) UnmarshalBinary(b []byte) error {
+	r.derivedBloom.Store(nil)
 	if len(b) > 0 && b[0] > 0x7f {
 		// It's a legacy receipt decode the RLP
 		var data receiptRLP
@@ -260,7 +265,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if log.Topics, err = decodeHashList(s); err != nil {
+		if log.Topics, err = decodeHashListTo(s, nil); err != nil {
 			return fmt.Errorf("read Topics: %w", err)
 		}
 		if log.Data, err = s.Bytes(); err != nil {
@@ -286,6 +291,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 // DecodeRLP implements rlp.Decoder, and loads the consensus fields of a receipt
 // from an RLP stream.
 func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
+	r.derivedBloom.Store(nil)
 	kind, size, err := s.Kind()
 	if err != nil {
 		return err
@@ -347,6 +353,19 @@ func (r *Receipt) statusEncoding() []byte {
 		return receiptStatusSuccessfulRLP
 	}
 	return r.PostState
+}
+
+// LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
+func (r *Receipt) LogsBloom() Bloom {
+	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
+		return r.Bloom
+	}
+	if b := r.derivedBloom.Load(); b != nil {
+		return *b
+	}
+	b := CreateBloom(Receipts{r})
+	r.derivedBloom.Store(&b)
+	return b
 }
 
 // Copy creates a deep copy of the Receipt.
@@ -443,8 +462,8 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	if l == 0 {
 		return Logs{}, s.ListEnd()
 	}
-	const typicalLogSize = 128                    // estimate only, append grows past it
-	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeHashList
+	const typicalLogSize = 128 // estimate only, append grows past it
+	preAlloc := int(min(maxDecodePreAlloc, l/typicalLogSize+1))
 	logs := make(Logs, 0, preAlloc)
 	for s.MoreDataInList() {
 		log := &Log{}
@@ -459,24 +478,24 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
 // fields of a receipt from an RLP stream
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
-	var dec ReceiptForStorage
+	*r = ReceiptForStorage{}
 	_, err := s.List()
 	if err != nil {
 		return err
 	}
-	if dec.Type, err = s.Uint8(); err != nil {
+	if r.Type, err = s.Uint8(); err != nil {
 		return fmt.Errorf("read Type: %w", err)
 	}
-	if !storableReceiptType(dec.Type) {
-		return fmt.Errorf("invalid receipt type %d", dec.Type)
+	if !storableReceiptType(r.Type) {
+		return fmt.Errorf("invalid receipt type %d", r.Type)
 	}
 	kind, size, err := s.Kind()
 	if err != nil {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
 	if kind == rlp.String && size == uint64(len(common.Hash{})) {
-		dec.PostState = make([]byte, size)
-		if err := s.ReadBytes(dec.PostState); err != nil {
+		r.PostState = make([]byte, size)
+		if err := s.ReadBytes(r.PostState); err != nil {
 			return fmt.Errorf("read PostStateOrStatus: %w", err)
 		}
 	} else {
@@ -487,15 +506,15 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		if status != ReceiptStatusSuccessful && status != ReceiptStatusFailed {
 			return fmt.Errorf("invalid receipt status %d", status)
 		}
-		dec.Status = status
+		r.Status = status
 	}
-	if dec.CumulativeGasUsed, err = s.Uint64(); err != nil {
+	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
-	if dec.FirstLogIndexWithinBlock, err = s.Uint32(); err != nil {
+	if r.FirstLogIndexWithinBlock, err = s.Uint32(); err != nil {
 		return fmt.Errorf("read FirstLogIndex: %w", err)
 	}
-	if dec.Logs, err = decodeLogsForStorage(s); err != nil {
+	if r.Logs, err = decodeLogsForStorage(s); err != nil {
 		return fmt.Errorf("read Logs: %w", err)
 	}
 	txnIdx, err := s.Uint64()
@@ -505,17 +524,16 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if uint64(uint(txnIdx)) != txnIdx {
 		return fmt.Errorf("read TransactionIndex: %d overflows uint", txnIdx)
 	}
-	dec.TransactionIndex = uint(txnIdx)
-	if dec.ContractAddress, err = s.Addr(); err != nil {
+	r.TransactionIndex = uint(txnIdx)
+	if r.ContractAddress, err = s.Addr(); err != nil {
 		return fmt.Errorf("read ContractAddress: %w", err)
 	}
-	if dec.GasUsed, err = s.Uint64(); err != nil {
+	if r.GasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasUsed: %w", err)
 	}
 	if err := s.ListEnd(); err != nil {
 		return err
 	}
-	*r = dec
 	return nil
 }
 
@@ -677,7 +695,7 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 func (r *Receipt) String() string {
 	j, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Sprintf("Error during JSON marshalling, receipt: %+v, error: %s", *r, err)
+		return fmt.Sprintf("Error during JSON marshalling, receipt of txn %x: %s", r.TxHash, err)
 	}
 	return string(j)
 }

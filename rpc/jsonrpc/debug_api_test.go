@@ -479,6 +479,32 @@ func TestDebugTraceCallBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 	}
 }
 
+// TestUnpricedBlobsIgnoreBlobBaseFeeOverride pins that a call naming blob fields
+// without pricing them reads BLOBBASEFEE as zero even when blockOverrides raises
+// the block's blob fee, and that eth_call and debug_traceCall answer alike.
+func TestUnpricedBlobsIgnoreBlobBaseFeeOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const zeroWord = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opBlobbasefee)
+	args := ethapi.CallArgs{
+		From:                &c.bankAddress,
+		To:                  &contractAddr,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	overrides := &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(777))}
+
+	require.Equal(t, zeroWord, callDebugTraceCall(t, c.debugAPI(), args, overrides))
+
+	result, err := newTestEthAPIWithFilters(t, c.m).Call(context.Background(), args, nil, nil, overrides)
+	require.NoError(t, err)
+	require.Equal(t, zeroWord, result.String())
+}
+
 // TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
 // with prependSeparator=true (the per-tx result field case).
 func TestTxResultFieldStreamLazy(t *testing.T) {
@@ -1266,7 +1292,7 @@ func TestGetBadBlocks(t *testing.T) {
 	hash4 := putBlock(i + 3)
 	require.NoError(rawdb.TruncateCanonicalHash(tx, i, true)) // trim since i
 
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	// Reset the global bad block cache so it reads only from this test's DB
 	tx2, err := m.DB.BeginRo(ctx)
@@ -1297,7 +1323,7 @@ func TestGetRawTransaction(t *testing.T) {
 	}
 	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	if number < 1 {
 		t.Error("TestSentry doesn't have enough blocks for this test")

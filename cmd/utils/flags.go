@@ -1172,6 +1172,11 @@ var (
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
 	}
+	SlowBlockThresholdFlag = cli.DurationFlag{
+		Name:  "debug.slow-block-threshold",
+		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables). Enabling it also times every state domain read process-wide, RPC included",
+		Value: -1,
+	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
 		Usage: "Disables the embedded MCP server",

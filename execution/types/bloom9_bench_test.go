@@ -86,9 +86,9 @@ func BenchmarkCreateBloom(b *testing.B) {
 	}
 	var rLargeWithBloom = make(Receipts, len(rLarge))
 	for i, receipt := range rLarge {
-		cpy := *receipt
-		cpy.Bloom = CreateBloom(Receipts{&cpy})
-		rLargeWithBloom[i] = &cpy
+		cpy := &Receipt{Logs: receipt.Logs}
+		cpy.Bloom = CreateBloom(Receipts{cpy})
+		rLargeWithBloom[i] = cpy
 	}
 	b.Run("small", func(b *testing.B) {
 		b.ReportAllocs()
