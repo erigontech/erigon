@@ -312,6 +312,11 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	// Record the block in the pre-exec frontier — its own space, keyed by the hash it currently carries
 	// (the header re-hashes every round as the body grows, and the seal re-keys it again).
 	if status == engine_types.ValidStatus {
+		// The caller may already have stopped waiting and requeued this round's transactions. Commit only
+		// if this round wins the claim; otherwise the deferred close drops the staged state untouched.
+		if claim := roundCommitClaim(ctx); claim != nil && !claim() {
+			return ValidationResult{}, fmt.Errorf("%w: num=%d lost the commit claim", ErrRoundAbandoned, blockNumber)
+		}
 		if stagingBase != nil {
 			if merr := stagingBase.Merge(ctx, stagingBase.TxNum(), doms, doms.TxNum(), true); merr != nil {
 				return ValidationResult{}, fmt.Errorf("commit pre-exec round num=%d: %w", blockNumber, merr)

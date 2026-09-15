@@ -252,15 +252,17 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("PreExecuteFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(body), status, err)
 	}
 	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
-	// The round ran out of the time its caller gave it. That is a DROP, not a failure, and it has to be
-	// recognised BEFORE the verdict below: execution cut off mid-round reports the block as INVALID, which
-	// is true of the half-executed body and says nothing about the transactions. Treating it as a bad block
-	// would condemn transactions whose only fault is that the clock ran out while they were being executed.
+	// A round that WON its commit claim is committed, even if its deadline passed while it merged: the
+	// caller saw the claim taken and is waiting for this result, so reporting it abandoned now would be
+	// the duplicate return the claim exists to prevent.
+	claimWon := err == nil && vr.ValidationStatus == ExecutionStatusSuccess && roundCommitClaim(ctx) != nil
+	// Otherwise, a round that ran out of the time its caller gave it is a DROP, not a failure, and it has
+	// to be recognised BEFORE the verdict below: execution cut off mid-round reports the block as INVALID,
+	// which is true of the half-executed body and says nothing about the transactions.
 	//
-	// Nothing is left behind either way: the deferred rollback takes the round's transactions back out of
-	// the body and the staged state was closed rather than merged, so the block is exactly what it was
-	// before the round began and the seal may proceed at once.
-	if ctx.Err() != nil {
+	// Nothing is left behind: the deferred rollback takes the round's transactions back out of the body
+	// and the staged state was closed rather than merged, so the block is exactly what it was before.
+	if !claimWon && (errors.Is(err, ErrRoundAbandoned) || ctx.Err() != nil) {
 		return nil, common.Hash{}, ValidationResult{}, fmt.Errorf("%w: num=%d roundTxs=%d after=%s", ErrRoundAbandoned,
 			inputs.Number, len(kept), time.Since(roundStart).Round(time.Millisecond))
 	}

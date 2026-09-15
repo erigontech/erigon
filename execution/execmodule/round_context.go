@@ -60,3 +60,21 @@ func (r *RoundContext) Err() error                  { return r.current().Err() }
 // Value answers from the BASE context: values are node-scoped, and a round's deadline context carries none
 // of its own. Reading them through the swap would make an unrelated lookup depend on round timing.
 func (r *RoundContext) Value(key any) any { return r.base.Value(key) }
+
+type roundCommitKey struct{}
+
+// WithRoundCommit attaches a one-shot claim a pre-exec round must win before it commits.
+//
+// The caller runs the round on its own goroutine and may stop waiting for it at a deadline, requeueing
+// its transactions. Without a single decision the round could still merge after that — its transactions
+// committed to the block AND back in the backlog. So commit and abandon go through one claim: the round
+// takes it immediately before merging, the caller takes it when it gives up, and whoever is first
+// decides. A round that loses closes its staged state and reports ErrRoundAbandoned.
+func WithRoundCommit(ctx context.Context, claim func() bool) context.Context {
+	return context.WithValue(ctx, roundCommitKey{}, claim)
+}
+
+func roundCommitClaim(ctx context.Context) func() bool {
+	claim, _ := ctx.Value(roundCommitKey{}).(func() bool)
+	return claim
+}
