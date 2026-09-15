@@ -517,8 +517,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 	if receiptsDedup == "singleflight" {
+		// Shared by every waiter: one caller's cancellation must not fail the others. Do keeps the
+		// first caller, and so its tx, blocked until the work returns.
 		v, err, _ := g.blockExecGroup.Do(string(blockHash[:]), func() (any, error) {
-			return g.getReceipts(ctx, cfg, tx, block, opts)
+			return g.getReceipts(context.WithoutCancel(ctx), cfg, tx, block, opts)
 		})
 		if err != nil {
 			return nil, err
