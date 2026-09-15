@@ -72,6 +72,371 @@ func newTestTimestamp() uint64 {
 	return uint64(time.Now().Add(10 * time.Second).Unix())
 }
 
+func TestSameBuildRequestTransientPayloadBypassesReuse(t *testing.T) {
+	previous := &builder.Parameters{ParentHash: common.HexToHash("0x01"), Timestamp: 2}
+	transient := previous.Copy()
+	transient.TransientPayload = true
+
+	require.False(t, sameBuildRequest(previous, transient))
+	require.False(t, sameBuildRequest(transient, previous))
+	require.False(t, sameBuildRequest(transient, transient.Copy()))
+	require.True(t, sameBuildRequest(previous, previous.Copy()))
+}
+
+func TestTransientPayloadDoesNotReplaceNormalTimestampIndex(t *testing.T) {
+	timestamp := newTestTimestamp()
+	started := make(chan uint64, 3)
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- params.PayloadId
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+
+	params := &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}}
+	normal, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	<-started
+	require.Eventually(t, module.builders[normal.PayloadID].builder.Completed, time.Second, time.Millisecond)
+	transientParams := params.Copy()
+	transientParams.TransientPayload = true
+	transient, err := module.AssembleBlock(t.Context(), transientParams)
+	require.NoError(t, err)
+	<-started
+
+	require.Equal(t, normal.PayloadID, module.buildersByTimestamp[timestamp])
+	repeat, err := module.AssembleBlock(t.Context(), params.Copy())
+	require.NoError(t, err)
+	require.Equal(t, normal.PayloadID, repeat.PayloadID)
+	require.Empty(t, started)
+
+	require.NotContains(t, module.builders, transient.PayloadID)
+}
+
+func TestTransientPayloadCollectionDoesNotHoldModuleSemaphore(t *testing.T) {
+	timestamp := newTestTimestamp()
+	transientInterrupted := make(chan struct{})
+	releaseTransient := make(chan struct{})
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if params.TransientPayload {
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			close(transientInterrupted)
+			<-releaseTransient
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+
+	transient, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: timestamp, ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	collected := make(chan error, 1)
+	go func() {
+		_, collectErr := module.GetAssembledBlock(t.Context(), transient.PayloadID)
+		collected <- collectErr
+	}()
+	<-transientInterrupted
+
+	normal, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp + 1, ParentHash: common.Hash{0x02}})
+	require.NoError(t, err)
+	require.False(t, normal.Busy)
+	close(releaseTransient)
+	require.NoError(t, <-collected)
+	require.NotContains(t, module.builders, transient.PayloadID)
+	module.builders[normal.PayloadID].builder.Discard()
+}
+
+func TestDiscardAssembledBlockRemovesTransientPayload(t *testing.T) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, module.DiscardAssembledBlock(t.Context(), result.PayloadID))
+	require.NotContains(t, module.builders, result.PayloadID)
+}
+
+func TestSemaphoreOwnerAppliesPendingTransientDiscard(t *testing.T) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	require.NoError(t, module.DiscardAssembledBlock(t.Context(), result.PayloadID))
+	module.releaseProduction()
+	require.NotContains(t, module.builders, result.PayloadID)
+}
+
+func TestPendingTransientDiscardYieldsToProductionWaiter(t *testing.T) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	module.transientAdmissionMu.Lock()
+	module.transientWaiters = 1
+	module.transientAdmissionMu.Unlock()
+
+	require.NoError(t, module.DiscardAssembledBlock(t.Context(), result.PayloadID))
+	require.Contains(t, module.builders, result.PayloadID)
+	module.transientAdmissionMu.Lock()
+	module.transientWaiters = 0
+	module.transientAdmissionMu.Unlock()
+	require.True(t, module.semaphore.TryAcquire(1))
+	module.releaseProduction()
+	require.NotContains(t, module.builders, result.PayloadID)
+}
+
+func TestCanceledLastProductionWaiterAppliesPendingTransientDiscard(t *testing.T) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	module.queueTransientDiscard(result.PayloadID)
+	module.transientAdmissionMu.Lock()
+	module.transientWaiters = 1
+	module.transientAdmissionMu.Unlock()
+
+	require.True(t, module.cancelTransientWaiter())
+	module.releaseTransient()
+	require.NotContains(t, module.builders, result.PayloadID)
+}
+
+func TestTransientPayloadBuildFollowsRequestContext(t *testing.T) {
+	stopped := make(chan error, 1)
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		stopped <- ctx.Err()
+		return nil, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	result, err := module.AssembleBlock(ctx, &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	cancel()
+	require.ErrorIs(t, <-stopped, context.Canceled)
+	require.Eventually(t, module.builders[result.PayloadID].builder.Failed, time.Second, time.Millisecond)
+}
+
+func TestDrainWaitsForDiscardedTransientBuild(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		close(started)
+		<-release
+		return nil, context.Canceled
+	})
+	_, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	<-started
+
+	drained := make(chan struct{})
+	go func() {
+		module.Drain()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		t.Fatal("drain returned before transient build stopped")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		t.Fatal("drain did not return after transient build stopped")
+	}
+}
+
+func TestDrainClosesTransientAdmission(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	module.Drain()
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Busy)
+}
+
+func TestTransientPayloadDoesNotEvictProductionPayloadAtCapacity(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	for id := uint64(1); id <= engine_helpers.MaxBuilders; id++ {
+		module.builders[id] = nil
+	}
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Busy)
+	require.Len(t, module.builders, engine_helpers.MaxBuilders)
+	for id := uint64(1); id <= engine_helpers.MaxBuilders; id++ {
+		require.Contains(t, module.builders, id)
+	}
+}
+
+func TestProductionAssemblyPreemptsTransientPayload(t *testing.T) {
+	transientStopped := make(chan error, 1)
+	normalStarted := make(chan struct{}, 1)
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if params.TransientPayload {
+			<-ctx.Done()
+			transientStopped <- ctx.Err()
+			return nil, ctx.Err()
+		}
+		normalStarted <- struct{}{}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	transient, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+
+	normal, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp() + 1, ParentHash: common.Hash{0x02},
+	})
+	require.NoError(t, err)
+	require.False(t, normal.Busy)
+	require.ErrorIs(t, <-transientStopped, context.Canceled)
+	require.NotContains(t, module.builders, transient.PayloadID)
+	<-normalStarted
+}
+
+func TestTransientAssemblyYieldsToRunningProductionPayload(t *testing.T) {
+	normalStarted := make(chan struct{})
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if !params.TransientPayload {
+			close(normalStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	normal, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01},
+	})
+	require.NoError(t, err)
+	<-normalStarted
+
+	transient, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: newTestTimestamp() + 1, ParentHash: common.Hash{0x02}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+	require.True(t, transient.Busy)
+	module.builders[normal.PayloadID].builder.Discard()
+}
+
+func TestDuplicateProductionAssemblyPreemptsTransientPayload(t *testing.T) {
+	normalCompleted := make(chan struct{}, 1)
+	transientStopped := make(chan error, 1)
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if params.TransientPayload {
+			<-ctx.Done()
+			transientStopped <- ctx.Err()
+			return nil, ctx.Err()
+		}
+		normalCompleted <- struct{}{}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
+	normal, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	<-normalCompleted
+	require.Eventually(t, module.builders[normal.PayloadID].builder.Completed, time.Second, time.Millisecond)
+	_, err = module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp: params.Timestamp + 1, ParentHash: common.Hash{0x02}, TransientPayload: true,
+	})
+	require.NoError(t, err)
+
+	repeated, err := module.AssembleBlock(t.Context(), params.Copy())
+	require.NoError(t, err)
+	require.Equal(t, normal.PayloadID, repeated.PayloadID)
+	require.ErrorIs(t, <-transientStopped, context.Canceled)
+}
+
+func TestProductionAssemblyWaitsForTransientAdmission(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	module.transientAdmissionMu.Lock()
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	module.transientAdmission = make(chan struct{})
+	module.transientAdmissionMu.Unlock()
+	result := make(chan AssembleBlockResult, 1)
+	go func() {
+		assembled, _ := module.AssembleBlock(t.Context(), &builder.Parameters{
+			Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01},
+		})
+		result <- assembled
+	}()
+	select {
+	case <-result:
+		t.Fatal("production returned while transient admission held the semaphore")
+	case <-time.After(20 * time.Millisecond):
+	}
+	module.releaseTransient()
+	require.False(t, (<-result).Busy)
+}
+
+func TestProductionDoesNotQueueBehindNextOwnerAfterTransientAdmission(t *testing.T) {
+	module := newTestModule(t, nil)
+	module.transientAdmissionMu.Lock()
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	admissionDone := make(chan struct{})
+	module.transientAdmission = admissionDone
+	module.transientAdmissionMu.Unlock()
+
+	result := make(chan bool, 1)
+	go func() {
+		acquired, _ := module.acquireProduction(t.Context())
+		result <- acquired
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	module.transientAdmissionMu.Lock()
+	module.semaphore.Release(1)
+	close(admissionDone)
+	module.transientAdmission = nil
+	require.True(t, module.semaphore.TryAcquire(1))
+	module.transientAdmissionMu.Unlock()
+	require.False(t, <-result)
+	module.releaseProduction()
+}
+
+func TestTransientAdmissionYieldsToProductionWaiter(t *testing.T) {
+	module := newTestModule(t, nil)
+	module.transientAdmissionMu.Lock()
+	module.transientWaiters = 1
+	module.transientAdmissionMu.Unlock()
+
+	require.False(t, module.acquireTransient())
+	require.True(t, module.semaphore.TryAcquire(1))
+	module.releaseProduction()
+}
+
 func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 	timestamp := newTestTimestamp()
 	type runningBuilder struct {

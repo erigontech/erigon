@@ -94,7 +94,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	frozenBlocks := e.blockReader.FrozenBlocks()
 

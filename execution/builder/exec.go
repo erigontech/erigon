@@ -49,16 +49,17 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState BuilderState
-	notifier     stagedsync.ChainEventNotifier
-	chainConfig  *chain.Config
-	engine       rules.Engine
-	blockReader  dbservices.FullBlockReader
-	vmConfig     *vm.Config
-	tmpdir       string
-	interrupt    *atomic.Bool
-	payloadId    uint64
-	txnProvider  txnprovider.TxnProvider
+	builderState     BuilderState
+	notifier         stagedsync.ChainEventNotifier
+	chainConfig      *chain.Config
+	engine           rules.Engine
+	blockReader      dbservices.FullBlockReader
+	vmConfig         *vm.Config
+	tmpdir           string
+	interrupt        *atomic.Bool
+	payloadId        uint64
+	txnProvider      txnprovider.TxnProvider
+	transientPayload bool
 }
 
 func StageBuilderExecCfg(
@@ -72,18 +73,20 @@ func StageBuilderExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader dbservices.FullBlockReader,
+	transientPayload bool,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: builderState,
-		notifier:     notifier,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		blockReader:  blockReader,
-		vmConfig:     vmConfig,
-		tmpdir:       tmpdir,
-		interrupt:    interrupt,
-		payloadId:    payloadId,
-		txnProvider:  txnProvider,
+		builderState:     builderState,
+		notifier:         notifier,
+		chainConfig:      chainConfig,
+		engine:           engine,
+		blockReader:      blockReader,
+		vmConfig:         vmConfig,
+		tmpdir:           tmpdir,
+		interrupt:        interrupt,
+		payloadId:        payloadId,
+		txnProvider:      txnProvider,
+		transientPayload: transientPayload,
 	}
 }
 
@@ -192,7 +195,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if err != nil {
 				return err
 			}
-			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+			if !cfg.transientPayload {
+				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+			}
 			if stop {
 				break
 			}
@@ -211,7 +216,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	logger.Info("Block txn filtration", append([]any{"block", current.Header.Number.Uint64()}, filtration.logArgs()...)...)
 
-	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
+	if !cfg.transientPayload {
+		metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
+	}
 
 	logger.Debug("SpawnBuilderExecStage", "block", current.Header.Number, "txn", ba.Txns.Len(), "payload", cfg.payloadId)
 	if ba.Uncles == nil {

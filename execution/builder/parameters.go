@@ -36,6 +36,7 @@ type Parameters struct {
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
 	TargetGasLimit        *uint64             // added in Gloas (EIP-7732)
+	TransientPayload      bool
 	// CustomTxnProvider overrides the block's transaction source when non-nil.
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider

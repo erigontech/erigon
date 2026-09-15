@@ -176,7 +176,8 @@ func (e *ExecModule) waitForConditionalForkChoiceReadiness(ctx context.Context, 
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return false, err
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
 		return false, err
@@ -525,7 +526,8 @@ func (e *ExecModule) updateForkChoice(
 	expectedHead *common.Hash,
 	outcomeCh chan forkchoiceOutcome,
 ) (err error) {
-	if !e.semaphore.TryAcquire(1) {
+	acquired, acquireErr := e.acquireProduction(ctx)
+	if acquireErr != nil || !acquired {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		validationError := ""
 		if expectedHead != nil {
@@ -536,14 +538,15 @@ func (e *ExecModule) updateForkChoice(
 			Status:          ExecutionStatusBusy,
 			ValidationError: validationError,
 		}, false)
-		return fmt.Errorf("semaphore timeout")
+		return errors.Join(errors.New("semaphore timeout"), acquireErr)
 	}
 	shouldReleaseSema := true
 	defer func() {
 		if shouldReleaseSema {
-			e.semaphore.Release(1)
+			e.releaseProduction()
 		}
 	}()
+	e.dropTransientBuilders()
 	conditionalValidationNeedsRecovery := false
 	if expectedHead != nil {
 		decision, preservedSafe, preservedFinalized, rejectReason, err := e.conditionalForkChoicePreflight(ctx, *expectedHead, originalBlockHash)
@@ -948,7 +951,7 @@ func (e *ExecModule) updateForkChoice(
 			shouldReleaseSema = false
 			cleanupBeforeSemaRelease()
 			go func() {
-				defer e.semaphore.Release(1)
+				defer e.releaseProduction()
 				if err := work(); err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}

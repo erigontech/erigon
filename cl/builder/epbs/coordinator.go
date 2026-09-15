@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -49,12 +50,18 @@ var (
 	ErrRetainedPayloadCapacity = errors.New("retained payload capacity reached")
 	ErrAuctionAlreadyTracked   = errors.New("auction already tracked")
 	ErrSlotExpired             = errors.New("slot expired")
+	ErrPayloadParentChanged    = errors.New("payload parent changed")
 )
 
 type PayloadAssembler interface {
 	AssemblePayload(context.Context, *builder.Parameters) (uint64, error)
 	// GetPayload transfers exclusive ownership of the returned payload to the caller.
 	GetPayload(context.Context, uint64) (*eladapter.AssembledPayload, error)
+}
+
+type payloadDiscarder interface {
+	CanDiscardPayload() bool
+	DiscardPayload(context.Context, uint64) error
 }
 
 type GossipPublisher interface {
@@ -100,6 +107,12 @@ type PayloadIdentity struct {
 	BlockHash       common.Hash
 }
 
+type PayloadParentIdentity struct {
+	Slot            uint64
+	ParentBlockHash common.Hash
+	ParentBlockRoot common.Hash
+}
+
 type RetainedPayload struct {
 	PayloadID         uint64
 	Assembled         *eladapter.AssembledPayload
@@ -110,13 +123,27 @@ type RetainedPayload struct {
 	GenesisRoot       common.Hash
 }
 
+type PayloadMeasurement struct {
+	Slot              uint64
+	ParentBlockRoot   common.Hash
+	ParentBlockHash   common.Hash
+	BlockHash         common.Hash
+	BlockValueWei     *big.Int
+	TransactionCount  int
+	GasUsed           uint64
+	BlobCount         int
+	AssemblyStartedAt time.Time
+	AssemblyElapsed   time.Duration
+}
+
 type Coordinator struct {
-	beaconCfg   *clparams.BeaconChainConfig
-	signer      Signer
-	strategy    BidStrategy
-	assembler   PayloadAssembler
-	publisher   GossipPublisher
-	maxRetained int
+	beaconCfg     *clparams.BeaconChainConfig
+	signer        Signer
+	strategy      BidStrategy
+	assembler     PayloadAssembler
+	publisher     GossipPublisher
+	maxRetained   int
+	onRetainedBid func(*cltypes.SignedProposerPreferences, *cltypes.SignedExecutionPayloadBid, PayloadMeasurement)
 
 	mu        sync.Mutex
 	slotFloor uint64
@@ -170,6 +197,74 @@ func (c *Coordinator) RunSlot(ctx context.Context, input SlotInput) (*cltypes.Si
 	return c.runSlotGuarded(ctx, input, nil)
 }
 
+func (c *Coordinator) MeasurePayload(ctx context.Context, input SlotInput) (PayloadMeasurement, error) {
+	return c.measurePayloadGuarded(ctx, input, nil)
+}
+
+func (c *Coordinator) measurePayloadGuarded(
+	ctx context.Context,
+	input SlotInput,
+	freshness SlotInputFreshness,
+) (measurement PayloadMeasurement, resultErr error) {
+	if err := c.validateInput(ctx, input); err != nil {
+		return PayloadMeasurement{}, err
+	}
+	if !input.BuilderActive || input.AvailableBidValueGwei == 0 {
+		return PayloadMeasurement{}, errors.New("epbs/coordinator: builder is unavailable for payload measurement")
+	}
+	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+		return PayloadMeasurement{}, err
+	}
+	discarder, ok := c.assembler.(payloadDiscarder)
+	if !ok || !discarder.CanDiscardPayload() {
+		return PayloadMeasurement{}, errors.New("epbs/coordinator: payload measurement requires disposable assembly")
+	}
+	preferences := input.ValidatedPreferences.Clone().(*cltypes.SignedProposerPreferences)
+	parameters := buildParameters(input, preferences.Message)
+	parameters.TransientPayload = true
+	assemblyStarted := time.Now()
+	payloadID, err := c.assembler.AssemblePayload(ctx, parameters)
+	if err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: measure assemble payload: %w", err)
+	}
+	defer func() {
+		if err := discarder.DiscardPayload(context.Background(), payloadID); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("epbs/coordinator: discard measured payload: %w", err))
+			measurement = PayloadMeasurement{}
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return PayloadMeasurement{}, err
+	}
+	assembled, err := c.assembler.GetPayload(ctx, payloadID)
+	if err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: measure get payload: %w", err)
+	}
+	if assembled == nil {
+		return PayloadMeasurement{}, ErrPayloadNotReady
+	}
+	assemblyElapsed := time.Since(assemblyStarted)
+	if err := validateBuiltPayload(c.beaconCfg, input, preferences.Message, assembled); err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: %w", err)
+	}
+	if _, _, err := decodeExecutionRequests(c.beaconCfg, assembled.RequestsBundle); err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: execution requests: %w", err)
+	}
+	commitments, err := buildBlobCommitments(c.beaconCfg, input.Slot, assembled.BlobsBundle)
+	if err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+	}
+	if commitments.Len() != 0 {
+		if _, err := buildBlobDataColumns(ctx, c.beaconCfg, input.Slot, common.Hash{}, assembled.BlobsBundle, commitments); err != nil {
+			return PayloadMeasurement{}, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+		}
+	}
+	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+		return PayloadMeasurement{}, err
+	}
+	return newPayloadMeasurement(input, assembled, commitments.Len(), assemblyStarted, assemblyElapsed), nil
+}
+
 func (c *Coordinator) runSlotGuarded(
 	ctx context.Context,
 	input SlotInput,
@@ -198,6 +293,7 @@ func (c *Coordinator) runSlotGuarded(
 
 	preferences := input.ValidatedPreferences.Clone().(*cltypes.SignedProposerPreferences)
 	parameters := buildParameters(input, preferences.Message)
+	assemblyStarted := time.Now()
 	payloadID, err := c.assembler.AssemblePayload(ctx, parameters)
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: assemble payload: %w", err)
@@ -212,6 +308,7 @@ func (c *Coordinator) runSlotGuarded(
 	if assembled == nil {
 		return nil, ErrPayloadNotReady
 	}
+	assemblyElapsed := time.Since(assemblyStarted)
 	if err := validateBuiltPayload(c.beaconCfg, input, preferences.Message, assembled); err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: %w", err)
 	}
@@ -310,7 +407,13 @@ func (c *Coordinator) runSlotGuarded(
 		c.rollbackPublish(auction)
 		return nil, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
-	c.finishPublish(auction)
+	if c.finishPublish(auction) && c.onRetainedBid != nil {
+		c.onRetainedBid(
+			input.ValidatedPreferences,
+			signedBid,
+			newPayloadMeasurement(input, assembled, commitments.Len(), assemblyStarted, assemblyElapsed),
+		)
+	}
 	if publishErr != nil {
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
@@ -328,6 +431,22 @@ func validateSlotInputFreshness(ctx context.Context, input SlotInput, freshness 
 		return fmt.Errorf("epbs/coordinator: slot input is stale: %w", err)
 	}
 	return ctx.Err()
+}
+
+func newPayloadMeasurement(
+	input SlotInput,
+	assembled *eladapter.AssembledPayload,
+	blobCount int,
+	assemblyStartedAt time.Time,
+	assemblyElapsed time.Duration,
+) PayloadMeasurement {
+	payload := assembled.Eth1Block
+	return PayloadMeasurement{
+		Slot: input.Slot, ParentBlockRoot: input.ParentBlockRoot, ParentBlockHash: input.ParentBlockHash,
+		BlockHash: payload.BlockHash, BlockValueWei: new(big.Int).Set(assembled.BlockValue),
+		TransactionCount: len(payload.Transactions.UnderlyngReference()), GasUsed: payload.GasUsed,
+		BlobCount: blobCount, AssemblyStartedAt: assemblyStartedAt, AssemblyElapsed: assemblyElapsed,
+	}
 }
 
 func (c *Coordinator) Payload(identity PayloadIdentity) (*RetainedPayload, bool, error) {
@@ -751,20 +870,21 @@ func (c *Coordinator) retainForPublish(entry *auctionEntry, identity PayloadIden
 	return nil
 }
 
-func (c *Coordinator) finishPublish(entry *auctionEntry) {
+func (c *Coordinator) finishPublish(entry *auctionEntry) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.auctions[entry.key] != entry || entry.phase != auctionPhasePublishing {
-		return
+		return false
 	}
 	if entry.key.slot < c.slotFloor {
 		if retained := c.retained[entry.identity]; retained != nil && retained.owner == entry {
 			delete(c.retained, entry.identity)
 		}
 		delete(c.auctions, entry.key)
-		return
+		return false
 	}
 	entry.phase = auctionPhaseRetained
+	return true
 }
 
 func (c *Coordinator) rollbackPublish(entry *auctionEntry) {

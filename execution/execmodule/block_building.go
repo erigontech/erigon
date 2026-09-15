@@ -77,6 +77,9 @@ func sameBuildRequest(previous, current *builder.Parameters) bool {
 	if previous == nil || current == nil {
 		return false
 	}
+	if previous.TransientPayload || current.TransientPayload {
+		return false
+	}
 	if previous.CustomTxnProvider != nil || current.CustomTxnProvider != nil {
 		return false
 	}
@@ -85,6 +88,7 @@ func sameBuildRequest(previous, current *builder.Parameters) bool {
 	withoutID := func(p *builder.Parameters) builder.Parameters {
 		stripped := *p
 		stripped.PayloadId = 0
+		stripped.TransientPayload = false
 		return stripped
 	}
 	previousWithoutID, currentWithoutID := withoutID(previous), withoutID(current)
@@ -127,6 +131,10 @@ func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now ti
 // dropBuilder removes and discards a builder.
 func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 	if entry != nil {
+		if entry.params != nil && entry.params.TransientPayload {
+			e.transientBuilders--
+			e.transientPayloads.Delete(id)
+		}
 		if e.isIndexedFor(id, entry) {
 			delete(e.buildersByTimestamp, entry.params.Timestamp)
 		}
@@ -135,6 +143,157 @@ func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 		}
 	}
 	delete(e.builders, id)
+}
+
+func (e *ExecModule) dropTransientBuilders() {
+	if e.transientBuilders == 0 {
+		return
+	}
+	for id, entry := range e.builders {
+		if entry != nil && entry.params != nil && entry.params.TransientPayload {
+			e.dropBuilder(id, entry)
+		}
+	}
+}
+
+func (e *ExecModule) hasRunningProductionBuilder() bool {
+	for _, entry := range e.builders {
+		if entry != nil && entry.params != nil && !entry.params.TransientPayload && entry.builder != nil &&
+			!entry.builder.Completed() && !entry.builder.Discarded() {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *ExecModule) acquireProduction(ctx context.Context) (bool, error) {
+	e.transientAdmissionMu.Lock()
+	if e.semaphore.TryAcquire(1) {
+		e.transientAdmissionMu.Unlock()
+		return true, nil
+	}
+	waitsForTransient := e.transientAdmission
+	if waitsForTransient != nil {
+		e.transientWaiters++
+	}
+	e.transientAdmissionMu.Unlock()
+	if waitsForTransient == nil {
+		return false, nil
+	}
+	select {
+	case <-ctx.Done():
+		if e.cancelTransientWaiter() {
+			e.releaseTransient()
+		}
+		return false, ctx.Err()
+	case <-waitsForTransient:
+	}
+	e.transientAdmissionMu.Lock()
+	e.transientWaiters--
+	acquired := e.semaphore.TryAcquire(1)
+	e.transientAdmissionMu.Unlock()
+	return acquired, nil
+}
+
+func (e *ExecModule) cancelTransientWaiter() bool {
+	e.transientAdmissionMu.Lock()
+	defer e.transientAdmissionMu.Unlock()
+	e.transientWaiters--
+	if e.transientWaiters > 0 || !e.semaphore.TryAcquire(1) {
+		return false
+	}
+	e.transientAdmission = make(chan struct{})
+	return true
+}
+
+func (e *ExecModule) acquireTransient() bool {
+	e.transientAdmissionMu.Lock()
+	defer e.transientAdmissionMu.Unlock()
+	if e.transientDraining || e.transientWaiters > 0 {
+		return false
+	}
+	if !e.semaphore.TryAcquire(1) {
+		return false
+	}
+	e.transientAdmission = make(chan struct{})
+	return true
+}
+
+func (e *ExecModule) releaseTransient() {
+	e.transientAdmissionMu.Lock()
+	e.transientDiscardMu.Lock()
+	e.applyTransientDiscardsLocked()
+	e.semaphore.Release(1)
+	close(e.transientAdmission)
+	e.transientAdmission = nil
+	e.transientDiscardMu.Unlock()
+	e.transientAdmissionMu.Unlock()
+}
+
+func (e *ExecModule) acquirePayload(ctx context.Context, payloadID uint64) (bool, *builderEntry, bool, error) {
+	_, requestsTransient := e.transientPayloads.Load(payloadID)
+	e.transientAdmissionMu.Lock()
+	if requestsTransient && e.transientWaiters > 0 {
+		e.transientAdmissionMu.Unlock()
+		return false, nil, false, nil
+	}
+	if !e.semaphore.TryAcquire(1) {
+		waitsForTransient := e.transientAdmission
+		if waitsForTransient != nil && !requestsTransient {
+			e.transientWaiters++
+		}
+		e.transientAdmissionMu.Unlock()
+		if waitsForTransient == nil || requestsTransient {
+			return false, nil, false, nil
+		}
+		select {
+		case <-ctx.Done():
+			if e.cancelTransientWaiter() {
+				e.releaseTransient()
+			}
+			return false, nil, false, ctx.Err()
+		case <-waitsForTransient:
+		}
+		e.transientAdmissionMu.Lock()
+		e.transientWaiters--
+		if !e.semaphore.TryAcquire(1) {
+			e.transientAdmissionMu.Unlock()
+			return false, nil, false, nil
+		}
+	}
+	entry := e.builders[payloadID]
+	isTransient := entry != nil && entry.params != nil && entry.params.TransientPayload
+	if isTransient {
+		e.transientAdmission = make(chan struct{})
+	}
+	e.transientAdmissionMu.Unlock()
+	return true, entry, isTransient, nil
+}
+
+func (e *ExecModule) queueTransientDiscard(payloadID uint64) {
+	e.transientDiscardMu.Lock()
+	if e.transientDiscards == nil {
+		e.transientDiscards = make(map[uint64]struct{})
+	}
+	e.transientDiscards[payloadID] = struct{}{}
+	e.transientDiscardMu.Unlock()
+}
+
+func (e *ExecModule) applyTransientDiscardsLocked() {
+	for payloadID := range e.transientDiscards {
+		entry := e.builders[payloadID]
+		if entry != nil && entry.params != nil && entry.params.TransientPayload {
+			e.dropBuilder(payloadID, entry)
+		}
+		delete(e.transientDiscards, payloadID)
+	}
+}
+
+func (e *ExecModule) releaseProduction() {
+	e.transientDiscardMu.Lock()
+	e.applyTransientDiscardsLocked()
+	e.semaphore.Release(1)
+	e.transientDiscardMu.Unlock()
 }
 
 // evictOldBuilders makes room for one builder by dropping the oldest entries, except those a live
@@ -168,11 +327,36 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	if err := e.backgroundCtx.Err(); err != nil {
 		return AssembleBlockResult{}, err
 	}
-	if !e.semaphore.TryAcquire(1) {
-		return AssembleBlockResult{Busy: true}, nil
+	if params.TransientPayload {
+		if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
+			return AssembleBlockResult{}, err
+		}
+		if !e.acquireTransient() {
+			return AssembleBlockResult{Busy: true}, nil
+		}
+	} else {
+		acquired, err := e.acquireProduction(ctx)
+		if err != nil {
+			return AssembleBlockResult{}, err
+		}
+		if !acquired {
+			return AssembleBlockResult{Busy: true}, nil
+		}
 	}
-	defer e.semaphore.Release(1)
-	if e.db != nil {
+	defer func() {
+		if params.TransientPayload {
+			e.releaseTransient()
+			return
+		}
+		e.releaseProduction()
+	}()
+	e.dropTransientBuilders()
+	if !params.TransientPayload {
+		if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
+			return AssembleBlockResult{}, err
+		}
+	}
+	if !params.TransientPayload && e.db != nil {
 		tx, cleanup, err := e.beginOverlayOrRo(ctx)
 		if err != nil {
 			return AssembleBlockResult{}, err
@@ -185,8 +369,10 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
-	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
-		return AssembleBlockResult{}, err
+	if params.TransientPayload {
+		if len(e.builders) >= engine_helpers.MaxBuilders || e.hasRunningProductionBuilder() || e.transientInFlight.Load() > 0 {
+			return AssembleBlockResult{Busy: true}, nil
+		}
 	}
 
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
@@ -204,19 +390,37 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
 	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
 	// payload that is still growing.
-	e.evictOldBuilders()
+	if !params.TransientPayload {
+		e.evictOldBuilders()
+	}
 
 	e.nextPayloadId++
 	ownedParams := params.Copy()
 	ownedParams.PayloadId = e.nextPayloadId
 
 	secondsPerSlot := e.config.SecondsPerSlot()
-	e.builders[e.nextPayloadId] = &builderEntry{
-		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
-			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
-		params: ownedParams,
+	buildCtx := e.backgroundCtx
+	if params.TransientPayload {
+		buildCtx = ctx
 	}
-	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
+	blockBuilder := builder.NewBlockBuilder(buildCtx, e.builderFunc, ownedParams,
+		buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot))
+	e.builders[e.nextPayloadId] = &builderEntry{
+		builder: blockBuilder,
+		params:  ownedParams,
+	}
+	if params.TransientPayload {
+		e.transientBuilders++
+		e.transientPayloads.Store(e.nextPayloadId, struct{}{})
+		e.transientInFlight.Add(1)
+		e.transientLifecycle.Go(func() {
+			defer e.transientInFlight.Add(-1)
+			blockBuilder.Wait()
+		})
+	}
+	if !params.TransientPayload {
+		e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
+	}
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -242,15 +446,49 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	if err := ctx.Err(); err != nil {
 		return AssembledBlockResult{}, err
 	}
-	if !e.semaphore.TryAcquire(1) {
+	acquired, entry, isTransient, err := e.acquirePayload(ctx, payloadID)
+	if err != nil {
+		return AssembledBlockResult{}, err
+	}
+	if !acquired {
 		return AssembledBlockResult{Busy: true}, nil
 	}
-	defer e.semaphore.Release(1)
-
-	entry, ok := e.builders[payloadID]
-	if !ok || entry == nil || entry.builder == nil {
+	if entry == nil || entry.builder == nil {
+		e.dropTransientBuilders()
+		e.releaseProduction()
 		return AssembledBlockResult{Unknown: true}, nil
 	}
+	if isTransient {
+		e.releaseTransient()
+		result, err := assembledBlockResult(ctx, entry)
+		entry.builder.Discard()
+		if e.acquireTransient() {
+			if e.builders[payloadID] == entry {
+				e.dropBuilder(payloadID, entry)
+			}
+			e.releaseTransient()
+		}
+		// A competing owner removes transient builders before beginning production work.
+		return result, err
+	}
+	e.dropTransientBuilders()
+	defer e.releaseProduction()
+	return e.assembledBlockResult(ctx, payloadID, entry)
+}
+
+func assembledBlockResult(ctx context.Context, entry *builderEntry) (AssembledBlockResult, error) {
+	blockWithReceipts, err := entry.builder.Stop(ctx)
+	if err != nil {
+		return AssembledBlockResult{}, err
+	}
+	if blockWithReceipts == nil {
+		return AssembledBlockResult{}, nil
+	}
+	header := blockWithReceipts.Block.Header()
+	return AssembledBlockResult{Block: blockWithReceipts, BlockValue: blockValue(blockWithReceipts, header.BaseFee)}, nil
+}
+
+func (e *ExecModule) assembledBlockResult(ctx context.Context, payloadID uint64, entry *builderEntry) (AssembledBlockResult, error) {
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if errors.Is(err, builder.ErrDiscarded) {
 		e.dropBuilder(payloadID, entry)
@@ -281,4 +519,13 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		Block:      blockWithReceipts,
 		BlockValue: value,
 	}, nil
+}
+
+func (e *ExecModule) DiscardAssembledBlock(_ context.Context, payloadID uint64) error {
+	e.queueTransientDiscard(payloadID)
+	if !e.acquireTransient() {
+		return nil
+	}
+	defer e.releaseTransient()
+	return nil
 }

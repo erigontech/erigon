@@ -18,6 +18,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 )
 
@@ -94,6 +95,25 @@ func TestLiveCoordinatorHandlesValidatedPreferences(t *testing.T) {
 	require.NotNil(t, bid)
 	require.Equal(t, 1, publisher.calls)
 	require.Equal(t, 4, freshness.calls)
+}
+
+func TestLiveCoordinatorMeasureValidatedPreferencesRequiresPublishedParent(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembler := &coordinatorAssembler{
+		payloadID: 7,
+		payload:   validCoordinatorPayload(&config, input, big.NewInt(1_000_000_000)),
+	}
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1,
+	)
+	live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, new(countingSlotInputFreshness))
+
+	_, err := live.MeasureValidatedPreferences(t.Context(), input.ValidatedPreferences, PayloadParentIdentity{
+		Slot: input.Slot, ParentBlockRoot: common.HexToHash("0xff"), ParentBlockHash: input.ParentBlockHash,
+	})
+	require.ErrorIs(t, err, ErrPayloadParentChanged)
+	require.Zero(t, assembler.calls)
 }
 
 func TestLiveCoordinatorRejectsMalformedPreferencesBeforeResolve(t *testing.T) {

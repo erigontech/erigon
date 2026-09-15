@@ -50,13 +50,17 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 	return result
 }
 
-func TestDefaultFlagsIncludeEmbeddedBuilderBidDelay(t *testing.T) {
-	for _, flag := range DefaultFlags {
-		if slices.Contains(flag.Names(), "builder.bid-delay") {
-			return
+func TestDefaultFlagsIncludeEmbeddedBuilderTimingFlags(t *testing.T) {
+	for _, name := range []string{"builder.bid-delay", "builder.shadow-value-curve"} {
+		found := false
+		for _, flag := range DefaultFlags {
+			if slices.Contains(flag.Names(), name) {
+				found = true
+				break
+			}
 		}
+		require.True(t, found, "%s is not registered", name)
 	}
-	require.Fail(t, "builder.bid-delay is not registered")
 }
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler

@@ -29,6 +29,17 @@ type assembledBlockModule struct {
 	assembledErr   error
 }
 
+type discardingBlockModule struct {
+	assembledBlockModule
+	discarded uint64
+	err       error
+}
+
+func (m *discardingBlockModule) DiscardAssembledBlock(_ context.Context, payloadID uint64) error {
+	m.discarded = payloadID
+	return m.err
+}
+
 type forkchoiceAwareBlockModule struct {
 	execmodule.ExecutionModule
 	state          execmodule.ForkChoiceState
@@ -157,6 +168,27 @@ func TestAdapterConditionallyAdvancesEmbeddedExecutionHeadBeforeBuild(t *testing
 	require.Equal(t, 1, module.advanceCalls)
 	require.Equal(t, 1, module.assembleCalls)
 	require.Zero(t, module.updateCalls)
+}
+
+func TestAdapterTransientPayloadNeverAdvancesExecutionHead(t *testing.T) {
+	currentHead := common.Hash{0x41}
+	targetHead := common.Hash{0x42}
+	module := &conditionalForkchoiceBlockModule{
+		forkchoiceAwareBlockModule: &forkchoiceAwareBlockModule{
+			state:          execmodule.ForkChoiceState{HeadHash: currentHead},
+			assembleResult: execmodule.AssembleBlockResult{PayloadID: 42},
+		},
+	}
+
+	_, err := NewAdapter(module, &clparams.MainnetBeaconConfig).AssemblePayload(
+		t.Context(),
+		&builder.Parameters{ParentHash: targetHead, TransientPayload: true},
+	)
+
+	require.ErrorIs(t, err, ErrExecutionBusy)
+	require.Zero(t, module.advanceCalls)
+	require.Zero(t, module.assembleCalls)
+	require.Equal(t, currentHead, module.state.HeadHash)
 }
 
 func TestAdapterDoesNotConditionallyAdvanceMatchingExecutionHead(t *testing.T) {
@@ -552,6 +584,21 @@ func TestAdapterPropagatesExecutionErrors(t *testing.T) {
 
 	_, err = NewAdapter(assembledBlockModule{assembledErr: want}, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
 	require.ErrorIs(t, err, want)
+}
+
+func TestAdapterDiscardsPayload(t *testing.T) {
+	module := new(discardingBlockModule)
+	adapter := NewAdapter(module, &clparams.MainnetBeaconConfig)
+	require.True(t, adapter.CanDiscardPayload())
+	require.NoError(t, adapter.DiscardPayload(t.Context(), 42))
+	require.Equal(t, uint64(42), module.discarded)
+
+	want := errors.New("discard failed")
+	module.err = want
+	require.ErrorIs(t, adapter.DiscardPayload(t.Context(), 43), want)
+	unsupported := NewAdapter(assembledBlockModule{}, &clparams.MainnetBeaconConfig)
+	require.False(t, unsupported.CanDiscardPayload())
+	require.ErrorContains(t, unsupported.DiscardPayload(t.Context(), 1), "cannot discard")
 }
 
 func TestAdapterRejectsMissingDependencies(t *testing.T) {

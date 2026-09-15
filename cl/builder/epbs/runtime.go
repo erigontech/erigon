@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type RuntimeDependencies struct {
@@ -38,6 +39,7 @@ type RuntimeDependencies struct {
 type Runtime struct {
 	coordinator *Coordinator
 	runner      *ValidatedPreferencesRunner
+	shadow      *shadowValueCurveRunner
 	reveals     *revealRunner
 	events      *beaconevents.EventEmitter
 }
@@ -80,12 +82,48 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	if err != nil {
 		return nil, fmt.Errorf("epbs/runtime: create preferences runner: %w", err)
 	}
+	var shadow *shadowValueCurveRunner
+	if cfg.ShadowValueCurve {
+		discarder, ok := deps.Assembler.(payloadDiscarder)
+		if !ok || !discarder.CanDiscardPayload() {
+			return nil, errors.New("epbs/runtime: shadow value curve requires disposable payload assembly")
+		}
+		shadow, err = newShadowValueCurveRunner(
+			live,
+			deps.Clock,
+			cfg.MaxPending,
+			cfg.RetryInterval,
+			cfg.BidDelay,
+			[]time.Duration{cfg.BidDelay + 2*time.Second, cfg.BidDelay + 4*time.Second},
+			func(interval time.Duration) runnerTicker { return systemRunnerTicker{Ticker: time.NewTicker(interval)} },
+			time.Now,
+			deps.Clock.GetSlotTime,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("epbs/runtime: create shadow value curve: %w", err)
+		}
+		coordinator.onRetainedBid = func(
+			preferences *cltypes.SignedProposerPreferences,
+			bid *cltypes.SignedExecutionPayloadBid,
+			measurement PayloadMeasurement,
+		) {
+			if bid == nil || bid.Message == nil {
+				return
+			}
+			if !shadow.Submit(preferences, PayloadParentIdentity{
+				Slot: bid.Message.Slot, ParentBlockHash: bid.Message.ParentBlockHash, ParentBlockRoot: bid.Message.ParentBlockRoot,
+			}, measurement) {
+				log.Warn("Embedded builder shadow payload baseline dropped", "slot", bid.Message.Slot,
+					"parentBlockRoot", bid.Message.ParentBlockRoot, "parentBlockHash", bid.Message.ParentBlockHash)
+			}
+		}
+	}
 	reveals := newRevealRunner(
 		deps.BeaconConfig, deps.Clock, signer, coordinator, deps.AcceptedBlocks, deps.PayloadProcessor,
 		deps.Publisher, deps.Forkchoice, deps.Forkchoice, cfg.RetryInterval, cfg.MaxRetained,
 	)
 	reveals.blobData = newBlobDataPreparer(deps.BeaconConfig, deps.ColumnStorage, deps.Publisher)
-	return &Runtime{coordinator: coordinator, runner: runner, reveals: reveals, events: deps.Events}, nil
+	return &Runtime{coordinator: coordinator, runner: runner, shadow: shadow, reveals: reveals, events: deps.Events}, nil
 }
 
 func ValidateRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainConfig) error {
@@ -131,6 +169,12 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	if cfg.BidDelay > 0 && (cfg.RetryInterval >= slotDuration || cfg.BidDelay >= slotDuration-cfg.RetryInterval) {
 		return cfg, nil, errors.New("epbs/runtime: bid delay and retry cadence must fit within the preceding slot")
 	}
+	if cfg.ShadowValueCurve {
+		shadowTail := 4*time.Second + cfg.RetryInterval
+		if cfg.BidDelay <= 0 || shadowTail >= slotDuration || cfg.BidDelay >= slotDuration-shadowTail {
+			return cfg, nil, errors.New("epbs/runtime: shadow value curve must fit within the preceding slot")
+		}
+	}
 	if cfg.MaxPending == 0 {
 		if beaconCfg.SlotsPerEpoch > uint64(^uint(0)>>1) {
 			return cfg, nil, errors.New("epbs/runtime: slots per epoch exceeds pending capacity range")
@@ -170,9 +214,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 	subscription := r.events.State().Subscribe(events)
 	defer subscription.Unsubscribe()
 	runnerDone := make(chan error, 1)
+	var shadowDone chan error
 	revealsDone := make(chan struct{})
 	runnerExited := false
+	shadowExited := false
 	go func() { runnerDone <- r.runner.Run(runCtx) }()
+	if r.shadow != nil {
+		shadowDone = make(chan error, 1)
+		go func() { shadowDone <- r.shadow.Run(runCtx) }()
+	}
 	go func() {
 		defer close(revealsDone)
 		r.reveals.Run(runCtx)
@@ -181,6 +231,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 		cancel()
 		if !runnerExited {
 			<-runnerDone
+		}
+		if shadowDone != nil && !shadowExited {
+			<-shadowDone
 		}
 		<-revealsDone
 	}()
@@ -192,6 +245,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 			runnerExited = true
 			if err == nil {
 				return errors.New("epbs/runtime: preferences runner stopped")
+			}
+			return err
+		case err := <-shadowDone:
+			shadowExited = true
+			if err == nil {
+				return errors.New("epbs/runtime: shadow value curve stopped")
 			}
 			return err
 		case err, ok := <-subscription.Err():

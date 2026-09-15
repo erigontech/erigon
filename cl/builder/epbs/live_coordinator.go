@@ -63,3 +63,30 @@ func (c *LiveCoordinator) HandleValidatedPreferences(
 	}
 	return c.coordinator.runSlotGuarded(ctx, input, c.freshness)
 }
+
+func (c *LiveCoordinator) MeasureValidatedPreferences(
+	ctx context.Context,
+	preferences *cltypes.SignedProposerPreferences,
+	expected PayloadParentIdentity,
+) (PayloadMeasurement, error) {
+	if ctx == nil {
+		return PayloadMeasurement{}, errors.New("epbs/live coordinator: nil context")
+	}
+	if c == nil || c.coordinator == nil || isNilDependency(c.resolver) || isNilDependency(c.freshness) {
+		return PayloadMeasurement{}, errors.New("epbs/live coordinator: missing dependency")
+	}
+	if preferences == nil || preferences.Message == nil {
+		return PayloadMeasurement{}, errors.New("epbs/live coordinator: missing validated proposer preferences")
+	}
+	input, err := c.resolver.Resolve(ctx, preferences)
+	if err != nil {
+		return PayloadMeasurement{}, fmt.Errorf("epbs/live coordinator: resolve slot input: %w", err)
+	}
+	if input.Slot != expected.Slot || input.ParentBlockRoot != expected.ParentBlockRoot || input.ParentBlockHash != expected.ParentBlockHash {
+		return PayloadMeasurement{}, ErrPayloadParentChanged
+	}
+	if err := validateSlotInputFreshness(ctx, input, c.freshness); err != nil {
+		return PayloadMeasurement{}, err
+	}
+	return c.coordinator.measurePayloadGuarded(ctx, input, c.freshness)
+}

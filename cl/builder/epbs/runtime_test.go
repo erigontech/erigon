@@ -546,6 +546,14 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		{name: "bid delay exceeds retry cadence boundary", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval + time.Nanosecond
 		}},
+		{name: "shadow curve without bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
+			cfg.ShadowValueCurve = true
+			cfg.BidDelay = 0
+		}},
+		{name: "shadow curve reaches target slot", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.ShadowValueCurve = true
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - 4*time.Second - cfg.RetryInterval + time.Nanosecond
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testCfg := valid
@@ -584,6 +592,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.BidDelay = 1200 * time.Millisecond
+	runtimeCfg.ShadowValueCurve = true
 	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
 		BeaconConfig:     &cfg,
 		Clock:            eth_clock.NewMockEthereumClock(gomock.NewController(t)),
@@ -600,4 +609,6 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
+	require.NotNil(t, runtime.shadow)
+	require.Equal(t, []time.Duration{3200 * time.Millisecond, 5200 * time.Millisecond}, runtime.shadow.delays)
 }

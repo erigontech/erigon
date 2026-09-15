@@ -35,6 +35,10 @@ type conditionalForkChoiceUpdater interface {
 	UpdateForkChoiceIfHead(context.Context, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error)
 }
 
+type assembledBlockDiscarder interface {
+	DiscardAssembledBlock(context.Context, uint64) error
+}
+
 func NewAdapter(execution execmodule.ExecutionModule, beaconCfg *clparams.BeaconChainConfig) *Adapter {
 	return &Adapter{execution: execution, beaconCfg: beaconCfg}
 }
@@ -46,7 +50,7 @@ func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Param
 	if parameters == nil {
 		return 0, fmt.Errorf("eladapter: nil build parameters")
 	}
-	if err := a.requirePayloadParent(ctx, parameters.ParentHash); err != nil {
+	if err := a.requirePayloadParent(ctx, parameters.ParentHash, !parameters.TransientPayload); err != nil {
 		return 0, err
 	}
 	result, err := a.execution.AssembleBlock(ctx, parameters)
@@ -59,7 +63,7 @@ func (a *Adapter) AssemblePayload(ctx context.Context, parameters *builder.Param
 	return result.PayloadID, nil
 }
 
-func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Hash) error {
+func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Hash, allowAdvance bool) error {
 	if parentHash == (common.Hash{}) {
 		return fmt.Errorf("%w: payload parent is zero", ErrExecutionBusy)
 	}
@@ -69,6 +73,9 @@ func (a *Adapter) requirePayloadParent(ctx context.Context, parentHash common.Ha
 	}
 	if state.HeadHash == parentHash {
 		return nil
+	}
+	if !allowAdvance {
+		return fmt.Errorf("%w: execution head does not match transient parent: executionHead=%s requestedParent=%s", ErrExecutionBusy, state.HeadHash, parentHash)
 	}
 	updater, ok := a.execution.(conditionalForkChoiceUpdater)
 	if !ok {
@@ -108,6 +115,28 @@ func (a *Adapter) GetPayload(ctx context.Context, payloadID uint64) (*AssembledP
 		return nil, fmt.Errorf("%w: builder produced no block", ErrInvalidResult)
 	}
 	return a.convertResult(&result)
+}
+
+func (a *Adapter) DiscardPayload(ctx context.Context, payloadID uint64) error {
+	if a == nil || a.execution == nil {
+		return errors.New("eladapter: nil execution module")
+	}
+	discarder, ok := a.execution.(assembledBlockDiscarder)
+	if !ok {
+		return errors.New("eladapter: execution module cannot discard payload")
+	}
+	if err := discarder.DiscardAssembledBlock(ctx, payloadID); err != nil {
+		return fmt.Errorf("eladapter: discard payload %d: %w", payloadID, err)
+	}
+	return nil
+}
+
+func (a *Adapter) CanDiscardPayload() bool {
+	if a == nil || a.execution == nil {
+		return false
+	}
+	_, ok := a.execution.(assembledBlockDiscarder)
+	return ok
 }
 
 func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*AssembledPayload, error) {

@@ -190,6 +190,14 @@ func (b *BlockBuilder) Failed() bool {
 	return b.err != nil
 }
 
+func (b *BlockBuilder) Completed() bool {
+	return b.finished()
+}
+
+func (b *BlockBuilder) Wait() {
+	<-b.done
+}
+
 func (b *BlockBuilder) Block() *types.Block {
 	result, err := b.readResult()
 	if err != nil || result == nil {

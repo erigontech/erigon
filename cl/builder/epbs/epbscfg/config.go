@@ -11,13 +11,14 @@ package epbscfg
 import "time"
 
 type Config struct {
-	Enabled       bool
-	KeyPath       string
-	BidMargin     float64
-	BidDelay      time.Duration
-	MaxPending    int
-	MaxRetained   int
-	RetryInterval time.Duration
+	Enabled          bool
+	KeyPath          string
+	BidMargin        float64
+	BidDelay         time.Duration
+	ShadowValueCurve bool
+	MaxPending       int
+	MaxRetained      int
+	RetryInterval    time.Duration
 }
 
 func DefaultConfig() Config {

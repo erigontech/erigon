@@ -116,3 +116,27 @@ func TestFinishBlockValidatesBlockAccessListBeforeSealing(t *testing.T) {
 	require.False(t, engine.called.Load())
 	require.Nil(t, store.BlockBuilt())
 }
+
+func TestFinishBlockTransientPayloadHasNoProductionSideEffects(t *testing.T) {
+	engine := &recordingSealEngine{}
+	store := NewLatestBlockBuiltStore()
+	pending := make(chan *types.Block, 1)
+	result := make(chan *types.BlockWithReceipts, 1)
+	cfg := BuilderFinishCfg{
+		chainConfig: &chain.Config{},
+		engine:      engine,
+		builderState: BuilderState{
+			BuiltBlock:      &exec.AssembledBlock{Header: &types.Header{}},
+			PendingResultCh: pending,
+			BuilderResultCh: result,
+		},
+		latestBlockBuiltStore: store,
+		transientPayload:      true,
+	}
+
+	require.NoError(t, finishBlock(t.Context(), nil, cfg, log.Root()))
+	require.Nil(t, store.BlockBuilt())
+	require.False(t, engine.called.Load())
+	require.Empty(t, pending)
+	require.Len(t, result, 1)
+}

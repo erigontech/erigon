@@ -56,7 +56,8 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
 		return fmt.Errorf("execution module is busy: %w", err)
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 
 	resumeReadAhead, err := e.suspendReadAhead(ctx)
 	if err != nil {

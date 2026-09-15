@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -47,6 +48,7 @@ type coordinatorAssembler struct {
 	calls      int
 	started    chan struct{}
 	release    chan struct{}
+	discarded  []uint64
 }
 
 func (a *coordinatorAssembler) AssemblePayload(ctx context.Context, parameters *builder.Parameters) (uint64, error) {
@@ -68,6 +70,13 @@ func (a *coordinatorAssembler) AssemblePayload(ctx context.Context, parameters *
 func (a *coordinatorAssembler) GetPayload(context.Context, uint64) (*eladapter.AssembledPayload, error) {
 	return a.payload, nil
 }
+
+func (a *coordinatorAssembler) DiscardPayload(_ context.Context, payloadID uint64) error {
+	a.discarded = append(a.discarded, payloadID)
+	return nil
+}
+
+func (a *coordinatorAssembler) CanDiscardPayload() bool { return true }
 
 type coordinatorPublisher struct {
 	topic string
@@ -189,6 +198,14 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	publisher := new(coordinatorPublisher)
 	signer := new(coordinatorSigner)
 	coordinator := NewCoordinator(&config, signer, FixedMarginStrategy{Margin: 1}, assembler, publisher, 2)
+	var publishedMeasurement PayloadMeasurement
+	coordinator.onRetainedBid = func(
+		_ *cltypes.SignedProposerPreferences,
+		_ *cltypes.SignedExecutionPayloadBid,
+		measurement PayloadMeasurement,
+	) {
+		publishedMeasurement = measurement
+	}
 
 	signedBid, err := coordinator.RunSlot(t.Context(), input)
 	require.NoError(t, err)
@@ -239,6 +256,11 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, uint64(7), retained.PayloadID)
+	require.Equal(t, assembled.BlockValue, publishedMeasurement.BlockValueWei)
+	require.Equal(t, input.ParentBlockHash, publishedMeasurement.ParentBlockHash)
+	require.False(t, publishedMeasurement.AssemblyStartedAt.IsZero())
+	require.GreaterOrEqual(t, publishedMeasurement.AssemblyElapsed, time.Duration(0))
+	require.Empty(t, assembler.discarded)
 	require.Equal(t, input.BuilderIndex, retained.BuilderIndex)
 	require.Equal(t, input.GenesisValidatorsRoot, retained.GenesisRoot)
 	signedBidRoot, err := signedBid.HashSSZ()
@@ -252,6 +274,49 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	_, ok, err = coordinator.Payload(identity)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestCoordinatorMeasurePayloadBuildsFreshWithoutPublishingOrRetaining(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_345_678_901_234))
+	assembled.Eth1Block.GasUsed = 456_789
+	assembled.Eth1Block.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}, {0x02}})
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
+	assembler := &coordinatorAssembler{payloadID: 8, payload: assembled}
+	publisher := new(coordinatorPublisher)
+	signer := new(coordinatorSigner)
+	coordinator := NewCoordinator(&config, signer, FixedMarginStrategy{Margin: 1}, assembler, publisher, 2)
+
+	measurement, err := coordinator.MeasurePayload(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, input.Slot, measurement.Slot)
+	require.Equal(t, input.ParentBlockRoot, measurement.ParentBlockRoot)
+	require.Equal(t, input.ParentBlockHash, measurement.ParentBlockHash)
+	require.Equal(t, assembled.Eth1Block.BlockHash, measurement.BlockHash)
+	require.Equal(t, assembled.BlockValue, measurement.BlockValueWei)
+	require.Equal(t, 2, measurement.TransactionCount)
+	require.Equal(t, uint64(456_789), measurement.GasUsed)
+	require.Equal(t, 1, measurement.BlobCount)
+	require.True(t, assembler.parameters.TransientPayload)
+	require.Equal(t, []uint64{8}, assembler.discarded)
+	require.Zero(t, publisher.calls)
+	require.Equal(t, common.Hash{}, signer.root)
+	require.Empty(t, coordinator.auctions)
+	require.Empty(t, coordinator.retained)
+}
+
+func TestCoordinatorMeasurementRequiresDisposableAssembler(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembler := &controlledCoordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(1))}
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1,
+	)
+
+	_, err := coordinator.MeasurePayload(t.Context(), input)
+	require.ErrorContains(t, err, "requires disposable assembly")
+	require.Zero(t, assembler.Calls())
 }
 
 func TestCoordinatorRoutesPayloadFeesToBuilderAndBidPaymentToProposer(t *testing.T) {

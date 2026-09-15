@@ -169,8 +169,13 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	if param.CustomTxnProvider != nil {
 		txnProvider = param.CustomTxnProvider
 	}
-	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
-	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
+	execCfg := StageBuilderExecCfg(
+		state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId,
+		txnProvider, b.blockReader, param.TransientPayload,
+	)
+	finishCfg := StageBuilderFinishCfg(
+		b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore, param.TransientPayload,
+	)
 
 	if err := createBlock(ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err

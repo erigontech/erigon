@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -192,10 +193,20 @@ type ExecModule struct {
 
 	logger log.Logger
 	// Block building
-	nextPayloadId       uint64
-	builderFunc         builder.BlockBuilderFunc
-	builders            map[uint64]*builderEntry
-	buildersByTimestamp map[uint64]uint64
+	nextPayloadId        uint64
+	builderFunc          builder.BlockBuilderFunc
+	builders             map[uint64]*builderEntry
+	buildersByTimestamp  map[uint64]uint64
+	transientBuilders    int
+	transientAdmission   chan struct{}
+	transientAdmissionMu sync.Mutex
+	transientDraining    bool
+	transientWaiters     int
+	transientDiscardMu   sync.Mutex
+	transientDiscards    map[uint64]struct{}
+	transientInFlight    atomic.Int64
+	transientLifecycle   sync.WaitGroup
+	transientPayloads    sync.Map
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -327,14 +338,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return // context cancelled — best effort
 	}
-	e.semaphore.Release(1)
+	e.dropTransientBuilders()
+	e.releaseProduction()
 }
 
 // Drain waits without a local timeout for serialized execution work to finish.
 // Callers must stop producers first because backing resources are unsafe to
 // close while execution still holds a transaction.
 func (e *ExecModule) Drain() {
+	e.transientAdmissionMu.Lock()
+	e.transientDraining = true
+	e.transientAdmissionMu.Unlock()
 	e.WaitIdle(context.Background())
+	e.transientLifecycle.Wait()
 }
 
 // newDomainStateCache is the module's one construction site of the domain
@@ -497,13 +513,18 @@ const nextForkBanner = `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
-	if !e.semaphore.TryAcquire(1) {
+	acquired, acquireErr := e.acquireProduction(ctx)
+	if acquireErr != nil {
+		return ValidationResult{}, acquireErr
+	}
+	if !acquired {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
@@ -732,7 +753,8 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		return
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -782,7 +804,8 @@ func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return false, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.releaseProduction()
+	e.dropTransientBuilders()
 	return true, nil
 }
 

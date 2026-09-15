@@ -39,6 +39,7 @@ type BuilderFinishCfg struct {
 	builderState          BuilderState
 	blockReader           dbservices.FullBlockReader
 	latestBlockBuiltStore *LatestBlockBuiltStore
+	transientPayload      bool
 }
 
 func StageBuilderFinishCfg(
@@ -48,6 +49,7 @@ func StageBuilderFinishCfg(
 	sealCancel chan struct{},
 	blockReader dbservices.FullBlockReader,
 	latestBlockBuiltStore *LatestBlockBuiltStore,
+	transientPayload bool,
 ) BuilderFinishCfg {
 	return BuilderFinishCfg{
 		chainConfig:           chainConfig,
@@ -56,6 +58,7 @@ func StageBuilderFinishCfg(
 		sealCancel:            sealCancel,
 		blockReader:           blockReader,
 		latestBlockBuiltStore: latestBlockBuiltStore,
+		transientPayload:      transientPayload,
 	}
 }
 
@@ -99,6 +102,10 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 		return err
 	}
 	*current = exec.AssembledBlock{} // hack to clean global data
+	if cfg.transientPayload {
+		cfg.builderState.BuilderResultCh <- blockWithReceipts
+		return nil
+	}
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
