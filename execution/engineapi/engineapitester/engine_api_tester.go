@@ -373,6 +373,18 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
 	}
+	if args.BeforeNodeStart != nil {
+		// Node.Close does not stop services before Node.Start has been called.
+		inspectionComplete := false
+		addCleanup(func() error {
+			if !inspectionComplete {
+				return ethBackend.Stop()
+			}
+			return nil
+		})
+		args.BeforeNodeStart(ethBackend.ChainDB().(kv.TemporalRoDB))
+		inspectionComplete = true
+	}
 	err = ethNode.Start()
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethNode.Start: %w", err)
@@ -445,6 +457,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		NodeKey:              nodeKey,
 		StateAgg:             stateAgg,
 		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
+		ExecutionModule:      ethBackend.ExecutionModule(),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -463,6 +476,8 @@ type EngineApiTesterInitArgs struct {
 	MdbxDBSizeLimit         datasize.ByteSize
 	StateTransitionObserver execmodule.StateTransitionObserver
 	EnableTestingAPI        bool
+	// BeforeNodeStart can inspect persisted data before startup execution changes it.
+	BeforeNodeStart func(kv.TemporalRoDB)
 }
 
 type EngineApiTester struct {
@@ -482,6 +497,7 @@ type EngineApiTester struct {
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
 	ChainDB              kv.TemporalRoDB
+	ExecutionModule      execmodule.ExecutionModule
 	cleanup              *cleanupHandle
 }
 

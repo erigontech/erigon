@@ -41,6 +41,12 @@ const (
 	// StateTransitionCommitReady means the tip FCU's metadata and domain writes
 	// have been flushed into its MDBX transaction, which has not committed yet.
 	StateTransitionCommitReady
+	// StateTransitionCatchupCommitReady means a catch-up cycle has flushed its
+	// writes into an uncommitted MDBX transaction. The FCU may need more cycles.
+	StateTransitionCatchupCommitReady
+	// StateTransitionCatchupCommitComplete means that cycle is durable, before
+	// opening the next read view. Final forkchoice markers may still be pending.
+	StateTransitionCatchupCommitComplete
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each

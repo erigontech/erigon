@@ -518,6 +518,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if result != nil {
+		if result.Status == ExecutionStatusSuccess && fcuHeader.Number.Uint64() == finishProgressBefore {
+			// An already-executed head still needs durable forkchoice markers.
+			if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
+				writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
+				return nil
+			}); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
 		return nil
 	}
@@ -604,9 +613,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
 			// fresh SD built below (no reuse).
-			if err := sd.Commit(ctx, commitRwTx); err != nil {
+			if err := sd.Commit(ctx, commitRwTx, func(kv.RwTx) error {
+				e.observeStateTransition(ctx, StateTransitionCatchupCommitReady)
+				return nil
+			}); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
+			e.observeStateTransition(ctx, StateTransitionCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {

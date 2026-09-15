@@ -72,6 +72,8 @@ type crashRecoveryRequest struct {
 	Deadline       time.Time
 	Canonical      []*engineapitester.MockClPayload
 	Replacement    []*engineapitester.MockClPayload
+	CatchupCommit  int
+	Downloaded     []crashRecoveryBlock
 }
 
 type crashRecoveryState struct {
@@ -315,6 +317,14 @@ func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
 
 func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState {
 	t.Helper()
+	state := readCrashRecoveryCheckpoint(t, db)
+	require.Equal(t, uint64(len(state.TxNums)-1), state.CommitmentBlock, "commitment and canonical TxNums must describe the same block")
+	require.Equal(t, state.Canonical[state.CommitmentBlock], state.HeadBlock, "commitment must describe the head block")
+	return state
+}
+
+func readCrashRecoveryCheckpoint(t *testing.T, db kv.TemporalRoDB) crashRecoveryState {
+	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -359,11 +369,11 @@ func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState
 	root, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(encoded)
 	require.NoError(t, err)
 	state.StateRoot, state.CommitmentBlock, state.CommitmentTx = common.BytesToHash(root), blockNum, txNum
-	require.Equal(t, lastBlock, blockNum, "commitment and canonical TxNums must describe the same block")
-	header, err := rawdb.ReadHeaderByHash(tx, state.HeadBlock)
+	require.LessOrEqual(t, blockNum, lastBlock, "commitment must have a canonical block")
+	header, err := rawdb.ReadHeaderByHash(tx, state.Canonical[blockNum])
 	require.NoError(t, err)
 	require.NotNil(t, header)
-	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match the head header")
+	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match its canonical header")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain} {
 		state.Domains[domain] = readCrashRecoveryDomain(t, tx, domain)
 	}
@@ -483,7 +493,11 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			configureCrashRecovery(config)
+			if request.CatchupCommit > 0 {
+				configureCatchupCrashRecovery(config)
+			} else {
+				configureCrashRecovery(config)
+			}
 			config.Sync.ParallelStateFlushing = true
 		},
 	})
@@ -515,13 +529,34 @@ func runUnwindCrashChild(t *testing.T) {
 	canonicalCleared.release()
 
 	t.Log("importing the replacement chain")
-	insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
-	boundary := transitions.hold(t, request.Point, 1)
+	var boundary *stateTransitionHold
+	if request.CatchupCommit > 0 {
+		insertCrashRecoveryBlocks(ctx, t, eat, request.Downloaded)
+		seen := 0
+		boundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
+			seen++
+			return seen == request.CatchupCommit
+		})
+	} else {
+		insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
+		boundary = transitions.hold(t, request.Point, 1)
+	}
 	// Abort before cleanup can release the crash barrier, even on failure.
 	t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
 	response := startForkchoice(request.Replacement[len(request.Replacement)-1])
 	t.Logf("waiting for replacement transition %d", request.Point)
-	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response), "replacement FCU")
+	if request.CatchupCommit > 0 {
+		select {
+		case <-boundary.reached:
+			require.NoError(t, ctx.Err())
+		case err := <-response:
+			t.Fatalf("unvalidated FCU returned before catch-up cycle %d, transition %d: %v", request.CatchupCommit, request.Point, err)
+		case <-ctx.Done():
+			t.Fatalf("waiting for catch-up cycle %d, transition %d: %v", request.CatchupCommit, request.Point, ctx.Err())
+		}
+	} else {
+		require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response), "replacement FCU")
+	}
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
 	require.NoError(t, err)
@@ -569,7 +604,12 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	require.NotEmpty(t, request.Replacement)
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
 	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
-	require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
+	if request.CatchupCommit > 0 {
+		require.Greater(t, replacementHead, canonicalHead+16, "the replacement FCU must enter catch-up mode")
+		require.Len(t, request.Downloaded, len(request.Replacement))
+	} else {
+		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
+	}
 	testDeadline, _ := t.Deadline()
 	deadline := crashRecoveryAttemptDeadline(time.Now(), testDeadline)
 	ctx, cancel := context.WithDeadline(t.Context(), deadline)
