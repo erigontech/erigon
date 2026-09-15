@@ -1691,3 +1691,17 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 	}
 	return nil
 }
+
+func TestStateDecodeRejectsTruncatedInput(t *testing.T) {
+	src := state{Root: []byte{1, 2, 3}, RootPresent: true}
+	src.TouchMap[5], src.AfterMap[127], src.Depths[64], src.BranchBefore[100] = 0x1234, 0xffff, 9, true
+	enc, err := src.Encode(nil)
+	require.NoError(t, err)
+
+	var got state
+	require.NoError(t, got.Decode(enc))
+	require.Equal(t, src, got)
+	for n := range len(enc) {
+		require.Error(t, new(state).Decode(enc[:n]), "prefix of %d bytes", n)
+	}
+}
