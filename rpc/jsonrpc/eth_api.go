@@ -186,7 +186,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if !conf.SingleNodeMode {
 		blocksLRUBytes *= 5
 	}
-	blocksLRU := cache.NewByteLRU(blocksLRUBytes, func(_ uint64, b *types.Block) int64 { return int64(b.Size()) + cache.ByteLRUEntryOverheadBytes })
+	blocksLRU := cache.NewByteLRU(blocksLRUBytes, func(_ uint64, b *types.Block) int64 { return int64(b.EncodingSize()) + cache.ByteLRUEntryOverheadBytes })
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
