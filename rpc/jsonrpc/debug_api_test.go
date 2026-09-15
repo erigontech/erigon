@@ -49,6 +49,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -503,6 +504,30 @@ func TestUnpricedBlobsIgnoreBlobBaseFeeOverride(t *testing.T) {
 	result, err := newTestEthAPIWithFilters(t, c.m).Call(context.Background(), args, nil, nil, overrides)
 	require.NoError(t, err)
 	require.Equal(t, zeroWord, result.String())
+}
+
+// TestPricedBlobsRejectBlobBaseFeeOverride pins that a blob fee cap below the
+// overridden block blob fee is rejected, as eth_estimateGas rejects it.
+func TestPricedBlobsRejectBlobBaseFeeOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opBlobbasefee)
+	args := ethapi.CallArgs{
+		From:                &c.bankAddress,
+		To:                  &contractAddr,
+		MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(10)),
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	overrides := &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(11))}
+
+	var buf bytes.Buffer
+	err := c.debugAPI().TraceCall(context.Background(), args, nil, &tracersConfig.TraceConfig{
+		BlockOverrides: overrides,
+	}, jsonstream.New(&buf))
+	require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
 }
 
 // TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
