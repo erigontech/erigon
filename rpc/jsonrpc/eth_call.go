@@ -513,12 +513,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
+	proofTrie, proofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(calculatedAccountProofRoot, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in account proof trie calculatedAccountProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
+	if !bytes.Equal(proofRoot, header.Root[:]) {
+		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", proofRoot, header.Root[:])
 	}
 
 	// set initial response fields
