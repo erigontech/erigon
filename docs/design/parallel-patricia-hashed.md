@@ -85,15 +85,15 @@ the mount fold DFS-walks it directly.
 Per-batch state: the `prefixTrie`, the `plainKeyArena`, and a mutex-guarded
 `deferredCombined` slice. `Insert` calls MUST be serialized by the caller;
 `deferredCombined` is guarded by `deferredMu` (`appendDeferred`). A fork's per-nibble
-cell and deferred-update slots are written by its children at distinct indices and read
+cell, touch and presence slots are written by its children at distinct indices and read
 only after the join.
 
 ### 3.3 `ParallelPatriciaHashed` (`parallel_patricia_hashed.go`)
 
 Holds a configuration/base `template *HexPatriciaHashed`, a `TrieContextFactory`, the `cfg TrieConfig` and `accountKeyLen` used to mint
 pooled workers, `numWorkers`, the published `rootHash`, and — for the deferred path
-— a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. Worker
-tries come from the package-wide `hphPool`. The `template`
+— a `deferredForCaller` hand-off slice, filled when `cfg.LeaveDeferredForCaller` is set.
+Worker tries come from the package-wide `hphPool`. The `template`
 doubles as the **mount base** during `Process`: the fork walk starts on it, positions it
 at every eligible split row it reaches, stitches the children's folded cells into that
 row, and folds the completed walk to the root. A fork below a clone positions and
@@ -115,9 +115,10 @@ the top, a clone below a fork — in nibble-ascending order, applying each termi
 before descending, so an account at depth 64 precedes its storage keys (I4). A
 terminating node with a nil `plainKey` and no children is an error.
 
-A node is a **fork point** when it has two or more children, the work below its
-non-largest children — `subtreeCount − max(child.subtreeCount)` — reaches the round's
-grain (§4.1.1). At a fork point with prefix `P` the walker:
+A node is a **fork point** when it has two or more children and the work below its
+non-largest children — `Σ child.subtreeCount − max(child.subtreeCount)` — reaches the
+round's grain (§4.1.1). A key that terminates at the node is applied before the fork and
+does not count. At a fork point with prefix `P` the walker:
 
 1. **Positions itself on the row at depth `len(P)+1`.** `unfoldToRow` folds while
    `needFolding(P·0)`, then unfolds while `needUnfolding(P·0) > 0`, never past that depth.
@@ -147,9 +148,9 @@ grain (§4.1.1). At a fork point with prefix `P` the walker:
    touch bit, and folding the opened row would leave one in `P`'s parent record.
 
 Clones write only prefixes strictly below the fork row; the walker is the single writer
-of `P` and of every row above it. Each child's deferred branch updates go to a per-nibble
-slot that the walker appends to the shared accumulator after the join; the clone's
-`Metrics` are merged on release.
+of `P` and of every row above it. When a child finishes, successfully or not, `checkin`
+merges its `Metrics` and appends its deferred branch updates to the shared accumulator in
+completion order, then releases the clone.
 
 ### 4.1.1 Grain and read transactions
 
@@ -274,7 +275,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
 | any error after the walk began | restore the base trie's in-memory state from the snapshot taken before it — root cell and its three flags, no open rows, no queued branch updates |
-| branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; `ClearDeferred` on the abort path discards the whole round |
+| branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; on the abort path `ClearDeferred` discards the base's queued records and `drainDeferred` discards the records the clones and the root fold already handed to the accumulator |
 
 ## 9. Validation
 
@@ -301,7 +302,7 @@ in scheduling.
 | flag | `--experimental.parallel-commitment=false` | (default) |
 | `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
 | parallel unit | none | one clone per child nibble of a forking prefix-trie node (≤16 per fork) |
-| split granularity | none | every prefix-trie split point whose subtree reaches the grain, at any depth and in either plane |
+| split granularity | none | every prefix-trie split point whose non-largest children together reach the grain, at any depth and in either plane |
 | merge | single bottom-up fold | folded cells stitched into the fork row, the walk continuing on the same trie |
 | branch writes | inline | deferred, applied once or handed to the caller |
 | key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
@@ -334,7 +335,7 @@ figures are for inspection, not a CI gate.
 | `execution/commitment/parallel_mount.go` | `processMounted` — drive the fork walk over the whole prefix trie and fold the base to the root; `mountTo` re-basing a clone on the fork row |
 | `execution/commitment/fork_walk.go` | `forkWalk` — the walk, the fork predicate, the grain, the `ctxLeasePool` and the sibling claim loop |
 | `execution/commitment/split_point.go` | depth-agnostic split-point primitives: `unfoldToRow`, `openEmptyRow`/`closeIfEmpty`, `stitchSplitCells`, `foldSplitRow` |
-| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by both fold levels |
+| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop at which a clone returns its fork-row cell |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
