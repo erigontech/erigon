@@ -2851,12 +2851,10 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 }
 
 func (s *state) Decode(buf []byte) error {
-	aux := bytes.NewBuffer(buf)
-	var rootFlags stateRootFlag
-	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
-		return fmt.Errorf("rootFlags: %w", err)
+	if len(buf) < 3 {
+		return fmt.Errorf("state header: %w", io.ErrUnexpectedEOF)
 	}
-
+	rootFlags := stateRootFlag(buf[0])
 	if rootFlags&stateRootPresent != 0 {
 		s.RootPresent = true
 	}
@@ -2867,34 +2865,26 @@ func (s *state) Decode(buf []byte) error {
 		s.RootChecked = true
 	}
 
-	var rootSize uint16
-	if err := binary.Read(aux, binary.BigEndian, &rootSize); err != nil {
-		return fmt.Errorf("root size: %w", err)
+	rootSize := int(binary.BigEndian.Uint16(buf[1:]))
+	buf = buf[3:]
+	if len(buf) < rootSize+len(s.Depths)+2*len(s.TouchMap)+2*len(s.AfterMap)+16 {
+		return fmt.Errorf("state body: %w", io.ErrUnexpectedEOF)
 	}
 	s.Root = make([]byte, rootSize)
-	if _, err := aux.Read(s.Root); err != nil {
-		return fmt.Errorf("root: %w", err)
+	buf = buf[copy(s.Root, buf):]
+	for i := range s.Depths {
+		s.Depths[i] = int16(buf[i])
 	}
-	d := make([]byte, len(s.Depths))
-	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
-		return fmt.Errorf("depths: %w", err)
+	buf = buf[len(s.Depths):]
+	for i := range s.TouchMap {
+		s.TouchMap[i] = binary.BigEndian.Uint16(buf[2*i:])
 	}
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(d[i])
+	buf = buf[2*len(s.TouchMap):]
+	for i := range s.AfterMap {
+		s.AfterMap[i] = binary.BigEndian.Uint16(buf[2*i:])
 	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
-		return fmt.Errorf("afterMap: %w", err)
-	}
-	var branch1, branch2 uint64
-	if err := binary.Read(aux, binary.BigEndian, &branch1); err != nil {
-		return fmt.Errorf("branchBefore1: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &branch2); err != nil {
-		return fmt.Errorf("branchBefore2: %w", err)
-	}
+	buf = buf[2*len(s.AfterMap):]
+	branch1, branch2 := binary.BigEndian.Uint64(buf), binary.BigEndian.Uint64(buf[8:])
 
 	for i := range 64 {
 		if branch1&(1<<i) != 0 {
