@@ -551,3 +551,27 @@ func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestForksServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = noReadTxDB{m.DB}
+	got, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	want, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = noReadTxDB{m.DB}
+	got, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
