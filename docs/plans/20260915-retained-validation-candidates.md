@@ -11,7 +11,8 @@ of executing A again. Validation and fork choice remain serialized.
 
 This is bounded local reuse, not a distributed CRDT or a persistent artifact
 format. Candidates remain eligible only until the next fork-choice operation,
-a notified canonical-height change, an invalid-chain purge, or module shutdown.
+a notified canonical-height change, a `SetHead` rewind, an invalid-chain purge,
+or module shutdown.
 Validity facts survive artifact eviction, as before. A validity-cache hit does
 not reconstruct an evicted state.
 

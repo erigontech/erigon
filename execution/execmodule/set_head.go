@@ -116,6 +116,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
 	sd.SetCodeStore(e.codeStore)
+	e.forkValidator.ClearWithUnwind()
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {

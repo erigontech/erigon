@@ -130,3 +130,26 @@ func TestValidatedCandidateClosedAfterValidHashEviction(t *testing.T) {
 	require.Nil(t, first.GetCommitmentCtx())
 	require.Nil(t, second.GetCommitmentCtx())
 }
+
+func TestValidatedCandidateClosedBySetHead(t *testing.T) {
+	m := execmoduletester.New(t)
+	canonical, err := m.GenerateChain(2, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(canonical))
+
+	child, err := m.GenerateChainFrom(canonical.Blocks[1], 1, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), child.Blocks)
+	require.NoError(t, err)
+	result, err := m.ValidateChain(t.Context(), child.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	_, _, state := m.ForkValidator.ExtendingFork()
+	require.NotNil(t, state)
+
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1))
+	require.False(t, m.ForkValidator.HasValidatedState(child.Blocks[0].Hash()))
+	require.Nil(t, state.GetCommitmentCtx())
+}
