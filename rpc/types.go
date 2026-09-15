@@ -273,7 +273,8 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 			bnh.BlockHash = &hash
 			return nil
 		} else {
-			if blckNum, err = hexutil.DecodeUint64(input); err != nil {
+			blckNum, err := hexutil.DecodeUint64(input)
+			if err != nil {
 				return err
 			}
 			if blckNum > math.MaxInt64 {
