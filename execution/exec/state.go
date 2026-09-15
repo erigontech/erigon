@@ -389,9 +389,19 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 		rw.notifier.Wait()
 	}
 
+	start := time.Now()
+	defer func() {
+		if result == nil {
+			return
+		}
+		result.Duration = time.Since(start)
+		if r, ok := txTask.(ResultReporter); ok {
+			r.TaskDone(result)
+		}
+	}()
+
 	if rw.metrics != nil && dbg.KVReadLevelledMetrics {
 		rw.metrics.Active.Add(1)
-		start := time.Now()
 		defer func() {
 			rw.metrics.Duration.Add(time.Since(start))
 			if readDuration := rw.ibs.ReadDuration(); readDuration > 0 {

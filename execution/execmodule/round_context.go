@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/exec"
 )
 
@@ -84,10 +83,12 @@ func WithRoundCommit(ctx context.Context, claim func() bool) context.Context {
 	return context.WithValue(ctx, roundCommitKey{}, claim)
 }
 
-// WithTxExecuted attaches a callback a pre-exec round calls as each of its transactions finishes executing. See
-// exec.WithTxExecuted.
-func WithTxExecuted(ctx context.Context, done func(common.Hash)) context.Context {
-	return exec.WithTxExecuted(ctx, done)
+// TxProgress is told when each of a pre-exec round's transactions starts and stops executing. See exec.TxProgress.
+type TxProgress = exec.TxProgress
+
+// WithTxProgress attaches p to a pre-exec round's context.
+func WithTxProgress(ctx context.Context, p TxProgress) context.Context {
+	return exec.WithTxProgress(ctx, p)
 }
 
 func roundCommitClaim(ctx context.Context) func() bool {

@@ -2089,6 +2089,18 @@ type taskVersion struct {
 	profile    bool
 	stats      map[int]ExecutionStat
 	statsMutex *sync.Mutex
+	progress   exec.TxProgress // the round's, when its caller asked to see each transaction run
+}
+
+// TaskDone hands a regular transaction's measured run time to the round, once the run has completed. The worker
+// calls it, so a run that finishes after its round was cut is still reported.
+func (ev *taskVersion) TaskDone(result *exec.TxResult) {
+	if ev.progress == nil || result.Err != nil {
+		return
+	}
+	if h := ev.execTask.TxHash(); h != (common.Hash{}) {
+		ev.progress.TxExecuted(h, result.Duration)
+	}
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2114,6 +2126,10 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	postApplyMessage := evm.Context.PostApplyMessage
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
+
+	if stall := dbg.ExecTxStall; stall > 0 && ev.execTask.TxHash() != (common.Hash{}) {
+		time.Sleep(stall)
+	}
 
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
@@ -2393,13 +2409,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	tx := task.index
 	be.results[tx] = &execResult{res, nil}
-	if res.Err == nil {
-		if done := exec.TxExecuted(ctx); done != nil {
-			if h := task.TxHash(); h != (common.Hash{}) {
-				done(h)
-			}
-		}
-	}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if res.Version().Incarnation > len(be.tasks) {
@@ -3162,6 +3171,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			profile:    be.profile,
 			stats:      be.stats,
 			statsMutex: &be.Mutex,
+			progress:   exec.TxProgressFrom(ctx),
 		}
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {

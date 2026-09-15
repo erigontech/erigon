@@ -130,6 +130,9 @@ var (
 	ExecShutdownStall = EnvDuration("EXEC_SHUTDOWN_STALL", 0)
 	// ExecShutdownStallEvery applies the stall to one pre-exec round in this many (1 = every round).
 	ExecShutdownStallEvery = EnvInt("EXEC_SHUTDOWN_STALL_EVERY", 1)
+	// ExecTxStall holds every regular transaction's own execution for this long in the parallel executor. Test-only:
+	// it models a transaction that itself runs long, as distinct from a round that stalls around its transactions.
+	ExecTxStall = EnvDuration("EXEC_TX_STALL", 0)
 	// FlashblockSkipBlockEnd strips the per-round block-END (engine.Finalize: withdrawals +
 	// end-of-block system calls) on the FORK-VALIDATION / PreExecute path only. The cocoon DAG
 	// flashblock flow PreExecutes each committed round into ONE accumulating SharedDomains; the

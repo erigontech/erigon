@@ -120,6 +120,9 @@ type TxResult struct {
 	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
 	// adjustments are applied directly to these writes.
 	CollectorWrites state.VersionedWrites
+
+	// Duration is the worker's wall time for this run of the task, from picking it up to handing back its result.
+	Duration time.Duration
 }
 
 func (r *TxResult) compare(other *TxResult) int {
