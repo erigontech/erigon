@@ -64,20 +64,22 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	if sd == nil && e.publishedSD != nil {
 		sd = e.publishedSD()
 	}
-	if sd != nil {
-		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
-			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
-			if err != nil {
-				e.lock.RUnlock()
-				return nil, nil, err
-			}
-			view := overlay.NewReadView(roTx)
+	overlay := e.retainedBlocks
+	if sd != nil && sd.BlockOverlay() != nil {
+		overlay = sd.BlockOverlay()
+	}
+	if overlay != nil {
+		// Open a fresh RO tx while still holding the read lock so that
+		// the overlay cannot be closed between our check and the
+		// NewReadView call (TOCTOU avoidance).
+		roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
 			e.lock.RUnlock()
-			return view, func() { roTx.Rollback() }, nil
+			return nil, nil, err
 		}
+		view := overlay.NewReadView(roTx)
+		e.lock.RUnlock()
+		return view, func() { roTx.Rollback() }, nil
 	}
 	e.lock.RUnlock()
 

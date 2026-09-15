@@ -93,6 +93,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
+		if err := e.seedRetainedBlocks(roTx, sd.BlockOverlay()); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: seed retained blocks: %w", err)
+		}
 	} else {
 		sd.BlockOverlay().UpdateTxn(roTx)
 	}
@@ -170,6 +173,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
+		e.addPendingBlock(blockHash, height, header.ParentHash)
 		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
@@ -179,6 +183,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
 			return 0, err
 		}
+		e.dropPendingBlocks()
 	}
 	return ExecutionStatusSuccess, nil
 }
