@@ -104,6 +104,9 @@ func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error) {
+	if cc, ok := api.tryChainConfig(); ok {
+		return cc.ChainID, nil
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
