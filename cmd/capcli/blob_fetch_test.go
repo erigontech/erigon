@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -176,4 +177,28 @@ func TestBeaconAPISourceCountsOnlyOutboundRequests(t *testing.T) {
 	_, _, err = src.headerRoot(t.Context(), 2)
 	require.NoError(t, err)
 	require.Greater(t, src.requests, before, "a second fetch must advance the counter")
+}
+
+// --from is the only way to repair a range: without it the dump starts at the Deneb fork and
+// rewrites every segment from a store that no longer holds the already-frozen blobs.
+func TestDumpBlobsSnapshotsFromMustBeOnASegmentBoundary(t *testing.T) {
+	var cli struct {
+		DumpBlobsSnapshots DumpBlobsSnapshots `cmd:""`
+	}
+	parser, err := kong.New(&cli)
+	require.NoError(t, err)
+
+	_, err = parser.Parse([]string{"dump-blobs-snapshots", "--datadir", t.TempDir(), "--from", "28880000", "--to", "30060000"})
+	require.NoError(t, err, "the command must accept --from")
+	require.Equal(t, uint64(28880000), cli.DumpBlobsSnapshots.From)
+	require.Equal(t, uint64(30060000), cli.DumpBlobsSnapshots.To)
+
+	var defaults struct {
+		DumpBlobsSnapshots DumpBlobsSnapshots `cmd:""`
+	}
+	dp, err := kong.New(&defaults)
+	require.NoError(t, err)
+	_, err = dp.Parse([]string{"dump-blobs-snapshots", "--datadir", t.TempDir()})
+	require.NoError(t, err)
+	require.Zero(t, defaults.DumpBlobsSnapshots.From, "omitting --from must keep the fork-boundary default")
 }
