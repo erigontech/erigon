@@ -103,6 +103,10 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	}
 	defer historyCleanup()
 
+	if err := p.ensureTransactionsStraddleForUnwind(ctx, toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: ensure transactions: %w", err)
+	}
+
 	// 1. Snapshot-trim (staged for post-commit FS deletion).
 	removed, err := p.unwindSnapshotsPastBlock(ctx, opts.Tx, toBlock)
 	if err != nil {
