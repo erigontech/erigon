@@ -397,25 +397,14 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
 }
 
+// AllProtocolChanges activates Osaka at timestamp 0, so the zero-valued head is
+// already past it.
 func TestGetBlobsV1PostOsakaRejection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	require := require.New(t)
 
-	// Osaka is active (AllProtocolChanges has Osaka enabled from genesis):
-	// GetBlobsV1 must return UnsupportedForkError
-	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	engineServer := NewEngineServer(log.New(), chain.AllProtocolChanges, fixedHeadExecutionModule{}, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, ethconfig.Defaults.MaxReorgDepth)
 
-	txPoolClient := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
-	executionRpc := mockSentry.ExecModule
-	fcuTimeout := ethconfig.Defaults.FcuTimeout
-	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, txPoolClient, mockSentry.TxPool, fcuTimeout, maxReorgDepth)
-
-	ctx := context.Background()
-
-	_, err := engineServer.GetBlobsV1(ctx, []common.Hash{{}})
+	_, err := engineServer.GetBlobsV1(context.Background(), []common.Hash{{}})
 	var rpcErr *rpc.UnsupportedForkError
 	require.ErrorAs(err, &rpcErr)
 	require.Equal(-38005, rpcErr.ErrorCode())
