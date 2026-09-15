@@ -1312,9 +1312,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
-			Task:               txTask,
-			index:              i,
-			shouldDelayFeeCalc: true,
+			Task:  txTask,
+			index: i,
 		}
 
 		executor.tasks = append(executor.tasks, t)
@@ -1840,8 +1839,7 @@ const (
 
 type execTask struct {
 	exec.Task
-	index              int
-	shouldDelayFeeCalc bool
+	index int
 }
 
 type execResult struct {
@@ -1946,11 +1944,16 @@ func (result *execResult) calcFees(
 	stateReader state.StateReader,
 	chainRules *chain.Rules,
 	credited *state.WriteSet,
-	recipient accounts.Address,
-	tipCredit uint256.Int,
 ) (*state.WriteSet, feeOutcome, error) {
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
+
+	recipient := result.Coinbase
+	tipCredit := result.ExecutionResult.FeeTipped
+	if chainRules.IsParlia {
+		recipient = params.SystemAddress
+		tipCredit.Add(&result.ExecutionResult.FeeTipped, &result.ExecutionResult.FeeBlob)
+	}
 
 	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
 	// own prior incarnations that would double-apply the tip on re-execution.
@@ -1981,7 +1984,7 @@ func (result *execResult) calcFees(
 		}
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
-	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
+	// applied to sender under calcFees=false execution). Track Nonce / CodeHash
 	// alongside Balance so the EIP-161 empty-removal check below sees the
 	// worker's post-write coinbase state, not the stale pre-tx snapshot.
 	coinbaseNonce := uint64(0)
@@ -2266,7 +2269,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
-		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+		chainConfig, chainReader, dirs, false)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
 		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
@@ -2887,7 +2890,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// version-only validator would miss (not observed on Chapel; revisit for
 		// high-contention BSC). System txs are excluded: their result carries no
 		// Coinbase and they distribute SystemAddress themselves.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && !txTask.IsSystemTx() && txResult != nil && txResult.Err == nil && be.tasks[tx].shouldDelayFeeCalc {
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && !txTask.IsSystemTx() && txResult != nil && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
@@ -2899,15 +2902,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
 				}
 			}
-			recipient := txResult.Coinbase
-			tipCredit := txResult.ExecutionResult.FeeTipped
-			if pe.cfg.chainConfig.Parlia != nil {
-				recipient = params.SystemAddress
-				tipCredit.Add(&txResult.ExecutionResult.FeeTipped, &txResult.ExecutionResult.FeeBlob)
-			}
 			existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			tipWrites, outcome, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules(),
-				be.creditedWrites(txVersion, existingWrites), recipient, tipCredit)
+				be.creditedWrites(txVersion, existingWrites))
 			if err != nil {
 				return nil, err
 			}
