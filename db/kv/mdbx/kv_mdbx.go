@@ -470,6 +470,7 @@ type MdbxKV struct {
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
 	txsAllDoneOnCloseCond *sync.Cond
+	paused                bool // new txs wait while CloseAndReopen has the env closed
 
 	// liveTxs tracks all currently-open chaindata txs so we can dump the
 	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
@@ -558,6 +559,9 @@ func (db *MdbxKV) trackTxBegin() bool {
 	db.txsCountMutex.Lock()
 	defer db.txsCountMutex.Unlock()
 
+	for db.paused {
+		db.txsAllDoneOnCloseCond.Wait()
+	}
 	isOpen := !db.closed.Load()
 	if isOpen {
 		db.txsCount++
@@ -642,7 +646,7 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
-	return (db.txsCount == 0) && db.closed.Load()
+	return (db.txsCount == 0) && db.closed.Load() && !db.paused
 }
 
 func (db *MdbxKV) trackTxEnd() {
@@ -655,9 +659,52 @@ func (db *MdbxKV) trackTxEnd() {
 		panic("MdbxKV: unmatched trackTxEnd")
 	}
 
-	if db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Signal()
+	if db.txsCount == 0 {
+		db.txsAllDoneOnCloseCond.Broadcast()
 	}
+}
+
+// CloseAndReopen waits for open txs to end, closes the env, runs whileClosed and
+// opens the env again. New txs wait until the env is open again. It returns
+// false without calling whileClosed if open txs outlive drainTimeout.
+func (db *MdbxKV) CloseAndReopen(ctx context.Context, drainTimeout time.Duration, whileClosed func()) (bool, error) {
+	db.txsCountMutex.Lock()
+	if db.closed.Load() {
+		db.txsCountMutex.Unlock()
+		return false, nil
+	}
+	db.paused = true
+	defer func() {
+		db.txsCountMutex.Lock()
+		db.paused = false
+		db.txsAllDoneOnCloseCond.Broadcast()
+		db.txsCountMutex.Unlock()
+	}()
+	deadline := time.Now().Add(drainTimeout)
+	wake := time.AfterFunc(drainTimeout, func() {
+		db.txsCountMutex.Lock()
+		db.txsAllDoneOnCloseCond.Broadcast()
+		db.txsCountMutex.Unlock()
+	})
+	defer wake.Stop()
+	for db.txsCount > 0 && time.Now().Before(deadline) {
+		db.txsAllDoneOnCloseCond.Wait()
+	}
+	drained := db.txsCount == 0
+	db.txsCountMutex.Unlock()
+	if !drained {
+		return false, nil
+	}
+
+	db.env.Close()
+	whileClosed()
+	reopened, err := db.opts.Open(ctx)
+	if err != nil {
+		return true, err
+	}
+	fresh := reopened.(*MdbxKV)
+	db.env, db.buckets = fresh.env, fresh.buckets
+	return true, nil
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
