@@ -1747,7 +1747,7 @@ func TestGrowLRU_AddOfPresentKeyKeepsCount(t *testing.T) {
 	})
 }
 
-// byteLRU bounds by the bytes it holds rather than an entry count: mixed-size
+// ByteLRU bounds by the bytes it holds rather than an entry count: mixed-size
 // values evict until the newcomer fits, every removal reports through onEvict,
 // and a value larger than the whole budget is rejected without disturbing the
 // resident set.

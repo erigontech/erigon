@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -82,7 +84,7 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	downloader.sn = snapshot
 	downloader.addRetrySlot(1)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{1, 20, 19, 18, 17, 16, 15}, reader.slots)
@@ -123,7 +125,7 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	downloader.rpc = peers
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
@@ -154,35 +156,152 @@ func TestBlobHistoryDownloaderNewRetryRevokesPriorCompletionBeforeCancellationRe
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	downloader.backfillCompleted.Store(true)
 	var downstreamComplete atomic.Bool
-	var transitions atomic.Int32
+	var transitions []bool
 	downstreamComplete.Store(true)
-	downloader.SetNotifyBlobBackfilled(func(completed bool) {
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
 		downstreamComplete.Store(completed)
-		transitions.Add(1)
-	})
+		transitions = append(transitions, completed)
+	}))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.NotEmpty(t, downloader.retryRanges)
 	require.False(t, downloader.backfillCompleted.Load())
 	require.False(t, downstreamComplete.Load())
-	require.Equal(t, int32(1), transitions.Load())
+	require.Equal(t, []bool{true, false}, transitions)
 	downloader.addRetrySlot(block.GetSlot())
-	require.Equal(t, int32(1), transitions.Load(), "duplicate retry emitted another false transition")
+	require.Equal(t, []bool{true, false}, transitions, "duplicate retry emitted another false transition")
 }
 
 func TestBlobHistoryDownloaderCompletionCallbackCanReplaceItself(t *testing.T) {
 	downloader := &BlobHistoryDownloader{}
 	done := make(chan struct{})
-	downloader.SetNotifyBlobBackfilled(func(bool) {
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(bool) {
 		downloader.SetNotifyBlobBackfilled(nil)
 		close(done)
-	})
+	}))
 
 	go downloader.setBackfillCompleted(true)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("completion callback ran while the callback lock was held")
+	}
+}
+
+func TestBlobHistoryDownloaderLateCompletionCallbackReceivesCurrentState(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	var completed atomic.Bool
+	var notifications atomic.Int32
+
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) {
+		completed.Store(value)
+		notifications.Add(1)
+	}))
+
+	require.True(t, completed.Load())
+	require.Equal(t, int32(1), notifications.Load())
+}
+
+func TestBlobHistoryDownloaderCompletionCallbackCanReregisterItself(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	done := make(chan struct{})
+	var callback *BlobBackfilledNotifier
+	callback = NewBlobBackfilledNotifier(func(bool) { downloader.SetNotifyBlobBackfilled(callback) })
+
+	go func() {
+		downloader.SetNotifyBlobBackfilled(callback)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion callback re-registration did not finish")
+	}
+}
+
+func TestBlobHistoryDownloaderLateCompletionReplayPreservesNewerTransition(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	values := make(chan bool, 2)
+	done := make(chan struct{})
+
+	go func() {
+		downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
+			values <- completed
+			if completed {
+				close(started)
+				<-release
+			}
+		}))
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("completion replay did not start")
+	}
+	downloader.setBackfillCompleted(false)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion replay did not finish")
+	}
+
+	require.Equal(t, true, <-values)
+	require.Equal(t, false, <-values)
+}
+
+func TestBlobHistoryDownloaderReplacementReceivesTransitionQueuedDuringReplay(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	done := make(chan bool, 1)
+
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) {
+		if !completed {
+			return
+		}
+		downloader.setBackfillCompleted(false)
+		downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { done <- value }))
+	}))
+
+	select {
+	case completed := <-done:
+		require.False(t, completed)
+	case <-time.After(time.Second):
+		t.Fatal("replacement callback did not receive the queued transition")
+	}
+}
+
+func TestBlobHistoryDownloaderReplacementReceivesCurrentStateDuringReplay(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	downloader.setBackfillCompleted(true)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	replacementValues := make(chan bool, 1)
+
+	go downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(bool) {
+		close(started)
+		<-release
+	}))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial replay did not start")
+	}
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { replacementValues <- value }))
+	close(release)
+
+	select {
+	case value := <-replacementValues:
+		require.True(t, value)
+	case <-time.After(time.Second):
+		t.Fatal("replacement callback did not receive current state")
 	}
 }
 
@@ -327,7 +446,7 @@ func TestBlobHistoryDownloaderCancellationDuringRetryStopsBeforeRecentScan(t *te
 	downloader.ctx = ctx
 	downloader.addRetrySlot(retrySlot)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{retrySlot}, reader.slots)
@@ -356,7 +475,7 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanWithoutNotifying(t *tes
 	downloader.blobStorage = blobStorage
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, target, reader.slots[len(reader.slots)-1])
@@ -666,7 +785,7 @@ func TestBlobHistoryDownloaderDropsRetriesBeforeNonArchiveRetentionFloor(t *test
 	require.Empty(t, downloader.retryRanges)
 }
 
-func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
+func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader *boundaryBlockReader) *BlobHistoryDownloader {
 	t.Helper()
 	downloader := &BlobHistoryDownloader{
 		ctx:                    t.Context(),
@@ -682,7 +801,35 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint6
 		logger:                 log.New(),
 	}
 	downloader.headSlot.Store(headSlot)
+	// The downloader resolves each block's root from the canonical index, so a fixture without
+	// one would make every slot look like a gap regardless of what the reader serves.
+	seedCanonicalRoots(t, downloader.indiciesDB.(kv.RwDB), headSlot, reader)
 	return downloader
+}
+
+// seedCanonicalRoots stands in for a synced index: each slot maps to the root of the block the
+// reader serves there, so the production lookup and the storage mocks agree. The reader's own
+// fields are read directly rather than through ReadBeaconBlockBodyBySlot, which would pollute
+// the slot list tests assert on.
+func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader *boundaryBlockReader) {
+	t.Helper()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= headSlot; slot++ {
+			block := reader.blocks[slot]
+			if block == nil {
+				block = reader.block
+			}
+			if block == nil {
+				continue
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			if err := beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
 }
 
 type boundaryBlockReader struct {
@@ -755,3 +902,53 @@ func (s boundarySyncedChecker) Synced() bool { return bool(s) }
 type boundarySyncedCheckerFunc func() bool
 
 func (f boundarySyncedCheckerFunc) Synced() bool { return f() }
+
+// unindexCanonicalRoot removes a slot's canonical row, leaving the state a snapshot-backed slot is
+// in before the antiquary's indexing walk reaches it.
+func unindexCanonicalRoot(t *testing.T, db kv.RwDB, slot uint64) {
+	t.Helper()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot))
+	}))
+}
+
+// Below BlocksAvailable the reader serves a block straight from the segment without consulting the
+// canonical index, so a block can be visible before its index row exists. Treating that as an empty
+// slot would count it as visited, leave it out of retryRanges, and let the pass ratchet the target
+// up to the recent window and report completion — the slot's blobs would never be fetched and blob
+// retirement could then wedge on the dump.
+func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const head = uint64(1_000)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = head
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{head: block}}
+
+	downloader := newBoundaryDownloader(t, head, 0, head, reader)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	expectSidecarFilesPresent(blobStorage)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	db := downloader.indiciesDB.(kv.RwDB)
+	unindexCanonicalRoot(t, db, head)
+	targetBefore := downloader.nextBackfillTargetSlot
+
+	require.Error(t, downloader.downloadOnce(false), "an unindexed slot must fail the pass, not be skipped")
+	require.Equal(t, targetBefore, downloader.nextBackfillTargetSlot, "the pass advanced its target over an unindexed slot")
+	require.False(t, downloader.backfillCompleted.Load(), "the pass reported completion over an unindexed slot")
+
+	// Indexing catches up: the slot is now resolvable and the pass can finish.
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, head, root)
+	}))
+	reader.slots = nil
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Contains(t, reader.slots, head, "the slot was not revisited after its index row appeared")
+	require.True(t, downloader.backfillCompleted.Load(), "a fully indexed and stored range must complete")
+}

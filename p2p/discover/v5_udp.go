@@ -615,10 +615,10 @@ func (t *UDPv5) dispatch() {
 			t.sendNextCall(c.id)
 
 		case r := <-t.sendCh:
-			t.send(r.destID, r.destAddr, r.msg, nil)
+			_, _ = t.send(r.destID, r.destAddr, r.msg, nil)
 
 		case p := <-t.packetInCh:
-			t.handlePacket(p.Data, p.Addr)
+			_ = t.handlePacket(p.Data, p.Addr)
 			// Arm next read.
 			t.readNextCh <- struct{}{}
 
@@ -878,7 +878,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		if t.trace {
 			t.log.Trace("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
 		}
-		t.sendResponse(fromID, fromAddr, currentChallenge)
+		_ = t.sendResponse(fromID, fromAddr, currentChallenge)
 		return
 	}
 
@@ -889,7 +889,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		challenge.Node = n
 		challenge.RecordSeq = n.Seq()
 	}
-	t.sendResponse(fromID, fromAddr, challenge)
+	_ = t.sendResponse(fromID, fromAddr, challenge)
 }
 
 var (
@@ -948,7 +948,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr netip.AddrP
 	} else {
 		remoteIP = fromAddr.Addr().AsSlice()
 	}
-	t.sendResponse(fromID, fromAddr, &v5wire.Pong{
+	_ = t.sendResponse(fromID, fromAddr, &v5wire.Pong{
 		ReqID:  p.ReqID,
 		ToIP:   remoteIP,
 		ToPort: fromAddr.Port(),
@@ -960,7 +960,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr netip.AddrP
 func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr netip.AddrPort) {
 	nodes := t.collectTableNodes(fromAddr.Addr(), p.Distances, findnodeResultLimit)
 	for _, resp := range packNodes(p.ReqID, nodes) {
-		t.sendResponse(fromID, fromAddr, resp)
+		_ = t.sendResponse(fromID, fromAddr, resp)
 	}
 }
 
