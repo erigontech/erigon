@@ -321,12 +321,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if req.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
+	}
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas)),
+		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),

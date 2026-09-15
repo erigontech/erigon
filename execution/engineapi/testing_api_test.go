@@ -1471,6 +1471,25 @@ func TestNewPayloadV4RejectsSlotNumber(t *testing.T) {
 	require.Equal(t, -32602, rpcErr.ErrorCode())
 }
 
+// A null baseFeePerGas decodes to nil and must reach validation, not panic while building the header.
+func TestNewPayloadWithoutBaseFeeDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	zero := hexutil.Uint64(0)
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		Transactions:  []hexutil.Bytes{},
+		Withdrawals:   []*types.Withdrawal{},
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+	}
+
+	require.NotPanics(t, func() {
+		_, _ = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	})
+}
+
 func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	t.Parallel()
 
