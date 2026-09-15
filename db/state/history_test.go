@@ -261,7 +261,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 			valWords = append(valWords, string(w))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
-		require.Equal(6, int(sf.historyIdx.KeyCount()))
 		ge := sf.efHistoryDecomp.MakeGetter()
 		ge.Reset(0)
 		var keyWords []string
@@ -297,21 +296,16 @@ func TestHistoryCollationBuild(t *testing.T) {
 			w, _ := ge.Next(nil)
 			require.Equal(keyWords[i], string(w))
 		}
-		r = recsplit.NewIndexReader(sf.historyIdx)
-		defer r.Close()
-
 		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
 			for j := range ints {
-				var txKey [8]byte
-				binary.BigEndian.PutUint64(txKey[:], ints[j])
-				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
-				if !ok {
-					continue
-				}
-				gh.Reset(offset)
+				// .ef is walked in key order, so keyWords index is the key ordinal
+				// and j the rank of that txNum in the key's list
+				off, ok := sf.historyIdx.Lookup(uint64(i), uint64(j), ints[j], []byte(keyWords[i]))
+				require.True(ok)
+				gh.Reset(off)
 				w, _ := gh.Next(nil)
 				require.Equal(valWords[vi], string(w))
 				vi++
@@ -325,41 +319,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 	t.Run("small_values", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
-	})
-}
-
-// TestHistoryBuildVI_PageCounterResetOnCollisionRetry verifies that the page
-// counter 'i' used for paged history files is reset when buildVI retries due
-// to a recsplit collision. Without the reset, the .vi index would contain
-// incorrect offsets on the retry pass.
-//
-// The bug only manifests when compressedPageValuesCount > 0 (paged history),
-// which happens during merge (not initial collation). This test forces a
-// collision retry during merge and verifies history lookups remain correct.
-func TestHistoryBuildVI_PageCounterResetOnCollisionRetry(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-
-	logger := log.New()
-
-	test := func(t *testing.T, largeValues bool) {
-		t.Helper()
-		db, h, txs := filledHistory(t, largeValues, logger)
-
-		// Force collision retries during buildVI calls.
-		// Set the hook AFTER collation but BEFORE merge, so only merge's
-		// buildVI calls get the forced collision.
-		collateAndMergeHistoryWithCollisionRetry(t, db, h, txs)
-		checkHistoryHistory(t, h, txs)
-	}
-	t.Run("large_values", func(t *testing.T) {
-		test(t, true)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		test(t, false)
 	})
 }
 
@@ -1229,64 +1188,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			break
 		}
 	}
-
-	err = tx.Commit()
-	require.NoError(err)
-}
-
-// collateAndMergeHistoryWithCollisionRetry is like collateAndMergeHistory
-// but forces a recsplit collision retry on every buildVI call during merge.
-func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
-	tb.Helper()
-	require := require.New(tb)
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	ctx := tb.Context()
-	tx, err := db.BeginRwNosync(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-
-	// Collate without collision forcing
-	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
-		require.NoError(h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-
-		hc := h.beginForTests()
-		_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
-		hc.Close()
-		require.NoError(err)
-	}
-
-	// Enable collision forcing for merge phase only
-	collisionRetries := 0
-	h._testBuildVIHook = func(rs *recsplit.RecSplit) {
-		rs.ForceCollisionOnce()
-		collisionRetries++
-	}
-
-	var r HistoryRanges
-	maxSpan := h.stepSize * config3.DefaultStepsInFrozenFile
-
-	for {
-		if stop := func() bool {
-			hc := h.beginForTests()
-			defer hc.Close()
-			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
-			if !r.any() {
-				return true
-			}
-			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
-			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
-			require.NoError(err)
-			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			return false
-		}(); stop {
-			break
-		}
-	}
-
-	require.Greater(collisionRetries, 0, "expected at least one buildVI collision retry during merge")
 
 	err = tx.Commit()
 	require.NoError(err)

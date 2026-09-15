@@ -14,7 +14,7 @@ accounts:
             current: v2.1
             min: v1.0
         vi:
-            current: v1.2
+            current: v2.0
             min: v1.0
     ii:
         ef:
@@ -47,7 +47,7 @@ code:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
@@ -69,7 +69,7 @@ commitment:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
@@ -115,7 +115,7 @@ rcache:
             current: v3.1
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
@@ -140,7 +140,7 @@ receipt:
             current: v3.0
             min: v1.0
         vi:
-            current: v1.2
+            current: v2.0
             min: v1.0
     ii:
         ef:
@@ -165,7 +165,7 @@ storage:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:

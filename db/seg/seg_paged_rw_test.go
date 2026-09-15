@@ -564,14 +564,15 @@ func TestReaderBinarySearch(t *testing.T) {
 
 	// Test 1: find every existing key
 	for i, k := range keys {
-		foundOffset, ok := g.BinarySearch(k, numPairs, getOffset)
+		foundOffset, ordinal, ok := g.BinarySearch(k, numPairs, getOffset)
 		require.True(t, ok, "key %d not found: %x", i, k)
 		require.Equal(t, offsets[i], foundOffset, "key %d: wrong offset", i)
+		require.Equal(t, uint64(i), ordinal, "key %d: wrong ordinal", i)
 	}
 
 	// Test 2: key smaller than all — should find first
 	smallKey := make([]byte, 20)
-	foundOffset, ok := g.BinarySearch(smallKey, numPairs, getOffset)
+	foundOffset, _, ok := g.BinarySearch(smallKey, numPairs, getOffset)
 	if ok {
 		require.Equal(t, offsets[0], foundOffset, "small key should find first entry")
 	}
@@ -581,7 +582,7 @@ func TestReaderBinarySearch(t *testing.T) {
 	for i := range bigKey {
 		bigKey[i] = 0xFF
 	}
-	_, ok = g.BinarySearch(bigKey, numPairs, getOffset)
+	_, _, ok = g.BinarySearch(bigKey, numPairs, getOffset)
 	require.False(t, ok, "big key should not be found")
 
 	// Test 4: MatchPrefix/MatchCmp on last key with prefix beyond it
