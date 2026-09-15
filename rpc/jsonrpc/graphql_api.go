@@ -174,7 +174,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
 }
 
-func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes map[string]any) (map[string]any, error) {
+func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes *ethapi.RPCBlock) (map[string]any, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -214,9 +214,9 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.U256)(td)
+		getBlockRes.TotalDifficulty = (*hexutil.U256)(td)
 	} else {
-		getBlockRes["totalDifficulty"] = new(hexutil.U256)
+		getBlockRes.TotalDifficulty = new(hexutil.U256)
 	}
 
 	response := map[string]any{}
@@ -372,22 +372,18 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	return hexutil.Encode(res.PaddedBytes(32)), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	additionalFields := make(map[string]any)
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
+		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = hexutil.Uint64(b.Transactions().Len())
+	response.TransactionCount = hexutil.Uint64(b.Transactions().Len())
 
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
-	return response, err
+	return response, nil
 }
 
 func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
