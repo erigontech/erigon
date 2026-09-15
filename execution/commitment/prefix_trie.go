@@ -264,3 +264,32 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		node = node.children[idx]
 	}
 }
+
+func (t *prefixTrie) walkKeys(fn func(key []byte, shared int) bool) {
+	path := make([]byte, 0, forkPathCap)
+	path = append(path, t.root.ext...)
+	var visit func(n *prefixNode, shared int) bool
+	visit = func(n *prefixNode, shared int) bool {
+		if n.plainKey != nil {
+			if !fn(path, shared) {
+				return false
+			}
+			shared = len(path)
+		}
+		idx := 0
+		for bm := n.bitmap; bm != 0; bm &= bm - 1 {
+			child := n.children[idx]
+			base := len(path)
+			path = append(path, byte(bits.TrailingZeros16(bm)))
+			path = append(path, child.ext...)
+			if !visit(child, shared) {
+				return false
+			}
+			path = path[:base]
+			shared = base
+			idx++
+		}
+		return true
+	}
+	visit(t.root, 0)
+}

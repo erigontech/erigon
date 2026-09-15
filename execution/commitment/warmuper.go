@@ -285,3 +285,33 @@ func (w *Warmuper) Close() {
 	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
 }
+
+func warmPrefixTrie(ctx context.Context, cfg WarmupConfig, t *prefixTrie) (stop func()) {
+	if !cfg.Enabled || cfg.NumWorkers <= 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	w := NewWarmuper(ctx, cfg)
+	w.Start()
+	fed := make(chan struct{})
+	go func() {
+		defer close(fed)
+		var buf []byte
+		t.walkKeys(func(key []byte, shared int) bool {
+			if ctx.Err() != nil {
+				return false
+			}
+			if cap(buf)-len(buf) < len(key) {
+				buf = make([]byte, 0, 1<<16)
+			}
+			buf = append(buf, key...)
+			w.WarmKey(buf[len(buf)-len(key):len(buf):len(buf)], shared, 0)
+			return true
+		})
+	}()
+	return func() {
+		cancel()
+		<-fed
+		w.CloseAndWait()
+	}
+}

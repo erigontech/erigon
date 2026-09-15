@@ -17,10 +17,24 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"errors"
+	"runtime"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
@@ -254,4 +268,187 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 		}
 	default:
 	}
+}
+
+func TestPrefixTrieWalkKeysMatchesSortedFeed(t *testing.T) {
+	t.Parallel()
+	keys, _ := buildMixedCorpus(7, 2000)
+	tr := newPrefixTrie()
+	want := make([][]byte, 0, len(keys))
+	for _, k := range keys {
+		hk := KeyToHexNibbleHash(k)
+		tr.Insert(hk, k, nil)
+		want = append(want, hk)
+	}
+	slices.SortFunc(want, bytes.Compare)
+	want = slices.CompactFunc(want, bytes.Equal)
+
+	var got [][]byte
+	var prev []byte
+	tr.walkKeys(func(key []byte, shared int) bool {
+		require.Equal(t, nibbles.CommonPrefixLen(prev, key), shared, "shared depth of %x", key)
+		prev = bytes.Clone(key)
+		got = append(got, prev)
+		return true
+	})
+	require.Equal(t, want, got)
+
+	calls := 0
+	tr.walkKeys(func([]byte, int) bool {
+		calls++
+		return calls < 10
+	})
+	require.Equal(t, 10, calls, "returning false must stop the walk")
+}
+
+type warmReadCtx struct {
+	*MockState
+	first *sync.Once
+	read  chan struct{}
+}
+
+func (c warmReadCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.first.Do(func() { close(c.read) })
+	return c.MockState.Branch(prefix)
+}
+
+type afterWarmReadCtx struct {
+	*MockState
+	read     <-chan struct{}
+	deadline context.Context
+}
+
+func (c afterWarmReadCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	select {
+	case <-c.read:
+		return c.MockState.Branch(prefix)
+	case <-c.deadline.Done():
+		return nil, 0, errors.New("the walk ran without the warmup reading a single branch")
+	}
+}
+
+func TestParallelProcessFeedsWarmup(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(11, 3000)
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	read := make(chan struct{})
+	deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	walkCtx := afterWarmReadCtx{MockState: ms, read: read, deadline: deadline}
+
+	var once sync.Once
+	var opened, released atomic.Int64
+	warmFactory := func(context.Context) (PatriciaContext, func()) {
+		opened.Add(1)
+		return warmReadCtx{MockState: ms, first: &once, read: read}, func() { released.Add(1) }
+	}
+
+	tr := NewParallelPatriciaHashed(func(context.Context) (PatriciaContext, func()) { return walkCtx, func() {} }, length.Addr, DefaultTrieConfig())
+	defer tr.Release()
+	tr.SetNumWorkers(4)
+	tr.ResetContext(walkCtx)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: warmFactory,
+		NumWorkers: 2,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	require.NoError(t, err)
+	require.Equal(t, opened.Load(), released.Load(), "every warmup context must be released before Process returns")
+}
+
+type semLeaseErrCtx struct {
+	err error
+}
+
+func (c semLeaseErrCtx) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, c.err }
+func (c semLeaseErrCtx) PutBranch([]byte, []byte, []byte) error { return c.err }
+func (c semLeaseErrCtx) Account([]byte) (*Update, error)        { return nil, c.err }
+func (c semLeaseErrCtx) Storage([]byte) (*Update, error)        { return nil, c.err }
+
+func TestParallelWarmupDoesNotDeadlockReadTxFloor(t *testing.T) {
+	origProcs := runtime.GOMAXPROCS(64)
+	defer runtime.GOMAXPROCS(origProcs)
+
+	origWorkers := defaultParallelCommitmentWorkers
+	defaultParallelCommitmentWorkers = 64
+	defer func() { defaultParallelCommitmentWorkers = origWorkers }()
+
+	origWarmupers := dbg.TipTrieWarmupers
+	dbg.TipTrieWarmupers = 32
+	defer func() { dbg.TipTrieWarmupers = origWarmupers }()
+
+	floor := ParallelCommitmentReadTxs()
+	sem := semaphore.NewWeighted(int64(floor))
+
+	numWarmupWorkers := dbg.TipTrieWarmupers
+	var warmupAttempted sync.WaitGroup
+	warmupAttempted.Add(numWarmupWorkers)
+	leasesMayStart := make(chan struct{})
+	go func() {
+		warmupAttempted.Wait()
+		close(leasesMayStart)
+	}()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+
+	warmFactory := func(context.Context) (PatriciaContext, func()) {
+		defer warmupAttempted.Done()
+		if !sem.TryAcquire(1) {
+			return semLeaseErrCtx{err: errors.New("warmup: no read-tx slot")}, func() {}
+		}
+		return ms, func() { sem.Release(1) }
+	}
+
+	leaseFactory := func(ctx context.Context) (PatriciaContext, func()) {
+		<-leasesMayStart
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return semLeaseErrCtx{err: err}, func() {}
+		}
+		return ms, func() { sem.Release(1) }
+	}
+
+	ub := NewUpdateBuilder()
+	for nib := range 16 {
+		addr := findAddressForNibble(nib, 41)
+		ub.Balance(hex.EncodeToString(addr), 7)
+	}
+	for i := range 4000 {
+		addr := findAddressForNibble(i%16, 1000+i)
+		ub.Balance(hex.EncodeToString(addr), uint64(i)+1)
+	}
+	keys, upds := ub.Build()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := NewParallelPatriciaHashed(leaseFactory, length.Addr, DefaultTrieConfig())
+	defer tr.Release()
+	tr.SetNumWorkers(64)
+	tr.SetForkGrain(4)
+	tr.ResetContext(ms)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err := tr.Process(ctx, ut, "", nil, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: warmFactory,
+		NumWorkers: numWarmupWorkers,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	require.NoError(t, err, "ParallelCommitmentReadTxs floor=%d must reserve slots for %d warmup workers", floor, numWarmupWorkers)
 }
