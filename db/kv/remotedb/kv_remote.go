@@ -822,6 +822,10 @@ func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error {
 	panic("not supported")
 }
 
+func (c *remoteCursorDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	panic("not supported")
+}
+
 func (c *remoteCursorDupSort) CountDuplicates() (uint64, error) {
 	panic("not supported")
 }
