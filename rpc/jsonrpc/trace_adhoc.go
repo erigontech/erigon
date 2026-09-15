@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"

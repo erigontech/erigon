@@ -737,7 +737,7 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	require.NotNil(t, sender)
 	balance, ok := sender.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "sender balance must be reported as changed, got %v", sender.Balance)
-	require.Equal(t, (*big.Int)(overriddenBalance).String(), (*big.Int)(balance["*"].From).String())
+	require.Equal(t, (*big.Int)(overriddenBalance).String(), balance["*"].From.ToInt().String())
 }
 
 func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
