@@ -412,14 +412,14 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 }
 
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
-// the EL, releasing the caller-held f.mu for the call. It records a VALID result before the
-// admission token is released, so callers already queued for the same payload reuse it
-// instead of resending; publishing after the token is released would be too late, since the
-// finishing caller must reacquire f.mu first. verifiedExecutionPayload carries its own lock,
-// so neither the check nor the publish needs f.mu.
+// the EL, releasing the caller-held f.mu for the call. It records the terminal verdict
+// before releasing the admission token, so callers already queued for the same payload
+// reuse it instead of resending: a caller that published only after the token was released
+// would still be waiting for f.mu while the queue drained.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
+	executionBlockHash common.Hash,
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -428,14 +428,29 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	f.mu.Unlock()
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		if f.verifiedExecutionPayload.Contains(blockRoot) {
+		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
 			return execution_client.PayloadStatusValidated, nil
 		}
-		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
-		if err == nil && status == execution_client.PayloadStatusValidated {
-			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+		if f.executionPayloadStatus != nil {
+			if status, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && status == execution_client.PayloadStatusInvalidated {
+				return execution_client.PayloadStatusInvalidated, nil
+			}
 		}
-		return status, err
+		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+		if err != nil {
+			return status, err
+		}
+		switch status {
+		case execution_client.PayloadStatusValidated:
+			if f.verifiedExecutionPayload != nil {
+				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+			}
+		case execution_client.PayloadStatusInvalidated:
+			if f.executionPayloadStatus != nil {
+				f.executionPayloadStatus.Add(executionBlockHash, status)
+			}
+		}
+		return status, nil
 	})
 }
 

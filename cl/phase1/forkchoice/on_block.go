@@ -352,7 +352,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
-			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, executionBlockHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 			f.invalidateCachedHead()
 			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {

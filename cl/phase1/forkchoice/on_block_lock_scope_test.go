@@ -294,6 +294,49 @@ func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
 	}
 }
 
+// The INVALIDATED verdict must be published under the admission token too. Without it,
+// callers queued for the same payload each resend it to the EL, because the invalid gate
+// they check on entry is only refreshed once the first caller reacquires f.mu.
+func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+			blockRoot, executionBlockHash, block.Block.Body.ExecutionPayload,
+			&block.Block.ParentRoot, nil, nil)
+	}()
+	awaitSignal(t, elEntered, "NewPayload to start")
+
+	// Pin f.mu so the caller cannot reach anything it would record after relock.
+	pinned, unpin := make(chan struct{}), make(chan struct{})
+	go func() {
+		store.mu.Lock()
+		close(pinned)
+		<-unpin
+		store.mu.Unlock()
+	}()
+	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+	close(releaseEL)
+
+	// Sending into the admission channel blocks until the caller hands the token back.
+	store.payloadValidationAdmission <- struct{}{}
+	status, ok := store.executionPayloadStatus.Get(executionBlockHash)
+	require.True(t, ok, "the invalid verdict must be published before the token is released")
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	<-store.payloadValidationAdmission
+
+	close(unpin)
+	awaitSignal(t, done, "the validating caller to finish")
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
@@ -306,7 +349,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 
 	f.mu.Lock()
 	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, nil, nil, nil, nil)
+		blockRoot, common.Hash{}, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
