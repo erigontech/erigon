@@ -605,7 +605,7 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
-	setCodeTx.DecodeRLP(rlpStream)
+	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
 	require.Len(t, txn.AuthAndNonces, 1)
 	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
 }

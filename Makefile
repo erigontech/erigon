@@ -53,7 +53,7 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 
@@ -102,6 +102,7 @@ GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
+GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -340,19 +341,11 @@ check-generated:
 
 ## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
 check-large-files:
-	@base="${BASE:-main}"; \
-	found=0; \
-	while IFS= read -r file; do \
-		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
-		if [ "$$size" -gt 1048576 ]; then \
-			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
-			found=1; \
-		fi; \
-	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
-	if [ "$$found" -eq 1 ]; then \
-		echo "ERROR: Files exceeding 1 MB found."; \
-		exit 1; \
-	fi
+	@bash .github/workflows/scripts/check-large-files.sh "$(or $(BASE),main)"
+
+## test-check-large-files:          test the large-file checker itself
+test-check-large-files:
+	@bash .github/workflows/scripts/check-large-files.test.sh
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
@@ -505,13 +498,13 @@ kurtosis-cleanup:
 
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
-	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml --fast-only
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`

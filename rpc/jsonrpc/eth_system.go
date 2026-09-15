@@ -169,9 +169,9 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
 	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
-	// MergeHeight set, pre-merge transaction segments are never downloaded, so the oldest
-	// available block is the merge point. The same sentinel also covers a legacy archive
-	// datadir, so the field follows the boundary the gate resolves.
+	// MergeHeight set, pre-merge transaction segments are not downloaded, except the one
+	// spanning the merge, which reaches below it. The same sentinel also covers a legacy
+	// archive datadir, so the field follows the boundary the gate resolves.
 	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -777,4 +777,8 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
+}
+
+func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {
+	return b.baseApi.checkBlockHistoryAvailable(ctx, b.tx, blockNumber)
 }

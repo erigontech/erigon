@@ -236,6 +236,8 @@ type mockOracleBackend struct {
 	canonicalErr   error
 	prepareForkErr error
 	headerCalls    atomic.Int32
+	forkCalls      atomic.Int32
+	pending        *types.Block
 	safeBlock      uint64
 	finalizedBlock uint64
 
@@ -283,7 +285,11 @@ func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block
 }
 
 func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
+	return m.pending, nil
+}
+
+func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
+	return nil
 }
 
 func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
@@ -328,6 +334,7 @@ func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.H
 }
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
+	m.forkCalls.Add(1)
 	return nil, nil, nil // sequential mode
 }
 
@@ -412,6 +419,65 @@ func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
 	require.Empty(t, backend.resolvedRanges())
 	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
 		"the second request must be served from number-keyed cache entries")
+}
+
+// A fork opens a read transaction, which takes the database's reader-slot lock; a fully
+// cached range must not pay for one.
+func TestFeeHistory_CachedRangeDoesNotFork(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	forksAfterFirst := backend.forkCalls.Load()
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 5)
+	require.Equal(t, forksAfterFirst, backend.forkCalls.Load())
+}
+
+func TestFeeHistory_PendingSlotDoesNotFork(t *testing.T) {
+	header := func(n uint64) *types.Header {
+		h := types.NewEmptyHeaderForAssembling()
+		h.Number.SetUint64(n)
+		h.GasLimit = 30_000_000
+		h.BaseFee = uint256.NewInt(1_000_000_000)
+		return h
+	}
+	backend := &mockOracleBackend{head: header(10), frozen: 10, pending: types.NewBlockWithHeader(header(11), nil)}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	forksAfterFirst := backend.forkCalls.Load()
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 5)
+	require.Equal(t, forksAfterFirst, backend.forkCalls.Load())
+}
+
+func TestFeeHistory_CachedRangeHonorsCancelledContext(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, _, _, _, _, err = oracle.FeeHistory(ctx, 4, rpc.LatestBlockNumber, nil)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // TestFeeHistory_WindowStraddlingFrozenBoundary pins the mixed regime: one

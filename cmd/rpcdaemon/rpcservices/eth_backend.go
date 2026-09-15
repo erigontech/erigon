@@ -119,6 +119,9 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
+	return back.blockReader.FrozenBlocksObserved()
+}
 func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
 	return back.blockReader.FrozenBlocksInView(tx)
 }

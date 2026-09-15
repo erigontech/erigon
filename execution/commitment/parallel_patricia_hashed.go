@@ -28,7 +28,9 @@ import (
 	"time"
 )
 
-var defaultParallelCommitmentWorkers = runtime.NumCPU()
+// Must track the same quantity as maxFoldConcurrency: parallelMountConcurrency mins
+// the two, so sourcing this from anything else silently caps mounting below folding.
+var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
@@ -42,8 +44,7 @@ type ParallelPatriciaHashed struct {
 
 	deepLocalFolds atomic.Uint64
 
-	leaveDeferredForCaller bool
-	deferredForCaller      []*DeferredBranchUpdate
+	deferredForCaller []*DeferredBranchUpdate
 
 	// metrics is the round's aggregate: each mount worker counts into its own
 	// Metrics and merges here when it finishes, so the fold loop never touches
@@ -86,7 +87,7 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 }
 
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
-	p.leaveDeferredForCaller = leave
+	p.cfg.LeaveDeferredForCaller = leave
 }
 
 func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
@@ -255,16 +256,11 @@ func (p *ParallelPatriciaHashed) Process(
 
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
-		pu.deferredMu.Lock()
-		for _, upd := range pu.deferredCombined {
-			putDeferredUpdate(upd)
-		}
-		pu.deferredCombined = nil
-		pu.deferredMu.Unlock()
+		pu.drainDeferred()
 		return nil, mErr
 	}
 
-	if p.leaveDeferredForCaller {
+	if p.cfg.LeaveDeferredForCaller {
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil

@@ -221,13 +221,13 @@ func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
-	recomputedRoot, recomputedSlot, recomputedStatus, err := store.getHeadGloasWithPayloadStatus()
+	recomputedHead, recomputedSlot, err := store.getHeadGloas()
 	require.NoError(t, err)
-	require.Equal(t, selectedRoot, recomputedRoot)
+	require.Equal(t, selectedRoot, recomputedHead.Root)
 	require.Equal(t, selectedSlot, recomputedSlot)
 	expectedStatus, matchesHead := store.ResolveHeadPayloadStatus(root)
 	require.True(t, matchesHead)
-	require.Equal(t, expectedStatus, recomputedStatus)
+	require.Equal(t, expectedStatus, recomputedHead.PayloadStatus)
 
 	store.mu.Lock()
 	store.headHash = common.Hash{}

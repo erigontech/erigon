@@ -9,10 +9,125 @@ import (
 )
 
 const (
-	epbsPreferencesPoolSize         = 64  // ~2 epochs of slots
-	epbsHighestBidsPoolSize         = 128 // multiple builders × parent hashes × a few slots
 	epbsPayloadAttestationsPoolSize = 512 // one slot's worth of PTC votes
 )
+
+type slotMap[K comparable, V any] struct {
+	mu      sync.RWMutex
+	values  map[K]V
+	bySlot  map[uint64]map[K]struct{}
+	slotFor func(K) uint64
+	// Only maps whose readers memoize entries need generations. A new generation is never
+	// reused after a slot is pruned and later added again.
+	generations    map[uint64]uint64
+	nextGeneration uint64
+}
+
+func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
+	return &slotMap[K, V]{values: make(map[K]V), bySlot: make(map[uint64]map[K]struct{}), slotFor: slotFor}
+}
+
+func (m *slotMap[K, V]) Add(key K, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.values[key] = value
+	slot := m.slotFor(key)
+	if m.bySlot[slot] == nil {
+		m.bySlot[slot] = make(map[K]struct{})
+	}
+	m.bySlot[slot][key] = struct{}{}
+	m.advanceGeneration(slot)
+}
+
+func (m *slotMap[K, V]) advanceGeneration(slot uint64) {
+	if m.generations == nil {
+		return
+	}
+	m.nextGeneration++
+	if m.nextGeneration == 0 {
+		m.nextGeneration++
+	}
+	m.generations[slot] = m.nextGeneration
+}
+
+func (m *slotMap[K, V]) GetWithGeneration(key K) (V, bool, uint64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, ok := m.values[key]
+	return value, ok, m.generations[m.slotFor(key)]
+}
+
+func (m *slotMap[K, V]) Generation(slot uint64) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.generations[slot]
+}
+
+func (m *slotMap[K, V]) ValuesForSlot(slot uint64) []V {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	values := make([]V, 0, len(m.bySlot[slot]))
+	for key := range m.bySlot[slot] {
+		values = append(values, m.values[key])
+	}
+	return values
+}
+
+func (m *slotMap[K, V]) Get(key K) (V, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, ok := m.values[key]
+	return value, ok
+}
+
+func (m *slotMap[K, V]) Keys() []K {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]K, 0, len(m.values))
+	for key := range m.values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func (m *slotMap[K, V]) Remove(key K) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.remove(key)
+}
+
+func (m *slotMap[K, V]) remove(key K) bool {
+	if _, ok := m.values[key]; !ok {
+		return false
+	}
+	delete(m.values, key)
+	slot := m.slotFor(key)
+	delete(m.bySlot[slot], key)
+	if len(m.bySlot[slot]) == 0 {
+		delete(m.bySlot, slot)
+		delete(m.generations, slot)
+	} else {
+		m.advanceGeneration(slot)
+	}
+	return true
+}
+
+func (m *slotMap[K, V]) PruneSlotsBefore(slot uint64) {
+	m.PruneSlots(func(entrySlot uint64) bool { return entrySlot < slot })
+}
+func (m *slotMap[K, V]) PruneSlots(remove func(uint64) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for slot, keys := range m.bySlot {
+		if remove(slot) {
+			for key := range keys {
+				delete(m.values, key)
+			}
+			delete(m.bySlot, slot)
+			delete(m.generations, slot)
+		}
+	}
+}
 
 // ProposerPreferencesKey identifies a proposer preferences entry by slot and dependent root.
 // Different dependent roots (different forks) must not overwrite each other.
@@ -39,88 +154,63 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
-	// Individual cache operations are synchronized by the LRU. This mutex makes
-	// bid replacement atomic with conditional removal.
-	highestBidUpdatesMu sync.Mutex
-	highestBids         *lru.Cache[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
+	HighestBids *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
 
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
-	ProposerPreferences *lru.Cache[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
-
+	ProposerPreferences *slotMap[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
-
-	proposerPreferenceUpdatesMu      sync.Mutex
-	proposerPreferenceGenerationsMu  sync.Mutex
-	proposerPreferenceGenerations    map[uint64]uint64
-	nextProposerPreferenceGeneration uint64
 }
 
 func (p *EpbsPool) GetHighestBid(key HighestBidKey) (*cltypes.SignedExecutionPayloadBid, bool) {
-	return p.highestBids.Get(key)
+	return p.HighestBids.Get(key)
 }
 
 func (p *EpbsPool) HighestBidKeys() []HighestBidKey {
-	return p.highestBids.Keys()
+	return p.HighestBids.Keys()
 }
 
 // StoreHighestBid replaces the current entry for key.
 func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
-	p.highestBidUpdatesMu.Lock()
-	defer p.highestBidUpdatesMu.Unlock()
-	p.highestBids.Add(key, bid)
+	p.HighestBids.Add(key, bid)
 }
 
 // RemoveHighestBid preserves a concurrently stored replacement for the same key.
 func (p *EpbsPool) RemoveHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) bool {
-	p.highestBidUpdatesMu.Lock()
-	defer p.highestBidUpdatesMu.Unlock()
-	current, found := p.highestBids.Get(key)
+	p.HighestBids.mu.Lock()
+	defer p.HighestBids.mu.Unlock()
+	current, found := p.HighestBids.values[key]
 	if !found || current != bid {
 		return false
 	}
-	return p.highestBids.Remove(key)
+	return p.HighestBids.remove(key)
 }
 
 func NewEpbsPool() *EpbsPool {
-	epbsPool := &EpbsPool{proposerPreferenceGenerations: make(map[uint64]uint64)}
-	preferencesCache, err := lru.NewWithEvict[ProposerPreferencesKey, *cltypes.SignedProposerPreferences](
-		"proposerPreferencesPool",
-		epbsPreferencesPoolSize,
-		func(key ProposerPreferencesKey, _ *cltypes.SignedProposerPreferences) {
-			// Eviction changes the effective preference just as an insertion does.
-			epbsPool.advanceProposerPreferenceGeneration(key.Slot)
-		},
-	)
-	if err != nil {
-		panic(err)
-	}
-	highestBidsCache, err := lru.New[HighestBidKey, *cltypes.SignedExecutionPayloadBid]("highestBidsPool", epbsHighestBidsPoolSize)
-	if err != nil {
-		panic(err)
-	}
+	preferencesCache := newSlotMap[ProposerPreferencesKey, *cltypes.SignedProposerPreferences](func(key ProposerPreferencesKey) uint64 { return key.Slot })
+	preferencesCache.generations = make(map[uint64]uint64)
+	highestBidsCache := newSlotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid](func(key HighestBidKey) uint64 { return key.Slot })
 	payloadAttestationsCache, err := lru.New[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]("payloadAttestationsPool", epbsPayloadAttestationsPoolSize)
 	if err != nil {
 		panic(err)
 	}
-	epbsPool.ProposerPreferences = preferencesCache
-	epbsPool.highestBids = highestBidsCache
-	epbsPool.PayloadAttestations = payloadAttestationsCache
-	return epbsPool
+	return &EpbsPool{
+		ProposerPreferences: preferencesCache,
+		HighestBids:         highestBidsCache,
+		PayloadAttestations: payloadAttestationsCache,
+	}
 }
 
 // GetPreferencesForSlot returns all stored proposer preferences that match the given slot,
 // regardless of dependent_root. This is used by the bid service which needs to find any
 // valid preferences for a slot across different fork views.
 func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerPreferences {
-	var results []*cltypes.SignedProposerPreferences
-	for _, key := range p.ProposerPreferences.Keys() {
-		if key.Slot != slot {
-			continue
-		}
-		if msg, ok := p.ProposerPreferences.Get(key); ok && msg != nil {
+	values := p.ProposerPreferences.ValuesForSlot(slot)
+	results := make([]*cltypes.SignedProposerPreferences, 0, len(values))
+	for _, msg := range values {
+		if msg != nil {
 			results = append(results, msg)
 		}
 	}
@@ -137,10 +227,7 @@ func (p *EpbsPool) GetPreferenceWithGeneration(
 	slot uint64,
 	dependentRoot common.Hash,
 ) (*cltypes.SignedProposerPreferences, bool, uint64) {
-	p.proposerPreferenceUpdatesMu.Lock()
-	defer p.proposerPreferenceUpdatesMu.Unlock()
-	preference, found := p.GetPreference(slot, dependentRoot)
-	return preference, found, p.ProposerPreferencesGeneration(slot)
+	return p.ProposerPreferences.GetWithGeneration(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
 }
 
 // AddProposerPreference stores a preference and advances its proposal slot's generation.
@@ -148,52 +235,15 @@ func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPrefe
 	if preference == nil || preference.Message == nil {
 		return
 	}
-	p.proposerPreferenceUpdatesMu.Lock()
-	defer p.proposerPreferenceUpdatesMu.Unlock()
 	slot := preference.Message.ProposalSlot
 	p.ProposerPreferences.Add(ProposerPreferencesKey{
 		Slot:          slot,
 		DependentRoot: preference.Message.DependentRoot,
 	}, preference)
-	p.advanceProposerPreferenceGeneration(slot)
-	p.pruneProposerPreferenceGenerations()
-}
-
-func (p *EpbsPool) advanceProposerPreferenceGeneration(slot uint64) {
-	p.proposerPreferenceGenerationsMu.Lock()
-	defer p.proposerPreferenceGenerationsMu.Unlock()
-	p.nextProposerPreferenceGeneration++
-	if p.nextProposerPreferenceGeneration == 0 {
-		p.nextProposerPreferenceGeneration++
-	}
-	p.proposerPreferenceGenerations[slot] = p.nextProposerPreferenceGeneration
-}
-
-func (p *EpbsPool) pruneProposerPreferenceGenerations() {
-	p.proposerPreferenceGenerationsMu.Lock()
-	if len(p.proposerPreferenceGenerations) <= epbsPreferencesPoolSize {
-		p.proposerPreferenceGenerationsMu.Unlock()
-		return
-	}
-	p.proposerPreferenceGenerationsMu.Unlock()
-
-	activeSlots := make(map[uint64]struct{}, p.ProposerPreferences.Len())
-	for _, key := range p.ProposerPreferences.Keys() {
-		activeSlots[key.Slot] = struct{}{}
-	}
-	p.proposerPreferenceGenerationsMu.Lock()
-	defer p.proposerPreferenceGenerationsMu.Unlock()
-	for slot := range p.proposerPreferenceGenerations {
-		if _, active := activeSlots[slot]; !active {
-			delete(p.proposerPreferenceGenerations, slot)
-		}
-	}
 }
 
 // ProposerPreferencesGeneration returns the current generation for one proposal slot.
 // Preferences for other slots do not change it.
 func (p *EpbsPool) ProposerPreferencesGeneration(slot uint64) uint64 {
-	p.proposerPreferenceGenerationsMu.Lock()
-	defer p.proposerPreferenceGenerationsMu.Unlock()
-	return p.proposerPreferenceGenerations[slot]
+	return p.ProposerPreferences.Generation(slot)
 }

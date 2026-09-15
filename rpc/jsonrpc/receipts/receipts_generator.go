@@ -268,6 +268,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			BlockNum:  blockNum,
 			BlockHash: blockHash,
 			TxnHash:   txnHash,
+			// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
+			DontCalcBloom: true,
 		})
 		if err != nil {
 			return nil, err
@@ -292,6 +294,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	if err != nil {
+		return nil, err
+	}
+
+	firstLogIndex, err = rawtemporaldb.FirstLogIndex(tx, txNum, index)
 	if err != nil {
 		return nil, err
 	}
@@ -437,11 +444,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
 	}
 
-	if rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
-		firstLogIndex = logIdxAfterTx
-	} else {
-		firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
-	}
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
@@ -469,7 +471,11 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	if cfg.IsByzantium(blockNum) {
 		return false
 	}
-	return commitmentHistoryEnabled || blockReader.FrozenBlocks() == 0
+	if commitmentHistoryEnabled {
+		return true
+	}
+	frozen, observed := blockReader.FrozenBlocksObserved()
+	return observed && frozen == 0
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {

@@ -46,12 +46,7 @@ func EncodeKeyV2(nibbles []byte) []byte {
 
 	odd := n & 1
 	out := make([]byte, n/2+odd+1)
-	for i := 0; i < n/2; i++ {
-		out[i] = (nibbles[2*i] << 4) | (nibbles[2*i+1] & 0x0F)
-	}
-	if odd == 1 {
-		out[n/2] = nibbles[n-1] << 4
-	}
+	decodeNibbles(nibbles, out)
 	out[len(out)-1] = byte(odd)
 	return out
 }

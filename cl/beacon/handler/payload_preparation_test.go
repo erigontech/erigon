@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	mock_services "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
+	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -65,10 +67,10 @@ func requireExecutionWithdrawals(t *testing.T, expected []*cltypes.Withdrawal, a
 	t.Helper()
 	require.Len(t, actual, len(expected))
 	for i, withdrawal := range expected {
-		require.Equal(t, withdrawal.Index, actual[i].Index)
-		require.Equal(t, withdrawal.Validator, actual[i].Validator)
+		require.Equal(t, hexutil.Uint64(withdrawal.Index), actual[i].Index)
+		require.Equal(t, hexutil.Uint64(withdrawal.Validator), actual[i].Validator)
 		require.Equal(t, withdrawal.Address, actual[i].Address)
-		require.Equal(t, withdrawal.Amount, actual[i].Amount)
+		require.Equal(t, hexutil.Uint64(withdrawal.Amount), actual[i].Amount)
 	}
 }
 
@@ -929,7 +931,7 @@ func TestExecutionPayloadSourceUsesPreForkParentForFirstGloasSlot(t *testing.T) 
 	require.Equal(t, gloasPayloadPathPreFork, source.gloasPath)
 }
 
-func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction(t *testing.T) {
+func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
@@ -954,13 +956,7 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction
 			TargetGasLimit: 36_000_000,
 		},
 	})
-	for offset := uint64(1); offset <= 64; offset++ {
-		handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
-			Message: &cltypes.ProposerPreferences{
-				ProposalSlot: targetSlot + offset, DependentRoot: common.Hash{byte(offset)},
-			},
-		})
-	}
+	handler.epbsPool.ProposerPreferences.Remove(pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot})
 	_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
 	require.False(t, found)
 
@@ -1061,16 +1057,9 @@ func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
 			_, found, usedGeneration := handler.epbsPool.GetPreferenceWithGeneration(targetSlot, dependentRoot)
 			require.True(t, found)
 			require.NotZero(t, usedGeneration)
-			// Fill the cache with other slots so the preference used by this attempt is evicted and
-			// its generation is pruned back to zero before the attempt settles.
-			for offset := uint64(1); offset <= 64; offset++ {
-				handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
-					Message: &cltypes.ProposerPreferences{
-						ProposalSlot:  targetSlot + offset,
-						DependentRoot: common.Hash{byte(offset)},
-					},
-				})
-			}
+			// Prune the preference before the attempt settles, so it must record the generation
+			// it actually used rather than the pool's current zero generation.
+			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
 			_, found = handler.epbsPool.GetPreference(targetSlot, dependentRoot)
 			require.False(t, found)
 			require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(targetSlot))
@@ -1178,12 +1167,26 @@ func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
 	handler.blobStoage = storage
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
 	block.Block.Slot = 1
+	scheduled := make(chan func(context.Context) error, 1)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+			scheduled <- store
+			return completedPublishedBlockJob{}
+		},
+	)
+	handler.blockService = blockService
 	completedAt := time.Now()
 	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 
-	require.NoError(t, handler.broadcastBlock(t.Context(), block))
+	require.NoError(t, handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
 	require.False(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+	store := <-scheduled
+	stored := make(chan error, 1)
+	go func() { stored <- store(t.Context()) }()
 	select {
 	case <-writeStarted:
 	case <-time.After(5 * time.Second):
@@ -1196,6 +1199,7 @@ func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
 	}
 	require.False(t, preparationStarted, "published block storage must suppress preparation")
 	finishWrite()
+	require.ErrorIs(t, awaitErrorResult(t, stored), persistenceErr)
 	select {
 	case <-writeReturned:
 	case <-time.After(5 * time.Second):
@@ -1219,7 +1223,7 @@ func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
 	completedAt := time.Now()
 	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 
-	err := handler.broadcastBlock(t.Context(), block)
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
 
 	require.ErrorContains(t, err, "missing blob bundle")
 	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
@@ -1228,14 +1232,13 @@ func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
 func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
-	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("stop after persistence"))
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.blobStoage = storage
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	blockPublishErr := errors.New("block publish failed")
-	sidecarPublishErr := errors.New("sidecar publish failed")
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(blockPublishErr)
-	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(0), gomock.Any()).Return(sidecarPublishErr)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(0), gomock.Any()).Times(0)
 	handler.gossipManager = gossipManager
 
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
@@ -1250,16 +1253,16 @@ func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
 	completedAt := time.Now()
 	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 
-	err := handler.broadcastBlock(t.Context(), block)
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
 	require.ErrorIs(t, err, blockPublishErr)
-	require.ErrorIs(t, err, sidecarPublishErr)
 	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
 }
 
 func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	fcu.OnTickFn = func(uint64) {}
 	handler.indiciesDB = updateFailingDB{RwDB: handler.indiciesDB, err: errors.New("stop after persistence")}
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
@@ -1275,33 +1278,9 @@ func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T)
 	completedAt := time.Now()
 	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 
-	require.NoError(t, handler.broadcastBlock(t.Context(), block))
+	require.NoError(t, handler.broadcastBlockWithIntegrationWait(t.Context(), block, BlockPublishingValidationGossip, false))
 	require.False(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
-}
-
-func TestSignedSelfBuildEnvelopeGossipFailureIsRequiredPublication(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	publishErr := errors.New("envelope publish failed")
-	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(publishErr)
-	handler.gossipManager = gossipManager
-
-	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
-	bid := block.Block.Body.GetSignedExecutionPayloadBid()
-	require.NotNil(t, bid)
-	require.NotNil(t, bid.Message)
-	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message:   cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
-		Signature: common.Bytes96{0x01},
-	}
-
-	gossipRequired, err := handler.broadcastSelfBuildEnvelope(t.Context(), block, envelope)
-
-	require.True(t, gossipRequired)
-	require.ErrorIs(t, err, publishErr)
 }
 
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
@@ -1495,9 +1474,9 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 		require.NotNil(t, attrs.Withdrawals)
 		require.Len(t, attrs.Withdrawals, len(expectedWithdrawals.Withdrawals))
 		for i, withdrawal := range expectedWithdrawals.Withdrawals {
-			require.Equal(t, withdrawal.Index, attrs.Withdrawals[i].Index)
-			require.Equal(t, withdrawal.Amount, attrs.Withdrawals[i].Amount)
-			require.Equal(t, withdrawal.Validator, attrs.Withdrawals[i].Validator)
+			require.Equal(t, hexutil.Uint64(withdrawal.Index), attrs.Withdrawals[i].Index)
+			require.Equal(t, hexutil.Uint64(withdrawal.Amount), attrs.Withdrawals[i].Amount)
+			require.Equal(t, hexutil.Uint64(withdrawal.Validator), attrs.Withdrawals[i].Validator)
 			require.Equal(t, withdrawal.Address, attrs.Withdrawals[i].Address)
 		}
 		return payloadID, nil

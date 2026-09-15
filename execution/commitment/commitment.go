@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -50,9 +49,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -221,18 +217,7 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
@@ -347,7 +332,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
-	ResetDeferredUpdateMetrics()
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
@@ -423,7 +407,6 @@ func ApplyDeferredBranchUpdates(
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
 		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
@@ -468,7 +451,6 @@ func ApplyDeferredBranchUpdates(
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
 	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
@@ -518,7 +500,6 @@ func (be *BranchEncoder) CollectUpdate(
 		return err
 	}
 	publishBranchWrites(1, len(updateCopy), be.metrics)
-	mxTrieBranchesUpdated.Inc()
 	return nil
 }
 
@@ -1401,8 +1382,6 @@ func (t *Updates) IsConcurrentCommitment() bool {
 
 type keyHasher func(key []byte) []byte
 
-func keyHasherNoop(key []byte) []byte { return key }
-
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
 }
@@ -1551,13 +1530,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
 	default:
 	}
