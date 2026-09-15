@@ -384,7 +384,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		buckets:      kv.TableCfg{},
 		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
 		roTxsLimiter: opts.roTxsLimiter,
-		roTxPool:     make(chan *mdbx.Txn, dbg.EnvInt("MDBX_RO_TX_POOL", 256)),
+		roTxPool:     make(chan *mdbx.Txn, roTxPoolSize),
 
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
@@ -457,6 +457,8 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	}
 	return db
 }
+
+var roTxPoolSize = dbg.EnvInt("MDBX_RO_TX_POOL", 256)
 
 type MdbxKV struct {
 	log          log.Logger
