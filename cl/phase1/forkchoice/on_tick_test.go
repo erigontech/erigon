@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +25,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/common"
 )
 
 // A stalled /eth/v1/events subscriber must not wedge fork choice: the finalized
@@ -85,6 +88,99 @@ func TestFinalizedCheckpointEmittedOutsideLock(t *testing.T) {
 	requireOperationPrunerIdle(t, f)
 }
 
+func TestTickBuildsUnrealizedJustifiedCheckpointState(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.JustifiedCheckpoint()
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: justified.Epoch + 1, Root: root}
+	f.unrealizedJustifiedCheckpoint.Store(next)
+
+	f.OnTick((f.beaconCfg.SlotsPerEpoch - 1) * f.beaconCfg.SecondsPerSlot)
+
+	require.Equal(t, justified, f.JustifiedCheckpoint())
+	require.Eventually(t, func() bool {
+		_, ok := f.checkpointStates.Load(next)
+		return ok
+	}, 10*time.Second, 10*time.Millisecond)
+}
+
+func TestTickSkipsCheckpointStateBuild(t *testing.T) {
+	tests := []struct {
+		name string
+		tick func(f *ForkChoiceStore) uint64
+	}{
+		{name: "slot not advanced", tick: func(f *ForkChoiceStore) uint64 { return f.time.Load() }},
+		{name: "not synced", tick: func(f *ForkChoiceStore) uint64 {
+			return (f.highestSeen.Load() + 2*f.beaconCfg.SlotsPerEpoch + 1) * f.beaconCfg.SecondsPerSlot
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildExAnteStore(t)
+			_, root := decodeDiffBlock(t, diffBlockc2Enc)
+			next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+			f.unrealizedJustifiedCheckpoint.Store(next)
+
+			f.OnTick(tt.tick(f))
+
+			require.Never(t, func() bool {
+				_, ok := f.checkpointStates.Load(next)
+				return ok
+			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+type blockingStateForkGraph struct {
+	fork_graph.ForkGraph
+	root    common.Hash
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (g *blockingStateForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	if blockRoot == g.root {
+		g.calls.Add(1)
+		<-g.release
+	}
+	return g.ForkGraph.GetState(blockRoot, alwaysCopy)
+}
+
+func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
+	f := buildExAnteStore(t)
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+	graph := &blockingStateForkGraph{ForkGraph: f.forkGraph, root: root, release: make(chan struct{})}
+	f.forkGraph = graph
+	released := false
+	defer func() {
+		if !released {
+			close(graph.release)
+		}
+	}()
+	f.unrealizedJustifiedCheckpoint.Store(next)
+
+	slot := f.Slot()
+	for i := uint64(1); i <= 3; i++ {
+		f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot)
+	}
+	built := make(chan error, 1)
+	go func() {
+		_, err := f.getCheckpointState(next)
+		built <- err
+	}()
+
+	require.Eventually(t, func() bool { return graph.calls.Load() >= 1 }, 10*time.Second, time.Millisecond)
+	require.Never(t, func() bool { return graph.calls.Load() > 1 }, 300*time.Millisecond, 5*time.Millisecond)
+	close(graph.release)
+	released = true
+
+	require.NoError(t, <-built)
+	_, ok := f.checkpointStates.Load(next)
+	require.True(t, ok)
+	require.Equal(t, int32(1), graph.calls.Load())
+}
+
 type blockingPruneForkGraph struct {
 	fork_graph.ForkGraph
 	started chan uint64
@@ -111,7 +207,6 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 		if !released {
 			close(pruneGraph.release)
 		}
-		f.forkGraph = base
 	}()
 
 	_, root := decodeDiffBlock(t, diffBlockc2Enc)
