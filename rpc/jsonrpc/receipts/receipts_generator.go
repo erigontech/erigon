@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"golang.org/x/sync/singleflight"
 	"runtime"
@@ -503,7 +504,10 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-// Prototype knobs for the dedup A/B: RECEIPTS_DEDUP=mutex|singleflight, RECEIPTS_PRECHECK probes the cache before dedup.
+// Prototype knobs for the dedup A/B: RECEIPTS_PRECHECK probes the cache before dedup; RECEIPTS_DEDUP picks:
+// mutex (per-block loaderMutex), singleflight (Do, work detached from the first caller's cancellation),
+// singleflight-shared (plain Do), singleflight-retry (plain Do, retry after a shared cancellation),
+// singleflight-chan (DoChan, callers leave on their own ctx; unsafe: the work may outlive the first caller's tx).
 var (
 	receiptsDedup    = dbg.EnvString("RECEIPTS_DEDUP", "mutex")
 	receiptsPrecheck = dbg.EnvBool("RECEIPTS_PRECHECK", false)
@@ -516,20 +520,48 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return receipts, nil
 		}
 	}
-	if receiptsDedup == "singleflight" {
-		// Shared by every waiter: one caller's cancellation must not fail the others. Do keeps the
-		// first caller, and so its tx, blocked until the work returns.
+	switch receiptsDedup {
+	case "singleflight":
 		v, err, _ := g.blockExecGroup.Do(string(blockHash[:]), func() (any, error) {
 			return g.getReceipts(context.WithoutCancel(ctx), cfg, tx, block, opts)
 		})
-		if err != nil {
-			return nil, err
+		return receiptsResult(v, err)
+	case "singleflight-shared":
+		v, err, _ := g.blockExecGroup.Do(string(blockHash[:]), func() (any, error) {
+			return g.getReceipts(ctx, cfg, tx, block, opts)
+		})
+		return receiptsResult(v, err)
+	case "singleflight-retry":
+		for {
+			v, err, shared := g.blockExecGroup.Do(string(blockHash[:]), func() (any, error) {
+				return g.getReceipts(ctx, cfg, tx, block, opts)
+			})
+			if shared && ctx.Err() == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				continue
+			}
+			return receiptsResult(v, err)
 		}
-		return v.(types.Receipts), nil
+	case "singleflight-chan":
+		ch := g.blockExecGroup.DoChan(string(blockHash[:]), func() (any, error) {
+			return g.getReceipts(context.WithoutCancel(ctx), cfg, tx, block, opts)
+		})
+		select {
+		case r := <-ch:
+			return receiptsResult(r.Val, r.Err)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
 	return g.getReceipts(ctx, cfg, tx, block, opts)
+}
+
+func receiptsResult(v any, err error) (types.Receipts, error) {
+	if err != nil {
+		return nil, err
+	}
+	return v.(types.Receipts), nil
 }
 
 func (g *Generator) getReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
