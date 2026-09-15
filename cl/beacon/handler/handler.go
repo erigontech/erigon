@@ -58,8 +58,9 @@ import (
 )
 
 const (
-	maxBlobBundleCacheSize    = 48 // 8 blocks worth of blobs
-	maxPendingBuilderPayloads = 4
+	maxBlobBundleCacheSize             = 48 // 8 blocks worth of blobs
+	maxPendingBuilderPayloads          = 4
+	maxExecutionPayloadEnvelopeRetries = 1024
 )
 
 // Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
@@ -178,6 +179,16 @@ type selfBuildEnvelopeKey struct {
 	BeaconBlockRoot common.Hash
 }
 
+type executionPayloadEnvelopeGossipKey struct {
+	BeaconBlockRoot common.Hash
+	BuilderIndex    uint64
+}
+
+type executionPayloadEnvelopeRetry struct {
+	EnvelopeRoot   [32]byte
+	GossipRequired bool
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -253,8 +264,11 @@ type ApiHandler struct {
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
-	builderRoutes      *builderRouteStore
+	selfBuildEnvelopes                      *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
+	executionPayloadEnvelopeRetryMu         sync.Mutex
+	executionPayloadEnvelopeRetries         *lru.Cache[executionPayloadEnvelopeGossipKey, executionPayloadEnvelopeRetry]
+	executionPayloadEnvelopeRetriesInFlight map[executionPayloadEnvelopeGossipKey]struct{}
+	builderRoutes                           *builderRouteStore
 }
 
 func NewApiHandler(
@@ -324,6 +338,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	executionPayloadEnvelopeRetries, err := lru.New[executionPayloadEnvelopeGossipKey, executionPayloadEnvelopeRetry]("executionPayloadEnvelopeRetries", maxExecutionPayloadEnvelopeRetries)
+	if err != nil {
+		panic(err)
+	}
 	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
 	return &ApiHandler{
 		logger:                             logger,
@@ -376,8 +394,47 @@ func NewApiHandler(
 		selfBuildPayloads:                selfBuildPayloads,
 		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
 		selfBuildEnvelopes:               selfBuildEnvelopes,
+		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
 		builderRoutes:                    builderRoutes,
 	}
+}
+
+func (a *ApiHandler) claimExecutionPayloadEnvelopeRetry(
+	key executionPayloadEnvelopeGossipKey,
+	envelopeRoot [32]byte,
+) (executionPayloadEnvelopeRetry, bool, bool) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	retry, ok := a.executionPayloadEnvelopeRetries.Peek(key)
+	if !ok || retry.EnvelopeRoot != envelopeRoot {
+		return executionPayloadEnvelopeRetry{}, false, false
+	}
+	if _, ok := a.executionPayloadEnvelopeRetriesInFlight[key]; ok {
+		return executionPayloadEnvelopeRetry{}, true, false
+	}
+	if a.executionPayloadEnvelopeRetriesInFlight == nil {
+		a.executionPayloadEnvelopeRetriesInFlight = make(map[executionPayloadEnvelopeGossipKey]struct{})
+	}
+	a.executionPayloadEnvelopeRetriesInFlight[key] = struct{}{}
+	return retry, true, true
+}
+
+func (a *ApiHandler) finishExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	delete(a.executionPayloadEnvelopeRetriesInFlight, key)
+}
+
+func (a *ApiHandler) recordExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey, retry executionPayloadEnvelopeRetry) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	a.executionPayloadEnvelopeRetries.Add(key, retry)
+}
+
+func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	a.executionPayloadEnvelopeRetries.Remove(key)
 }
 
 func (a *ApiHandler) Init() {

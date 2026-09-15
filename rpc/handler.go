@@ -216,10 +216,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				default:
 				}
 
-				// handleCallMsg yields one of three:
-				// non-streaming response: res != nil, encoded here via writeTo.
-				// streamed response: res == nil, already written to the stream.
-				// notification: no response, leaving buf empty (only non-empty buffers reply).
+				// A non-nil res is an error answer that still has to be written. On nil the answer
+				// is already in the stream, or the message needs none.
 				buf := bytes.NewBuffer(nil)
 				stream := jsonstream.Get(buf)
 				defer jsonstream.Put(stream)
@@ -243,29 +241,14 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	})
 }
 
-// sendBatchAnswers joins the per-item answers into one JSON array and sends it.
-// It owns the stream for the whole call, so the pool gets it back on any exit.
+// sendBatchAnswers sends the answers in request order, leaving out calls that have none.
 func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
-	out := jsonstream.Get(nil)
-	defer jsonstream.Put(out)
-
-	out.WriteArrayStart()
-	wrote := false
-	for _, answer := range answers {
-		if answer == nil {
-			continue
-		}
-		if wrote {
-			out.WriteMore()
-		}
-		wrote = true
-		out.WriteRawBytes(answer)
+	batch := slices.DeleteFunc(answers, func(answer []byte) bool { return answer == nil })
+	if len(batch) == 0 {
+		return
 	}
-	out.WriteArrayEnd()
-	if wrote {
-		if err := h.conn.WriteJSON(ctx, rawResponse(out.Buffer())); err != nil {
-			h.logger.Debug("Failed to write RPC batch response", "err", err)
-		}
+	if err := h.conn.WriteJSON(ctx, rawBatch(batch)); err != nil {
+		h.logger.Debug("Failed to write RPC batch response", "err", err)
 	}
 }
 
@@ -282,8 +265,8 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	}
 }
 
-// answerInto runs the call and leaves its response in stream. A streamed method
-// writes its own; anything else is encoded here.
+// answerInto runs the call and leaves its response in stream. The call writes a success
+// itself; only an error answer is encoded here.
 func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
 	answer := h.handleCallMsg(cp, msg, stream)
 	h.addSubscriptions(cp.notifiers)
@@ -521,7 +504,8 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 }
 
-// handleCallMsg executes a call message and returns the answer.
+// handleCallMsg executes a call message. It returns the error answer, or nil once the
+// response is in the stream or the message needs none.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
@@ -672,7 +656,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		if err != nil {
 			return msg.errorResponse(remapDBOverload(ctx, err))
 		}
-		return msg.response(result)
+		if msg.isNotification() {
+			return nil
+		}
+		return msg.writeResponse(stream, result)
 	}
 
 	stream.WriteObjectStart()
@@ -702,32 +689,17 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	return nil
 }
 
-// writeTo writes a success response's already-encoded Result (and id) directly rather than
-// re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
-// except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
-// Nothing here may reach the underlying writer: the response must stay in the stream buffer
-// until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
+// writeTo writes a response built as a message, such as an error; success results go through
+// writeResponse. Nothing here may reach the underlying writer: the response must stay in the
+// stream buffer until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, err := json.Marshal(msg)
-		if err != nil {
-			buf, err = json.Marshal(msg.errorResponse(err))
-		}
-		if err == nil {
-			stream.WriteRawBytes(buf)
-		}
-		return
+	buf, err := json.Marshal(msg)
+	if err != nil {
+		buf, err = json.Marshal(msg.errorResponse(err))
 	}
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString(msg.Version)
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteRawBytes(msg.ID)
-	stream.WriteMore()
-	stream.WriteObjectField("result")
-	stream.WriteRawBytes(msg.Result)
-	stream.WriteObjectEnd()
+	if err == nil {
+		stream.WriteRawBytes(buf)
+	}
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
