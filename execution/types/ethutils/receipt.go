@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, []*types.Log, []map[string]any or nil.
+// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log, []map[string]any or nil.
 type RPCReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash"`
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
