@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -190,4 +191,14 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, has, "%s pruned the reorg boundary", table)
 	}
+}
+
+// The tip budget is shared with the FCU prune path (execmodule), which passes it
+// to PruneExecutionStage as the caller timeout: if the two drift apart, the
+// larger one silently wins.
+func TestTipPruneTimeout(t *testing.T) {
+	const mainnetSlot = 12
+	require.Equal(t, 4*time.Second, TipPruneTimeout(mainnetSlot, 0))
+	require.Equal(t, 4200*time.Millisecond, TipPruneTimeout(mainnetSlot, 100))
+	require.Equal(t, 8*time.Second, TipPruneTimeout(mainnetSlot, 100_000), "backlog must not push past the cap")
 }
