@@ -390,8 +390,6 @@ func (t *mdLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
 }
 
-func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
-
 func (t *mdLogger) captureStartOrEnter(from, to accounts.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
