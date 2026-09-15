@@ -19,7 +19,9 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -27,7 +29,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -360,4 +364,91 @@ func TestParallelProcessFeedsWarmup(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, opened.Load(), released.Load(), "every warmup context must be released before Process returns")
+}
+
+type semLeaseErrCtx struct {
+	err error
+}
+
+func (c semLeaseErrCtx) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, c.err }
+func (c semLeaseErrCtx) PutBranch([]byte, []byte, []byte) error { return c.err }
+func (c semLeaseErrCtx) Account([]byte) (*Update, error)        { return nil, c.err }
+func (c semLeaseErrCtx) Storage([]byte) (*Update, error)        { return nil, c.err }
+
+func TestParallelWarmupDoesNotDeadlockReadTxFloor(t *testing.T) {
+	origProcs := runtime.GOMAXPROCS(64)
+	defer runtime.GOMAXPROCS(origProcs)
+
+	origWorkers := defaultParallelCommitmentWorkers
+	defaultParallelCommitmentWorkers = 64
+	defer func() { defaultParallelCommitmentWorkers = origWorkers }()
+
+	origWarmupers := dbg.TipTrieWarmupers
+	dbg.TipTrieWarmupers = 32
+	defer func() { dbg.TipTrieWarmupers = origWarmupers }()
+
+	floor := ParallelCommitmentReadTxs()
+	sem := semaphore.NewWeighted(int64(floor))
+
+	numWarmupWorkers := dbg.TipTrieWarmupers
+	var warmupAttempted sync.WaitGroup
+	warmupAttempted.Add(numWarmupWorkers)
+	leasesMayStart := make(chan struct{})
+	go func() {
+		warmupAttempted.Wait()
+		close(leasesMayStart)
+	}()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+
+	warmFactory := func(context.Context) (PatriciaContext, func()) {
+		defer warmupAttempted.Done()
+		if !sem.TryAcquire(1) {
+			return semLeaseErrCtx{err: errors.New("warmup: no read-tx slot")}, func() {}
+		}
+		return ms, func() { sem.Release(1) }
+	}
+
+	leaseFactory := func(ctx context.Context) (PatriciaContext, func()) {
+		<-leasesMayStart
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return semLeaseErrCtx{err: err}, func() {}
+		}
+		return ms, func() { sem.Release(1) }
+	}
+
+	ub := NewUpdateBuilder()
+	for nib := range 16 {
+		addr := findAddressForNibble(nib, 41)
+		ub.Balance(hex.EncodeToString(addr), 7)
+	}
+	for i := range 4000 {
+		addr := findAddressForNibble(i%16, 1000+i)
+		ub.Balance(hex.EncodeToString(addr), uint64(i)+1)
+	}
+	keys, upds := ub.Build()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := NewParallelPatriciaHashed(leaseFactory, length.Addr, DefaultTrieConfig())
+	defer tr.Release()
+	tr.SetNumWorkers(64)
+	tr.SetForkGrain(4)
+	tr.ResetContext(ms)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err := tr.Process(ctx, ut, "", nil, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: warmFactory,
+		NumWorkers: numWarmupWorkers,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	require.NoError(t, err, "ParallelCommitmentReadTxs floor=%d must reserve slots for %d warmup workers", floor, numWarmupWorkers)
 }

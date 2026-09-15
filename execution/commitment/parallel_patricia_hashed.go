@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
@@ -79,9 +81,8 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 }
 
 // ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
-// One per leased execution context, plus the base trie's own; a parked walker holds no lease.
 func ParallelCommitmentReadTxs() int {
-	return parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1
+	return parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1 + max(dbg.TipTrieWarmupers, 0)
 }
 
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {

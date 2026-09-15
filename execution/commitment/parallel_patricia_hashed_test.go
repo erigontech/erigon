@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -47,7 +48,7 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 func TestParallelCommitmentReadTxs(t *testing.T) {
 	concurrency := parallelMountConcurrency(defaultParallelCommitmentWorkers)
 
-	require.Equal(t, concurrency+1, ParallelCommitmentReadTxs())
+	require.Equal(t, concurrency+1+max(dbg.TipTrieWarmupers, 0), ParallelCommitmentReadTxs())
 }
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {

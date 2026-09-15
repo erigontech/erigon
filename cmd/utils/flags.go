@@ -449,7 +449,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 + TIP_TRIE_WARMUPERS parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
