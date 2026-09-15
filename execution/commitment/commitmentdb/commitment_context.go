@@ -339,6 +339,15 @@ func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, p
 	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
 }
 
+// WitnessNodesByHash returns the witness nodes of the touched keys keyed by their hash, and the root hash.
+func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	return hexPatriciaHashed.WitnessNodesByHash(ctx, sdc.updates)
+}
+
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
@@ -352,32 +361,6 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
 	return lean, rootHash, nil
-}
-
-// Witness builds the proof trie from the captured superset and re-attaches codeReads
-// to present account nodes, since the consensus RLP carries only the code hash. The
-// trie is returned unpruned; consumers do their own node selection.
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	full, _, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
-	if err != nil {
-		return nil, nil, err
-	}
-	proofTrie, err = trie.RLPDecode(full)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	for addrHash, codeWithHash := range codeReads {
-		if len(codeWithHash.Code) == 0 {
-			continue
-		}
-		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
-			continue
-		}
-		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
-			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
-		}
-	}
-	return proofTrie, rootHash, nil
 }
 
 // WitnessLean builds the proof trie from the lean (pruned) witness node set — the

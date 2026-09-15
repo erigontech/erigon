@@ -668,3 +668,89 @@ func PrintProof(proof []hexutil.Bytes) error {
 	}
 	return nil
 }
+
+// ProofFromNodes returns the nodes on the path to key (keybytes) from the node with hash root, and the leaf value when
+// key is present. byHash holds nodes keyed by their hash; a node embedded in its parent is taken from the parent.
+func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte, value []byte, err error) {
+	enc, ok := byHash[string(root)]
+	if !ok {
+		return nil, nil, fmt.Errorf("proof node %x absent", root)
+	}
+	path := nibbles.KeybytesToHex(key)
+	path = path[:len(path)-1]
+	for enc != nil {
+		proof = append(proof, enc)
+		elems, _, err := rlp.SplitList(enc)
+		if err != nil {
+			return nil, nil, err
+		}
+		n, err := rlp.CountValues(elems)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch n {
+		case 2:
+			compact, rest, err := rlp.SplitString(elems)
+			if err != nil {
+				return nil, nil, err
+			}
+			nodeKey := nibbles.CompactToHex(compact)
+			leaf := nibbles.HasTerm(nodeKey)
+			if leaf {
+				nodeKey = nodeKey[:len(nodeKey)-1]
+			}
+			if !bytes.HasPrefix(path, nodeKey) {
+				return proof, nil, nil
+			}
+			path = path[len(nodeKey):]
+			if leaf {
+				if len(path) != 0 {
+					return proof, nil, nil
+				}
+				value, _, err = rlp.SplitString(rest)
+				return proof, value, err
+			}
+			if enc, err = childNode(byHash, rest); err != nil {
+				return nil, nil, err
+			}
+		case 17:
+			if len(path) == 0 {
+				return proof, nil, nil
+			}
+			rest := elems
+			for range path[0] {
+				if _, _, rest, err = rlp.Split(rest); err != nil {
+					return nil, nil, err
+				}
+			}
+			path = path[1:]
+			if enc, err = childNode(byHash, rest); err != nil {
+				return nil, nil, err
+			}
+		default:
+			return nil, nil, fmt.Errorf("invalid number of list elements: %d", n)
+		}
+	}
+	return proof, nil, nil
+}
+
+// childNode resolves the child reference at the start of buf: an embedded node, a node looked up by hash, or nil.
+func childNode(byHash map[string][]byte, buf []byte) ([]byte, error) {
+	kind, val, rest, err := rlp.Split(buf)
+	switch {
+	case err != nil:
+		return nil, err
+	case kind == rlp.List:
+		return buf[:len(buf)-len(rest)], nil
+	case len(val) == 0:
+		return nil, nil
+	case len(val) == 32:
+		enc, ok := byHash[string(val)]
+		if !ok {
+			return nil, fmt.Errorf("proof node %x absent", val)
+		}
+		return enc, nil
+	default:
+		return nil, fmt.Errorf("invalid child reference of %d bytes", len(val))
+	}
+}
