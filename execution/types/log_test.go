@@ -444,6 +444,16 @@ func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
 	}
 }
 
+func TestAppendFilteredRPCLogsCopiesTheLog(t *testing.T) {
+	t.Parallel()
+	src := Logs{{Address: common.Address{1}, Index: 7}}
+	out := src.AppendFilteredRPCLogs(nil, nil, nil, 99, 0)
+	src[0].Address = common.Address{2}
+	src[0].Index = 8
+	require.Equal(t, common.Address{1}, out[0].Address)
+	require.Equal(t, hexutil.Uint(7), out[0].Index)
+}
+
 // AppendFilteredRPCLogs must select exactly what FilterWithTopicMap selects.
 func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
 	t.Parallel()

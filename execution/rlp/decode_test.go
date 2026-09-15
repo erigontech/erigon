@@ -1397,7 +1397,7 @@ func TestDecodeListSliceNoAmplification(t *testing.T) {
 	defer PutStream(s)
 	size, err := s.List()
 	require.NoError(t, err)
-	require.Equal(t, items, countItems(s.Peek()[:size]), "payload really is one-byte items")
+	require.Equal(t, items, CountItems(s.Peek()[:size]), "payload really is one-byte items")
 	require.LessOrEqual(t, sliceHint(s, elem, size)*int(elem.Size()), maxSliceHintBytes,
 		"a pre-allocation must stay within the hint budget")
 }
