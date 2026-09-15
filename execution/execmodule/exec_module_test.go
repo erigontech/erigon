@@ -2392,8 +2392,8 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	block := chainPack.Blocks[0]
 	header := block.Header()
 	invalidBAL := types.BlockAccessList{
-		{Address: accounts.InternAddress(common.Address{2})},
-		{Address: accounts.InternAddress(common.Address{1})},
+		{Address: common.Address{2}},
+		{Address: common.Address{1}},
 	}
 	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
 	require.NoError(t, err)
@@ -2413,7 +2413,7 @@ func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 
 	block := chainPack.Blocks[0]
 	header := block.Header()
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := types.BlockAccessList{{Address: common.Address{1}}}
 	wrongHash := common.Hash{1}
 	header.BlockAccessListHash = &wrongHash
 	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
