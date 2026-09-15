@@ -82,45 +82,15 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
-func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err error) {
+func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) error {
 	if !s.enabled {
-		return
+		return nil
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.accessLock.Lock()
-	defer s.accessLock.Unlock()
-
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	var blkRoot common.Hash
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(s.headState)
-	}
+	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
-	blkRoot, err = newState.BlockRoot()
-	if err != nil {
-		return err
-	}
-	s.stateHead.Store(&headIdentity{root: blkRoot, slot: newState.Slot()})
-	return nil
+	return s.OnHeadStateWithBlockRoot(newState, blkRoot)
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
@@ -137,27 +107,15 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
+	next := s.previousHeadState
+	if next == nil {
+		next = state.New(newState.BeaconConfig())
 	}
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(s.headState)
-	}
-	if err != nil {
+	if err = newState.CopyInto(next); err != nil {
+		s.previousHeadState = nil
 		return err
 	}
+	s.previousHeadState, s.headState = s.headState, next
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
 }
