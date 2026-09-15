@@ -357,6 +357,17 @@ func BenchmarkHashSort_ModeDirect(b *testing.B) {
 	}
 }
 
+func BenchmarkContractHashFromPrefix(b *testing.B) {
+	prefix := make([]byte, 34)
+	for i := range prefix {
+		prefix[i] = byte(i * 37)
+	}
+	prefix[0] = 0x1a
+	for b.Loop() {
+		_, _ = ContractHashFromPrefix(prefix)
+	}
+}
+
 func BenchmarkHashSort_ModeUpdate(b *testing.B) {
 	for _, n := range []int{50, 5000, 50000} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
