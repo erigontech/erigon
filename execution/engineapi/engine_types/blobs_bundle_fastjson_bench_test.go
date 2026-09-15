@@ -19,6 +19,8 @@ package engine_types
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // BenchmarkBlobsBundleMarshal compares the worst-case getPayload blobs bundle (a full mainnet block,
@@ -50,7 +52,10 @@ func BenchmarkBlobsBundleMarshal(b *testing.B) {
 
 // BenchmarkGetPayloadResponseJSON decodes and encodes a getPayload result with a 16-transaction payload.
 func BenchmarkGetPayloadResponseJSON(b *testing.B) {
-	enc := []byte(getPayloadResponseJSON(`"0x3b9aca00"`, `"0x1bc16d674ec80000"`, 16))
+	enc, err := json.Marshal(getPayloadResponse(b, `"0x3b9aca00"`, `"0x1bc16d674ec80000"`, 16))
+	if err != nil {
+		b.Fatal(err)
+	}
 	var resp GetPayloadResponse
 	if err := json.Unmarshal(enc, &resp); err != nil {
 		b.Fatal(err)
@@ -72,4 +77,20 @@ func BenchmarkGetPayloadResponseJSON(b *testing.B) {
 			}
 		}
 	})
+}
+
+// getPayloadResponse is a getPayload result with txs 120-byte transactions. Quantities are given as JSON,
+// so the fixture builds whatever type the fields have.
+func getPayloadResponse(tb testing.TB, baseFee, blockValue string, txs int) *GetPayloadResponse {
+	r := &GetPayloadResponse{ExecutionPayload: &ExecutionPayload{LogsBloom: make(hexutil.Bytes, 256), Transactions: make([]hexutil.Bytes, txs)}}
+	for i := range r.ExecutionPayload.Transactions {
+		r.ExecutionPayload.Transactions[i] = make(hexutil.Bytes, 120)
+	}
+	if err := json.Unmarshal([]byte(baseFee), &r.ExecutionPayload.BaseFeePerGas); err != nil {
+		tb.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(blockValue), &r.BlockValue); err != nil {
+		tb.Fatal(err)
+	}
+	return r
 }

@@ -76,13 +76,6 @@ type PayloadAttributes struct {
 	SSZVersion            clparams.StateVersion `json:"-"`
 }
 
-// TransitionConfiguration represents the correct configurations of the CL and the EL
-type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.U256 `json:"terminalTotalDifficulty"`
-	TerminalBlockHash       common.Hash   `json:"terminalBlockHash"`
-	TerminalBlockNumber     *hexutil.U256 `json:"terminalBlockNumber"`
-}
-
 // BlobsBundle holds the blobs of an execution payload.
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
