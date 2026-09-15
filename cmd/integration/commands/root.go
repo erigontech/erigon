@@ -108,9 +108,14 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 	return opts.MustOpen(), nil
 }
 
+// isDefaultChaindata compares the flags as given: dirs.Chaindata is absolute and never matches a relative --datadir.
+func isDefaultChaindata(chaindata, datadir string) bool {
+	return chaindata == filepath.Join(datadir, "chaindata")
+}
+
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
-	if applyMigrations && chaindata == filepath.Join(datadirCli, "chaindata") {
+	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
 		if err := app.RetireStateIfStepsInDB(ctx, dirs, 3, logger); err != nil {
 			return nil, err
 		}

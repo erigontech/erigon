@@ -268,6 +268,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			BlockNum:  blockNum,
 			BlockHash: blockHash,
 			TxnHash:   txnHash,
+			// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
+			DontCalcBloom: true,
 		})
 		if err != nil {
 			return nil, err
