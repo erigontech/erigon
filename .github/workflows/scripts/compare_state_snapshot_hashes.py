@@ -195,9 +195,9 @@ def file_statuses(comparison, one_side_only, one_side_label):
 
 
 def file_lists(comparison):
-    return [(f"Built locally ({comparison.built})",
+    return [(f"Built state data files ({comparison.built})",
              file_statuses(comparison, comparison.local_only, "not published")),
-            (f"Published ({comparison.published})",
+            (f"Published state data files ({comparison.published})",
              file_statuses(comparison, comparison.published_only, "not built"))]
 
 
@@ -209,19 +209,25 @@ def format_by_subdir(comparison, dirs):
     return ", ".join(f"{d} {count}" for d, count in compared_by_subdir(comparison, dirs).items())
 
 
-def render_console(result, comparison, source, chain, dirs, exts):
+def describe_state_data(dirs, exts, quote=""):
+    file_types = ", ".join(f"{quote}{e}{quote}" for e in exts) if exts else "all extensions"
+    return f"{file_types} in {', '.join(f'{quote}{d}{quote}' for d in dirs)}"
+
+
+def render_console(result, comparison, source, chain, dirs, exts, local_entries, published_entries):
     def row(label, count, note=""):
-        return f"  {label:<22}{count:>5}{note}"
+        return f"  {label:<28}{count:>5}{note}"
 
     lines = [f"State snapshot hash check — {chain}",
              f"  published hashes from: {source}",
-             f"  compared file types:   {', '.join(exts) if exts else 'all'} in {', '.join(dirs)}", ""]
+             f"  counted: only state data files ({describe_state_data(dirs, exts)})", ""]
     for title, statuses in file_lists(comparison):
         lines.append(f"{title}:")
         lines += [f"  {status:<14} {name}" for status, name in statuses]
         lines.append("")
-    lines += [row("published:", comparison.published),
-             row("built locally:", comparison.built),
+    lines += [row("published state data files:", comparison.published,
+                 f"  (of {published_entries} entries in the published TOML)"),
+             row("built state data files:", comparison.built, f"  (of {local_entries} entries in the local hashes)"),
              row("in both (compared):", comparison.compared,
                  f"  ->  {len(comparison.matched)} identical, {len(comparison.mismatched)} DIFFERENT"),
              f"    compared by subdir: {format_by_subdir(comparison, dirs)}",
@@ -236,16 +242,15 @@ def render_console(result, comparison, source, chain, dirs, exts):
     return "\n".join(lines)
 
 
-def render_summary(result, comparison, source, chain, dirs, exts, cap=50):
+def render_summary(result, comparison, source, chain, dirs, exts, local_entries, published_entries, cap=50):
     badge = {"SUCCESS": "✅", "FAILURE": "❌"}.get(result.outcome, "⚠️")
-    file_types = ", ".join(f"`{e}`" for e in exts) if exts else "all"
     lines = [f"## {badge} State snapshot hashes — {chain}", "",
              f"**{headline(comparison)}**", "",
-             f"Compared file types: {file_types} in {', '.join(f'`{d}`' for d in dirs)}. "
+             f"Counted: only state data files ({describe_state_data(dirs, exts, quote='`')}). "
              f"Published hashes from `{source}`.", "",
              "| | files | |", "|---|---:|---|",
-             f"| published | {comparison.published} | |",
-             f"| built locally | {comparison.built} | |",
+             f"| published state data files | {comparison.published} | of {published_entries} entries in the published TOML |",
+             f"| built state data files | {comparison.built} | of {local_entries} entries in the local hashes |",
              f"| **in both (compared)** | **{comparison.compared}** | "
              f"{len(comparison.matched)} identical, {len(comparison.mismatched)} different |",
              f"| built, not published | {len(comparison.local_only)} | not compared |",
@@ -300,22 +305,25 @@ def main():
     exts = tuple(e.strip().lstrip(".") for e in args.exts.split(",") if e.strip())
 
     with open(args.local_hashes, encoding="utf-8") as fh:
-        local = state_entries(parse_hash_toml(fh.read()), dirs, exts)
+        local_all = parse_hash_toml(fh.read())
     published_text, source = load_published(args, repo_root)
-    published = state_entries(parse_hash_toml(published_text), dirs, exts)
+    published_all = parse_hash_toml(published_text)
+    local = state_entries(local_all, dirs, exts)
+    published = state_entries(published_all, dirs, exts)
 
     comparison = compare(local, published)
     result = verdict(comparison, dirs)
     result.add_measure("local_state_files", len(local))
     result.add_measure("published_state_files", len(published))
 
-    print(render_console(result, comparison, source, args.chain, dirs, exts))
+    print(render_console(result, comparison, source, args.chain, dirs, exts, len(local_all), len(published_all)))
 
     if args.result_file:
         result.write_to_json_file(args.result_file)
     if args.summary_file:
         with open(args.summary_file, "a", encoding="utf-8") as fh:
-            fh.write(render_summary(result, comparison, source, args.chain, dirs, exts) + "\n")
+            fh.write(render_summary(result, comparison, source, args.chain, dirs, exts,
+                                    len(local_all), len(published_all)) + "\n")
 
     return result.exit_code
 
