@@ -22,7 +22,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	commonerrors "github.com/erigontech/erigon/common/errors"
@@ -1500,38 +1499,21 @@ func TestJoinWorkers(t *testing.T) {
 	require.EqualError(t, got, "worker pool: exec.Worker panic: boom")
 }
 
-// errgroup keeps its first non-nil error, so members must filter cancellation.
 func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 	boom := errors.New("exec.Worker panic: boom")
-
-	t.Run("raw cancellation occupies the first-error slot", func(t *testing.T) {
-		g, groupCtx := errgroup.WithContext(context.Background())
-		g.Go(func() error { return context.Canceled })
-		g.Go(func() error {
-			<-groupCtx.Done()
-			return boom
-		})
-		got := g.Wait()
-		require.ErrorIs(t, got, context.Canceled)
-		require.NotErrorIs(t, got, boom,
-			"errgroup keeps the first non-nil return — the raw Canceled masks the real error")
+	canceledReturned := make(chan struct{})
+	pe := &parallelExecutor{}
+	pe.execLoopGroup, _ = commonerrors.NewGroup(context.Background())
+	pe.execLoopGroup.Go(func() error {
+		defer close(canceledReturned)
+		return context.Canceled
 	})
-
-	t.Run("a raw canceled member cannot mask a late real worker error", func(t *testing.T) {
-		canceledReturned := make(chan struct{})
-		pe := &parallelExecutor{}
-		pe.execLoopGroup, _ = commonerrors.NewGroup(context.Background())
-		pe.execLoopGroup.Go(func() error {
-			defer close(canceledReturned)
-			return context.Canceled
-		})
-		pe.execLoopGroup.Go(func() error {
-			<-canceledReturned
-			return joinWorkers(func() error { return boom })
-		})
-		require.ErrorIs(t, pe.wait(), boom,
-			"members must not need to self-filter cancellation for real failures to survive")
+	pe.execLoopGroup.Go(func() error {
+		<-canceledReturned
+		return joinWorkers(func() error { return boom })
 	})
+	require.ErrorIs(t, pe.wait(), boom,
+		"members must not need to self-filter cancellation for real failures to survive")
 }
 
 // A recorded failure must take precedence over missing terminal results because
