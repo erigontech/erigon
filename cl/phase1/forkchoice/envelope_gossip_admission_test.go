@@ -146,3 +146,27 @@ func TestExecutionPayloadEnvelopeAdmissionsTryClaimNeverWaits(t *testing.T) {
 	_, err = admissions.TryClaim(root, 42)
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 }
+
+func TestExecutionPayloadEnvelopeAdmissionsForgetSeenPreservesFIFO(t *testing.T) {
+	var admissions ExecutionPayloadEnvelopeAdmissions
+	targetRoot := common.HexToHash("0xffff")
+	target, err := admissions.TryClaim(targetRoot, 42)
+	require.NoError(t, err)
+	admissions.Finish(target, true)
+
+	admissions.ForgetSeen(targetRoot, 42)
+	target, err = admissions.TryClaim(targetRoot, 42)
+	require.NoError(t, err)
+	admissions.Finish(target, true)
+	for i := range maxSeenExecutionPayloadEnvelopes - 2 {
+		token, err := admissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		admissions.Finish(token, true)
+	}
+	extra, err := admissions.TryClaim(common.HexToHash("0xeeee"), 43)
+	require.NoError(t, err)
+	admissions.Finish(extra, true)
+
+	_, err = admissions.TryClaim(targetRoot, 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+}

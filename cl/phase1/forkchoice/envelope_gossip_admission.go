@@ -195,3 +195,26 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Finish(token ExecutionPayloadEnvelo
 	}
 	a.seen[token.identity] = struct{}{}
 }
+
+func (a *ExecutionPayloadEnvelopeAdmissions) ForgetSeen(beaconBlockRoot common.Hash, builderIndex uint64) {
+	identity := executionPayloadEnvelopeIdentity{beaconBlockRoot: beaconBlockRoot, builderIndex: builderIndex}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; !ok {
+		return
+	}
+	delete(a.seen, identity)
+	ordered := make([]executionPayloadEnvelopeIdentity, 0, len(a.seenFIFO)-1)
+	start := 0
+	if len(a.seenFIFO) == maxSeenExecutionPayloadEnvelopes {
+		start = a.seenNext
+	}
+	for i := range len(a.seenFIFO) {
+		entry := a.seenFIFO[(start+i)%len(a.seenFIFO)]
+		if entry != identity {
+			ordered = append(ordered, entry)
+		}
+	}
+	a.seenFIFO = ordered
+	a.seenNext = 0
+}

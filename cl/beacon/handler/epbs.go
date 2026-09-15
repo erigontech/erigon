@@ -894,7 +894,17 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
 			if persistedKnown && persisted == nil {
-				persisted, _ = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+				var readErr error
+				persisted, readErr = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+				if readErr != nil {
+					persisted = nil
+				}
+				if persisted == nil {
+					a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(
+						signedEnvelope.Message.BeaconBlockRoot,
+						signedEnvelope.Message.BuilderIndex,
+					)
+				}
 			}
 			if persistedKnown && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)

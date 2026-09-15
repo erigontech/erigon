@@ -775,6 +775,9 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+	}
 	token, err := f.envelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -788,6 +791,10 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 
 func (f *ForkChoiceStore) FinishExecutionPayloadEnvelopeForGossip(token ExecutionPayloadEnvelopeAdmissionToken, seen bool) {
 	f.envelopeGossipAdmissions.Finish(token, seen)
+}
+
+func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot common.Hash, builderIndex uint64) {
+	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
 func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

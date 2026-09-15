@@ -509,6 +509,9 @@ func (f *ForkChoiceStorageMock) TryClaimExecutionPayloadEnvelopeForGossip(
 	if f.TryClaimExecutionPayloadEnvelopeForGossipFunc != nil {
 		return f.TryClaimExecutionPayloadEnvelopeForGossipFunc(beaconBlockRoot, builderIndex)
 	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
+	}
 	token, err := f.EnvelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -525,6 +528,10 @@ func (f *ForkChoiceStorageMock) FinishExecutionPayloadEnvelopeForGossip(
 	seen bool,
 ) {
 	f.EnvelopeGossipAdmissions.Finish(token, seen)
+}
+
+func (f *ForkChoiceStorageMock) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot common.Hash, builderIndex uint64) {
+	f.EnvelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
 func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {

@@ -541,6 +541,41 @@ func TestExecutionPayloadServiceQueuesEnvelopeWhileAdmissionIsBusy(t *testing.T)
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 7}))
 }
 
+func TestExecutionPayloadServiceDropsPersistedPendingEnvelopeWhenAdmissionIsSaturated(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
+	for i := range 1024 {
+		token, err := fcu.EnvelopeGossipAdmissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	fcu.SetEnvelope(blockRoot, envelope)
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return envelope, nil
+	}
+
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.Zero(t, reads.Load())
+	for _, token := range tokens {
+		fcu.EnvelopeGossipAdmissions.Finish(token, false)
+	}
+	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 7)
+	require.NoError(t, err)
+	fcu.EnvelopeGossipAdmissions.Finish(token, false)
+}
+
 func TestExecutionPayloadServicePendingBusyIdentityDoesNotBlockOtherJobs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

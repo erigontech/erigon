@@ -502,6 +502,36 @@ func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testi
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
+func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *testing.T) {
+	readEntered := make(chan struct{})
+	graph := &admissionEnvelopeReadForkGraph{readEntered: readEntered}
+	graph.hasEnvelope.Store(true)
+	store := &ForkChoiceStore{forkGraph: graph}
+	tokens := make([]ExecutionPayloadEnvelopeAdmissionToken, 0, maxInflightExecutionPayloadEnvelopes)
+	for i := range maxInflightExecutionPayloadEnvelopes {
+		token, err := store.envelopeGossipAdmissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+	root := common.HexToHash("0xffff")
+
+	_, err := store.TryClaimExecutionPayloadEnvelopeForGossip(root, 42)
+
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+	require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
+	select {
+	case <-readEntered:
+		t.Fatal("persisted envelope presence triggered a disk read")
+	default:
+	}
+	for _, token := range tokens {
+		store.envelopeGossipAdmissions.Finish(token, false)
+	}
+	token, err := store.envelopeGossipAdmissions.TryClaim(root, 42)
+	require.NoError(t, err)
+	store.envelopeGossipAdmissions.Finish(token, false)
+}
+
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
 	g.replace()
 	return nil, nil

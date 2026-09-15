@@ -738,6 +738,42 @@ func TestPostExecutionPayloadEnvelopePreservesConcurrentStoredDuplicateResponses
 	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
+func TestPostExecutionPayloadEnvelopeUnavailablePersistedLookupDoesNotPoisonAdmission(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	otherRoot := common.HexToHash("0x5678")
+	other, err := fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
+	require.NoError(t, err)
+	fcu.EnvelopeGossipAdmissions.Finish(other, true)
+	var staleMarker atomic.Bool
+	staleMarker.Store(true)
+	fcu.HasEnvelopeFunc = func(common.Hash) bool { return staleMarker.Load() }
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		staleMarker.Store(false)
+		return nil, errors.New("persisted envelope unavailable")
+	}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, int32(1), reads.Load())
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+	_, err = fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
+	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+}
+
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
@@ -1449,6 +1485,8 @@ func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	_, err = fcu.EnvelopeGossipAdmissions.TryClaim(common.Hash{}, envelope.Message.BuilderIndex)
+	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 	select {
 	case event := <-events:
 		t.Fatalf("unexpected event %s", event.Event)
