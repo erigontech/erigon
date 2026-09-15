@@ -21,14 +21,13 @@ Before committing, always verify changes with: `make lint && make erigon integra
 - Data flow: `db -> snapshots`
 - `snapshots` are immutable
 - `Unwind` beyond data in snapshots not allowed
-- Parallel commitment walks the touched-key prefix trie, forks at grain-qualified split points, and stitches child cells back into the forking trie. Its leased execution contexts and the base trie are what the `ParallelCommitmentReadTxs` read-transaction floor counts.
 
 ## Key Directories
 
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
 | `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
-| `execution/commitment/` | Sequential and parallel commitment tries | - |
+| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
 | `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
 | `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
 | `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
