@@ -187,11 +187,11 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 // StopTimer/StartTimer. Each run is checked against the fixture's authoritative
 // canonical outputs, so the measurement is of verified-correct execution.
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
+	fx, err := blockreplay.Load(fixturePath(b))
+	require.NoError(b, err)
 	if !dbg.DiscardCommitment() {
 		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
 	}
-	fx, err := blockreplay.Load(fixturePath(b))
-	require.NoError(b, err)
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
@@ -220,11 +220,11 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 // here rather than read from the header, since the header may carry no BAL hash.
 // Same recipe as BenchmarkEphemeralParallelReplay (DISCARD_COMMITMENT=true).
 func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
+	fx, err := blockreplay.Load(fixturePath(b))
+	require.NoError(b, err)
 	if !dbg.DiscardCommitment() {
 		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
 	}
-	fx, err := blockreplay.Load(fixturePath(b))
-	require.NoError(b, err)
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 

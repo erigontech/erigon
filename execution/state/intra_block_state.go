@@ -2686,8 +2686,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	sdb.recordAccess = true
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
+	// The coinbase is the block's fee recipient, a real (non-revertable) access,
+	// so the system address is kept in the BAL when it is itself the coinbase.
 	if rules.IsShanghai {
-		sdb.MarkAddressAccess(coinbase, true)
+		sdb.MarkAddressAccess(coinbase, false)
 	}
 }
 
