@@ -260,6 +260,11 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	hash := *numberOrHash.BlockHash
+	if !numberOrHash.RequireCanonical && api.blocksLRU != nil {
+		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+			return ethapi.RPCMarshalBlock(block, true, fullTx), nil
+		}
+	}
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
