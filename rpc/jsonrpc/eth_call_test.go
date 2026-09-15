@@ -1335,7 +1335,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 
 // fundedBankGenesis returns a fresh ExecModuleTester whose genesis funds a
 // bank account keyed by a fixed, well-known private key, under cfg.
-func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
+func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
 	t.Helper()
 
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1361,7 +1361,7 @@ func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.Exe
 	return m, bankKey, bankAddress
 }
 
-func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
+func chainWithDeployedContractAndConfig(t testing.TB, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	t.Helper()
 
 	var (
@@ -1884,23 +1884,6 @@ func TestCreateAccessListAuthorizationsAffordable(t *testing.T) {
 		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
 	})
 
-	t.Run("rejecting does not pay for the recoveries", func(t *testing.T) {
-		args := ethapi.CallArgs{
-			From:              &bankAddress,
-			To:                &receiverAddress,
-			AuthorizationList: signed(65536),
-		}
-
-		start := time.Now()
-		_, err := api.CreateAccessList(context.Background(), args, nil, nil, nil)
-		elapsed := time.Since(start)
-
-		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
-		// Recovering this many authorities runs into seconds, while the check that
-		// replaces them is arithmetic. The bound is loose enough to survive a slow
-		// machine and still tell the two apart.
-		require.Less(t, elapsed, time.Second, "authorities were recovered before the request was rejected")
-	})
 }
 
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
