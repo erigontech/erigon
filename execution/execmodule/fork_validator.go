@@ -214,10 +214,12 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(hash); ok {
-		if _, retained := fv.candidates.Get(hash); retained {
-			fv.extendingForkHeadHash = hash
-		}
+	_, valid := fv.validHashes.Get(hash)
+	if _, ok := fv.candidates.Get(hash); ok {
+		valid = true
+		fv.extendingForkHeadHash = hash
+	}
+	if valid {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return

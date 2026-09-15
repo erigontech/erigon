@@ -20,6 +20,9 @@ not reconstruct an evicted state.
 - Each candidate owns its SharedDomains, state-change accumulation, and receipts.
 - Completed overlays detach from the validation transaction before it rolls back.
 - Cache hits refresh recency; eviction and invalidation close the retained state.
+- A retained candidate counts as known-valid. A hash evicted from `validHashes`
+  while its state is retained is not executed again, so `Add` never overwrites
+  a retained state without closing it.
 - Adoption consumes one candidate, transfers its accumulation, and closes its
   remaining resources. Other candidates are cleared by fork-choice cleanup.
 - Later block insertion may allocate more physical transaction IDs. Adoption

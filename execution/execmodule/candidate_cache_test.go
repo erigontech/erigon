@@ -84,3 +84,49 @@ func testValidatedCandidateEvictionAndForkChoiceCleanup(t *testing.T, parallel b
 		require.Nil(t, states[i].GetCommitmentCtx())
 	}
 }
+
+func TestValidatedCandidateClosedAfterValidHashEviction(t *testing.T) {
+	const maxReorgDepth = 2
+	m := execmoduletester.New(t, execmoduletester.WithMaxReorgDepth(maxReorgDepth))
+	var coinbase byte
+	sibling := func() *types.Block {
+		t.Helper()
+		coinbase++
+		chain, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+			b.SetCoinbase(common.Address{coinbase})
+		})
+		require.NoError(t, err)
+		_, err = m.InsertBlocks(t.Context(), chain.Blocks)
+		require.NoError(t, err)
+		return chain.Blocks[0]
+	}
+	validate := func(block *types.Block) {
+		t.Helper()
+		result, err := m.ValidateChain(t.Context(), block.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	}
+
+	filler := make([]*types.Block, 8*maxReorgDepth)
+	for i := range filler {
+		filler[i] = sibling()
+		validate(filler[i])
+	}
+	m.ForkValidator.ClearWithUnwind()
+
+	retained := sibling()
+	validate(retained)
+	_, _, first := m.ForkValidator.ExtendingFork()
+	require.NotNil(t, first)
+	for _, block := range filler[1:] {
+		validate(block)
+	}
+	validate(sibling())
+	validate(retained)
+	_, _, second := m.ForkValidator.ExtendingFork()
+	require.NotNil(t, second)
+
+	m.ForkValidator.ClearWithUnwind()
+	require.Nil(t, first.GetCommitmentCtx())
+	require.Nil(t, second.GetCommitmentCtx())
+}
