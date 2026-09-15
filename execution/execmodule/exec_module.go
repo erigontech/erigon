@@ -27,6 +27,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -729,8 +730,12 @@ func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bo
 		(exec3Parallel || experimentalBAL)
 }
 
+// gRPC client cancellation does not unwrap to context.Canceled, but errors.Is
+// matches an equivalent status. Keep this target inside the all-causes check.
+var grpcContextCanceled = status.FromContextError(context.Canceled).Err()
+
 func isRoutineInitialSyncStop(err error) bool {
-	return commonerrors.IsOnly(err, context.Canceled, common.ErrStopped)
+	return commonerrors.IsOnly(err, context.Canceled, common.ErrStopped, grpcContextCanceled)
 }
 
 func isInitialSyncPublicationError(err error) bool {

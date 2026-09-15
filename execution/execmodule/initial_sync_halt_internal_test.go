@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -49,9 +51,13 @@ func TestHaltOnInitialSyncFailure(t *testing.T) {
 	stopped := fmt.Errorf("[Senders] %w", common.ErrStopped)
 	require.False(t, haltOnInitialSyncFailure(stopped, true, false),
 		"ETL shutdown must not halt the node")
-	require.False(t, haltOnInitialSyncFailure(errors.Join(context.Canceled, stopped), true, false),
+	grpcCanceled := status.Error(codes.Canceled, context.Canceled.Error())
+	require.False(t, haltOnInitialSyncFailure(grpcCanceled, true, false),
+		"remote downloader cancellation must not halt the node")
+	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Snapshots] %w", grpcCanceled), true, false))
+	require.False(t, haltOnInitialSyncFailure(errors.Join(context.Canceled, stopped, grpcCanceled), true, false),
 		"joined shutdown signals must not halt the node")
-	require.True(t, haltOnInitialSyncFailure(errors.Join(stopped, operational), true, false),
+	require.True(t, haltOnInitialSyncFailure(errors.Join(stopped, grpcCanceled, operational), true, false),
 		"a real failure must not be hidden by a shutdown signal")
 	publicationErr := &initialSyncPublicationError{err: errors.New("notification dispatch failed")}
 	require.False(t, haltOnInitialSyncFailure(publicationErr, true, false),

@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -106,6 +107,11 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 
 func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
 	t.Helper()
+
+	// Callers must not use t.Parallel: executor selection is process-wide.
+	previousParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	defer func() { dbg.Exec3Parallel = previousParallel }()
 
 	syncCfg := m.Cfg().Sync
 	syncCfg.ChaosMonkey = chaosMonkey
