@@ -135,11 +135,18 @@ func (e *ExecModule) seedRetainedBlocks(tx kv.Tx, overlay kv.RwTx) error {
 			return err
 		}
 	}
-	if err := raiseTxSequence(src, overlay); err != nil {
-		return err
+	return raiseTxSequence(src, overlay)
+}
+
+func (e *ExecModule) publishSeededContext(sd *execctx.SharedDomains) {
+	e.lock.Lock()
+	e.currentContext = sd
+	retained := e.retainedBlocks
+	e.retainedBlocks = nil
+	e.lock.Unlock()
+	if retained != nil {
+		retained.Close()
 	}
-	e.swapRetainedBlocks(nil)
-	return nil
 }
 
 func (e *ExecModule) dropPendingBlocks() {

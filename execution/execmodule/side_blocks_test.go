@@ -17,7 +17,9 @@
 package execmodule_test
 
 import (
+	"context"
 	"crypto/ecdsa"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -137,6 +139,45 @@ func TestRetainedBlockAboveCommittedSequenceKeepsTransactions(t *testing.T) {
 		requireStoredTransactions(t, tx, chainA[0])
 		return nil
 	}))
+}
+
+func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
+	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	canonical := generateTransferBlocks(t, m, key, 32, 0x0a)
+	insertAndValidateBlocks(t, m, side, canonical[0])
+	updateForkChoiceTo(t, m, canonical[0])
+
+	hash := side.Hash()
+	var misses, failures atomic.Int64
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			has, err := m.ExecModule.HasBlock(context.Background(), &hash, nil)
+			switch {
+			case err != nil:
+				failures.Add(1)
+			case !has:
+				misses.Add(1)
+			}
+		}
+	}()
+	for _, block := range canonical[1:] {
+		insertAndValidateBlocks(t, m, block)
+		updateForkChoiceTo(t, m, block)
+	}
+	close(stop)
+	<-done
+	require.Zero(t, failures.Load())
+	require.Zero(t, misses.Load())
 }
 
 func generateTransferBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, key *ecdsa.PrivateKey, n int, to byte) []*types.Block {

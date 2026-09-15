@@ -94,13 +94,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
+		e.publishSeededContext(sd)
 	} else {
 		sd.BlockOverlay().UpdateTxn(roTx)
-	}
-	if fresh {
-		e.lock.Lock()
-		e.currentContext = sd
-		e.lock.Unlock()
 	}
 	blockOverlay := sd.BlockOverlay()
 
