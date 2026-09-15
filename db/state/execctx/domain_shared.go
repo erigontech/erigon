@@ -157,6 +157,13 @@ type SharedDomains struct {
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
+	// detachOnCancel, when set, lets an execution over this SD that its caller cancelled return at once and hand
+	// the rest of its shutdown to the SD's owner, who discards the results. detached records that it did: from
+	// then on the run's leftover goroutines keep out of the node-wide state cache, which later rounds have already
+	// moved on from.
+	detachOnCancel func(finish func())
+	detached       atomic.Bool
+
 	// Serializes the calculator's changeset-accumulator swap against DomainPut/DomainDel; without it block N+1 writes can land in block N's changeset.
 	changesetMu sync.Mutex
 
@@ -650,10 +657,38 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 }
 
-// GetStateCache returns the StateCache, or nil if not set.
+// GetStateCache returns the StateCache, or nil if not set or this SD's execution was detached.
 func (sd *SharedDomains) GetStateCache() *cache.StateCache {
+	return sd.liveStateCache()
+}
+
+// liveStateCache is the state cache this SD may use: none once its execution has been detached.
+func (sd *SharedDomains) liveStateCache() *cache.StateCache {
+	if sd.detached.Load() {
+		return nil
+	}
 	return sd.stateCache
 }
+
+// SetDetachOnCancel marks this SD's results as disposable: an execution over it that is cancelled may return
+// without waiting for its shutdown, handing fn the rest of that shutdown (finish). fn then owns releasing the SD.
+func (sd *SharedDomains) SetDetachOnCancel(fn func(finish func())) { sd.detachOnCancel = fn }
+
+// CanDetachOnCancel reports whether a cancelled execution over this SD may return before its shutdown.
+func (sd *SharedDomains) CanDetachOnCancel() bool { return sd.detachOnCancel != nil }
+
+// DetachOnCancel hands the rest of a cancelled execution's shutdown to this SD's owner. It does nothing and
+// reports false when the SD's results are not disposable.
+func (sd *SharedDomains) DetachOnCancel(finish func()) bool {
+	if sd.detachOnCancel == nil || !sd.detached.CompareAndSwap(false, true) {
+		return false
+	}
+	sd.detachOnCancel(finish)
+	return true
+}
+
+// Detached reports whether an execution over this SD returned before its shutdown; its owner closes the SD.
+func (sd *SharedDomains) Detached() bool { return sd.detached.Load() }
 
 func (sd *SharedDomains) SetVersionedIO(v VersionedIO) { sd.versionedIO = v }
 func (sd *SharedDomains) GetVersionedIO() VersionedIO  { return sd.versionedIO }
@@ -976,8 +1011,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
-	if sd.stateCache != nil {
-		v, ok := sd.stateCache.Get(domain, k)
+	if stateCache := sd.liveStateCache(); stateCache != nil {
+		v, ok := stateCache.Get(domain, k)
 		if dbg.KVReadLevelledMetrics {
 			if ok {
 				sd.metrics.UpdateStateCacheHit(domain)
@@ -1027,8 +1062,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	// Populate state cache on successful storage read
-	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
+	if stateCache := sd.liveStateCache(); stateCache != nil {
+		stateCache.Put(domain, k, v)
 	}
 	// Correct only because commitment is computed on the latest committed
 	// snapshot: an SD reading an older snapshot could re-insert a stale value.
@@ -1161,8 +1196,8 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	}
 
 	// Update state cache when writing
-	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
+	if stateCache := sd.liveStateCache(); stateCache != nil {
+		stateCache.Put(domain, k, v)
 	}
 
 	// Serialize against the calculator's accumulator-swap window — see
@@ -1208,9 +1243,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			return err
 		}
 		// Remove from state cache when account is deleted
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.AccountsDomain, k)
-			sd.stateCache.Delete(kv.CodeDomain, k)
+		if stateCache := sd.liveStateCache(); stateCache != nil {
+			stateCache.Delete(kv.AccountsDomain, k)
+			stateCache.Delete(kv.CodeDomain, k)
 		}
 		// AccountsDomain — apply-side. Serialize against swap window.
 		sd.changesetMu.Lock()
@@ -1218,16 +1253,16 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
 		// Remove from state cache when storage is deleted
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.StorageDomain, k)
+		if stateCache := sd.liveStateCache(); stateCache != nil {
+			stateCache.Delete(kv.StorageDomain, k)
 		}
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
 		// Remove from state cache when code is deleted
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.CodeDomain, k)
+		if stateCache := sd.liveStateCache(); stateCache != nil {
+			stateCache.Delete(kv.CodeDomain, k)
 		}
 	default:
 		//noop

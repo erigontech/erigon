@@ -53,6 +53,13 @@ func (r *RoundContext) current() context.Context {
 	return r.cur
 }
 
+// Current is the context the round in progress runs under. Anything derived for the length of an execution must
+// derive from THIS, not from the RoundContext: the context package watches a custom parent's Done channel and then
+// asks the parent for its Err, and by then the RoundContext may already point back at the node's context — Err nil
+// on a closed Done, which it treats as an internal error and panics. An execution cut at its deadline returns
+// before its shutdown has finished, so that swap-back does come first.
+func (r *RoundContext) Current() context.Context { return r.current() }
+
 func (r *RoundContext) Deadline() (time.Time, bool) { return r.current().Deadline() }
 func (r *RoundContext) Done() <-chan struct{}       { return r.current().Done() }
 func (r *RoundContext) Err() error                  { return r.current().Err() }

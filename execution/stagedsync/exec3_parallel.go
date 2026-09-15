@@ -198,6 +198,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	// rootResults receives per-block commitment roots from the calculator.
 	rootResults := make(chan commitmentResult, 64)
+	calculatorOut := rootResults // the apply loop nils its own copy once the calculator has closed it
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		lastBlock := maxBlockNum
@@ -220,8 +221,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
 
+	// A round whose results are disposable gives the executor back as soon as it is cancelled; once it has, what is
+	// left of this run belongs to the SD's owner and none of the deferred teardown below may touch it.
+	detachable := pe.isForkValidation && pe.doms != nil && pe.doms.CanDetachOnCancel()
+	var detached bool
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	defer func() {
+		if !detached {
+			executorCancel(nil)
+		}
+	}()
 
 	if err != nil {
 		return nil, rwTx, err
@@ -234,7 +243,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Disable inline TouchKey — the commitment calculator accumulates touches
 	// via its own Updates buffer (TouchUpdates from VersionedWrites).
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
-	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
+	defer func() {
+		if !detached {
+			pe.rs.Domains().SetDisableInlineTouchKey(false)
+		}
+	}()
 	// Parallel exec needs in-mem history reads enabled for the calculator
 	// goroutine. Capture the caller's setting first and restore it on exit
 	// — the previous defer-to-false (b72aa7b4f7 #20805) hardcoded the
@@ -248,11 +261,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// block 131578.
 	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
-	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
-
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
-	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
+	defer func() {
+		if !detached {
+			pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
+			pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
+		}
+	}()
 
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
@@ -280,7 +296,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		return nil, nil, err
 	}
 	calculator.Start(executorContext)
-	defer calculator.Stop()
+	defer func() {
+		if !detached {
+			calculator.Stop()
+		}
+	}()
 
 	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, commitResults); err != nil {
 		return nil, rwTx, err
@@ -429,8 +449,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// loop owns shutdown sequencing. Adding context checks here causes
 		// the apply loop to exit before the calculator finishes, leaving
 		// sd.mem inconsistent with the commitment boundary.
+		// The one exception: a detachable round stops at its deadline. Its results are discarded, so there is no
+		// commitment boundary left to keep consistent, and waiting for the calculator is exactly the wait it must not do.
+		var abandoned <-chan struct{}
+		if detachable {
+			abandoned = ctx.Done()
+		}
 		for {
 			select {
+			case <-abandoned:
+				return ctx.Err()
 			case applyResult, ok := <-applyResults:
 				if !ok {
 					// Exec loop closed the channel — batch is complete.
@@ -725,14 +753,43 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 	}()
 
-	// Test-only (dbg.ExecShutdownStall): stall a pre-exec ACCUMULATION round here, never the seal's close or a
-	// validation, so the round cut can be exercised without the block itself becoming unsealable.
-	if stall := dbg.ExecShutdownStall; stall > 0 && pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating() {
-		if every := uint64(max(dbg.ExecShutdownStallEvery, 1)); execShutdownStallRounds.Add(1)%every == 0 {
-			time.Sleep(stall)
+	shutdown := func() {
+		// Test-only (dbg.ExecShutdownStall): stall a pre-exec ACCUMULATION round here, never the seal's close or a
+		// validation, so the round cut can be exercised without the block itself becoming unsealable.
+		if stall := dbg.ExecShutdownStall; stall > 0 && pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating() {
+			if every := uint64(max(dbg.ExecShutdownStallEvery, 1)); execShutdownStallRounds.Add(1)%every == 0 {
+				time.Sleep(stall)
+			}
+		}
+		executorCancel(nil)
+	}
+	if !detachable {
+		shutdown()
+	} else {
+		// Worker shutdown waits for every worker to finish the transaction it is in, and that can take seconds
+		// (live37: 2.28s). The executor is held all the while, and the seal is waiting behind it. A round whose
+		// results are going to be discarded does not wait: at its deadline it returns, and the rest of the
+		// shutdown — the workers, the exec loop, the calculator — runs for the SD's owner, which releases what the
+		// run was using once it has.
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			shutdown()
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			detached = true
+			pe.doms.DetachOnCancel(func() {
+				<-done
+				_ = pe.execLoopGroup.Wait()
+				for range calculatorOut {
+				}
+				calculator.Stop()
+			})
+			return nil, rwTx, ctx.Err()
 		}
 	}
-	executorCancel(nil)
 
 	if !hasLoggedExecution {
 		pe.LogExecution()

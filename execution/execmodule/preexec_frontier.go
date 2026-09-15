@@ -145,6 +145,29 @@ func (f *preExecFrontier) unpin(g *preExecGen) {
 	f.draining = kept
 }
 
+// PinAll leases every live generation, for a reader that may reach any of them: an abandoned round whose execution
+// is still shutting down reads through the chain it ran on. A generation dropped or retired meanwhile closes on the
+// release instead.
+func (f *preExecFrontier) PinAll() func() {
+	f.mu.Lock()
+	gens := make([]*preExecGen, 0, len(f.gens))
+	for _, g := range f.gens {
+		if g.sd != nil {
+			g.pins++
+			gens = append(gens, g)
+		}
+	}
+	f.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			for _, g := range gens {
+				f.unpin(g)
+			}
+		})
+	}
+}
+
 // Open records sd as the ACTIVE generation for the given block, pushing it onto the chain. The previous
 // active generation stays live beneath it as the read-through parent. Re-opening the SAME block number
 // REPLACES the active generation (a re-open after an abandon), closing the SD it displaces.

@@ -117,7 +117,14 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	defer roTx.Rollback()
+	// round is set when this round's SD is disposable. If its execution detached on cancel, goroutines are still
+	// reading through roTx and the SD, and the round's owner releases both once they have finished.
+	var round *execctx.SharedDomains
+	defer func() {
+		if round == nil || !round.Detached() {
+			roTx.Rollback()
+		}
+	}()
 
 	var doms *execctx.SharedDomains
 	var stagingBase *execctx.SharedDomains
@@ -246,6 +253,27 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	}
 	doms.SetStateCache(e.stateCache)
 
+	// A round's results are its caller's to keep or drop, and a dropped round is never read. So when its deadline
+	// cancels it, execution gives the executor back at once rather than waiting for its workers to shut down — the
+	// seal is waiting behind it (live40). The shutdown finishes in the background: the frontier generations it reads
+	// through stay pinned, and this round's SD and tx are released only once it is done.
+	//
+	// Only an SD nobody else holds qualifies — a staged child, or a fresh block — and only one that reads purely
+	// through the frontier: the canonical context a first block chains to is torn down by the fork choice, which a
+	// pin does not hold.
+	if stagingBase != nil || (!reuse && frontierExtension) {
+		round = doms
+		round.SetDetachOnCancel(func(finish func()) {
+			release := e.preExec.PinAll()
+			go func() {
+				defer release()
+				finish()
+				round.Close()
+				roTx.Rollback()
+			}()
+		})
+	}
+
 	// On a CARRY-FORWARD (reuse) round we are extending the SAME in-progress block with more txs; the
 	// maintained SD already holds the accumulated state and its commitment trie the progressive fold.
 	// unwindToCommonCanonical unwinds that trie back to the block's PARENT (common canonical ancestor) —
@@ -298,9 +326,15 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	// A round that does not go on to register its SD in the frontier owns it, and has to close it. Only the
 	// fresh-SD path can reach here holding one nobody else knows about: the carry-forward path is executing
 	// into the frontier's own generation, which the frontier closes.
+	detached := round != nil && round.Detached()
+	if round != nil && !detached {
+		// It ran to the end, so nothing will detach from it now; an SD that goes on to become a generation must
+		// not carry the hook.
+		round.SetDetachOnCancel(nil)
+	}
 	registered := false
 	defer func() {
-		if !registered {
+		if !registered && !detached {
 			doms.Close()
 		}
 	}()

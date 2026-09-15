@@ -120,6 +120,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
+	// Run under the round's own context, not the swappable one the pipeline was built with (execmodule.RoundContext):
+	// contexts derived from it outlive the round when a cut execution detaches, and must not see the swap back.
+	if round, ok := ctx.(interface{ Current() context.Context }); ok {
+		ctx = round.Current()
+	}
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
@@ -215,7 +220,11 @@ func ExecV3(ctx context.Context,
 	if isForkValidation || (parallel && isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
-	defer doms.SetDeferCommitmentUpdates(false)
+	defer func() {
+		if !doms.Detached() { // a detached run is still using it; its owner discards the SD
+			doms.SetDeferCommitmentUpdates(false)
+		}
+	}()
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -251,7 +260,9 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			pe.LogComplete(stepsInDb)
+			if !doms.Detached() {
+				pe.LogComplete(stepsInDb)
+			}
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
