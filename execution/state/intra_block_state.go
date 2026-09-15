@@ -1285,16 +1285,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive absence consumed before the destruct must force a retry.
-			// A wiped MapRead can use an older AddressPath cell's version because
-			// self-destruct snapshots omit the account record.
-			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
-				if sdRes.DepIdx() > sdb.dep {
-					sdb.dep = sdRes.DepIdx()
-				}
-				panic(ErrDependency)
-			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
@@ -1314,6 +1304,16 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved == nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
+				}
+				// A live reconstruction must not replace a consumed absence.
+				// A wiped MapRead can use an older AddressPath cell's version because
+				// self-destruct snapshots omit the account record.
+				if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+					!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
+					if sdRes.DepIdx() > sdb.dep {
+						sdb.dep = sdRes.DepIdx()
+					}
+					panic(ErrDependency)
 				}
 				// The EVM consumes this conclusion: reconcile the provisional
 				// nil probe with the preserved account so a later flush
