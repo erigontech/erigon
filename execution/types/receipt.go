@@ -382,19 +382,6 @@ func (r *Receipt) Size() int {
 	return n
 }
 
-// LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
-func (r *Receipt) LogsBloom() Bloom {
-	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
-		return r.Bloom
-	}
-	if b := r.derivedBloom.Load(); b != nil {
-		return *b
-	}
-	b := CreateBloom(Receipts{r})
-	r.derivedBloom.Store(&b)
-	return b
-}
-
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
 	if r == nil {

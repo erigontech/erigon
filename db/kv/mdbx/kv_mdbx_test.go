@@ -17,6 +17,7 @@
 package mdbx_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -1123,4 +1124,24 @@ func TestTxnDpLimitFromRealPageSize(t *testing.T) {
 	dpLimit, err := db.(*mdbx.MdbxKV).Env().GetOption(mdbxgo.OptTxnDpLimit)
 	require.NoError(t, err)
 	require.Equal(t, dirtySpace/db.PageSize().Bytes(), dpLimit)
+}
+
+func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
+	db := BaseCaseDB(t)
+	put := func(v uint64) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Put(kv.Sequence, []byte("k"), u64tob(v)) }))
+	}
+	get := func() []byte {
+		tx, err := db.BeginRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		v, err := tx.GetOne(kv.Sequence, []byte("k"))
+		require.NoError(t, err)
+		return bytes.Clone(v)
+	}
+
+	put(1)
+	require.Equal(t, u64tob(1), get())
+	put(2)
+	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
 }
