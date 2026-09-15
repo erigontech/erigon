@@ -18,11 +18,15 @@ package shutter
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -30,6 +34,7 @@ import (
 type revisionTxnProvider struct {
 	revision atomic.Uint64
 	provide  func(context.Context)
+	err      error
 }
 
 func (p *revisionTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -37,7 +42,7 @@ func (p *revisionTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.
 		p.provide(ctx)
 	}
 	txnprovider.ObserveTxnRevision(ctx, p.revision.Load())
-	return nil, nil
+	return nil, p.err
 }
 
 func (p *revisionTxnProvider) TransactionSetRevision(uint64, uint64) uint64 {
@@ -52,6 +57,10 @@ func (revisionEonTracker) RecentEon(index EonIndex) (Eon, bool) {
 	return Eon{Index: index}, true
 }
 func (revisionEonTracker) EonByBlockNum(uint64) (Eon, bool) { return Eon{Index: 1}, true }
+
+type missingRevisionEonTracker struct{ revisionEonTracker }
+
+func (missingRevisionEonTracker) EonByBlockNum(uint64) (Eon, bool) { return Eon{}, false }
 
 func TestPoolTransactionSetRevisionIncludesBaseAndDecryptedTransactions(t *testing.T) {
 	base := &revisionTxnProvider{}
@@ -81,11 +90,15 @@ func TestPoolObservesBaseSnapshotWithSelectedDecryptedRevision(t *testing.T) {
 	base := &revisionTxnProvider{}
 	base.revision.Store(1)
 	decrypted := NewDecryptedTxnsPool()
+	var blockTrackerMu sync.Mutex
 	pool := &Pool{
+		logger:            log.New(),
 		baseTxnProvider:   base,
+		blockTracker:      &BlockTracker{blockChangeCond: sync.NewCond(&blockTrackerMu), currentBlockNum: 100},
 		decryptedTxnsPool: decrypted,
 		slotCalculator:    NewBeaconChainSlotCalculator(0, 12),
 		eonTracker:        revisionEonTracker{},
+		chainConfig:       chain.AllProtocolChanges,
 	}
 	mark := DecryptionMark{Slot: 1, Eon: 1}
 	decrypted.AddDecryptedTxns(mark, TxnBatch{TotalGasLimit: 1})
@@ -98,7 +111,7 @@ func TestPoolObservesBaseSnapshotWithSelectedDecryptedRevision(t *testing.T) {
 	}
 	var observed atomic.Uint64
 	ctx := txnprovider.WithTxnRevisionObserver(t.Context(), observed.Store)
-	_, err := pool.provideBaseTxns(ctx, selectedDecryptedRevision, txnprovider.WithBlockTime(12), txnprovider.WithParentBlockNum(100))
+	_, err := pool.ProvideTxns(ctx, txnprovider.WithBlockTime(12), txnprovider.WithParentBlockNum(100))
 	require.NoError(t, err)
 	require.Equal(t, combineTransactionSetRevisions(2, selectedDecryptedRevision), observed.Load())
 
@@ -106,4 +119,59 @@ func TestPoolObservesBaseSnapshotWithSelectedDecryptedRevision(t *testing.T) {
 	require.NotEqual(t, observed.Load(), current)
 	decrypted.AddDecryptedTxns(DecryptionMark{Slot: 1, Eon: 2}, TxnBatch{TotalGasLimit: 3})
 	require.Equal(t, current, pool.TransactionSetRevision(12, 100))
+}
+
+func TestPoolFallbackObservesBaseSnapshot(t *testing.T) {
+	base := &revisionTxnProvider{}
+	base.revision.Store(7)
+	pool := &Pool{logger: log.New(), baseTxnProvider: base}
+	pool.stopped.Store(true)
+
+	var observed atomic.Uint64
+	ctx := txnprovider.WithTxnRevisionObserver(t.Context(), observed.Store)
+	_, err := pool.ProvideTxns(ctx, txnprovider.WithBlockTime(12), txnprovider.WithParentBlockNum(100))
+	require.NoError(t, err)
+	require.Equal(t, combineTransactionSetRevisions(7, 0), observed.Load())
+}
+
+func TestPoolMissingShutterInputObservesBaseSnapshot(t *testing.T) {
+	for name, eonTracker := range map[string]EonTracker{
+		"unknown eon":        missingRevisionEonTracker{},
+		"missing decryption": revisionEonTracker{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := &revisionTxnProvider{}
+			base.revision.Store(7)
+			var blockTrackerMu sync.Mutex
+			pool := &Pool{
+				logger:            log.New(),
+				baseTxnProvider:   base,
+				blockTracker:      &BlockTracker{blockChangeCond: sync.NewCond(&blockTrackerMu), currentBlockNum: 100},
+				decryptedTxnsPool: NewDecryptedTxnsPool(),
+				slotCalculator:    NewBeaconChainSlotCalculator(0, 12),
+				eonTracker:        eonTracker,
+				chainConfig:       chain.AllProtocolChanges,
+			}
+
+			var observed atomic.Uint64
+			ctx := txnprovider.WithTxnRevisionObserver(t.Context(), observed.Store)
+			_, err := pool.ProvideTxns(ctx, txnprovider.WithBlockTime(12), txnprovider.WithParentBlockNum(100))
+			require.NoError(t, err)
+			require.Equal(t, combineTransactionSetRevisions(7, 0), observed.Load())
+		})
+	}
+}
+
+func TestPoolFallbackErrorDoesNotPublishSnapshot(t *testing.T) {
+	base := &revisionTxnProvider{err: errors.New("base provider failed")}
+	base.revision.Store(7)
+	pool := &Pool{logger: log.New(), baseTxnProvider: base}
+	pool.stopped.Store(true)
+
+	var observed atomic.Uint64
+	observed.Store(99)
+	ctx := txnprovider.WithTxnRevisionObserver(t.Context(), observed.Store)
+	_, err := pool.ProvideTxns(ctx, txnprovider.WithBlockTime(12), txnprovider.WithParentBlockNum(100))
+	require.Error(t, err)
+	require.Equal(t, uint64(99), observed.Load())
 }

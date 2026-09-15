@@ -32,6 +32,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -147,6 +151,47 @@ func TestAssembleBlockRefreshesCompletedPayloadWhenTransactionsChange(t *testing
 	require.Equal(t, []byte{1}, refreshedBlock.Block.Block.Header().Extra)
 }
 
+func TestAssembleBlockUsesValidatedParentNumberForRevision(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	parentHash := common.Hash{1}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, parentHash)
+		rawdb.WriteHeadBlockHash(tx, parentHash)
+		return rawdb.WriteHeaderNumber(tx, parentHash, 42)
+	}))
+
+	started := make(chan uint64, 1)
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- params.PayloadId
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	module.db = db
+	var revisionCalls atomic.Uint32
+	var observedParent atomic.Uint64
+	WithPayloadTransactionsRevision(func(_ uint64, parentBlockNum uint64) uint64 {
+		revisionCalls.Add(1)
+		observedParent.Store(parentBlockNum)
+		return 0
+	})(module)
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: parentHash})
+	require.NoError(t, err)
+	require.False(t, result.Busy)
+	require.Equal(t, result.PayloadID, <-started)
+	require.Equal(t, uint64(42), observedParent.Load())
+
+	missingNumberHash := common.Hash{2}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, missingNumberHash)
+		rawdb.WriteHeadBlockHash(tx, missingNumberHash)
+		return nil
+	}))
+	busy, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp() + 1, ParentHash: missingNumberHash})
+	require.NoError(t, err)
+	require.True(t, busy.Busy)
+	require.Equal(t, uint32(1), revisionCalls.Load())
+}
+
 func TestAssembleBlockContinuesRefreshingAfterMultipleTransactionChanges(t *testing.T) {
 	var revision atomic.Uint64
 	started := make(chan uint64, 4)
@@ -198,6 +243,55 @@ func TestAssembleBlockReusesRunningPayloadAcrossTransactionRevision(t *testing.T
 	require.Empty(t, started)
 
 	module.builders[first.PayloadID].builder.Discard()
+}
+
+func TestAssembleBlockRefreshesInterruptedBuilderWhenTransactionsChange(t *testing.T) {
+	var revision atomic.Uint64
+	var builds atomic.Uint32
+	started := make(chan uint64, 2)
+	interrupted := make(chan struct{})
+	release := make(chan struct{})
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- params.PayloadId
+		if builds.Add(1) == 1 {
+			for !interrupt.Load() {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(time.Millisecond):
+				}
+			}
+			close(interrupted)
+			<-release
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	WithPayloadTransactionsRevision(func(uint64, uint64) uint64 { return revision.Load() })(module)
+	params := &builder.Parameters{Timestamp: newTestTimestamp(), ParentHash: common.Hash{0x01}}
+
+	first, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	require.Equal(t, first.PayloadID, <-started)
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		_, _ = module.builders[first.PayloadID].builder.Stop(t.Context())
+	}()
+	defer func() {
+		close(release)
+		<-stopDone
+	}()
+	select {
+	case <-interrupted:
+	case <-time.After(time.Second):
+		t.Fatal("builder did not observe interruption")
+	}
+
+	revision.Add(1)
+	refreshed, err := module.AssembleBlock(t.Context(), params.Copy())
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, refreshed.PayloadID)
+	require.Equal(t, refreshed.PayloadID, <-started)
 }
 
 func TestAssembleBlockRefreshesTransactionChangesForNewRequest(t *testing.T) {

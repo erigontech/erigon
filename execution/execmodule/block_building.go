@@ -428,7 +428,8 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		if previous := e.builders[previousID]; previous != nil {
 			sameRequest := sameBuildRequest(previous.params, params)
 			if sameRequest && previous.builder != nil && !previous.builder.Failed() && !previous.builder.Discarded() {
-				needsRefresh := hasCompletedPayload(previous) && payloadTxnRevision(previous) != txnRevision
+				snapshotChanged := payloadTxnRevision(previous) != txnRevision
+				needsRefresh := snapshotChanged && (hasCompletedPayload(previous) || previous.builder.Interrupted())
 				if !needsRefresh {
 					if !hasCompletedPayload(previous) {
 						e.dropTransientBuilders()

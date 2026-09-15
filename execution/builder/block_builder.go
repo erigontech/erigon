@@ -194,6 +194,10 @@ func (b *BlockBuilder) Completed() bool {
 	return b.finished()
 }
 
+func (b *BlockBuilder) Interrupted() bool {
+	return b.interrupt.Load()
+}
+
 func (b *BlockBuilder) Wait() {
 	<-b.done
 }
