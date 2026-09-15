@@ -453,8 +453,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	}
 
 	if ep.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		_, _ = (*uint256.Int)(ep.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 
 	if ep.BlobGasUsed != nil {
