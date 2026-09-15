@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -478,3 +479,28 @@ func TestReadAllBodyError(t *testing.T) {
 type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+type goroutineService struct{}
+
+func (goroutineService) Current() string { return goroutineID() }
+
+// goroutineID parses N out of the "goroutine N [running]:" stack header.
+func goroutineID() string {
+	buf := make([]byte, 64)
+	return string(bytes.Fields(buf[:runtime.Stack(buf, false)])[1])
+}
+
+func TestHTTPSingleRequestRunsOnServingGoroutine(t *testing.T) {
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	defer s.Stop()
+	require.NoError(t, s.RegisterName("gid", goroutineService{}))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://url.com", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"gid_current"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	var resp struct{ Result string }
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, goroutineID(), resp.Result)
+}
