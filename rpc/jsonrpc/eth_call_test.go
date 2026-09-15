@@ -1887,6 +1887,76 @@ func TestCreateAccessListAuthorizationsAffordable(t *testing.T) {
 
 }
 
+// TestExcludeAuthoritiesOrder pins that no authority is recovered until the intrinsic
+// gas check has passed. Each recovery is an ECDSA operation, so a list the request
+// cannot afford must not pay for a single one.
+func TestExcludeAuthoritiesOrder(t *testing.T) {
+	const gasCap = 5_000_000
+
+	amsterdam := &chain.Rules{
+		ChainID:     uint256.NewInt(1337),
+		IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsLondon: true,
+		IsShanghai: true, IsCancun: true, IsPrague: true, IsOsaka: true, IsAmsterdam: true,
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), common.HexToAddress("0x11"), 0)
+	require.NoError(t, err)
+
+	from, to := common.HexToAddress("0x22"), common.HexToAddress("0x33")
+	message := func(t *testing.T, count int, gas *hexutil.Uint64) *types.Message {
+		t.Helper()
+		auths := make([]types.JsonAuthorization, count)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+		}
+		msg, err := (&ethapi.CallArgs{From: &from, To: &to, Gas: gas, AuthorizationList: auths}).ToMessage(gasCap, nil)
+		require.NoError(t, err)
+		return msg
+	}
+	counting := func(calls *int) recoverAuthority {
+		return func(a *types.Authorization) (common.Address, error) {
+			*calls++
+			return a.RecoverSigner()
+		}
+	}
+
+	lowGas := hexutil.Uint64(params.TxGas)
+	for _, tc := range []struct {
+		name  string
+		count int
+		gas   *hexutil.Uint64
+	}{
+		{"gas below the intrinsic cost recovers nothing", 64, &lowGas},
+		{"no gas field leaves the rpc gas cap to refuse it", 4096, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			excl := map[common.Address]struct{}{}
+
+			err := excludeAuthorities(message(t, tc.count, tc.gas), amsterdam, excl, counting(&calls))
+
+			require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+			require.Zero(t, calls, "the request was refused, so no authority may be recovered")
+			require.Empty(t, excl)
+		})
+	}
+
+	// The oracle for the cases above: the counter does move when the list is affordable.
+	t.Run("an affordable list is recovered", func(t *testing.T) {
+		calls := 0
+		excl := map[common.Address]struct{}{}
+		gas := hexutil.Uint64(1_000_000)
+
+		require.NoError(t, excludeAuthorities(message(t, 8, &gas), amsterdam, excl, counting(&calls)))
+
+		require.Equal(t, 8, calls)
+		require.Contains(t, excl, authority)
+	})
+}
+
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
 // pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
 // meaningful concept there, regardless of whether the caller supplied one or

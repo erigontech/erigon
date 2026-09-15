@@ -900,6 +900,33 @@ type accessListResult struct {
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
+// recoverAuthority is types.Authorization.RecoverSigner. excludeAuthorities takes it
+// as a parameter so a test can count the calls and pin that none happen before the
+// gas check.
+type recoverAuthority func(*types.Authorization) (common.Address, error)
+
+// excludeAuthorities adds the message's EIP-7702 authorities to excl, which the state
+// transition pre-warms. Each one costs an ECDSA recovery, so a list that cannot cover
+// its intrinsic gas is refused before any of them runs.
+func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}, recover recoverAuthority) error {
+	if err := checkIntrinsicGas(msg, chainRules); err != nil {
+		return err
+	}
+	auths := msg.Authorizations()
+	for i := range auths {
+		auth := &auths[i]
+		if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(chainRules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			continue
+		}
+		authority, err := recover(auth)
+		if err != nil {
+			continue
+		}
+		excl[authority] = struct{}{}
+	}
+	return nil
+}
+
 // checkIntrinsicGas rejects a message that cannot cover its own intrinsic gas, the
 // same comparison the executor makes before running it. The message carries the
 // effective gas limit, RPC gas cap included, and the cost follows the block's fork
@@ -1048,30 +1075,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
 	if len(args.AuthorizationList) > 0 {
-		rules := blockCtx.Rules(chainConfig)
-		// Each entry below costs an ECDSA recovery, so refuse a list the executor
-		// would reject for intrinsic gas anyway before paying for them.
 		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
 		if err != nil {
 			return nil, err
 		}
-		if err := checkIntrinsicGas(msg, rules); err != nil {
+		if err := excludeAuthorities(msg, blockCtx.Rules(chainConfig), excl, (*types.Authorization).RecoverSigner); err != nil {
 			return nil, err
-		}
-		for i := range args.AuthorizationList {
-			jsonAuth := &args.AuthorizationList[i]
-			auth, err := jsonAuth.ToAuthorization()
-			if err != nil {
-				continue
-			}
-			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
-				continue
-			}
-			authority, err := auth.RecoverSigner()
-			if err != nil {
-				continue
-			}
-			excl[authority] = struct{}{}
 		}
 	}
 
