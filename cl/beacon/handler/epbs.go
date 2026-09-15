@@ -894,17 +894,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
 			if persistedKnown && persisted == nil {
-				var readErr error
-				persisted, readErr = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
-				if readErr != nil {
-					persisted = nil
-				}
-				if persisted == nil {
-					a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(
-						signedEnvelope.Message.BeaconBlockRoot,
-						signedEnvelope.Message.BuilderIndex,
-					)
-				}
+				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 			}
 			if persistedKnown && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
@@ -926,7 +916,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			}
 			defer a.finishExecutionPayloadEnvelopeRetry(gossipKey)
 			if !persistedKnown {
-				persisted, _ = a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 				if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 					beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 					return
@@ -1103,6 +1093,15 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 
 	accepted = !contentsIntegrationFailed
 	w.WriteHeader(status)
+}
+
+func (a *ApiHandler) readExecutionPayloadEnvelopeForAdmissionRetry(key executionPayloadEnvelopeGossipKey) *cltypes.SignedExecutionPayloadEnvelope {
+	persisted, err := a.forkchoiceStore.ReadEnvelopeFromDisk(key.BeaconBlockRoot)
+	if err != nil || persisted == nil || persisted.Message == nil {
+		a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.BeaconBlockRoot, key.BuilderIndex)
+		return nil
+	}
+	return persisted
 }
 
 func signedExecutionPayloadEnvelopesEqual(left, right *cltypes.SignedExecutionPayloadEnvelope) bool {
