@@ -158,15 +158,6 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
-	var from uint64
-	if err := a.mainDB.View(a.ctx, func(tx kv.Tx) error {
-		var err error
-		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
-		return err
-	}); err != nil {
-		return err
-	}
-
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
@@ -178,30 +169,17 @@ func (a *Antiquary) Loop() error {
 	}
 
 	defer logInterval.Stop()
-	available := a.sn.BlocksAvailable()
-	if from > available {
-		a.logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
-		from = clampBeaconSnapshotProgress(from, available)
-	}
-	indexedTo := from
-	for {
-		frozenSlots := a.sn.BlocksAvailable()
-		if indexedTo >= frozenSlots {
-			break
-		}
-		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", indexedTo, "to", frozenSlots)
-		err := indexBeaconSnapshots(a.ctx, a.mainDB, indexedTo, frozenSlots, antiquaryIndexBatchSlots, a.sn.ReadHeader, func(slot uint64) {
+	indexedTo, err := rebuildBeaconSnapshotIndex(a.ctx, a.mainDB, a.sn.BlocksAvailable, a.sn.ReadHeader,
+		antiquaryIndexBatchSlots, func(slot uint64) {
 			select {
 			case <-logInterval.C:
-				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot, "target", frozenSlots)
+				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot)
 			case <-a.ctx.Done():
 			default:
 			}
-		})
-		if err != nil {
-			return err
-		}
-		indexedTo = frozenSlots
+		}, a.logger)
+	if err != nil {
+		return err
 	}
 
 	if a.stateSn != nil {
@@ -274,6 +252,42 @@ func clampBeaconSnapshotProgress(progress, available uint64) uint64 {
 		return available
 	}
 	return progress
+}
+
+// rebuildBeaconSnapshotIndex indexes the visible snapshot range, resuming from the persisted
+// cursor, which is the first slot not yet indexed.
+func rebuildBeaconSnapshotIndex(ctx context.Context, db kv.RwDB, blocksAvailable func() uint64, readHeader readBeaconSnapshotHeaderFunc, batchSize uint64, onProgress func(slot uint64), logger log.Logger) (uint64, error) {
+	var from uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if available := blocksAvailable(); from > 0 && from-1 > available {
+		logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
+		from = clampBeaconSnapshotProgress(from, available)
+	}
+	indexedTo := uint64(0)
+	if from > 0 {
+		indexedTo = from - 1
+	}
+	for {
+		tip := blocksAvailable()
+		if tip == 0 || from > tip {
+			return indexedTo, nil
+		}
+		logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", tip)
+		// tip is the inclusive last readable slot and indexBeaconSnapshots takes an exclusive
+		// bound, so the tip needs tip+1 to be indexed at all. It is served from the snapshot path,
+		// which does not consult the canonical index, so leaving it out gives readers a block with
+		// no root for as long as the tip stays put.
+		if err := indexBeaconSnapshots(ctx, db, from, tip+1, batchSize, readHeader, onProgress); err != nil {
+			return indexedTo, err
+		}
+		from, indexedTo = tip+1, tip
+	}
 }
 
 func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {

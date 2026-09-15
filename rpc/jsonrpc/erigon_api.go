@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -38,11 +39,11 @@ type ErigonAPI interface {
 	// Blocks related (see ./erigon_blocks.go)
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
-	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error)
+	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (*ethapi.RPCBlock, error)
 	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error)
 
 	// Receipt related (see ./erigon_receipts.go)
-	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+	GetLogsByHash(ctx context.Context, hash common.Hash) ([]types.RPCLogs, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.RPCLogs, error)

@@ -26,10 +26,9 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// TestWriteToMatchesJSONMarshal asserts writeTo produces output byte-identical to json.Marshal of
-// the same message — for both the hand-written success fast path and the json.Marshal fallback
-// (errors, nil result, and other non-plain shapes).
-func TestWriteToMatchesJSONMarshal(t *testing.T) {
+// TestWriteResponseMatchesJSONMarshal asserts writeResponse produces output byte-identical to
+// json.Marshal of the same response message.
+func TestWriteResponseMatchesJSONMarshal(t *testing.T) {
 	results := []string{
 		`{"a":1,"b":[1,2,3],"c":"0xdeadbeef"}`,
 		`"0x1234"`,
@@ -41,46 +40,35 @@ func TestWriteToMatchesJSONMarshal(t *testing.T) {
 	}
 	ids := []json.RawMessage{json.RawMessage("1"), json.RawMessage(`"abc-123"`), json.RawMessage("9007199254740991")}
 
-	var msgs []*jsonrpcMessage
 	for _, r := range results {
 		for _, id := range ids {
-			msgs = append(msgs, &jsonrpcMessage{Version: vsn, ID: id, Result: json.RawMessage(r)})
+			want, err := json.Marshal(&jsonrpcMessage{Version: vsn, ID: id, Result: json.RawMessage(r)})
+			require.NoError(t, err)
+
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			require.Nil(t, (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, json.RawMessage(r)))
+			require.NoError(t, stream.Flush())
+
+			require.Equal(t, string(want), buf.String(), "want=%s", want)
 		}
-	}
-	// non-plain messages take the json.Marshal fallback inside writeTo
-	msgs = append(msgs,
-		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("1"), Error: &jsonError{Code: -32000, Message: "boom"}},
-		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("2"), Error: &jsonError{Code: -1, Message: "with data", Data: "0xdeadbeef"}},
-		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("3")},
-	)
-
-	for _, msg := range msgs {
-		want, err := json.Marshal(msg)
-		require.NoError(t, err)
-
-		var buf bytes.Buffer
-		stream := jsonstream.New(&buf)
-		msg.writeTo(stream)
-		require.NoError(t, stream.Flush())
-
-		require.Equal(t, string(want), buf.String(), "want=%s", want)
 	}
 }
 
-// TestWriteToSkipsHTMLEscaping documents the one accepted divergence from json.Marshal: writeTo
-// copies the id and result verbatim, so '<', '>', '&' (and U+2028/2029) are left unescaped. The
+// TestWriteResponseSkipsIDHTMLEscaping documents the one accepted divergence from json.Marshal:
+// the id is copied verbatim, so '<', '>', '&' (and U+2028/2029) in it are left unescaped. The
 // JSON is still valid and decodes to the same value.
-func TestWriteToSkipsHTMLEscaping(t *testing.T) {
-	msg := &jsonrpcMessage{Version: vsn, ID: json.RawMessage(`"a<b>&c"`), Result: json.RawMessage(`"x<y"`)}
+func TestWriteResponseSkipsIDHTMLEscaping(t *testing.T) {
+	id := json.RawMessage(`"a<b>&c"`)
 
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
-	msg.writeTo(stream)
+	require.Nil(t, (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, 1))
 	require.NoError(t, stream.Flush())
-	require.Equal(t, `{"jsonrpc":"2.0","id":"a<b>&c","result":"x<y"}`, buf.String())
+	require.Equal(t, `{"jsonrpc":"2.0","id":"a<b>&c","result":1}`, buf.String())
 
-	marshaled, err := json.Marshal(msg)
+	marshaled, err := json.Marshal(&jsonrpcMessage{Version: vsn, ID: id, Result: json.RawMessage("1")})
 	require.NoError(t, err)
-	require.NotContains(t, string(marshaled), "<") // stdlib HTML-escapes '<' where writeTo does not
+	require.NotContains(t, string(marshaled), "<") // stdlib HTML-escapes '<' where writeResponse does not
 	require.NotEqual(t, buf.String(), string(marshaled))
 }

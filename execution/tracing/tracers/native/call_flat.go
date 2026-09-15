@@ -147,7 +147,7 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-// CaptureEnter is clled when EVM enters a new scope (via call, create or selfdestruct).
+// OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.interrupt.Load() {
 		return
