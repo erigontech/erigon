@@ -47,3 +47,29 @@ func BenchmarkBlobsBundleMarshal(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkGetPayloadResponseJSON decodes and encodes a getPayload result with a 16-transaction payload.
+func BenchmarkGetPayloadResponseJSON(b *testing.B) {
+	enc := []byte(getPayloadResponseJSON(`"0x3b9aca00"`, `"0x1bc16d674ec80000"`, 16))
+	var resp GetPayloadResponse
+	if err := json.Unmarshal(enc, &resp); err != nil {
+		b.Fatal(err)
+	}
+	b.Run("unmarshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var r GetPayloadResponse
+			if err := json.Unmarshal(enc, &r); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("marshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if _, err := resp.MarshalFastJSON(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

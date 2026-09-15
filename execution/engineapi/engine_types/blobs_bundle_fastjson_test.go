@@ -19,6 +19,7 @@ package engine_types
 import (
 	"encoding/json"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -120,4 +121,40 @@ func worstCaseBlobsBundle() *BlobsBundle {
 		bundle.Proofs[i] = proof
 	}
 	return bundle
+}
+
+// getPayloadResponseJSON is a getPayload result in canonical encoding, fields in struct order.
+func getPayloadResponseJSON(baseFee, blockValue string, txs int) string {
+	hash := `"0x` + strings.Repeat("11", 32) + `"`
+	addr := `"0x` + strings.Repeat("22", 20) + `"`
+	var sb strings.Builder
+	sb.WriteString(`{"executionPayload":{"parentHash":` + hash + `,"feeRecipient":` + addr + `,"stateRoot":` + hash +
+		`,"receiptsRoot":` + hash + `,"logsBloom":"0x` + strings.Repeat("00", 256) + `","prevRandao":` + hash +
+		`,"blockNumber":"0x1","gasLimit":"0x1c9c380","gasUsed":"0x5208","timestamp":"0x6553f100","extraData":"0x","baseFeePerGas":` + baseFee +
+		`,"blockHash":` + hash + `,"transactions":[`)
+	for i := range txs {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(`"0x02f8` + strings.Repeat("ab", 120) + `"`)
+	}
+	sb.WriteString(`],"withdrawals":[],"blobGasUsed":"0x0","excessBlobGas":"0x0"},"blockValue":` + blockValue +
+		`,"blobsBundle":null,"executionRequests":[],"shouldOverrideBuilder":false}`)
+	return sb.String()
+}
+
+func TestGetPayloadResponseQuantitiesJSON(t *testing.T) {
+	for _, q := range []string{`"0x0"`, `"0x3b9aca00"`, `"0x8000000000000000000000000000000000000000000000000000000000000000"`, `null`} {
+		in := getPayloadResponseJSON(q, q, 2)
+		var r GetPayloadResponse
+		require.NoError(t, json.Unmarshal([]byte(in), &r))
+		out, err := json.Marshal(&r)
+		require.NoError(t, err)
+		require.Equal(t, in, string(out), q)
+	}
+	for _, bad := range []string{`"0x01"`, `"3b9aca00"`, `"0x"`, `"0x1` + strings.Repeat("0", 64) + `"`, `"0xzz"`, `1000`} {
+		var r GetPayloadResponse
+		require.Error(t, json.Unmarshal([]byte(getPayloadResponseJSON(bad, `"0x0"`, 0)), &r), "baseFeePerGas %s", bad)
+		require.Error(t, json.Unmarshal([]byte(getPayloadResponseJSON(`"0x0"`, bad, 0)), &r), "blockValue %s", bad)
+	}
 }
