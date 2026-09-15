@@ -25,6 +25,7 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1965,4 +1966,40 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
+}
+
+// BenchmarkCreateAccessListAuthGas measures refusing a list that cannot afford its
+// own intrinsic gas. Cost grows with the list because decoding it does, but the
+// per-entry share stays in the tens of nanoseconds. Recovering an authority is an
+// ECDSA operation costing hundreds of times that, so a check moved after the
+// recovery loop shows up here as a per-entry cost in the microseconds.
+func BenchmarkCreateAccessListAuthGas(b *testing.B) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(b, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(b, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(b, err)
+
+	for _, size := range []int{1024, 16384, 65536} {
+		auths := make([]types.JsonAuthorization, size)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+		}
+		args := ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: auths,
+		}
+
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := api.CreateAccessList(context.Background(), args, nil, nil, nil); err == nil {
+					b.Fatal("the list must not fit the gas cap, else this measures the wrong path")
+				}
+			}
+		})
+	}
 }
