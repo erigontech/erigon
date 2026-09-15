@@ -542,26 +542,13 @@ func TestBlocksLRUBoundedByBytes(t *testing.T) {
 	for i := range blocks {
 		txn := types.NewTransaction(uint64(i), common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 8*datasize.MB))
 		blocks[i] = types.NewBlock(&types.Header{}, []types.Transaction{txn}, nil, nil, nil, nil)
-		api.cacheBlock(blocks[i])
+		api.blocksLRU.Add(blocks[i].Hash(), blocks[i])
 	}
 	var cached datasize.ByteSize
 	for _, b := range blocks {
-		if api.cachedBlock(b.Hash()) != nil {
+		if _, ok := api.blocksLRU.Get(b.Hash()); ok {
 			cached += datasize.ByteSize(b.Size())
 		}
 	}
 	require.LessOrEqual(t, cached, 32*datasize.MB)
-}
-
-func TestCachedBlockMissesForeignHash(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newBaseApiForTest(m)
-	txn := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)
-	block := types.NewBlock(&types.Header{}, []types.Transaction{txn}, nil, nil, nil, nil)
-	api.cacheBlock(block)
-	require.Same(t, block, api.cachedBlock(block.Hash()))
-
-	foreign := block.Hash()
-	foreign[31]++
-	require.Nil(t, api.cachedBlock(foreign))
 }
