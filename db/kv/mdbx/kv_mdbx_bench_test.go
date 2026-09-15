@@ -47,7 +47,7 @@ func BenchmarkDB_BeginROParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			tx, err := db.BeginRo(b.Context())
+			tx, err := db.BeginRo(b.Context()) //nolint:gocritic
 			if err != nil {
 				b.Error(err)
 				return
