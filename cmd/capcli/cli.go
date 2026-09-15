@@ -1156,7 +1156,7 @@ type DumpBlobsSnapshots struct {
 	chainCfg
 	outputFolder
 
-	To uint64
+	From, To uint64
 }
 
 func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
@@ -1186,6 +1186,18 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	if c.From != 0 {
+		// Segments are rewritten unconditionally, so a run that starts at the fork rebuilds the
+		// whole history from the store — which no longer holds the blobs already frozen below the
+		// frontier. Repairing a range means starting at that range.
+		if c.From%snaptype.CaplinMergeLimit != 0 {
+			return fmt.Errorf("--from must be a multiple of %d, got %d", snaptype.CaplinMergeLimit, c.From)
+		}
+		if c.From < from {
+			return fmt.Errorf("--from %d is below the Deneb fork boundary %d", c.From, from)
+		}
+		from = c.From
+	}
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 	if err != nil {
