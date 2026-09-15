@@ -1039,6 +1039,117 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 		"step 1 collation must contain only step 1 values")
 }
 
+func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter()
+	key := []byte("key")
+	v0, v1, v2 := []byte("step-0"), []byte("step-1"), []byte("step-2")
+	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
+	require.NoError(t, writer.PutWithPrev(key, v1, 20, v0))
+	require.NoError(t, writer.PutWithPrev(key, v2, 40, v1))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	fromFiles, found, _, _, err := domainTx.debugGetLatestFromFiles(key, 0)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v1, fromFiles)
+	got, step, found, err := domainTx.getLatest(key, tx, kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v0, got)
+	require.Equal(t, kv.Step(1), step)
+}
+
+func TestDomain_GetLatestMaxStepSelectsNewestDBValue(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	defer domainTx.Close()
+	writer := domainTx.NewWriter()
+	defer writer.Close()
+	key := []byte("key")
+	v1, v2 := []byte("step-1"), []byte("step-2")
+	require.NoError(t, writer.PutWithPrev(key, v1, 20, nil))
+	require.NoError(t, writer.PutWithPrev(key, v2, 40, v1))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	got, step, found, err := domainTx.getLatest(key, tx, kv.GetLatestOptions{}.WithMaxStep(1))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v1, got)
+	require.Equal(t, kv.Step(1), step)
+}
+
+func TestDomain_GetLatestMaxStepZeroWithUnitSteps(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 1, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter()
+	key := []byte("key")
+	v0, v1 := []byte("step-0"), []byte("step-1")
+	require.NoError(t, writer.PutWithPrev(key, v0, 0, nil))
+	require.NoError(t, writer.PutWithPrev(key, v1, 1, v0))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	got, _, found, err := domainTx.getLatest(key, tx, kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v0, got)
+}
+
+func TestDomain_GetLatestMaxStepRejectsMergedFileSplit(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter()
+	key := []byte("key")
+	v0, v1 := []byte("step-0"), []byte("step-1")
+	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
+	require.NoError(t, writer.PutWithPrev(key, v1, 20, v0))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	ranges := domainTx.findMergeRange(domainTx.files.EndTxNum(), 2*d.stepSize, 2*d.stepSize)
+	require.True(t, ranges.values.needMerge)
+	valuesOuts, indexOuts, historyOuts := domainTx.staticFilesInRange(ranges)
+	valuesIn, indexIn, historyIn, err := domainTx.mergeFiles(t.Context(), valuesOuts, indexOuts, historyOuts, ranges, nil, true, background.NewProgressSet())
+	require.NoError(t, err)
+	d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+	domainTx.Close()
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	got, _, found, err := domainTx.getLatest(key, tx, kv.GetLatestOptions{}.WithMaxStep(0))
+	require.Error(t, err)
+	require.False(t, found)
+	require.Nil(t, got)
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2885,7 +2996,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
+		v, found, st, en, err := domainRoTx.debugGetLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for _, update := range slices.Backward(updates) {
@@ -3716,7 +3827,7 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], keyNum)
-			fileValue, fileFound, _, _, err := domainTx.getLatestFromFiles(key[:], 0)
+			fileValue, fileFound, _, _, err := domainTx.debugGetLatestFromFiles(key[:], 0)
 			require.NoError(t, err)
 			fileSize, sizeFound, err := domainTx.getLatestFromFilesValSize(key[:], 0)
 			require.NoError(t, err)
@@ -3748,4 +3859,33 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 		db, d, txs := filledDomainWithHashMapAccessor(t, log.New())
 		check(t, db, d, txs)
 	})
+}
+
+// TestDomainDisabledDiscardsWrites pins that Enabled=false is a real master
+// switch: a writer taken from a disabled domain must drop everything instead of
+// quietly collecting and flushing into the DB tables.
+func TestDomainDisabledDiscardsWrites(t *testing.T) {
+	logger := log.New()
+	cfg := statecfg.Schema.AccountsDomain
+	cfg.Hist.IiCfg.Enabled = false
+	db, d := testDbAndDomainOfStep(t, cfg, 16, logger)
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	dc := d.beginForTests()
+	defer dc.Close()
+	w := dc.NewWriter()
+	defer w.Close()
+
+	require.NoError(t, w.PutWithPrev([]byte("key"), []byte("value"), 0, nil))
+	require.NoError(t, w.Flush(ctx, tx))
+
+	for _, table := range d.Tables() {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Zerof(t, n, "table %s must stay empty", table)
+	}
 }

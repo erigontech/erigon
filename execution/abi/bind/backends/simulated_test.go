@@ -524,8 +524,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 				t.Fatalf("Expect error, want %v, got %v", c.expectError, err)
 			}
 			if c.expectData != nil {
-				var rerr *revertError
-				if !errors.As(err, &rerr) {
+				if rerr, ok := errors.AsType[*revertError](err); !ok {
 					t.Fatalf("Expect revert error, got %T", err)
 				} else if !reflect.DeepEqual(rerr.ErrorData(), c.expectData) {
 					t.Fatalf("Error data mismatch, want %v, got %v", c.expectData, rerr.ErrorData())
@@ -1127,7 +1126,6 @@ func TestSimulatedBackendEstimateGasClassifiesRuntimeOutOfGas(t *testing.T) {
 	)
 	gasCap := params.TxBaseEIP2780 +
 		params.ColdAccountAccessEIP2780 +
-		params.TransferLogCostEIP2780 +
 		params.TxValueCostEIP2780 +
 		params.StateGasNewAccount - 1
 

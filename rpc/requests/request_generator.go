@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -72,6 +73,7 @@ func (e EthError) Error() string {
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
 	GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockRef rpc.BlockReference) (*accounts.AccProofResult, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error)
@@ -86,6 +88,7 @@ type RequestGenerator interface {
 	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
 	UnsubscribeAll()
 	TxpoolContent() (int, int, int, error)
+	TxpoolPendingHashesFrom(address common.Address) (map[common.Hash]struct{}, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
@@ -93,7 +96,6 @@ type RequestGenerator interface {
 	EstimateGas(args bind.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 	GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error)
-	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error)
 }
 
 type requestGenerator struct {
@@ -118,6 +120,8 @@ var Methods = struct {
 	ETHGetTransactionCount RPCMethod
 	// ETHGetBalance represents the eth_getBalance method
 	ETHGetBalance RPCMethod
+	// ETHGetProof represents the eth_getProof method
+	ETHGetProof RPCMethod
 	// ETHSendRawTransaction represents the eth_sendRawTransaction method
 	ETHSendRawTransaction RPCMethod
 	// ETHSendRawTransactionSync represents the eth_sendRawTransactionSync method
@@ -134,6 +138,8 @@ var Methods = struct {
 	AdminNodeInfo RPCMethod
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod
+	// TxpoolContentFrom represents the txpool_contentFrom method
+	TxpoolContentFrom RPCMethod
 	// OTSGetBlockDetails represents the ots_getBlockDetails method
 	OTSGetBlockDetails RPCMethod
 	// ETHNewHeads represents the eth_newHeads sub method
@@ -148,11 +154,11 @@ var Methods = struct {
 	ETHGetTransactionByHash  RPCMethod
 	ETHGetTransactionReceipt RPCMethod
 	ETHGetBlockReceipts      RPCMethod
-	BorGetRootHash           RPCMethod
 	ETHCall                  RPCMethod
 }{
 	ETHGetTransactionCount:    "eth_getTransactionCount",
 	ETHGetBalance:             "eth_getBalance",
+	ETHGetProof:               "eth_getProof",
 	ETHSendRawTransaction:     "eth_sendRawTransaction",
 	ETHSendRawTransactionSync: "eth_sendRawTransactionSync",
 	ETHGetBlockByNumber:       "eth_getBlockByNumber",
@@ -161,6 +167,7 @@ var Methods = struct {
 	ETHBlockNumber:            "eth_blockNumber",
 	AdminNodeInfo:             "admin_nodeInfo",
 	TxpoolContent:             "txpool_content",
+	TxpoolContentFrom:         "txpool_contentFrom",
 	OTSGetBlockDetails:        "ots_getBlockDetails",
 	ETHNewHeads:               "eth_newHeads",
 	ETHLogs:                   "eth_logs",
@@ -173,7 +180,6 @@ var Methods = struct {
 	ETHGetTransactionByHash:   "eth_getTransactionByHash",
 	ETHGetTransactionReceipt:  "eth_getTransactionReceipt",
 	ETHGetBlockReceipts:       "eth_getBlockReceipts",
-	BorGetRootHash:            "bor_getRootHash",
 	ETHCall:                   "eth_call",
 }
 

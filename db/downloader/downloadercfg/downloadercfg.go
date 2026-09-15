@@ -152,6 +152,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 type NewCfgOpts struct {
 	// If set, clobber the default torrent config value.
 	DisableTrackers          g.Option[bool]
+	DisableTCP               g.Option[bool]
 	Verify                   bool
 	UploadRateLimit          g.Option[rate.Limit]
 	DownloadRateLimit        g.Option[rate.Limit]
@@ -208,6 +209,10 @@ func New(
 	// Override value set by download rate-limit.
 	for value := range opts.DisableTrackers.Iter {
 		torrentConfig.DisableTrackers = value
+	}
+
+	for value := range opts.DisableTCP.Iter {
+		torrentConfig.DisableTCP = value
 	}
 
 	var analogLevel analog.Level
@@ -317,11 +322,11 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 	}
 
 	preverifiedPath := dirs.PreverifiedPath()
-	exists, err := dir.FileExist(preverifiedPath)
+	initialDownloadComplete, err := dir.FileExist(preverifiedPath)
 	if err != nil {
 		return err
 	}
-	if exists {
+	if initialDownloadComplete {
 		// Load hashes from local preverified.toml
 		haveToml, err := os.ReadFile(preverifiedPath)
 		if err != nil {
@@ -336,7 +341,7 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
 		}
 	}
-	cfg.Local = exists
+	cfg.Local = initialDownloadComplete
 	return nil
 }
 

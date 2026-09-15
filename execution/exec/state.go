@@ -245,7 +245,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	} else {
 		var getter execctxapi.StateGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsStateGetterMetered(chainTx, rw.readMetrics)
+			getter = rs.Domains().AsStateGetter(chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics))
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -334,7 +334,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
+			typedReader.SetGetter(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -413,32 +413,36 @@ func (rw *Worker) Run() (err error) {
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Fold this task's reads into the per-batch log aggregate and the
-		// retained collector accumulator, then reset. Off the hot path (the
-		// result is already queued). The collector hand-off is a non-blocking
-		// TrySend: on a full buffer it is skipped and collectorAcc keeps growing
-		// (retried next task), so execution never blocks and no count is lost.
-		// Skipped entirely when read metrics are off.
-		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			doms := rw.rs.Domains()
-			doms.LogMergeMetrics(rw.readMetrics)
-			rw.collectorAcc.Merge(rw.readMetrics)
-			rw.readMetrics.Reset()
-			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
-				rw.collectorAcc = kvmetrics.NewDomainMetrics()
-			}
-		}
+		rw.PublishReadMetrics()
 	}
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and
 	// it must not be lost. Only the collector — the per-task log merges already
-	// folded this data into sd.metrics via LogMergeMetrics.
+	// folded this data into sd.metrics via MergeExecMetrics.
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
 			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
 		}
 	}
 	return nil
+}
+
+// PublishReadMetrics folds this worker's task reads into the per-batch log
+// aggregate and the retained collector accumulator, then resets. Off the hot
+// path: the result is already queued. The collector hand-off is a non-blocking
+// TrySend, so execution never blocks and no count is lost. Callers that drive
+// RunTxTask directly must call it, or their reads never reach sd.metrics.
+func (rw *Worker) PublishReadMetrics() {
+	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
+		return
+	}
+	doms := rw.rs.Domains()
+	doms.MergeExecMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
+	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
 }
 
 func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
@@ -491,7 +495,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -526,7 +530,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -618,7 +622,7 @@ func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shard
 			return
 		}
 		clearDone = true
-		g.Wait()
+		_ = g.Wait()
 		applyWorker.Close()
 		for _, w := range reconWorkers {
 			w.Close()
@@ -635,7 +639,7 @@ func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shard
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsStateGetterMetered(nil, w.readMetrics))
+				reader = state.NewReaderV3(rs.Domains().AsStateGetter(nil, execctxapi.StateGetterOptions{}.WithMetrics(w.readMetrics)))
 			}
 
 			if err = w.ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {

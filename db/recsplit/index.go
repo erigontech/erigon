@@ -294,8 +294,7 @@ func (idx *Index) init() (err error) {
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
-	idx.grData = p[:l]
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
@@ -363,10 +362,6 @@ func onlyKnownFeatures(features Features) error {
 		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
 	}
 	return nil
-}
-
-func (idx *Index) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&idx.data[0])
 }
 
 func (idx *Index) Size() int64 { return idx.size }

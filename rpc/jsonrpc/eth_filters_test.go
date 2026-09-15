@@ -17,6 +17,8 @@
 package jsonrpc
 
 import (
+	"errors"
+	"math/big"
 	"math/rand"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -42,7 +45,56 @@ import (
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+}
+
+func TestLogFilterEndpointsRejectTooManyTopicPositions(t *testing.T) {
+	filterManager := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
+	api := &APIImpl{
+		BaseAPI:                  &BaseAPI{filters: filterManager},
+		SubscribeLogsChannelSize: 1,
+	}
+	criteria := filters.FilterCriteria{Topics: make([][]common.Hash, filters.MaxTopicPositions+1)}
+
+	closeNotifications := make(chan any)
+	t.Cleanup(func() { close(closeNotifications) })
+	subscriptionContext := rpc.ContextWithNotifier(t.Context(), rpc.NewLocalNotifier("eth", make(chan any, 1), closeNotifications))
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "eth_getLogs",
+			call: func() error {
+				_, err := api.GetLogs(t.Context(), criteria)
+				return err
+			},
+		},
+		{
+			name: "eth_newFilter",
+			call: func() error {
+				_, err := api.NewFilter(t.Context(), criteria)
+				return err
+			},
+		},
+		{
+			name: `eth_subscribe("logs")`,
+			call: func() error {
+				_, err := api.Logs(subscriptionContext, criteria)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+		})
+	}
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
@@ -109,15 +161,193 @@ func TestNewFilters(t *testing.T) {
 	assert.True(ok)
 }
 
-func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
-	m := execmoduletester.New(t)
+func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)}
+
+	expected, err := api.GetLogs(ctx, crit)
+	require.NoError(t, err)
+	require.NotEmpty(t, expected)
+
+	filterID, err := api.NewFilter(ctx, crit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	for range 2 {
+		actual, err := api.GetFilterLogs(ctx, filterID)
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	}
+}
+
+func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)}
+
+	filterID, err := api.NewFilter(ctx, crit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	queued := &types.RPCLog{
+		Log:            types.Log{Address: common.Address{1}},
+		BlockTimestamp: 123,
+	}
+	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
+
+	_, err = api.GetFilterLogs(ctx, filterID)
+	require.NoError(t, err)
+	changes, err := api.GetFilterChanges(ctx, filterID)
+	require.NoError(t, err)
+	require.Equal(t, []any{queued}, changes)
+}
+
+func TestGetFilterLogsReturnsInvalidParamsWhenStoredRangeExceedsLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
+		Dirs:            m.Dirs,
+		BlockRangeLimit: 1,
+	})
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	filterID, err := api.NewFilter(ctx, filters.FilterCriteria{FromBlock: big.NewInt(0)})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	_, err = api.GetFilterLogs(ctx, filterID)
+	require.Error(t, err)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.Equal(t, errExceedBlockRange+": 1", rpcErr.Error())
+}
+
+func TestGetFilterLogsAppliesLogQueryLimitAtPollTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	tests := []struct {
+		name       string
+		criteria   filters.FilterCriteria
+		filterConf rpchelper.FiltersConfig
+	}{
+		{
+			name: "addresses",
+			criteria: filters.FilterCriteria{
+				Addresses: common.Addresses{{1}, {2}},
+			},
+			filterConf: rpchelper.FiltersConfig{
+				RpcSubscriptionFiltersMaxAddresses: 2,
+			},
+		},
+		{
+			name: "topic alternatives",
+			criteria: filters.FilterCriteria{
+				Topics: [][]common.Hash{{{1}, {2}}},
+			},
+			filterConf: rpchelper.FiltersConfig{
+				RpcSubscriptionFiltersMaxTopics: 2,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.filterConf.RpcSubscriptionFiltersTimeout = rpchelper.DefaultFilterTimeout
+			ff := rpchelper.New(ctx, test.filterConf, nil, nil, mining, func() {}, m.Log, nil)
+			base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
+				Dirs:          m.Dirs,
+				LogQueryLimit: 1,
+			})
+			api := newEthApiForTest(base, m.DB, nil, nil)
+			test.criteria.FromBlock = big.NewInt(10)
+			test.criteria.ToBlock = big.NewInt(10)
+
+			filterID, err := api.NewFilter(ctx, test.criteria)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = api.UninstallFilter(ctx, filterID)
+			})
+
+			_, err = api.GetLogs(ctx, test.criteria)
+			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
+
+			_, err = api.GetFilterLogs(ctx, filterID)
+			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
+		})
+	}
+}
+
+func TestGetFilterLogsDoesNotKeepFilterAlive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	config := rpchelper.DefaultFiltersConfig
+	config.RpcSubscriptionFiltersTimeout = 100 * time.Millisecond
+	ff := rpchelper.New(ctx, config, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	filterID, err := api.NewFilter(ctx, filters.FilterCriteria{
+		FromBlock: big.NewInt(10),
+		ToBlock:   big.NewInt(10),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, err = api.GetFilterLogs(ctx, filterID)
+		if errors.Is(err, rpc.ErrFilterNotFound) {
+			return
+		}
+		require.NoError(t, err)
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("eth_getFilterLogs kept the filter alive")
+}
+
+func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
 
 	// generate some random topics
-	topics := make([][]common.Hash, 0)
-	for range 10 {
+	topics := make([][]common.Hash, 0, filters.MaxTopicPositions)
+	for range filters.MaxTopicPositions {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -125,7 +355,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	// generate some addresses
-	addresses := make([]common.Address, 0)
+	addresses := make([]common.Address, 0, 10)
 	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
@@ -138,21 +368,30 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	ids := make([]rpchelper.LogsSubID, 1000)
+	errs := make([]error, len(ids))
+	unsubscribed := make([]bool, len(ids))
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
-	for i := range 1000 {
+	for i := range ids {
 		idx := i
 		wg.Go(func() {
-			_, id, _ := ff.SubscribeLogs(32, crit, "")
-			defer func() {
-				time.Sleep(100 * time.Nanosecond)
-				ff.UnsubscribeLogs(id)
-			}()
+			_, id, err := ff.SubscribeLogs(32, crit, rpchelper.ProtocolWS)
 			ids[idx] = id
+			errs[idx] = err
+			if err != nil {
+				return
+			}
+			time.Sleep(100 * time.Nanosecond)
+			unsubscribed[idx] = ff.UnsubscribeLogs(id)
 		})
 	}
 	wg.Wait()
+	for i := range ids {
+		require.NoError(t, errs[i])
+		require.NotEmpty(t, ids[i])
+		require.True(t, unsubscribed[i])
+	}
 }
 
 func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {

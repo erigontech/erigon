@@ -103,7 +103,7 @@ func TestCreateRulesEngineL2NotMergeWrapped(t *testing.T) {
 
 	chainConfig := &chain.Config{L2: fakeL2Config{name: "ttdl2"}, TerminalTotalDifficulty: uint256.NewInt(0)}
 	got := CreateRulesEngine(context.Background(), &nodecfg.Config{}, chainConfig, &ethashcfg.Config{PowMode: ethashcfg.ModeFake},
-		true, true, nil, false, log.New(), nil, nil)
+		true, nil, false, log.New())
 
 	assert.Same(t, want, got)
 }

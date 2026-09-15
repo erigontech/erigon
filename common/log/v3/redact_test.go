@@ -8,8 +8,8 @@ import (
 func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 	in := []string{
 		"./build/bin/erigon",
-		"--chain=bor",
-		"--datadir=~/erigon-data/bor-archive",
+		"--chain=gnosis",
+		"--datadir=~/erigon-data/gnosis-archive",
 		"--log.dir.verbosity", "debug",
 		"--torrent.conns.perfile", "100",
 		"--torrent.maxpeers", "1000",
@@ -17,7 +17,7 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 		"--torrent.download.rate", "1G",
 		"--http.addr", "0.0.0.0",
 		"--http.port", "8545",
-		"--bor.heimdall", "https://polygon-heimdall-rest.publicnode.com",
+		"--externalcl", "https://cl.example.com",
 		"--prune.mode=archive",
 	}
 
@@ -30,9 +30,9 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 	mustContain(t, out, "erigon")
 
 	// Flags must be preserved
-	mustContain(t, out, "--chain=bor")
+	mustContain(t, out, "--chain=gnosis")
 	// datadir should be redacted
-	if strings.Contains(out, "~/erigon-data/bor-archive") {
+	if strings.Contains(out, "~/erigon-data/gnosis-archive") {
 		t.Fatalf("expected datadir path to be redacted, got: %s", out)
 	}
 	mustContain(t, out, "--datadir=<redacted-dir>")
@@ -41,7 +41,7 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 	mustContain(t, out, "--torrent.maxpeers")
 	mustContain(t, out, "--torrent.download.slots")
 	mustContain(t, out, "--torrent.download.rate")
-	mustContain(t, out, "--bor.heimdall")
+	mustContain(t, out, "--externalcl")
 	mustContain(t, out, "--prune.mode=archive")
 
 	// Values that are not sensitive should remain
@@ -52,7 +52,7 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 	mustContain(t, out, "1G")
 
 	// Sensitive URL must be redacted
-	if strings.Contains(out, "polygon-heimdall-rest.publicnode.com") {
+	if strings.Contains(out, "cl.example.com") {
 		t.Fatalf("expected url to be redacted, got: %s", out)
 	}
 	mustContain(t, out, "https://<redacted>")

@@ -416,18 +416,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_nodeInfo                            | Yes     | Erigon only                                           |
 | erigon_cacheCheck                          | Yes     | Erigon only                                           |
 |                                            |         |                                                       |
-| bor_getSnapshot                            | Yes     | Bor only                                              |
-| bor_getAuthor                              | Yes     | Bor only                                              |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                                              |
-| bor_getSigners                             | Yes     | Bor only                                              |
-| bor_getSignersAtHash                       | Yes     | Bor only                                              |
-| bor_getCurrentProposer                     | Yes     | Bor only                                              |
-| bor_getCurrentValidators                   | Yes     | Bor only                                              |
-| bor_getSnapshotProposer                    | Yes     | Bor only                                              |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                                              |
-| bor_getRootHash                            | Yes     | Bor only                                              |
-| bor_getVoteOnHash                          | Yes     | Bor only                                              |
-|                                            |         |                                                       |
 | ots_getApiLevel                            | Yes     | Otterscan                                             |
 | ots_getInternalOperations                  | Yes     | Otterscan                                             |
 | ots_searchTransactionsBefore               | Yes     | Otterscan                                             |

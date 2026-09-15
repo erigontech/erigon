@@ -39,7 +39,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	logCount := 100
 	type sub struct {
 		id LogsSubID
-		ch <-chan *types.Log
+		ch <-chan *types.RPCLog
 	}
 	ctx, cancel := context.WithCancel(context.TODO())
 	for range subCount {

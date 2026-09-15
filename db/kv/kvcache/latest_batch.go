@@ -88,14 +88,14 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 			return bytes.Clone(v), nil
 		}
 		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := tx.GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	v, _, err := tx.GetLatest(kv.CodeDomain, k)
+	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
@@ -114,7 +114,3 @@ func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err
 	return nil, false, nil
 }
 func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
-func (c *LatestBatchView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}

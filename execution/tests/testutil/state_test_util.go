@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -312,7 +313,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	}()
 
 	// Read through sd.AsStateGetter so execution sees never-Flushed pre-state held in sd.mem.
-	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx))
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
 
@@ -406,7 +407,9 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// where the coinbase self-destructed or the tx didn't pay any fees; in
 	// those cases the coinbase isn't otherwise created and needs to be
 	// touched. Matches go-ethereum's state-test runner.
-	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
+	if err := statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified); err != nil {
+		return statedb, root, gasUsed, err
+	}
 
 	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
@@ -419,12 +422,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 }
 
 // Loads pre-state and flushes it to db + branch cache; for callers needing pre-state to outlive the call.
-func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	defer sd.Close()
+	sd.EnableParaTrieDB(db)
 	statedb, err := MakePreStateInto(rules, sd, tx, alloc, blockNr)
 	if err != nil {
 		return nil, err
@@ -438,25 +442,35 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 // Loads pre-state into the caller-owned sd; closing sd without Flush discards it (keeps test state out of the branch cache).
 func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	// Read through sd.AsStateGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
-	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx))
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis)
-		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
+		if err := statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis); err != nil {
+			return nil, err
+		}
+		if err := statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis); err != nil {
+			return nil, err
+		}
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
+		if err := statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance); err != nil {
+			return nil, err
+		}
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v[:])
-			statedb.SetState(address, key, *val)
+			if err := statedb.SetState(address, key, *val); err != nil {
+				return nil, err
+			}
 		}
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(address, state.FirstContractIncarnation)
+			if err := statedb.SetIncarnation(address, state.FirstContractIncarnation); err != nil {
+				return nil, err
+			}
 		}
 	}
 

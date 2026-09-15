@@ -102,6 +102,8 @@ jobs:
       # Release selection (src/releases.js) orders by semantic version because
       # the GitHub API orders by publish date; the unit tests pin that so a
       # back-port cannot silently regress the version in the install snippets.
+      # Bare `node --test` discovers test files itself — a glob would not
+      # survive npm running scripts through cmd.exe on Windows.
       - run: npm test
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site

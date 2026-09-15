@@ -96,7 +96,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -118,7 +118,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
@@ -370,10 +370,10 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	for _, w := range block.Withdrawals() {
 		withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 			Address:   w.Address,
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 		})
 	}
 	eth1Block.Withdrawals = withdrawals

@@ -142,13 +142,3 @@ func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum r
 
 	return &result, nil
 }
-
-func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
-	var result string
-
-	if err := req.rpcCall(ctx, &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
-		return common.Hash{}, err
-	}
-
-	return common.HexToHash(result), nil
-}

@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -69,27 +70,51 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkPrague
+	forkOsaka
+	forkTierCount
+)
+
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
-	case chainRules.IsBhilai:
-		return PrecompiledContractsBhilai
+		return forkOsaka
 	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
-	case chainRules.IsNapoli:
-		return PrecompiledContractsNapoli
+		return forkPrague
 	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -155,39 +180,6 @@ var PrecompiledContractsCancun = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x0a})): &pointEvaluation{},
 }
 
-var PrecompiledContractsNapoli = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
-var PrecompiledContractsBhilai = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0b})):       &bls12381G1Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0c})):       &bls12381G1MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0d})):       &bls12381G2Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0e})):       &bls12381G2MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0f})):       &bls12381Pairing{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
 var PrecompiledContractsPrague = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01})): &ecrecover{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x02})): &sha256hash{},
@@ -230,69 +222,37 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 }
 
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesNapoli    []accounts.Address
-	PrecompiledAddressesBhilai    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
 	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsNapoli {
-		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
-	}
-	for k := range PrecompiledContractsBhilai {
-		PrecompiledAddressesBhilai = append(PrecompiledAddressesBhilai, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+	} {
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsBhilai:
-		return PrecompiledAddressesBhilai
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsNapoli:
-		return PrecompiledAddressesNapoli
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

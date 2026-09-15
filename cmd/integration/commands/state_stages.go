@@ -45,8 +45,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/shards"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var stateStages = &cobra.Command{
@@ -131,9 +129,9 @@ func init() {
 	withIntegrityChecks(stateStages)
 	withMining(stateStages)
 	withChain(stateStages)
-	withHeimdall(stateStages)
 	withWorkers(stateStages)
 	withChaosMonkey(stateStages)
+	withExperimentalCommitment(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -141,9 +139,9 @@ func init() {
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
-	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
+	withExperimentalCommitment(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 

@@ -50,7 +50,7 @@ import (
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	b.Helper()
 	dirs := datadir.New(b.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
+	db := temporaltest.NewTestDB(b, dirs, temporaltest.WithStepSize(aggStep))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
@@ -206,7 +206,7 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -251,7 +251,7 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -296,7 +296,7 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -341,7 +341,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}

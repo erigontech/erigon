@@ -438,13 +438,13 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	cfg := &httpcfg.HttpCfg{WitnessCacheBlocks: 8, Dirs: m.Dirs}
 
-	headCapture, hcImpl := NewWitnessCacheBuilderAPI(true, true, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	headCapture, hcImpl := NewWitnessCacheBuilderAPI(true, true, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine)
 	require.NotNil(t, headCapture)
 	require.NotNil(t, hcImpl)
 	require.True(t, headCapture.HeadCapture(), "head-capture construction must set HeadCapture")
 	require.True(t, headCapture.CacheOnly(), "head-capture construction must set CacheOnly")
 
-	durable, durImpl := NewWitnessCacheBuilderAPI(true, false, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	durable, durImpl := NewWitnessCacheBuilderAPI(true, false, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine)
 	require.NotNil(t, durable)
 	require.NotNil(t, durImpl)
 	require.False(t, durable.HeadCapture(), "durable construction must stay recompute-capable")
@@ -611,7 +611,7 @@ func readCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.Tempo
 	defer tx.Rollback()
 	finish, err := stages.GetStageProgress(tx, stages.Finish)
 	require.NoError(t, err)
-	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	return finish, bytes.Clone(state)
 }
@@ -641,7 +641,7 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 
 	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 	require.NoError(t, err)
-	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	baseState = bytes.Clone(baseState)
 
@@ -675,7 +675,7 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 				errCh <- fmt.Errorf("held pin canonical hash drifted at %d", pinAt)
 				return
 			}
-			s, _, e := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+			s, _, e := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 			if e != nil {
 				errCh <- e
 				return

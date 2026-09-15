@@ -24,8 +24,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -55,7 +53,7 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
 	if !isEIP7928 && !experimental {
 		return nil
 	}
@@ -80,29 +78,6 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	blockBalHash := *h.BlockAccessListHash
-	blockBalBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
-	if err != nil {
-		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-	}
-	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
-	// never blocks stage progress — so cross-check it only when present.
-	var blockBal types.BlockAccessList
-	if blockBalBytes != nil {
-		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)
-		if err != nil {
-			return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-		}
-		if err = blockBal.Validate(); err != nil {
-			return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
-		}
-		if err = blockBal.ValidateMaxItems(h.GasLimit); err != nil {
-			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
-		}
-		if blockBalHash != blockBal.Hash() {
-			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
-			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
-		}
-	}
 	// Always validate computed BAL against header. The BalancePath cross-check
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body, so the computed BAL is accurate.

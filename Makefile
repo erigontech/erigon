@@ -53,7 +53,7 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 
@@ -102,6 +102,7 @@ GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
+GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -116,6 +117,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
+PROTOC_VERSION = 36.0
 PROTOC_INCLUDE = build/include/google
 PROTO_PATH = node/interfaces
 
@@ -123,8 +125,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 25 ]; then \
-		echo "minimum required Golang version is 1.25"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 26 ]; then \
+		echo "minimum required Golang version is 1.26"; \
 		exit 1 ;\
 	fi
 
@@ -274,10 +276,10 @@ test-fixtures-zkevm:
 test-fixtures-legacy:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
-# against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.yml (single source of truth shared with
-# .github/workflows/test-eest-spec.yml's load-matrix job and
+# EEST spec tests: run cmd/evm runners (statetest, transactiontest, blocktest,
+# enginextest, zkevmtest) against EEST fixtures. The shard list, workers, and
+# failure budgets live in tools/eest-spec-shards.yml (single source of truth
+# shared with .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards. Each shard provisions
@@ -339,19 +341,11 @@ check-generated:
 
 ## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
 check-large-files:
-	@base="${BASE:-main}"; \
-	found=0; \
-	while IFS= read -r file; do \
-		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
-		if [ "$$size" -gt 1048576 ]; then \
-			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
-			found=1; \
-		fi; \
-	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
-	if [ "$$found" -eq 1 ]; then \
-		echo "ERROR: Files exceeding 1 MB found."; \
-		exit 1; \
-	fi
+	@bash .github/workflows/scripts/check-large-files.sh "$(or $(BASE),main)"
+
+## test-check-large-files:          test the large-file checker itself
+test-check-large-files:
+	@bash .github/workflows/scripts/check-large-files.test.sh
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
@@ -378,13 +372,14 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
+# Pull the pinned devnet tarball URL and EELS git ref from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
 EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
-EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+EEST_DEVNET_REF = $(shell jq -r '."eest_devnet".ref' test-fixtures.json)
 EEST_STABLE_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0
 EEST_GLAMSTERDAM_ERIGON_FLAGS = $(EEST_STABLE_ERIGON_FLAGS) --experimental.bal
+EEST_HIVE_REPOSITORY = $(shell jq -r '.hive_repository' .github/workflows/hive-versions.json)
 EEST_HIVE_REF = $(shell jq -r '.hive_ref' .github/workflows/hive-versions.json)
 HIVE_SIM_PARALLELISM ?= 8
 
@@ -394,7 +389,7 @@ eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -404,7 +399,7 @@ eest-devnet:
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_REF) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
 
 # Define the run_suite function
 define run_suite
@@ -447,16 +442,17 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
-# Pull the pinned develop tarball URL straight from test-fixtures.json
-# so this target stays in sync with the rest of the test suite. Lazy `=`
-# so unrelated targets don't shell out to jq at make-parse time.
+# Pull the pinned stable tarball URL and EELS git ref from test-fixtures.json
+# so this target stays in sync with the rest of the test suite. Lazy `=` so
+# unrelated targets don't shell out to jq at make-parse time.
 EEST_STABLE_URL = $(shell jq -r '."eest_stable".url' test-fixtures.json)
+EEST_STABLE_REF = $(shell jq -r '."eest_stable".ref' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -465,7 +461,7 @@ eest-hive:
 		grep -qF -- '$(EEST_STABLE_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg branch=$(EEST_STABLE_REF) --sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -480,6 +476,10 @@ check-kurtosis:
 		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
 		exit 1; \
 	fi; \
+
+## test-kurtosis-setup:             test the bounded Kurtosis CI setup
+test-kurtosis-setup:
+	@bash .github/actions/setup-kurtosis/setup.test.sh
 
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
@@ -498,13 +498,13 @@ kurtosis-cleanup:
 
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
-	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@go tool golangci-lint run --config ./.golangci.yml
+	@$(GOLANGCI) run --config ./.golangci.yml --fast-only
+	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`
@@ -519,14 +519,17 @@ clean:
 $(GOBINREL):
 	mkdir -p "$(GOBIN)"
 
-$(GOBINREL)/protoc: | $(GOBINREL)
+# Stamped: make ignores recipe changes, so a plain protoc target would keep an old compiler.
+$(GOBINREL)/protoc-$(PROTOC_VERSION).stamp: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	rm -f "$(GOBIN)/protoc-"*".stamp"
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
 	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
 	rm -rf "$(PROTOC_TMP)"
+	touch "$@"
 
 # 'protoc-gen-go' tool generates proto messages
 $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
@@ -536,7 +539,7 @@ $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
 $(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
 	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+protoc-all: $(GOBINREL)/protoc-$(PROTOC_VERSION).stamp $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
 
 protoc-clean:
 	rm -f "$(GOBIN)/protoc"*
@@ -597,8 +600,6 @@ grpc: protoc-all $(PROTO_PATH)
 		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
 		--go_opt=Mremote/ethbackend.proto=./remoteproto \
 		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
-		--go_opt=Mremote/bor.proto=./remoteproto \
-		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
 		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go_opt=Mexecution/execution.proto=./executionproto \
@@ -608,7 +609,7 @@ grpc: protoc-all $(PROTO_PATH)
 		--go_opt=Mtxpool/mining.proto=./txpoolproto \
 		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
-		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
 

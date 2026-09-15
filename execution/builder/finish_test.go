@@ -23,10 +23,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type recordingSealEngine struct {
@@ -86,6 +89,30 @@ func TestFinishBlockDoesNotSealWhenCanceledDuringAssembly(t *testing.T) {
 	err := finishBlock(testCtx, nil, cfg, log.Root())
 
 	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, engine.called.Load())
+	require.Nil(t, store.BlockBuilt())
+}
+
+func TestFinishBlockValidatesBlockAccessListBeforeSealing(t *testing.T) {
+	engine := &recordingSealEngine{}
+	store := NewLatestBlockBuiltStore()
+	cfg := BuilderFinishCfg{
+		chainConfig: &chain.Config{AmsterdamTime: common.NewUint64(0)},
+		engine:      engine,
+		builderState: BuilderState{
+			BuiltBlock: &exec.AssembledBlock{
+				Header: &types.Header{GasLimit: types.BalItemCost - 1},
+				BlockAccessList: types.BlockAccessList{{
+					Address: accounts.InternAddress(common.Address{1}),
+				}},
+			},
+		},
+		latestBlockBuiltStore: store,
+	}
+
+	err := finishBlock(t.Context(), nil, cfg, log.Root())
+
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
 	require.False(t, engine.called.Load())
 	require.Nil(t, store.BlockBuilt())
 }

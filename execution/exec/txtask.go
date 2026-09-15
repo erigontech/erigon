@@ -529,7 +529,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
+			// Block initialisation runs between transactions, so the worker's EVM is
+			// free: reuse it instead of building one per system call.
+			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
@@ -585,13 +587,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				var panicErr *protocol.ErrExecPanic
-				if errors.As(applyErr, &panicErr) {
+				if _, ok := errors.AsType[*protocol.ErrExecPanic](applyErr); ok {
 					result.Operational = true
 					return evmtypes.ExecutionResult{}, applyErr
 				}
-				var abortErr protocol.ErrExecAbortError
-				if !errors.As(applyErr, &abortErr) {
+				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 
@@ -697,7 +697,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 

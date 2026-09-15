@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -112,81 +113,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON validates required fields and parses the Timestamp field.
-func (l *ErigonLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address     *common.Address `json:"address"`
-		Topics      *[]common.Hash  `json:"topics"`
-		Data        *hexutil.Bytes  `json:"data"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-		Timestamp   *hexutil.Uint64 `json:"timestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
-	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
-	}
-	if dec.Timestamp != nil {
-		l.Timestamp = *dec.Timestamp
-	}
-	return nil
-}
-
 type Logs []*Log
-
-type ErigonLog struct {
-	Log
-	Timestamp hexutil.Uint64 `json:"timestamp" codec:"-"`
-}
-
-type ErigonLogs []*ErigonLog
-
-// ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
-func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
-	result := make(ErigonLogs, len(logs))
-	for i, l := range logs {
-		result[i] = &ErigonLog{
-			Log:       *l,
-			Timestamp: hexutil.Uint64(timestamp),
-		}
-	}
-	return result
-}
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
@@ -196,52 +123,14 @@ type RPCLog struct {
 
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
 func (l *RPCLog) UnmarshalJSON(input []byte) error {
-	type flat struct {
-		Address        *common.Address `json:"address"`
-		Topics         *[]common.Hash  `json:"topics"`
-		Data           *hexutil.Bytes  `json:"data"`
-		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
-		TxHash         *common.Hash    `json:"transactionHash"`
-		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash      *common.Hash    `json:"blockHash"`
-		Index          *hexutil.Uint   `json:"logIndex"`
-		Removed        *bool           `json:"removed"`
-		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
-	}
-	var dec flat
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := l.Log.UnmarshalJSON(input); err != nil {
 		return err
 	}
-	if dec.Address == nil {
-		return errors.New("missing required field 'address' for Log")
+	var dec struct {
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
-	l.Address = *dec.Address
-	if dec.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
-	}
-	l.Topics = *dec.Topics
-	if dec.Data == nil {
-		return errors.New("missing required field 'data' for Log")
-	}
-	l.Data = *dec.Data
-	if dec.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
-	}
-	l.TxHash = *dec.TxHash
-	if dec.BlockNumber != nil {
-		l.BlockNumber = *dec.BlockNumber
-	}
-	if dec.TxIndex != nil {
-		l.TxIndex = *dec.TxIndex
-	}
-	if dec.BlockHash != nil {
-		l.BlockHash = *dec.BlockHash
-	}
-	if dec.Index != nil {
-		l.Index = *dec.Index
-	}
-	if dec.Removed != nil {
-		l.Removed = *dec.Removed
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
 	}
 	if dec.BlockTimestamp != nil {
 		l.BlockTimestamp = *dec.BlockTimestamp
@@ -285,7 +174,7 @@ func (logs Logs) Copy() Logs {
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
-func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
+func ToRPCTransactionLog(log *Log, header *Header) *RPCLog {
 	return &RPCLog{
 		Log:            *log,
 		BlockTimestamp: hexutil.Uint64(header.Time),
@@ -308,31 +197,40 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 	return topicMap
 }
 
+// matchFilter reports whether the log is worth considering (right address, enough
+// topics) and, separately, whether its topics match. A maxLogs budget is spent on
+// every considered log, so the two cannot be collapsed into one bool.
+func (l *Log) matchFilter(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}) (considered, matched bool) {
+	if len(addrMap) != 0 {
+		if _, ok := addrMap[l.Address]; !ok {
+			return false, false
+		}
+	}
+	if len(topicMap) > len(l.Topics) {
+		return false, false
+	}
+	for idx, topicSet := range topicMap {
+		if len(topicSet) == 0 {
+			continue
+		}
+		if _, ok := topicSet[l.Topics[idx]]; !ok {
+			return true, false
+		}
+	}
+	return true, true
+}
+
 // FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
 // in a loop with the same topics to avoid rebuilding the map on every call.
 func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 	for _, v := range logs {
-		if len(addrMap) != 0 {
-			if _, ok := addrMap[v.Address]; !ok {
-				continue
-			}
-		}
-		if len(topicMap) > len(v.Topics) {
+		considered, matched := v.matchFilter(addrMap, topicMap)
+		if !considered {
 			continue
 		}
-		found := true
-		for idx, topicSet := range topicMap {
-			if len(topicSet) == 0 {
-				continue
-			}
-			if _, ok := topicSet[v.Topics[idx]]; !ok {
-				found = false
-				break
-			}
-		}
-		if found {
+		if matched {
 			o = append(o, v)
 		}
 		logCount++
@@ -341,6 +239,21 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 		}
 	}
 	return o
+}
+
+// AppendFilteredRPCLogs appends the logs matching addrMap and topicMap to dst as RPCLogs,
+// adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
+// enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
+func (logs Logs) AppendFilteredRPCLogs(dst RPCLogs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) RPCLogs {
+	for _, l := range logs {
+		if limit != 0 && len(dst) >= limit {
+			break
+		}
+		if _, matched := l.matchFilter(addrMap, topicMap); matched {
+			dst = append(dst, &RPCLog{Log: *l, BlockTimestamp: hexutil.Uint64(timestamp)})
+		}
+	}
+	return dst
 }
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
@@ -495,25 +408,32 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeHashList(s *rlp.Stream) (list []common.Hash, err error) {
+// maxDecodePreAlloc caps how many elements a declared payload length may
+// pre-allocate, so a crafted length prefix cannot size the allocation.
+const maxDecodePreAlloc = 128
+
+// decodeHashListTo appends an RLP list of 32-byte values to dst, so one buffer
+// can back several lists. Pass nil for a fresh slice.
+func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
 	}
-	if l == 0 {
-		return []common.Hash{}, s.ListEnd()
+	// An encoded value is 33 bytes (rlpLenPrefix+32), so l/33 is the count.
+	n := int(min(l/33, maxDecodePreAlloc))
+	if dst == nil {
+		dst = make([]common.Hash, 0, n) // non-nil even for an empty list, and cheaper than Grow
+	} else {
+		dst = slices.Grow(dst, n)
 	}
-	listLen := l / (1 + 32)            // rlpLenPrefix+32bytes
-	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
-	list = make([]common.Hash, 0, preAlloc)
 	for s.MoreDataInList() {
 		h, err := s.ReadHash()
 		if err != nil {
 			return nil, err
 		}
-		list = append(list, h)
+		dst = append(dst, h)
 	}
-	return list, s.ListEnd()
+	return dst, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -527,7 +447,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeHashList(s)
+	l.Topics, err = decodeHashListTo(s, nil)
 	if err != nil {
 		return err
 	}

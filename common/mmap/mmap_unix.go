@@ -32,19 +32,21 @@ import (
 
 var osPageSize = uintptr(os.Getpagesize())
 
-// pageAligned returns the sub-slice of m covering only whole pages:
-// start rounded up, end rounded down. Returns nil when m spans no full page.
+// pageAligned returns the sub-slice of m starting at a page boundary, which is
+// what madvise(2) requires of its address. The tail is left alone: the kernel
+// rounds the length up to a whole page, and mmap only ever hands out whole pages.
+// Rounding the tail down instead would skip a mapping shorter than one page
+// entirely, and split the VMA of any mapping with a partial last page.
 func pageAligned(m []byte) []byte {
 	if len(m) == 0 {
 		return nil
 	}
 	start := reflect.ValueOf(m).Pointer()
 	skip := int((osPageSize - start%osPageSize) % osPageSize)
-	trim := int((start + uintptr(len(m))) % osPageSize)
-	if skip+trim >= len(m) {
+	if skip >= len(m) {
 		return nil
 	}
-	return m[skip : len(m)-trim]
+	return m[skip:]
 }
 
 func madvise(m []byte, advice int) error {

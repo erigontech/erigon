@@ -33,6 +33,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	commonlru "github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -57,10 +58,17 @@ const (
 	maxBlockFetchers = 4
 )
 
-// cacheKey identifies a processed block in the fee history cache.
+// cacheKey identifies a processed block in the fee history cache. Above the
+// frozen boundary the header hash is part of the key, so an entry lives
+// exactly as long as the block itself: a same-height sibling (reorg, or an
+// in-flight block replaced before its commit lands) has a different hash and
+// misses. At or below the boundary the mapping is immutable and the hash
+// stays zero: the number alone identifies the block, with no per-block
+// resolution on the hit path.
 // The percentiles string is a binary encoding of the requested percentile slice,
 // so identical percentile arrays produce the same key.
 type cacheKey struct {
+	hash        common.Hash
 	number      uint64
 	percentiles string
 }
@@ -68,9 +76,9 @@ type cacheKey struct {
 // processedFees holds the computed fee data for a single block.
 // This is what gets stored in the LRU cache.
 type processedFees struct {
-	reward                       []*big.Int
-	baseFee, nextBaseFee         *uint256.Int
-	blobBaseFee, nextBlobBaseFee *uint256.Int
+	reward                       []hexutil.U256
+	baseFee, nextBaseFee         hexutil.U256
+	blobBaseFee, nextBlobBaseFee hexutil.U256
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
 }
@@ -137,13 +145,11 @@ func (s sortGasAndReward) Less(i, j int) bool {
 // the block field filled in, retrieves the block from the backend if not present yet and
 // fills in the rest of the fields.
 func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainconfig *chain.Config) {
-	if bf.results.baseFee = bf.header.BaseFee; bf.results.baseFee == nil {
-		bf.results.baseFee = new(uint256.Int)
+	if bf.header.BaseFee != nil {
+		bf.results.baseFee = hexutil.U256(*bf.header.BaseFee)
 	}
 	if chainconfig.IsLondon(bf.blockNumber + 1) {
-		bf.results.nextBaseFee = misc.CalcBaseFee(chainconfig, bf.header)
-	} else {
-		bf.results.nextBaseFee = new(uint256.Int)
+		bf.results.nextBaseFee = hexutil.U256(*misc.CalcBaseFee(chainconfig, bf.header))
 	}
 
 	// Fill in blob base fee and next blob base fee.
@@ -159,12 +165,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			bf.err = err
 			return
 		}
-		bf.results.blobBaseFee = &blobBaseFee256
-		bf.results.nextBlobBaseFee = &nextBlobBaseFee256
-
-	} else {
-		bf.results.blobBaseFee = new(uint256.Int)
-		bf.results.nextBlobBaseFee = new(uint256.Int)
+		bf.results.blobBaseFee = hexutil.U256(blobBaseFee256)
+		bf.results.nextBlobBaseFee = hexutil.U256(nextBlobBaseFee256)
 	}
 	bf.results.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
 
@@ -179,16 +181,13 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
+		bf.results.reward = []hexutil.U256{}
 		return
 	}
 
-	bf.results.reward = make([]*big.Int, len(percentiles))
+	bf.results.reward = make([]hexutil.U256, len(percentiles))
 	if len(bf.block.Transactions()) == 0 {
-		// return an all zero row if there are no transactions to gather data from
-		for i := range bf.results.reward {
-			bf.results.reward[i] = new(big.Int)
-		}
-		return
+		return // an all zero row: there are no transactions to gather data from
 	}
 
 	sorter := make(sortGasAndReward, len(bf.block.Transactions()))
@@ -210,7 +209,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			txIndex++
 			sumGasUsed += sorter[txIndex].gasUsed
 		}
-		bf.results.reward[i] = sorter[txIndex].reward.ToBig()
+		bf.results.reward[i] = hexutil.U256(sorter[txIndex].reward)
 	}
 }
 
@@ -302,7 +301,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*uint256.Int, []float64, []*uint256.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]hexutil.U256, []hexutil.U256, []float64, []hexutil.U256, []float64, error) {
 	if blocks < 1 {
 		return common.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
@@ -337,6 +336,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
+	// The reward percentiles are computed from each block's transactions and the gas
+	// their receipts report; the other series come from headers alone. Availability is
+	// a lower bound, so the oldest block of the range decides for all of it.
+	if len(rewardPercentiles) != 0 {
+		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
+			return common.Big0, nil, nil, nil, nil, nil, err
+		}
+	}
+
 	// percentileKey is the binary-encoded percentile slice used as part of the cache key.
 	percentileKey := encodePercentiles(rewardPercentiles)
 
@@ -349,33 +357,101 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	var (
 		blockResults = make([]blockResult, blocks)
-		reward       = make([][]*big.Int, blocks)
-		baseFee      = make([]*uint256.Int, blocks+1)
+		reward       = make([][]hexutil.U256, blocks)
+		baseFee      = make([]hexutil.U256, blocks+1)
 		gasUsedRatio = make([]float64, blocks)
-		blobBaseFee  = make([]*uint256.Int, blocks+1)
+		blobBaseFee  = make([]hexutil.U256, blocks+1)
 	)
 	var next atomic.Uint64
 	next.Store(oldestBlock)
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
+	var frozenBound uint64
+	if oracle.historyCache != nil {
+		frozenBound = oracle.backend.FrozenBlocks()
+	}
+
+	// Unfrozen heights are cached by hash, so a reorged-out block can no longer
+	// be found under its number. The hashes come from one range scan per request
+	// — resolving them per block costs a remote round trip each in rpcdaemon
+	// mode, which the cache-hit path used to be free of. Heights left unresolved
+	// (scan error, beyond the head) are simply not cached.
+	var hotFrom uint64
+	var hotHashes []common.Hash
+	if oracle.historyCache != nil && lastBlock > frozenBound {
+		hotFrom = max(oldestBlock, frozenBound+1)
+		hotHashes, err = oracle.backend.CanonicalHashes(ctx, hotFrom, lastBlock)
+		if err != nil {
+			oracle.log.Debug("fee history: canonical range unresolved, serving uncached", "from", hotFrom, "to", lastBlock, "err", err)
+			hotHashes = nil
+		}
+	}
+
+	cacheKeyOf := func(blockNumber uint64) (key cacheKey, byHash, cacheable bool) {
+		cacheable = oracle.historyCache != nil
+		key = cacheKey{number: blockNumber, percentiles: percentileKey}
+		if cacheable && blockNumber > frozenBound {
+			hotIdx := int(blockNumber - hotFrom)
+			if hotIdx < len(hotHashes) && hotHashes[hotIdx] != (common.Hash{}) {
+				key.hash = hotHashes[hotIdx]
+				byHash = true
+			} else {
+				cacheable = false
+			}
+		}
+		return key, byHash, cacheable
+	}
+
+	// Cache hits are served here: every fetcher forks a read transaction, and a fork
+	// takes the database's reader-slot lock.
+	misses := 0
+	for blockNumber := oldestBlock; blockNumber <= lastBlock; blockNumber++ {
+		// The pending block comes from the mining cache and is rebuilt
+		// continuously, so its results are never memoized.
+		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
+			fees := &blockFees{blockNumber: blockNumber, block: pendingBlock, receipts: pendingReceipts, header: pendingBlock.Header()}
+			oracle.processBlock(fees, rewardPercentiles, chainconfig)
+			if fees.err != nil {
+				return common.Big0, nil, nil, nil, nil, nil, fees.err
+			}
+			blockResults[blockNumber-oldestBlock] = blockResult{processed: fees.results, hasResult: true}
+			continue
+		}
+		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
+			if cached, ok := oracle.historyCache.get(key); ok {
+				blockResults[blockNumber-oldestBlock] = blockResult{processed: cached, hasResult: true}
+				continue
+			}
+		}
+		misses++
+	}
+	if err := ctx.Err(); err != nil {
+		return common.Big0, nil, nil, nil, nil, nil, err
+	}
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
 	// When Fork is not supported (returns nil backend), a single goroutine falls back
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
+	if misses > 0 {
+		if err := oracle.backend.PrepareFork(ctx); err != nil {
+			oracle.log.Debug("fee history: parent identity unresolved, serving sequentially", "err", err)
+		}
+	}
 	g, fetchCtx := errgroup.WithContext(ctx)
 	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
-	for range maxBlockFetchers {
+	for range min(maxBlockFetchers, misses) {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
 			if forkErr != nil {
 				return forkErr
 			}
 			if localBackend == nil {
-				// Fork not supported: allow exactly one goroutine to proceed
-				// sequentially on the shared backend; the others exit.
+				// No forked backend for this call (unsupported, or a concurrent
+				// reorg): exactly one goroutine proceeds sequentially on the
+				// shared backend; the others exit.
 				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
@@ -393,25 +469,26 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					return nil
 				}
 				idx := int(blockNumber - oldestBlock)
-
-				// Try the LRU cache first (skip for pending blocks — they are ephemeral).
-				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
-				if !isPending && oracle.historyCache != nil {
-					if cached, ok := oracle.historyCache.get(cacheKey{blockNumber, percentileKey}); ok {
-						blockResults[idx] = blockResult{processed: cached, hasResult: true}
-						continue
-					}
+				if blockResults[idx].hasResult {
+					continue
 				}
 
+				key, byHash, cacheable := cacheKeyOf(blockNumber)
+
+				// Fetch by the resolved pair to skip a second canonical resolution.
 				fees := &blockFees{blockNumber: blockNumber}
 				switch {
-				case isPending:
-					fees.block, fees.receipts = pendingBlock, pendingReceipts
 				case len(rewardPercentiles) != 0:
-					fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
+					if byHash {
+						fees.block, fees.err = localBackend.BlockByHashNumber(fetchCtx, key.hash, blockNumber)
+					} else {
+						fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
+					}
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
 					}
+				case byHash:
+					fees.header, fees.err = localBackend.HeaderByHashNumber(fetchCtx, key.hash, blockNumber)
 				default:
 					fees.header, fees.err = localBackend.HeaderByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 				}
@@ -434,8 +511,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				blockResults[idx] = blockResult{processed: fees.results, hasResult: true}
-				if !isPending && oracle.historyCache != nil {
-					oracle.historyCache.add(cacheKey{blockNumber, percentileKey}, fees.results)
+				if cacheable {
+					oracle.historyCache.add(key, fees.results)
 				}
 			}
 		})
@@ -447,7 +524,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// Post-processing is serial: all goroutines have finished, no races.
 	firstMissing := len(blockResults)
 	blobGasUsedRatio := make([]float64, len(blockResults))
-	for i, r := range blockResults {
+	for i := range blockResults {
+		r := &blockResults[i]
 		if r.missing || !r.hasResult {
 			if i < firstMissing {
 				firstMissing = i
@@ -473,5 +551,6 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		reward = nil
 	}
 	baseFee, gasUsedRatio = baseFee[:firstMissing+1], gasUsedRatio[:firstMissing]
+	blobBaseFee, blobGasUsedRatio = blobBaseFee[:firstMissing+1], blobGasUsedRatio[:firstMissing]
 	return new(big.Int).SetUint64(oldestBlock), reward, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, nil
 }

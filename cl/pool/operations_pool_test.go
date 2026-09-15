@@ -158,9 +158,9 @@ func TestOperationsPool(t *testing.T) {
 func TestOperationsPoolPruneFinalized(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(3 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(3*cfg.SlotsPerEpoch))
 	for i := range 3 {
-		finalizedState.AddValidator(solid.NewValidatorFromParameters(
+		require.NoError(t, finalizedState.AddValidator(solid.NewValidatorFromParameters(
 			common.Bytes48{byte(i)},
 			common.Hash{},
 			cfg.MaxEffectiveBalance,
@@ -169,7 +169,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 			0,
 			cfg.FarFutureEpoch,
 			cfg.FarFutureEpoch,
-		), cfg.MaxEffectiveBalance)
+		), cfg.MaxEffectiveBalance))
 	}
 
 	t.Run("proposer slashings", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
 		pools.VoluntaryExitsPool.Insert(2, voluntaryExit(2))
 		pools.VoluntaryExitsPool.Insert(10, voluntaryExit(10))
-		finalizedState.SetExitEpochForValidatorAtIndex(2, 4)
+		require.NoError(t, finalizedState.SetExitEpochForValidatorAtIndex(2, 4))
 
 		pools.PruneFinalized(finalizedState, 3)
 
@@ -229,7 +229,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.BLSToExecutionChangesPool.Insert(remove.Signature, remove)
 		pools.BLSToExecutionChangesPool.Insert(missing.Signature, missing)
 		credentials := common.Hash{byte(cfg.ETH1AddressWithdrawalPrefixByte)}
-		finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials)
+		require.NoError(t, finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials))
 
 		pools.PruneFinalized(finalizedState, 3)
 
@@ -276,7 +276,7 @@ func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
 	finalizedState := state.New(&cfg)
 	validator := solid.NewValidator()
 	validator.SetSlashed(true)
-	finalizedState.AddValidator(validator, 0)
+	require.NoError(t, finalizedState.AddValidator(validator, 0))
 	pools := NewOperationsPool(&cfg)
 	pools.ProposerSlashingsPool.Insert(common.Bytes96{1}, nil)
 	pools.ProposerSlashingsPool.Insert(common.Bytes96{4}, &cltypes.ProposerSlashing{
@@ -300,7 +300,7 @@ func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
 func TestOperationsPoolPruneFinalizedUsesCheckpointEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(2*cfg.SlotsPerEpoch))
 	validator := solid.NewValidatorFromParameters(
 		common.Bytes48{},
 		common.Hash{},
@@ -311,7 +311,7 @@ func TestOperationsPoolPruneFinalizedUsesCheckpointEpoch(t *testing.T) {
 		cfg.FarFutureEpoch,
 		3,
 	)
-	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	require.NoError(t, finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance))
 	slashing := proposerSlashing(0, 1)
 
 	t.Run("before boundary", func(t *testing.T) {
@@ -338,7 +338,7 @@ func TestOperationsPoolPruneFinalizedConcurrentInsert(t *testing.T) {
 	finalizedState := state.New(&cfg)
 	validator := solid.NewValidator()
 	validator.SetExitEpoch(1)
-	finalizedState.AddValidator(validator, 0)
+	require.NoError(t, finalizedState.AddValidator(validator, 0))
 	pools := NewOperationsPool(&cfg)
 	pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
 
@@ -414,4 +414,88 @@ func TestEpbsPoolGetPreferenceExactLookup(t *testing.T) {
 
 	_, ok = p.GetPreference(slot, otherRoot)
 	require.False(t, ok)
+}
+
+func TestRemoveHighestBidOnlyRemovesMatchingBid(t *testing.T) {
+	pool := NewEpbsPool()
+	key := HighestBidKey{Slot: 1}
+	rejected := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 1}}
+	replacement := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 2}}
+
+	pool.StoreHighestBid(key, rejected)
+	require.False(t, pool.RemoveHighestBid(key, replacement))
+	stored, found := pool.GetHighestBid(key)
+	require.True(t, found)
+	require.Same(t, rejected, stored)
+
+	pool.StoreHighestBid(key, replacement)
+	require.False(t, pool.RemoveHighestBid(key, rejected))
+	stored, found = pool.GetHighestBid(key)
+	require.True(t, found)
+	require.Same(t, replacement, stored)
+
+	require.True(t, pool.RemoveHighestBid(key, replacement))
+	_, found = pool.GetHighestBid(key)
+	require.False(t, found)
+}
+
+func TestEpbsPoolRetainsLiveEntriesBeyondFormerCapacity(t *testing.T) {
+	p := NewEpbsPool()
+	for i := range uint64(256) {
+		root := common.Hash{byte(i), byte(i >> 8)}
+		p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 100, DependentRoot: root}, &cltypes.SignedProposerPreferences{})
+		p.HighestBids.Add(HighestBidKey{Slot: 100, ParentBlockRoot: root}, &cltypes.SignedExecutionPayloadBid{})
+	}
+
+	_, preferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 100})
+	_, bidFound := p.HighestBids.Get(HighestBidKey{Slot: 100})
+	require.True(t, preferencesFound)
+	require.True(t, bidFound)
+}
+
+func TestEpbsPoolRemoveHighestBidRemovesSlotIndexEntry(t *testing.T) {
+	pool := NewEpbsPool()
+	key := HighestBidKey{Slot: 100, ParentBlockRoot: common.Hash{1}}
+	bid := &cltypes.SignedExecutionPayloadBid{}
+	pool.StoreHighestBid(key, bid)
+
+	require.True(t, pool.RemoveHighestBid(key, bid))
+	require.Empty(t, pool.HighestBids.ValuesForSlot(key.Slot))
+}
+
+func TestEpbsPoolPrunesEntriesBeforeSlot(t *testing.T) {
+	p := NewEpbsPool()
+	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 99}, &cltypes.SignedProposerPreferences{})
+	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 100}, &cltypes.SignedProposerPreferences{})
+	p.HighestBids.Add(HighestBidKey{Slot: 99}, &cltypes.SignedExecutionPayloadBid{})
+	p.HighestBids.Add(HighestBidKey{Slot: 100}, &cltypes.SignedExecutionPayloadBid{})
+
+	p.ProposerPreferences.PruneSlots(func(slot uint64) bool { return slot < 100 })
+	p.HighestBids.PruneSlots(func(slot uint64) bool { return slot < 100 })
+
+	_, oldPreferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 99})
+	_, livePreferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 100})
+	_, oldBidFound := p.HighestBids.Get(HighestBidKey{Slot: 99})
+	_, liveBidFound := p.HighestBids.Get(HighestBidKey{Slot: 100})
+	require.False(t, oldPreferencesFound)
+	require.True(t, livePreferencesFound)
+	require.False(t, oldBidFound)
+	require.True(t, liveBidFound)
+}
+
+func TestSlotMapPrunesSlotBucketsInsteadOfEntries(t *testing.T) {
+	const slot = uint64(100)
+	m := newSlotMap[ProposerPreferencesKey, int](func(key ProposerPreferencesKey) uint64 { return key.Slot })
+	for i := range 2048 {
+		m.Add(ProposerPreferencesKey{Slot: slot, DependentRoot: common.Hash{byte(i), byte(i >> 8)}}, i)
+	}
+	require.Len(t, m.ValuesForSlot(slot), 2048)
+
+	visited := 0
+	m.PruneSlots(func(entrySlot uint64) bool {
+		visited++
+		return entrySlot < slot
+	})
+	require.Equal(t, 1, visited)
+	require.Len(t, m.ValuesForSlot(slot), 2048)
 }

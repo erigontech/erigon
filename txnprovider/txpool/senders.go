@@ -212,24 +212,24 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, accounts.CodeHash, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")
 	}
 	encoded, err := cacheView.Get(addr[:])
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
 	if len(encoded) == 0 {
-		return 0, uint256.Int{}, nil
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, nil
 	}
 	acc := accounts.Account{}
 	err = accounts.DeserialiseV3(&acc, encoded)
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
-	return acc.Nonce, acc.Balance, nil
+	return acc.Nonce, acc.Balance, acc.CodeHash, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {

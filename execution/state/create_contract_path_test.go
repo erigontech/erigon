@@ -19,6 +19,7 @@ package state
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +34,7 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
 	ibs.SetTxContext(0, 1)
 
 	contract := getAddress(1)

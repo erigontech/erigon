@@ -284,8 +284,7 @@ func FromECDSAPub(pub *ecdsa.PublicKey) []byte {
 // HexToECDSA parses a secp256k1 private key.
 func HexToECDSA(hexkey string) (*ecdsa.PrivateKey, error) {
 	b, err := hex.DecodeString(hexkey)
-	var byteErr hex.InvalidByteError
-	if errors.As(err, &byteErr) {
+	if byteErr, ok := errors.AsType[hex.InvalidByteError](err); ok {
 		return nil, fmt.Errorf("invalid hex character %q in private key", byte(byteErr))
 	} else if err != nil {
 		return nil, errors.New("invalid hex data for private key")

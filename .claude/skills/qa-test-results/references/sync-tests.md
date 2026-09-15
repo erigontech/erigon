@@ -6,7 +6,8 @@ and metric block described here.
 
 Driver: `erigon-qa/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py`.
 Shared by `qa-tip-tracking*`, `qa-constrained-tip-tracking`,
-`qa-sync-from-scratch*`, `qa-sync-with-externalcl`, `qa-sync-test-bisection-tool`
+`qa-sync-from-scratch*`, `qa-exec-from-zero`, `qa-sync-with-externalcl`,
+`qa-sync-test-bisection-tool`
 and the pre-test stabilisation steps. The report block opens with
 `*** Tip tracking completed` on *every* Sync workflow, sync-from-scratch included.
 

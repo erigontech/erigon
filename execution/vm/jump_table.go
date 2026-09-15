@@ -65,8 +65,6 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
-	napoliInstructionSet           = newNapoliInstructionSet()
-	bhilaiInstructionSet           = newBhilaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
@@ -79,6 +77,11 @@ var (
 // selected operation per executed opcode, and a pointer table would make each
 // of those a dependent load off a separately-allocated struct.
 type JumpTable [256]operation
+
+func (op *operation) NumPush() int { return op.numPush }
+
+// UsesMemory reports whether the operation reads or writes memory.
+func (op *operation) UsesMemory() bool { return op.memorySize != nil }
 
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
@@ -130,25 +133,12 @@ func newPragueInstructionSet() JumpTable {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
-	instructionSet := newNapoliInstructionSet()
-	enable4844(&instructionSet) // BLOBHASH opcode
-	enable7516(&instructionSet) // BLOBBASEFEE opcode
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newBhilaiInstructionSet() JumpTable {
-	instructionSet := newNapoliInstructionSet()
-	enable7702(&instructionSet) // EIP-7702: set code tx
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newNapoliInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
 	enable1153(&instructionSet) // Transient storage opcodes
 	enable5656(&instructionSet) // MCOPY opcode
 	enable6780(&instructionSet) // SELFDESTRUCT only in same transaction
+	enable4844(&instructionSet) // BLOBHASH opcode
+	enable7516(&instructionSet) // BLOBBASEFEE opcode
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

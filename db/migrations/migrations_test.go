@@ -36,6 +36,7 @@ func newTestMigrationsDB(t *testing.T) kv.RwDB {
 
 func TestApplyWithInit(t *testing.T) {
 	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := t.Context()
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -73,35 +74,32 @@ func TestApplyWithInit(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
 	var applied map[string][]byte
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		_, ok := applied[m[0].Name]
-		require.True(ok)
-		_, ok = applied[m[1].Name]
-		require.True(ok)
-		return nil
-	})
-	require.NoError(err)
+		return err
+	}))
+	_, ok := applied[m[0].Name]
+	require.True(ok)
+	_, ok = applied[m[1].Name]
+	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
-	})
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
+	var applied2 map[string][]byte
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
+	}))
+	require.Equal(applied, applied2)
 }
 
 func TestApplyWithoutInit(t *testing.T) {
 	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := t.Context()
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -127,47 +125,43 @@ func TestApplyWithoutInit(t *testing.T) {
 			},
 		},
 	}
-	err := migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
+	require.NoError(migrationsDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.Migrations, []byte(m[0].Name), []byte{1})
-	})
-	require.NoError(err)
+	}))
 
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
 
 	var applied map[string][]byte
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		require.Len(applied, 2)
-		_, ok := applied[m[1].Name]
-		require.True(ok)
-		_, ok = applied[m[0].Name]
-		require.True(ok)
-		return nil
-	})
-	require.NoError(err)
+		return err
+	}))
+	require.Len(applied, 2)
+	_, ok := applied[m[1].Name]
+	require.True(ok)
+	_, ok = applied[m[0].Name]
+	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
 
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
-	})
-	require.NoError(err)
+	var applied2 map[string][]byte
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
+	}))
+	require.Equal(applied, applied2)
 
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := t.Context()
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -193,45 +187,41 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 	}
-	err := migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
+	require.NoError(migrationsDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.Migrations, []byte(m[1].Name), []byte{1}) // apply non-first migration
-	})
-	require.NoError(err)
+	}))
 
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
 
 	var applied map[string][]byte
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		require.Len(applied, 2)
-		_, ok := applied[m[1].Name]
-		require.True(ok)
-		_, ok = applied[m[0].Name]
-		require.True(ok)
-		return nil
-	})
-	require.NoError(err)
+		return err
+	}))
+	require.Len(applied, 2)
+	_, ok := applied[m[1].Name]
+	require.True(ok)
+	_, ok = applied[m[0].Name]
+	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
-	require.NoError(err)
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
-	})
-	require.NoError(err)
+	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
+	var applied2 map[string][]byte
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
+	}))
+	require.Equal(applied, applied2)
 }
 
 func TestValidation(t *testing.T) {
 	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := t.Context()
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -272,17 +262,18 @@ func TestValidation(t *testing.T) {
 	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)
 		return nil
-	})
-	require.NoError(err)
+	}))
 }
 
 func TestCommitCallRequired(t *testing.T) {
 	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := t.Context()
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -300,11 +291,11 @@ func TestCommitCallRequired(t *testing.T) {
 	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
+		var err error
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)
 		return nil
-	})
-	require.NoError(err)
+	}))
 }

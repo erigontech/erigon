@@ -87,7 +87,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	var deleted []string
 	var aged []agedFiles
 	for _, dt := range at.d {
-		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
+		if !dt.d.Enabled || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
 		cutoffTxNum := cutoffs.Default
@@ -106,7 +106,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		aged = append(aged, agedList...)
 	}
 	for _, iit := range at.standaloneIIs() {
-		if iit.ii.Disable {
+		if !iit.ii.Enabled {
 			continue
 		}
 		cutoffStep := kv.Step(cutoffs.Default / iit.stepSize)

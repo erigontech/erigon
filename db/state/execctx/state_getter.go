@@ -17,36 +17,42 @@
 package execctx
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
+const maxLentCodeBuf = 256 * 1024
+
 type stateGetter struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
-	view cache.ReadView
-	m    *kvmetrics.DomainMetrics
+	sd      *SharedDomains
+	tx      kv.TemporalTx
+	view    cache.ReadView
+	m       kv.GetLatestMetrics
+	codeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
 
 // GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
-func (g *stateGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return g.sd.getLatestMetered(name, g.tx, k, g.m, g.view)
+func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, start := opts.Metrics()
+	if metrics == nil {
+		metrics = g.m
+	}
+	return g.sd.getLatest(name, g.tx, k, metrics, start, opts.MaxStep(), g.view, getLatestOptions{})
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return g.sd.getCode(g.tx, g.view, addr, txNum)
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
+	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
+	return code, ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
-}
-
-func (g *stateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return g.sd.HasPrefix(name, prefix, g.tx)
 }
 
 func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
@@ -65,8 +71,12 @@ func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 	return &TemporalTxStateGetter{TemporalTx: tx}
 }
 
+func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return g.TemporalTx.GetLatest(name, k, opts)
+}
+
 func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
-	code, _, err := g.GetLatest(kv.CodeDomain, addr)
+	code, _, err := g.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{})
 	return code, len(code) > 0, err
 }
 

@@ -46,7 +46,7 @@ const (
 
 	// HistoryNoSystemTxs verifies system transactions don't appear at block start.
 	// Samples history data to ensure the first transaction in each block's history
-	// is not a system transaction (except genesis). Used in Polygon chain validation.
+	// is not a system transaction (except genesis).
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 
 	// ReceiptsNoDups validates receipt data monotonicity. Checks that cumulative gas used
@@ -59,18 +59,6 @@ const (
 	// and CumulativeGasUsed are monotonically increasing. Differs from ReceiptsNoDups in that
 	// it works on the cached representation rather than the raw receipt domain.
 	RCacheNoDups Check = "RCacheNoDups"
-
-	// BorEvents validates Polygon Bor event snapshots (Heimdall events). Only runs on Bor chains.
-	// Checks consistency of Bor bridge events. Skipped silently on non-Bor chains.
-	BorEvents Check = "BorEvents"
-
-	// BorSpans validates Polygon Bor span snapshots (validator spans). Only runs on Bor chains.
-	// Checks consistency of Bor validator span data. Skipped silently on non-Bor chains.
-	BorSpans Check = "BorSpans"
-
-	// BorCheckpoints validates Polygon Bor checkpoint snapshots. Only runs on Bor chains.
-	// Checks consistency of Bor checkpoint data. Skipped silently on non-Bor chains.
-	BorCheckpoints Check = "BorCheckpoints"
 
 	// CommitmentRoot verifies commitment state roots are present and correct. Checks that
 	// each commitment snapshot file contains the state root key, and optionally recomputes
@@ -149,7 +137,6 @@ var FastChecks = []Check{
 
 var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
-	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
 	StateProgress,
 }

@@ -83,6 +83,18 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		return nil, err
 	}
 
+	var saltBytes []byte
+	if exists {
+		if saltBytes, err = os.ReadFile(fpath); err != nil {
+			return nil, err
+		}
+		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
+		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
+		if exists = len(saltBytes) == 4; !exists {
+			logger.Warn("discarding malformed snaptype salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
+	}
+
 	if !exists {
 		if !autoCreate {
 			logger.Debug("snaptype salt file not found + autocreate disabled")
@@ -90,20 +102,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		}
 		dir.MustExist(baseDir)
 
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
-	if len(saltBytes) != 4 {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
+		saltBytes = make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
@@ -112,7 +111,6 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 
 	salt := binary.BigEndian.Uint32(saltBytes)
 	return &salt, nil
-
 }
 
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -238,15 +236,15 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
-	if enum >= MinCaplinEnum && enum < MinBorEnum {
+	if enum >= MinCaplinEnum && enum < MaxCaplinEnum {
 		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
 	}
 	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
 }
 
 func RegisterCaplinType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
-	if enum < MinCaplinEnum || enum >= MinBorEnum {
-		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MinBorEnum))
+	if enum < MinCaplinEnum || enum >= MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MaxCaplinEnum))
 	}
 	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
 }
@@ -413,7 +411,7 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 50
+const MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
 const MinCaplinEnum = 10
 
 // MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
@@ -540,7 +538,9 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -598,7 +598,9 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err

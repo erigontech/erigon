@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -87,11 +88,11 @@ func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
-	statedb.CreateAccount(params.BuilderDepositAddress, true)
+	require.NoError(t, statedb.CreateAccount(params.BuilderDepositAddress, true))
 
 	_, err := misc.DequeueBuilderDepositRequests(noopSyscall, statedb, params.BuilderDepositAddress)
 	require.Error(t, err)
@@ -106,11 +107,11 @@ func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
-	statedb.CreateAccount(params.BuilderExitAddress, true)
+	require.NoError(t, statedb.CreateAccount(params.BuilderExitAddress, true))
 
 	_, err := misc.DequeueBuilderExitRequests(noopSyscall, statedb, params.BuilderExitAddress)
 	require.Error(t, err)

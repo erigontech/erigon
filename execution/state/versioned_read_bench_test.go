@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -15,7 +16,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	_ = tx
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress([20]byte{0x01})
 	key := accounts.InternKey([32]byte{0x01})
@@ -60,7 +61,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}

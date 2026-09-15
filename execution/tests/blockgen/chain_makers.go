@@ -22,7 +22,6 @@ package blockgen
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -431,12 +431,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader := state.NewReaderV3(domains.AsStateGetter(tx))
+	stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
@@ -494,11 +495,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
 		// so that EIP-4788 can store it during initialization.
 		if config.IsCancun(b.header.Time) {
-			var beaconBlockRoot common.Hash
-			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-			}
-			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+			beaconBlockRoot := b.header.Hash().U256()
+			beaconBlockRoot.AddUint64(&beaconBlockRoot, 1)
+			parentBeaconBlockRoot := common.U256ToHash(beaconBlockRoot)
+			b.header.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
@@ -572,22 +572,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				// finalize) is applied in order; applying a phase before normalizing
 				// the next lets the next phase's stateReader fallback see it.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
 				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
 				isAura := config.Aura != nil
 				for i, ws := range b.blockIO.Outputs() {
@@ -595,9 +580,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 						continue
 					}
 					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}
@@ -614,16 +596,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 
 			var bal types.BlockAccessList
-			var balBytes []byte
 			if config.IsEIPEnabled(7928, b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
-				var encErr error
-				balBytes, encErr = types.EncodeBlockAccessListBytes(bal)
-				if encErr != nil {
-					return nil, nil, fmt.Errorf("encode block access list: %w", encErr)
-				}
 			}
 
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
@@ -632,7 +608,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals, balBytes)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals, types.NewBlockAccessListSidecar(bal))
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")
@@ -709,4 +685,3 @@ func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Bloc
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }

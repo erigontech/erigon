@@ -24,14 +24,18 @@ type plainKeyArena struct {
 	buf []byte
 }
 
-const plainKeyArenaChunk = 64 * 1024
+// Grows geometrically for the same reason the prefix arena does: a fresh buffer is
+// built per block, so a block touching two keys must not pay the full chunk.
+const plainKeyArenaChunkMin = 1024
+const plainKeyArenaChunkMax = 64 * 1024
 
 func (a *plainKeyArena) intern(b []byte) []byte {
-	if len(b) > plainKeyArenaChunk {
+	if len(b) > plainKeyArenaChunkMax {
 		return append([]byte(nil), b...)
 	}
 	if cap(a.buf)-len(a.buf) < len(b) {
-		a.buf = make([]byte, 0, plainKeyArenaChunk)
+		next := max(cap(a.buf)*2, plainKeyArenaChunkMin)
+		a.buf = make([]byte, 0, min(max(next, len(b)), plainKeyArenaChunkMax))
 	}
 	off := len(a.buf)
 	a.buf = append(a.buf, b...)
@@ -64,27 +68,26 @@ func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
-func (pu *parallelUpdate) Reset() {
-	if pu.trie != nil {
-		pu.trie.Reset()
-	}
-	pu.deferredMu.Lock()
-	for _, upd := range pu.deferredCombined {
-		putDeferredUpdate(upd)
-	}
-	pu.deferredCombined = pu.deferredCombined[:0]
-	pu.deferredMu.Unlock()
-	pu.keyArena.reset()
-}
-
-func (pu *parallelUpdate) Close() {
-	pu.trie = nil
+func (pu *parallelUpdate) drainDeferred() {
 	pu.deferredMu.Lock()
 	for _, upd := range pu.deferredCombined {
 		putDeferredUpdate(upd)
 	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
+}
+
+func (pu *parallelUpdate) Reset() {
+	if pu.trie != nil {
+		pu.trie.Reset()
+	}
+	pu.drainDeferred()
+	pu.keyArena.reset()
+}
+
+func (pu *parallelUpdate) Close() {
+	pu.trie = nil
+	pu.drainDeferred()
 	pu.keyArena.reset()
 }
 

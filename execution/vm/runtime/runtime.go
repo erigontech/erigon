@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -59,6 +60,7 @@ type Config struct {
 	Value       uint256.Int
 	EVMConfig   vm.Config
 	BaseFee     uint256.Int
+	L2Version   uint64
 
 	State     *state.IntraBlockState
 	GetHashFn func(n uint64) (common.Hash, error)
@@ -136,7 +138,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	}
 	var (
 		address = contractAsAddress
@@ -154,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 	ret, _, _, err := vmenv.Call(
 		sender,
@@ -200,7 +202,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	}
 	var (
 		vmenv  = NewEnv(cfg)
@@ -270,7 +272,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
 	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)

@@ -23,6 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -49,15 +50,19 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 }
 
 type gatedPatriciaContext struct {
-	sleep    time.Duration
-	descend  bool
-	entered  chan struct{}
-	release  chan struct{}
-	gateDone atomic.Bool
+	sleep       time.Duration
+	descend     bool
+	entered     chan struct{}
+	release     chan struct{}
+	startOthers chan struct{}
+	gateDone    atomic.Bool
 }
 
 func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
+		if g.startOthers != nil {
+			close(g.startOthers)
+		}
 		if g.entered != nil {
 			g.entered <- struct{}{}
 		}
@@ -134,7 +139,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
@@ -188,15 +193,20 @@ func TestHashSort_WarmupLap(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
 		require.GreaterOrEqual(t, ut.gen, uint64(3))
-		require.NoError(t, warmuper.Wait())
+		warmuper.CloseAndWait()
 	})
 }
 
 func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	var n atomic.Int32
-	return func(context.Context) (PatriciaContext, func()) {
+	startOthers := make(chan struct{})
+	return func(ctx context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
-			return &gatedPatriciaContext{entered: entered, release: release}, nil
+			return &gatedPatriciaContext{entered: entered, release: release, startOthers: startOthers}, nil
+		}
+		select {
+		case <-startOthers:
+		case <-ctx.Done():
 		}
 		return &gatedPatriciaContext{}, nil
 	}
@@ -286,7 +296,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	release := make(chan struct{})
 	warmuper := testWarmuper(context.Background(), gatedCtxFactory(entered, release), 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
 	<-entered
@@ -353,7 +363,7 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 	warmuper := testWarmuper(context.Background(), noopCtxFactory, 1)
 	warmuper.Start()
-	defer func() { require.NoError(t, warmuper.Wait()) }()
+	defer warmuper.CloseAndWait()
 
 	done := make(chan struct{})
 	go func() {
@@ -683,8 +693,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper.Wait()
-	require.NoError(t, err)
+	warmuper.CloseAndWait()
 
 	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper2.Start()
@@ -698,8 +707,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	err = warmuper2.Wait()
-	require.NoError(t, err)
+	warmuper2.CloseAndWait()
 }
 
 type recordingCtx struct {
@@ -893,6 +901,30 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 	require.Equal(t, uint64(len(keys)), ut.Size())
 	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
 		"duplicate TouchPlainKey must not double-count in the trie")
+}
+
+func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
+	t.Parallel()
+
+	var hashCalls atomic.Int64
+	hasher := func(key []byte) []byte {
+		hashCalls.Add(1)
+		return KeyToHexNibbleHash(key)
+	}
+	require.False(t, hasherReusesAddrPrefix(hasher), "wrapped hasher must not alias KeyToHexNibbleHash")
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), hasher)
+	defer ut.Close()
+
+	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+	for range 3 {
+		ut.TouchPlainKey(key, nil, func(c *KeyUpdate, val []byte) {})
+	}
+
+	require.EqualValues(t, 1, hashCalls.Load(), "a repeat touch must not rehash the key")
+	require.Equal(t, uint64(1), ut.Size())
+	require.NotNil(t, ut.parallel.trie.root)
+	require.EqualValues(t, 1, ut.parallel.trie.root.subtreeCount)
 }
 
 func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
@@ -1105,10 +1137,68 @@ func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 					require.Equal(t, len(data), cap(data), "data carries leftover pool capacity")
 					require.Equal(t, len(prevData), cap(prevData), "prevData carries leftover pool capacity")
 					return nil
-				})
+				}, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.updates, written)
 			require.Equal(t, tc.updates, seen, "callback must run for every update")
 		})
 	}
+}
+
+// The encoder sits inside a HexPatriciaHashed that Release() parks in a pool,
+// so a reslice would leave a branch's buffers reachable from there.
+func TestClearDeferredDropsUpdatesItReslicesPast(t *testing.T) {
+	t.Parallel()
+
+	row, bm := generateCellRow(t, 8)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, 0xAA}, bm, bm, bm, &cells, true))
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xBB, 0xBB}, bm, bm, bm, &cells, true))
+	require.Len(t, be.deferred, 2)
+
+	be.ClearDeferred()
+
+	for i, upd := range be.deferred[:cap(be.deferred)] {
+		require.Nil(t, upd, "deferred[%d] still pins a DeferredBranchUpdate after ClearDeferred", i)
+	}
+}
+
+// More keys than one batch, so the mid-loop truncation runs too, not just the
+// trailing one.
+func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
+	t.Parallel()
+
+	upd := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	for i := range hashSortBatchSize + 1 {
+		upd.TouchPlainKey(strconv.Itoa(i), []byte("v"), upd.TouchStorage)
+	}
+
+	require.NoError(t, upd.HashSort(context.Background(), nil, func(hk, pk []byte, u *Update) error { return nil }))
+
+	require.NotZero(t, cap(upd.batchSlab), "no batch ran, so the test proves nothing")
+	for i, ku := range upd.batchSlab[:cap(upd.batchSlab)] {
+		require.Nil(t, ku.update, "batchSlab[%d] still pins an Update after HashSort", i)
+		require.Nil(t, ku.hashedKey, "batchSlab[%d] still pins a hashed key after HashSort", i)
+		require.Empty(t, ku.plainKey, "batchSlab[%d] still pins a plain key after HashSort", i)
+	}
+}
+
+// Reset recycles the updates into the pool, so it must detach the slice the way
+// every other drain of deferredCombined does.
+func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
+	t.Parallel()
+
+	pu := newParallelUpdate()
+	pu.appendDeferred([]*DeferredBranchUpdate{
+		getDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
+		getDeferredUpdate([]byte{2}, make([]byte, 4096), nil),
+	})
+
+	pu.Reset()
+
+	require.Nil(t, pu.deferredCombined, "Reset still pins the recycled updates")
 }
