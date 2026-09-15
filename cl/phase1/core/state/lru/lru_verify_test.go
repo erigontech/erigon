@@ -126,11 +126,11 @@ func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
 
 	const workers = 4
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < 200; i++ {
+			for i := range 200 {
 				k := uint64(w*200 + i)
 				c.Add(k, k)
 				c.Get(k)

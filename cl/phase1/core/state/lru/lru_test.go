@@ -29,7 +29,7 @@ import (
 func surviving(t *testing.T) int {
 	t.Helper()
 	var count int
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.Gosched()
 		count = runtime.NumGoroutine()
 		time.Sleep(time.Millisecond)
@@ -50,7 +50,7 @@ func TestCacheWithTTLCloseStopsSweep(t *testing.T) {
 	before := surviving(t)
 
 	const caches = 8
-	for i := 0; i < caches; i++ {
+	for i := range caches {
 		c := NewWithTTL[uint64, uint64]("close_stops_sweep", 16, time.Hour)
 		c.Add(uint64(i), uint64(i))
 		c.Close()
