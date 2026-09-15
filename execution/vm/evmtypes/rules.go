@@ -50,7 +50,11 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 	}
 
 	if c.L2 != nil {
-		c.L2.ResolveRules(bc.L2Version, bc.BlockNumber, bc.Time, r)
+		var l2Version uint64
+		if bc.L2 != nil {
+			l2Version = bc.L2.Version
+		}
+		c.L2.ResolveRules(l2Version, bc.BlockNumber, bc.Time, r)
 	}
 
 	return r

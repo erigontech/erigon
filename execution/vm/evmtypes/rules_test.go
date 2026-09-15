@@ -39,7 +39,7 @@ func (fakeL2Config) ResolveRules(l2Version, _, _ uint64, rules *chain.Rules) {
 
 func TestBlockContextRulesL2Oracle(t *testing.T) {
 	c := chain.Config{L2: fakeL2Config{}}
-	bc := BlockContext{L2Version: 20}
+	bc := BlockContext{L2: &L2{Version: 20}}
 
 	rules := bc.Rules(&c)
 
@@ -49,7 +49,7 @@ func TestBlockContextRulesL2Oracle(t *testing.T) {
 
 func TestBlockContextRulesNoL2(t *testing.T) {
 	var c chain.Config
-	bc := BlockContext{L2Version: 20}
+	bc := BlockContext{L2: &L2{Version: 20}}
 
 	rules := bc.Rules(&c)
 

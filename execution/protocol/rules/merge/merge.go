@@ -500,6 +500,10 @@ func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return s.eth1Engine.GetPostApplyMessageFunc()
 }
 
+func (s *Merge) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {
+	s.eth1Engine.AmendBlockContext(bc, header)
+}
+
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
