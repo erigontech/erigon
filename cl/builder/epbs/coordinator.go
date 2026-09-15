@@ -137,13 +137,13 @@ type PayloadMeasurement struct {
 }
 
 type Coordinator struct {
-	beaconCfg     *clparams.BeaconChainConfig
-	signer        Signer
-	strategy      BidStrategy
-	assembler     PayloadAssembler
-	publisher     GossipPublisher
-	maxRetained   int
-	onRetainedBid func(*cltypes.SignedProposerPreferences, *cltypes.SignedExecutionPayloadBid, PayloadMeasurement)
+	beaconCfg         *clparams.BeaconChainConfig
+	signer            Signer
+	strategy          BidStrategy
+	assembler         PayloadAssembler
+	publisher         GossipPublisher
+	maxRetained       int
+	onPayloadMeasured func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
 
 	mu        sync.Mutex
 	slotFloor uint64
@@ -315,22 +315,54 @@ func (c *Coordinator) runSlotGuarded(
 	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
 		return nil, err
 	}
+	var (
+		executionRequests *cltypes.ExecutionRequests
+		requestsRoot      common.Hash
+		commitments       *solid.ListSSZ[*cltypes.KZGCommitment]
+		payloadValidated  bool
+	)
+	if c.onPayloadMeasured != nil {
+		executionRequests, requestsRoot, err = decodeExecutionRequests(c.beaconCfg, assembled.RequestsBundle)
+		if err != nil {
+			return nil, fmt.Errorf("epbs/coordinator: execution requests: %w", err)
+		}
+		commitments, err = buildBlobCommitments(c.beaconCfg, input.Slot, assembled.BlobsBundle)
+		if err != nil {
+			return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+		}
+		if commitments.Len() != 0 {
+			if _, err := buildBlobDataColumns(ctx, c.beaconCfg, input.Slot, common.Hash{}, assembled.BlobsBundle, commitments); err != nil {
+				return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+			}
+		}
+		if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+			return nil, err
+		}
+		payloadValidated = true
+		c.onPayloadMeasured(
+			input.ValidatedPreferences,
+			PayloadParentIdentity{Slot: input.Slot, ParentBlockHash: input.ParentBlockHash, ParentBlockRoot: input.ParentBlockRoot},
+			newPayloadMeasurement(input, assembled, commitments.Len(), assemblyStarted, assemblyElapsed),
+		)
+	}
 
 	candidateBidValue, ok, err := c.strategyBidValue(input.Slot, assembled.BlockValue)
 	if err != nil || !ok {
 		return nil, err
 	}
-	executionRequests, requestsRoot, err := decodeExecutionRequests(c.beaconCfg, assembled.RequestsBundle)
-	if err != nil {
-		return nil, fmt.Errorf("epbs/coordinator: execution requests: %w", err)
-	}
-	commitments, err := buildBlobCommitments(c.beaconCfg, input.Slot, assembled.BlobsBundle)
-	if err != nil {
-		return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
-	}
-	if commitments.Len() != 0 {
-		if _, err := buildBlobDataColumns(ctx, c.beaconCfg, input.Slot, common.Hash{}, assembled.BlobsBundle, commitments); err != nil {
+	if !payloadValidated {
+		executionRequests, requestsRoot, err = decodeExecutionRequests(c.beaconCfg, assembled.RequestsBundle)
+		if err != nil {
+			return nil, fmt.Errorf("epbs/coordinator: execution requests: %w", err)
+		}
+		commitments, err = buildBlobCommitments(c.beaconCfg, input.Slot, assembled.BlobsBundle)
+		if err != nil {
 			return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+		}
+		if commitments.Len() != 0 {
+			if _, err := buildBlobDataColumns(ctx, c.beaconCfg, input.Slot, common.Hash{}, assembled.BlobsBundle, commitments); err != nil {
+				return nil, fmt.Errorf("epbs/coordinator: blob bundle: %w", err)
+			}
 		}
 	}
 	bidValue, ok, err := c.reserveBid(auction, candidateBidValue, input.AvailableBidValueGwei)
@@ -407,13 +439,7 @@ func (c *Coordinator) runSlotGuarded(
 		c.rollbackPublish(auction)
 		return nil, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
-	if c.finishPublish(auction) && c.onRetainedBid != nil {
-		c.onRetainedBid(
-			input.ValidatedPreferences,
-			signedBid,
-			newPayloadMeasurement(input, assembled, commitments.Len(), assemblyStarted, assemblyElapsed),
-		)
-	}
+	c.finishPublish(auction)
 	if publishErr != nil {
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}

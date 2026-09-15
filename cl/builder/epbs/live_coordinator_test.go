@@ -213,6 +213,28 @@ func TestLiveCoordinatorPreservesFreshnessErrorBeforePublish(t *testing.T) {
 	require.Equal(t, 1, publisher.calls)
 }
 
+func TestLiveCoordinatorDoesNotMeasureStalePayloadAfterFullValidation(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_000_000_000))
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 7, payload: assembled}, new(coordinatorPublisher), 1,
+	)
+	measured := 0
+	coordinator.onPayloadMeasured = func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement) {
+		measured++
+	}
+	stale := errors.New("head changed")
+	live := NewLiveCoordinator(
+		coordinator, &staticSlotInputResolver{input: input}, &countingSlotInputFreshness{failAt: 4, err: stale},
+	)
+
+	_, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.ErrorIs(t, err, stale)
+	require.Zero(t, measured)
+}
+
 func TestLiveCoordinatorDoesNotPublishWhenContextExpiresAtFinalCheckpoint(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)

@@ -74,7 +74,7 @@ func TestShadowValueCurveRunnerMeasuresPublishedParentAtConfiguredDelays(t *test
 		defer nowMu.Unlock()
 		return now
 	}
-	samples := make(chan ShadowValueCurveSample, 2)
+	samples := make(chan ShadowValueCurveSample, 4)
 	runner, err := newShadowValueCurveRunner(
 		measurer, clock, 4, time.Second, 5*time.Second, []time.Duration{7 * time.Second, 9 * time.Second},
 		func(time.Duration) runnerTicker { return ticker }, nowFn, clock.GetSlotTime,
@@ -118,6 +118,16 @@ func TestShadowValueCurveRunnerMeasuresPublishedParentAtConfiguredDelays(t *test
 	require.Equal(t, 9*time.Second, second.Delay)
 	require.NoError(t, second.Err)
 	require.Equal(t, []PayloadParentIdentity{parent, parent}, measurer.snapshot())
+	require.True(t, runner.Submit(preferences, parent, PayloadMeasurement{
+		Slot: 11, ParentBlockRoot: parent.ParentBlockRoot, ParentBlockHash: parent.ParentBlockHash,
+		BlockValueWei: big.NewInt(4), AssemblyStartedAt: baselineStartedAt, AssemblyElapsed: time.Millisecond,
+	}))
+	select {
+	case repeated := <-samples:
+		t.Fatalf("duplicate baseline was observed: %+v", repeated)
+	case <-time.After(20 * time.Millisecond):
+	}
+	require.Equal(t, []PayloadParentIdentity{parent, parent}, measurer.snapshot())
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -138,10 +148,36 @@ func TestShadowValueCurveRunnerDropsRemainingSamplesWhenParentChanges(t *testing
 	pending := map[PayloadParentIdentity]*shadowValueCurveRequest{request.parent: request}
 
 	runner.runOneDue(t.Context(), pending)
-	require.Empty(t, pending)
+	require.Len(t, pending, 1)
 	runner.runOneDue(t.Context(), pending)
 	require.Len(t, measurer.snapshot(), 1)
+	clock.slot = 11
+	runner.runOneDue(t.Context(), pending)
+	require.Empty(t, pending)
 
+}
+
+func TestShadowValueCurveRunnerReleasesAdmissionWhenTargetTimeArrivesBeforeClockAdvances(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	now := clock.GetSlotTime(11)
+	runner, err := newShadowValueCurveRunner(
+		new(recordingShadowMeasurer), clock, 1, time.Second, 5*time.Second, []time.Duration{7 * time.Second},
+		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, func() time.Time { return now }, clock.GetSlotTime,
+	)
+	require.NoError(t, err)
+	first := PayloadParentIdentity{Slot: 11, ParentBlockRoot: common.Hash{0x01}, ParentBlockHash: common.Hash{0x02}}
+	runner.admitted[first] = struct{}{}
+	pending := map[PayloadParentIdentity]*shadowValueCurveRequest{
+		first: {parent: first, preferences: runnerPreferences(11, common.Hash{0x11})},
+	}
+
+	runner.runOneDue(t.Context(), pending)
+	require.Empty(t, pending)
+	second := PayloadParentIdentity{Slot: 12, ParentBlockRoot: common.Hash{0x03}, ParentBlockHash: common.Hash{0x04}}
+	require.True(t, runner.Submit(runnerPreferences(12, common.Hash{0x12}), second, PayloadMeasurement{
+		Slot: 12, ParentBlockRoot: second.ParentBlockRoot, ParentBlockHash: second.ParentBlockHash,
+		BlockValueWei: big.NewInt(1), AssemblyStartedAt: now,
+	}))
 }
 
 type blockingShadowMeasurer struct {
@@ -189,14 +225,15 @@ func TestShadowValueCurveRunnerCancellationStopsActiveMeasurement(t *testing.T) 
 
 func TestShadowValueCurveRunnerSubmissionCapacityIsBounded(t *testing.T) {
 	clock := &manualRunnerClock{slot: 10}
+	now := clock.GetSlotTime(10).Add(6 * time.Second)
 	runner, err := newShadowValueCurveRunner(
 		new(recordingShadowMeasurer), clock, 1, time.Second, 5*time.Second, []time.Duration{7 * time.Second},
-		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, time.Now, clock.GetSlotTime,
+		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, func() time.Time { return now }, clock.GetSlotTime,
 	)
 	require.NoError(t, err)
 	measurement := PayloadMeasurement{
 		Slot: 11, ParentBlockRoot: common.HexToHash("0x22"), ParentBlockHash: common.HexToHash("0x33"),
-		BlockValueWei: big.NewInt(1), AssemblyStartedAt: time.Now(),
+		BlockValueWei: big.NewInt(1), AssemblyStartedAt: now,
 	}
 	require.True(t, runner.Submit(runnerPreferences(11, common.HexToHash("0x11")), PayloadParentIdentity{
 		Slot: 11, ParentBlockRoot: measurement.ParentBlockRoot, ParentBlockHash: measurement.ParentBlockHash,
@@ -208,7 +245,85 @@ func TestShadowValueCurveRunnerSubmissionCapacityIsBounded(t *testing.T) {
 	}, measurement))
 }
 
-func TestShadowValueCurveRunnerObservesAdmissionRejectedAfterSubmission(t *testing.T) {
+func TestShadowValueCurveRunnerDuplicateSubmissionDoesNotConsumeCapacity(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	now := clock.GetSlotTime(10).Add(6 * time.Second)
+	runner, err := newShadowValueCurveRunner(
+		new(recordingShadowMeasurer), clock, 2, time.Second, 5*time.Second, []time.Duration{7 * time.Second},
+		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, func() time.Time { return now }, clock.GetSlotTime,
+	)
+	require.NoError(t, err)
+	measurement := func(parent PayloadParentIdentity) PayloadMeasurement {
+		return PayloadMeasurement{
+			Slot: parent.Slot, ParentBlockRoot: parent.ParentBlockRoot, ParentBlockHash: parent.ParentBlockHash,
+			BlockValueWei: big.NewInt(1), AssemblyStartedAt: now,
+		}
+	}
+	first := PayloadParentIdentity{Slot: 11, ParentBlockRoot: common.Hash{0x01}, ParentBlockHash: common.Hash{0x02}}
+	second := PayloadParentIdentity{Slot: 11, ParentBlockRoot: common.Hash{0x03}, ParentBlockHash: common.Hash{0x04}}
+
+	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x11}), first, measurement(first)))
+	for range 10 {
+		require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x11}), first, measurement(first)))
+	}
+	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x12}), second, measurement(second)))
+}
+
+func TestShadowValueCurveRunnerIgnoresExpiredSubmission(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	now := clock.GetSlotTime(11)
+	runner, err := newShadowValueCurveRunner(
+		new(recordingShadowMeasurer), clock, 1, time.Second, 5*time.Second, []time.Duration{7 * time.Second},
+		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, func() time.Time { return now }, clock.GetSlotTime,
+	)
+	require.NoError(t, err)
+	expired := PayloadParentIdentity{Slot: 11, ParentBlockRoot: common.Hash{0x01}, ParentBlockHash: common.Hash{0x02}}
+	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x11}), expired, PayloadMeasurement{
+		Slot: 11, ParentBlockRoot: expired.ParentBlockRoot, ParentBlockHash: expired.ParentBlockHash,
+		BlockValueWei: big.NewInt(1), AssemblyStartedAt: now.Add(-time.Second),
+	}))
+	require.Empty(t, runner.submissions)
+
+	future := PayloadParentIdentity{Slot: 12, ParentBlockRoot: common.Hash{0x03}, ParentBlockHash: common.Hash{0x04}}
+	require.True(t, runner.Submit(runnerPreferences(12, common.Hash{0x12}), future, PayloadMeasurement{
+		Slot: 12, ParentBlockRoot: future.ParentBlockRoot, ParentBlockHash: future.ParentBlockHash,
+		BlockValueWei: big.NewInt(1), AssemblyStartedAt: now,
+	}))
+}
+
+func TestShadowValueCurveRunnerDropsSubmissionThatExpiresBeforeConsumption(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	now := clock.GetSlotTime(10).Add(6 * time.Second)
+	runner, err := newShadowValueCurveRunner(
+		new(recordingShadowMeasurer), clock, 1, time.Second, 5*time.Second, []time.Duration{7 * time.Second},
+		func(time.Duration) runnerTicker { return &manualRunnerTicker{} }, func() time.Time { return now }, clock.GetSlotTime,
+	)
+	require.NoError(t, err)
+	samples := make(chan ShadowValueCurveSample, 1)
+	runner.observe = func(sample ShadowValueCurveSample) { samples <- sample }
+	parent := PayloadParentIdentity{Slot: 11, ParentBlockRoot: common.Hash{0x01}, ParentBlockHash: common.Hash{0x02}}
+	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x11}), parent, PayloadMeasurement{
+		Slot: 11, ParentBlockRoot: parent.ParentBlockRoot, ParentBlockHash: parent.ParentBlockHash,
+		BlockValueWei: big.NewInt(1), AssemblyStartedAt: now,
+	}))
+	now = clock.GetSlotTime(11)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	select {
+	case sample := <-samples:
+		t.Fatalf("expired baseline was observed: %+v", sample)
+	case <-time.After(20 * time.Millisecond):
+	}
+	runner.admissionMu.Lock()
+	require.Empty(t, runner.admitted)
+	runner.admissionMu.Unlock()
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestShadowValueCurveRunnerObservesRejectedSubmission(t *testing.T) {
 	clock := &manualRunnerClock{slot: 10}
 	now := clock.GetSlotTime(10).Add(6 * time.Second)
 	runner, err := newShadowValueCurveRunner(
@@ -232,7 +347,7 @@ func TestShadowValueCurveRunnerObservesAdmissionRejectedAfterSubmission(t *testi
 	go func() { done <- runner.Run(ctx) }()
 	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x11}), first, measurement(first.ParentBlockRoot, first.ParentBlockHash)))
 	require.NoError(t, (<-samples).Err)
-	require.True(t, runner.Submit(runnerPreferences(11, common.Hash{0x12}), second, measurement(second.ParentBlockRoot, second.ParentBlockHash)))
+	require.False(t, runner.Submit(runnerPreferences(11, common.Hash{0x12}), second, measurement(second.ParentBlockRoot, second.ParentBlockHash)))
 	select {
 	case sample := <-samples:
 		require.Equal(t, second, sample.Parent)

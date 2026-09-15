@@ -199,9 +199,9 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	signer := new(coordinatorSigner)
 	coordinator := NewCoordinator(&config, signer, FixedMarginStrategy{Margin: 1}, assembler, publisher, 2)
 	var publishedMeasurement PayloadMeasurement
-	coordinator.onRetainedBid = func(
+	coordinator.onPayloadMeasured = func(
 		_ *cltypes.SignedProposerPreferences,
-		_ *cltypes.SignedExecutionPayloadBid,
+		_ PayloadParentIdentity,
 		measurement PayloadMeasurement,
 	) {
 		publishedMeasurement = measurement
@@ -274,6 +274,31 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	_, ok, err = coordinator.Payload(identity)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestCoordinatorReportsMeasuredZeroValuePayload(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, new(big.Int))
+	assembler := &coordinatorAssembler{payloadID: 7, payload: assembled}
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, publisher, 2)
+	var measured PayloadMeasurement
+	coordinator.onPayloadMeasured = func(
+		_ *cltypes.SignedProposerPreferences,
+		_ PayloadParentIdentity,
+		measurement PayloadMeasurement,
+	) {
+		measured = measurement
+	}
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	require.Nil(t, bid)
+	require.Zero(t, publisher.calls)
+	require.NotNil(t, measured.BlockValueWei)
+	require.Zero(t, measured.BlockValueWei.Sign())
+	require.Equal(t, input.Slot, measured.Slot)
 }
 
 func TestCoordinatorMeasurePayloadBuildsFreshWithoutPublishingOrRetaining(t *testing.T) {
@@ -761,10 +786,15 @@ func TestCoordinatorRejectsMalformedBlobBundle(t *testing.T) {
 		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
 		&coordinatorAssembler{payload: assembled}, publisher, 1,
 	)
+	measured := 0
+	coordinator.onPayloadMeasured = func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement) {
+		measured++
+	}
 
 	_, err := coordinator.RunSlot(t.Context(), input)
 	require.ErrorContains(t, err, "commitment 0 has length")
 	require.Zero(t, publisher.calls)
+	require.Zero(t, measured)
 }
 
 func TestCoordinatorAcceptsPeerDASProofsForEveryColumn(t *testing.T) {
@@ -827,10 +857,15 @@ func TestCoordinatorRejectsInvalidPeerDASProofBeforePublishingBid(t *testing.T) 
 		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
 		&coordinatorAssembler{payload: assembled}, publisher, 1,
 	)
+	measured := 0
+	coordinator.onPayloadMeasured = func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement) {
+		measured++
+	}
 
 	_, err := coordinator.RunSlot(t.Context(), input)
 	require.ErrorContains(t, err, "invalid KZG proof")
 	require.Zero(t, publisher.calls)
+	require.Zero(t, measured)
 	_, retained, lookupErr := coordinator.Payload(payloadIdentity(input, assembled))
 	require.NoError(t, lookupErr)
 	require.False(t, retained)
@@ -939,10 +974,15 @@ func TestCoordinatorRejectsMalformedExecutionRequests(t *testing.T) {
 		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
 		&coordinatorAssembler{payload: assembled}, publisher, 1,
 	)
+	measured := 0
+	coordinator.onPayloadMeasured = func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement) {
+		measured++
+	}
 
 	_, err := coordinator.RunSlot(t.Context(), input)
 	require.ErrorContains(t, err, "unknown execution request type")
 	require.Zero(t, publisher.calls)
+	require.Zero(t, measured)
 }
 
 func TestCoordinatorRejectsTypedNilDependency(t *testing.T) {

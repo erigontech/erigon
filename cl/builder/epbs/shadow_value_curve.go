@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -52,6 +53,8 @@ type shadowValueCurveRunner struct {
 	slotTime      func(uint64) time.Time
 	submissions   chan shadowValueCurveRequest
 	observe       func(ShadowValueCurveSample)
+	admissionMu   sync.Mutex
+	admitted      map[PayloadParentIdentity]struct{}
 }
 
 func newShadowValueCurveRunner(
@@ -90,6 +93,7 @@ func newShadowValueCurveRunner(
 		measurer: measurer, clock: clock, maxPending: maxPending, retryInterval: retryInterval,
 		baselineDelay: baselineDelay, delays: ownedDelays, newTicker: newTicker, now: now, slotTime: slotTime,
 		submissions: make(chan shadowValueCurveRequest, maxPending), observe: logShadowValueCurveSample,
+		admitted: make(map[PayloadParentIdentity]struct{}, maxPending),
 	}, nil
 }
 
@@ -104,8 +108,25 @@ func (r *shadowValueCurveRunner) Submit(
 		baseline.AssemblyStartedAt.IsZero() || baseline.AssemblyElapsed < 0 {
 		return false
 	}
+	r.admissionMu.Lock()
+	if _, exists := r.admitted[parent]; exists {
+		r.admissionMu.Unlock()
+		return true
+	}
+	if parent.Slot <= r.clock.GetCurrentSlot() || !r.now().Before(r.slotTime(parent.Slot)) {
+		r.admissionMu.Unlock()
+		return true
+	}
+	if len(r.admitted) >= r.maxPending {
+		r.admissionMu.Unlock()
+		r.observeRejected(parent, baseline)
+		return false
+	}
+	r.admitted[parent] = struct{}{}
+	r.admissionMu.Unlock()
 	owned, ok := preferences.Clone().(*cltypes.SignedProposerPreferences)
 	if !ok || owned == nil || owned.Message == nil {
+		r.release(parent)
 		return false
 	}
 	baseline.BlockValueWei = new(big.Int).Set(baseline.BlockValueWei)
@@ -116,8 +137,29 @@ func (r *shadowValueCurveRunner) Submit(
 	case r.submissions <- request:
 		return true
 	default:
+		r.release(parent)
+		r.observeRejected(parent, baseline)
 		return false
 	}
+}
+
+func (r *shadowValueCurveRunner) observeRejected(parent PayloadParentIdentity, baseline PayloadMeasurement) {
+	if r.observe == nil {
+		return
+	}
+	r.observe(ShadowValueCurveSample{
+		Parent: parent, Delay: r.baselineDelay,
+		LeadTime:  r.slotTime(parent.Slot).Sub(baseline.AssemblyStartedAt),
+		StartedAt: baseline.AssemblyStartedAt,
+		Elapsed:   baseline.AssemblyElapsed, Measurement: baseline,
+		Err: errors.New("epbs/shadow value curve: pending capacity reached"),
+	})
+}
+
+func (r *shadowValueCurveRunner) release(parent PayloadParentIdentity) {
+	r.admissionMu.Lock()
+	delete(r.admitted, parent)
+	r.admissionMu.Unlock()
 }
 
 func (r *shadowValueCurveRunner) Run(ctx context.Context) error {
@@ -138,26 +180,18 @@ func (r *shadowValueCurveRunner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case request := <-r.submissions:
-			added := false
-			_, exists := pending[request.parent]
-			if !exists && len(pending) < r.maxPending {
-				owned := request
-				pending[request.parent] = &owned
-				added = true
+			if request.parent.Slot <= r.clock.GetCurrentSlot() || !r.now().Before(r.slotTime(request.parent.Slot)) {
+				r.release(request.parent)
+				continue
 			}
+			owned := request
+			pending[request.parent] = &owned
 			if r.observe != nil {
 				sample := ShadowValueCurveSample{
 					Parent: request.parent, Delay: r.baselineDelay,
 					LeadTime:  r.slotTime(request.parent.Slot).Sub(request.baseline.AssemblyStartedAt),
 					StartedAt: request.baseline.AssemblyStartedAt,
 					Elapsed:   request.baseline.AssemblyElapsed, Measurement: request.baseline,
-				}
-				if !added {
-					if exists {
-						sample.Err = errors.New("epbs/shadow value curve: parent is already pending")
-					} else {
-						sample.Err = errors.New("epbs/shadow value curve: pending capacity reached")
-					}
 				}
 				r.observe(sample)
 			}
@@ -177,8 +211,12 @@ func (r *shadowValueCurveRunner) runOneDue(
 	var selected *shadowValueCurveRequest
 	var scheduled time.Time
 	for parent, request := range pending {
-		if parent.Slot <= currentSlot || request.nextDelay >= len(r.delays) {
+		if parent.Slot <= currentSlot {
 			delete(pending, parent)
+			r.release(parent)
+			continue
+		}
+		if request.nextDelay >= len(r.delays) {
 			continue
 		}
 		precedingSlot := parent.Slot - 1
@@ -197,6 +235,7 @@ func (r *shadowValueCurveRunner) runOneDue(
 	remaining := r.slotTime(selected.parent.Slot).Sub(startedAt)
 	if remaining <= 0 {
 		delete(pending, selected.parent)
+		r.release(selected.parent)
 		return
 	}
 	measureCtx, cancel := context.WithTimeout(ctx, remaining)
@@ -220,8 +259,8 @@ func (r *shadowValueCurveRunner) runOneDue(
 		Measurement: measurement, Err: err,
 	}
 	selected.nextDelay++
-	if errors.Is(err, ErrPayloadParentChanged) || selected.nextDelay >= len(r.delays) {
-		delete(pending, selected.parent)
+	if errors.Is(err, ErrPayloadParentChanged) {
+		selected.nextDelay = len(r.delays)
 	}
 	if r.observe != nil {
 		r.observe(sample)

@@ -102,19 +102,14 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		if err != nil {
 			return nil, fmt.Errorf("epbs/runtime: create shadow value curve: %w", err)
 		}
-		coordinator.onRetainedBid = func(
+		coordinator.onPayloadMeasured = func(
 			preferences *cltypes.SignedProposerPreferences,
-			bid *cltypes.SignedExecutionPayloadBid,
+			parent PayloadParentIdentity,
 			measurement PayloadMeasurement,
 		) {
-			if bid == nil || bid.Message == nil {
-				return
-			}
-			if !shadow.Submit(preferences, PayloadParentIdentity{
-				Slot: bid.Message.Slot, ParentBlockHash: bid.Message.ParentBlockHash, ParentBlockRoot: bid.Message.ParentBlockRoot,
-			}, measurement) {
-				log.Warn("Embedded builder shadow payload baseline dropped", "slot", bid.Message.Slot,
-					"parentBlockRoot", bid.Message.ParentBlockRoot, "parentBlockHash", bid.Message.ParentBlockHash)
+			if !shadow.Submit(preferences, parent, measurement) {
+				log.Warn("Embedded builder shadow payload baseline dropped", "slot", parent.Slot,
+					"parentBlockRoot", parent.ParentBlockRoot, "parentBlockHash", parent.ParentBlockHash)
 			}
 		}
 	}
