@@ -1036,7 +1036,7 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }
 
-func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) ([]string, []commitmentResult, bool) {
+func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
 	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
@@ -1072,28 +1072,19 @@ func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) ([]string, []com
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, !checkRoot))
 
 	var published []commitmentResult
-	for {
-		select {
-		case r := <-out:
-			published = append(published, r)
-			continue
-		default:
-		}
-		break
+	for len(out) > 0 {
+		published = append(published, <-out)
 	}
 
-	var branchKeys []string
+	var branches int
 	require.NoError(t, doms.Flush(ctx, tx))
 	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
-		if len(k) == 0 || len(v) == 0 || bytes.Equal(k, commitment.KeyCommitmentState) {
-			return true, nil
-		}
-		if b := fmt.Sprintf("%02x", k[0]); len(branchKeys) == 0 || branchKeys[len(branchKeys)-1] != b {
-			branchKeys = append(branchKeys, b)
+		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+			branches++
 		}
 		return true, nil
 	}))
-	return branchKeys, published, doms.GetCommitmentContext().HasPendingUpdate()
+	return branches, published, doms.GetCommitmentContext().HasPendingUpdate()
 }
 
 func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
