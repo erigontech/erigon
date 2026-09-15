@@ -192,7 +192,6 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 
 					args := baseArgs
 					args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), request.DataDir
-					args.NoEmptyBlock1 = true
 					eat, initErr := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 					require.NoError(t, initErr)
 					t.Cleanup(func() { require.NoError(t, eat.Close()) })
