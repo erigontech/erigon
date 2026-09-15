@@ -25,6 +25,7 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1335,7 +1336,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 
 // fundedBankGenesis returns a fresh ExecModuleTester whose genesis funds a
 // bank account keyed by a fixed, well-known private key, under cfg.
-func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
+func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
 	t.Helper()
 
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1361,7 +1362,7 @@ func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.Exe
 	return m, bankKey, bankAddress
 }
 
-func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
+func chainWithDeployedContractAndConfig(t testing.TB, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	t.Helper()
 
 	var (
@@ -1758,6 +1759,207 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	})
 }
 
+// TestCreateAccessListAuthGas pins that the authorization count is bounded by the
+// intrinsic gas check alone. A gas limit eth_estimateGas returned must be accepted,
+// and one below the intrinsic cost must be refused by that check rather than by a
+// separate count heuristic.
+func TestCreateAccessListAuthGas(t *testing.T) {
+	const authCount = 9
+
+	authorizations := func(addr common.Address) []types.JsonAuthorization {
+		auths := make([]types.JsonAuthorization, authCount)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(types.Authorization{
+				ChainID: *uint256.NewInt(1337),
+				Address: addr,
+				Nonce:   uint64(i),
+				YParity: 1,
+				R:       *uint256.NewInt(0x1111),
+				S:       *uint256.NewInt(0x2222),
+			})
+		}
+		return auths
+	}
+
+	preAmsterdam := chain.AllProtocolChanges.Copy()
+	preAmsterdam.AmsterdamTime = nil
+
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"amsterdam", chain.AllProtocolChanges},
+		{"pre-amsterdam", preAmsterdam},
+	} {
+		t.Run(tc.name+" accepts the estimated gas", func(t *testing.T) {
+			m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, tc.cfg)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+			args := ethapi.CallArgs{
+				From:              &bankAddress,
+				To:                &receiverAddress,
+				AuthorizationList: authorizations(receiverAddress),
+			}
+
+			estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+			require.NoError(t, err)
+
+			args.Gas = &estimate
+			_, err = api.CreateAccessList(context.Background(), args, nil, nil, nil)
+			require.NoError(t, err, "eth_estimateGas result must be accepted by eth_createAccessList")
+		})
+	}
+
+	// Amsterdam prices an authorization below the count heuristic's old divisor, so
+	// this is the case that heuristic used to reject.
+	t.Run("amsterdam estimate lands under the old divisor", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		estimate, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: authorizations(receiverAddress),
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Less(t, uint64(estimate), authCount*uint64(params.CallNewAccountGas))
+	})
+
+	t.Run("under-gassed reports the intrinsic shortfall", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		gas := hexutil.Uint64(params.TxGas)
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			Gas:               &gas,
+			AuthorizationList: authorizations(receiverAddress),
+		}, nil, nil, nil)
+		// The intrinsic gas check rejects it and names the shortfall, which the
+		// removed guard could not do.
+		require.ErrorContains(t, err, "intrinsic gas too low")
+	})
+
+	t.Run("no gas field leaves the rpc gas cap to refuse it", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		auths := make([]types.JsonAuthorization, 4096)
+		for i := range auths {
+			auths[i] = authorizations(receiverAddress)[0]
+		}
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: auths,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+	})
+}
+
+// TestExcludeAuthoritiesOrder pins that no authority is recovered until the intrinsic
+// gas check has passed. Each recovery is an ECDSA operation, so a list the request
+// cannot afford must not pay for a single one.
+func TestExcludeAuthoritiesOrder(t *testing.T) {
+	const gasCap = 5_000_000
+
+	amsterdam := &chain.Rules{
+		ChainID:     uint256.NewInt(1337),
+		IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsLondon: true,
+		IsShanghai: true, IsCancun: true, IsPrague: true, IsOsaka: true, IsAmsterdam: true,
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), common.HexToAddress("0x11"), 0)
+	require.NoError(t, err)
+
+	from, to := common.HexToAddress("0x22"), common.HexToAddress("0x33")
+	message := func(t *testing.T, count int, gas *hexutil.Uint64) *types.Message {
+		t.Helper()
+		auths := make([]types.JsonAuthorization, count)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+		}
+		msg, err := (&ethapi.CallArgs{From: &from, To: &to, Gas: gas, AuthorizationList: auths}).ToMessage(gasCap, nil)
+		require.NoError(t, err)
+		return msg
+	}
+	counting := func(calls *int) recoverAuthority {
+		return func(a *types.Authorization) (common.Address, error) {
+			*calls++
+			return a.RecoverSigner()
+		}
+	}
+
+	lowGas := hexutil.Uint64(params.TxGas)
+	for _, tc := range []struct {
+		name  string
+		count int
+		gas   *hexutil.Uint64
+	}{
+		{"gas below the intrinsic cost recovers nothing", 64, &lowGas},
+		{"no gas field leaves the rpc gas cap to refuse it", 4096, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			excl := map[common.Address]struct{}{}
+
+			err := excludeAuthorities(message(t, tc.count, tc.gas), amsterdam, excl, counting(&calls))
+
+			require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+			require.Zero(t, calls, "the request was refused, so no authority may be recovered")
+			require.Empty(t, excl)
+		})
+	}
+
+	// The oracle for the cases above: the counter does move when the list is affordable.
+	t.Run("an affordable list is recovered", func(t *testing.T) {
+		calls := 0
+		excl := map[common.Address]struct{}{}
+		gas := hexutil.Uint64(1_000_000)
+
+		require.NoError(t, excludeAuthorities(message(t, 8, &gas), amsterdam, excl, counting(&calls)))
+
+		require.Equal(t, 8, calls)
+		require.Contains(t, excl, authority)
+	})
+}
+
+// TestCreateAccessListExcludedAccessList pins that a caller-supplied entry the
+// tracer drops is not charged for. The sender is pre-warmed, so its entry never
+// reaches the executor and must not count against the gas limit either.
+func TestCreateAccessListExcludedAccessList(t *testing.T) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(t, err)
+
+	keys := make([]common.Hash, 200)
+	for i := range keys {
+		keys[i] = common.BigToHash(big.NewInt(int64(i)))
+	}
+	// The sender is in excl, so NewAccessListTracer drops this whole entry.
+	accessList := types.AccessList{{Address: bankAddress, StorageKeys: keys}}
+	gas := hexutil.Uint64(280_000)
+
+	res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		From:              &bankAddress,
+		To:                &receiverAddress,
+		Gas:               &gas,
+		AccessList:        &accessList,
+		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
+	}, nil, nil, nil)
+
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+}
+
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
 // pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
 // meaningful concept there, regardless of whether the caller supplied one or
@@ -1837,4 +2039,40 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
+}
+
+// BenchmarkCreateAccessListAuthGas measures refusing a list that cannot afford its
+// own intrinsic gas. Cost grows with the list because decoding it does, but the
+// per-entry share stays in the tens of nanoseconds. Recovering an authority is an
+// ECDSA operation costing hundreds of times that, so a check moved after the
+// recovery loop shows up here as a per-entry cost in the microseconds.
+func BenchmarkCreateAccessListAuthGas(b *testing.B) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(b, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(b, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(b, err)
+
+	for _, size := range []int{1024, 16384, 65536} {
+		auths := make([]types.JsonAuthorization, size)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
+		}
+		args := ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: auths,
+		}
+
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := api.CreateAccessList(context.Background(), args, nil, nil, nil); err == nil {
+					b.Fatal("the list must not fit the gas cap, else this measures the wrong path")
+				}
+			}
+		})
+	}
 }
