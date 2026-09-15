@@ -172,24 +172,24 @@ func DefragIfBloated(db kv.RwDB, timeLimit time.Duration, logger log.Logger) {
 	if !bloated(data, free) {
 		return
 	}
-	logger.Info("[compact] auto-defrag", "db", m.Path(), "data", common.ByteCount(data), "free", common.ByteCount(free))
+	logger.Info("[compact] auto-defrag", "db", m.Path(), "data", data.HR(), "free", free.HR())
 	res, err := m.Defrag(mdbx.DefragOptions{TimeLimit: timeLimit, AcceptableBacklash: -1})
 	if res == nil {
 		logger.Warn("[compact] auto-defrag failed", "db", m.Path(), "err", err)
 		return
 	}
-	pageSize := m.PageSize().Bytes()
+	pageSize := m.PageSize()
 	logger.Info("[compact] auto-defrag done", "db", m.Path(), "err", err,
-		"shrunk", common.ByteCount(uint64(max(res.PagesShrunk, 0))*pageSize), "moved", common.ByteCount(res.PagesMoved*pageSize),
-		"left", common.ByteCount(res.PagesLeft*pageSize), "retained", common.ByteCount(res.PagesRetained*pageSize),
+		"shrunk", (datasize.ByteSize(max(res.PagesShrunk, 0)) * pageSize).HR(), "moved", (datasize.ByteSize(res.PagesMoved) * pageSize).HR(),
+		"left", (datasize.ByteSize(res.PagesLeft) * pageSize).HR(), "retained", (datasize.ByteSize(res.PagesRetained) * pageSize).HR(),
 		"cycles", res.Cycles, "stoppingReasons", res.StoppingReasons, "took", res.SpentTime)
 }
 
-func bloated(data, free uint64) bool {
+func bloated(data, free datasize.ByteSize) bool {
 	return free > bloatRatio*data && free >= autoCompactMinFree
 }
 
-func envPageUsage(env *mdbx.Env) (data, free uint64, err error) {
+func envPageUsage(env *mdbx.Env) (data, free datasize.ByteSize, err error) {
 	st, err := env.Stat()
 	if err != nil {
 		return 0, 0, err
