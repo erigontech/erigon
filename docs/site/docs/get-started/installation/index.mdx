@@ -116,7 +116,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 **General Info**
 
 * The Docker images feature several binaries, including: `erigon`, `downloader`, `evm`, `caplin`, `capcli`, `integration`, `rpcdaemon`, `sentry`, and `txpool`.
-* The multi-platform Docker image is available for `linux/amd64` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform.
+* The multi-platform Docker image is available for `linux/amd64` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform. The `linux/amd64` image is compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT); Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify, older hardware and hypervisor profiles that mask v2 CPU features are not supported.
 * All build flags are now passed to the release workflow, allowing users to view previously missed build information in the released binaries and Docker images. This change is also expected to result in better build optimization.
 * Docker images now contain the label `org.opencontainers.image.revision`, which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
@@ -312,7 +312,7 @@ To install the latest Go version, visit the official documentation at [https://g
 This turns the C++ part of Erigon's code into a program your computer can run. You can use either **Clang** or **GCC**:
 
 * For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
-* For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
+* For **GCC** (version 11 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
 
 **2. Building Erigon from Source**
 
