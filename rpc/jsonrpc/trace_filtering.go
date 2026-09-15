@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
 	"time"
@@ -163,12 +162,12 @@ func rewardKindToString(kind protocolrules.RewardKind) string {
 	}
 }
 
-func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount *big.Int) ParityTrace {
+func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount uint256.Int) ParityTrace {
 	var tr ParityTrace
 	rewardAction := &RewardTraceAction{}
 	rewardAction.Author = author
 	rewardAction.RewardType = rewardType
-	(*uint256.Int)(&rewardAction.Value).SetFromBig(amount)
+	rewardAction.Value = hexutil.U256(amount)
 	bh := blockHash
 	tr.Action = rewardAction
 	tr.BlockHash = &bh
@@ -247,12 +246,12 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	blockHash := block.Hash()
 	blockNum = block.NumberU64()
 	for _, r := range rewards {
-		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount.ToBig()))
+		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount))
 	}
 
 	if traceConfig.IncludeWithdrawalsEnabled() {
 		for _, wd := range wdiffs {
-			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount.ToBig()))
+			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount))
 		}
 	}
 
@@ -598,7 +597,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
-				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward.ToBig())
+				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward)
 				done, err := exportTrace(tr)
 				if err != nil {
 					return err
@@ -610,7 +609,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			for i, uncle := range body.Uncles {
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
-						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i].ToBig())
+						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i])
 						done, err := exportTrace(tr)
 						if err != nil {
 							return err
