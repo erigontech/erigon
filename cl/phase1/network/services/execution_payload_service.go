@@ -254,6 +254,9 @@ func (s *executionPayloadService) processMessage(
 				}
 				return err
 			}
+			if persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err); persistedKnown && persisted == nil {
+				s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot, builderIndex)
+			}
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		hasAdmission = true

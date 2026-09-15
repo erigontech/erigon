@@ -512,6 +512,48 @@ func TestExecutionPayloadServiceSharesSeenEnvelopeAdmissionWithREST(t *testing.T
 	require.False(t, fcu.OnExecutionPayloadCalled)
 }
 
+func TestExecutionPayloadServiceRollsBackOnlyLookupRequiredAlreadySeen(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		claimError func(*cltypes.SignedExecutionPayloadEnvelope) error
+		forgotten  bool
+	}{
+		{name: "plain", claimError: func(*cltypes.SignedExecutionPayloadEnvelope) error {
+			return forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
+		}},
+		{name: "lookup required", claimError: func(*cltypes.SignedExecutionPayloadEnvelope) error {
+			return forkchoice.NewExecutionPayloadEnvelopeAlreadySeenError(nil)
+		}, forgotten: true},
+		{name: "verified persisted", claimError: forkchoice.NewExecutionPayloadEnvelopeAlreadySeenError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+			owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			require.NoError(t, err)
+			fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+			fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+				return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, tc.claimError(envelope)
+			}
+
+			err = service.ProcessMessage(t.Context(), nil, envelope)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.False(t, service.(*executionPayloadService).seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			require.False(t, fcu.OnExecutionPayloadCalled)
+			token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			if tc.forgotten {
+				require.NoError(t, claimErr)
+				fcu.EnvelopeGossipAdmissions.Finish(token, false)
+			} else {
+				require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+			}
+		})
+	}
+}
+
 func TestExecutionPayloadServiceQueuesEnvelopeWhileAdmissionIsBusy(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
