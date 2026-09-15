@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -50,22 +51,18 @@ type Regenerator struct {
 	blockReader    dbservices.FullBlockReader
 	txNumReader    rawdbv3.TxNumsReader
 	engine         rules.Engine
-	cache          *lru.Cache[common.Hash, []byte]
+	cache          *cache.HashByteLRU[[]byte]
 	perBlockExecMu *loaderMutex[common.Hash]
 	execSem        chan struct{} // bounds concurrent block replays
 	logger         log.Logger
 }
 
 func NewRegenerator(blockReader dbservices.FullBlockReader, engine rules.Engine, logger log.Logger) *Regenerator {
-	cache, err := lru.New[common.Hash, []byte](balsCacheLimit)
-	if err != nil {
-		panic(err)
-	}
 	return &Regenerator{
 		blockReader:    blockReader,
 		txNumReader:    blockReader.TxnumReader(),
 		engine:         engine,
-		cache:          cache,
+		cache:          cache.NewHashByteLRU(datasize.ByteSize(balsCacheLimit)*100*datasize.KB, func(b []byte) int64 { return int64(len(b)) }),
 		perBlockExecMu: &loaderMutex[common.Hash]{},
 		execSem:        make(chan struct{}, balsExecConcurrency),
 		logger:         logger,

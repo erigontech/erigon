@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
@@ -179,4 +182,32 @@ func (b *ByteLRU[V]) Close() {
 	}
 	b.limit.Store(0)
 	b.ceiling.Store(0)
+}
+
+// HashByteLRU is an unbudgeted ByteLRU keyed by a hash: the first 8 bytes pick the slot, Get compares the whole hash.
+type HashByteLRU[V any] struct {
+	c *ByteLRU[hashEntry[V]]
+}
+
+type hashEntry[V any] struct {
+	hash  common.Hash
+	value V
+}
+
+func NewHashByteLRU[V any](maxBytes datasize.ByteSize, weigh func(V) int64) *HashByteLRU[V] {
+	return &HashByteLRU[V]{c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 {
+		return weigh(e.value) + length.Hash + ByteLRUEntryOverheadBytes
+	})}
+}
+
+func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
+	e, ok := l.c.Get(binary.BigEndian.Uint64(hash[:]))
+	if !ok || e.hash != hash {
+		return value, false
+	}
+	return e.value, true
+}
+
+func (l *HashByteLRU[V]) Add(hash common.Hash, value V) {
+	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value})
 }

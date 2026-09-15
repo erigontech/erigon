@@ -1079,7 +1079,7 @@ func TestTraceRawTransactionUsesHeaderCacheInCommittedView(t *testing.T) {
 		return err
 	}))
 	require.NotNil(t, latestBlock)
-	base.cacheBlock(latestBlock)
+	base.blocksLRU.Add(latestBlock.Hash(), latestBlock)
 	base._blockReader = failHeaderReadBlockReader{
 		FullBlockReader: base._blockReader,
 		hash:            latestBlock.Hash(),
@@ -1108,7 +1108,7 @@ func TestTraceTransactionMethodsUseHeaderCacheInCommittedView(t *testing.T) {
 	require.NotNil(t, block)
 	require.NotEmpty(t, block.Transactions())
 
-	base.cacheBlock(block)
+	base.blocksLRU.Add(block.Hash(), block)
 	base._blockReader = failHeaderReadBlockReader{
 		FullBlockReader: base._blockReader,
 		hash:            block.Hash(),

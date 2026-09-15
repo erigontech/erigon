@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
 	sharedreceipts "github.com/erigontech/erigon/execution/receipts"
@@ -43,7 +42,7 @@ import (
 
 type Generator struct {
 	stateCache    kvcache.Cache
-	receiptsCache *lru.Cache[common.Hash, types.Receipts]
+	receiptsCache *cache.HashByteLRU[types.Receipts]
 	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
@@ -82,10 +81,6 @@ var (
 )
 
 func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
-	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
-	if err != nil {
-		panic(err)
-	}
 
 	txNumReader := blockReader.TxnumReader()
 
@@ -96,7 +91,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 
 	return &Generator{
 		stateCache:         stateCache,
-		receiptsCache:      receiptsCache,
+		receiptsCache:      newReceiptsCache(datasize.ByteSize(receiptsCacheLimit) * 200 * datasize.KB),
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
 		engine:             engine,
@@ -223,6 +218,18 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
+}
+
+func newReceiptsCache(maxBytes datasize.ByteSize) *cache.HashByteLRU[types.Receipts] {
+	return cache.NewHashByteLRU(maxBytes, func(rs types.Receipts) int64 {
+		n := int64(len(rs)) * 8
+		for _, r := range rs {
+			if r != nil {
+				n += int64(r.Size())
+			}
+		}
+		return n
+	})
 }
 
 func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] {

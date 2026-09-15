@@ -22,6 +22,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
@@ -36,4 +37,17 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
 	require.Equal(t, used, cachebudget.Global.Used())
+}
+
+func TestHashByteLRUMissesForeignHash(t *testing.T) {
+	l := NewHashByteLRU(datasize.MB, func(v []byte) int64 { return int64(len(v)) })
+	hash := common.Hash{1, 2, 3}
+	l.Add(hash, []byte{1})
+	_, ok := l.Get(hash)
+	require.True(t, ok)
+
+	foreign := hash
+	foreign[31]++
+	_, ok = l.Get(foreign)
+	require.False(t, ok, "a hash sharing the 8-byte slot must miss")
 }
