@@ -168,7 +168,7 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 	rewardAction := &RewardTraceAction{}
 	rewardAction.Author = author
 	rewardAction.RewardType = rewardType
-	rewardAction.Value.ToInt().Set(amount)
+	(*uint256.Int)(&rewardAction.Value).SetFromBig(amount)
 	bh := blockHash
 	tr.Action = rewardAction
 	tr.BlockHash = &bh
