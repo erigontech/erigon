@@ -336,10 +336,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if !revived && path != CodePath {
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
-			if s.eip8246 && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
-				// EIP-8246 removes the SELFDESTRUCT burn: a destroyed account keeps its
-				// balance and stays alive, so a reader sees the live account, not a zeroed
-				// one. Record the SD dependency, then fall through to the actual value.
+			if s.eip8246 && path == BalancePath {
+				// EIP-8246 preserves only the balance across SELFDESTRUCT; code, nonce and
+				// incarnation clear as in a normal destruct (they take the wiped path below).
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,

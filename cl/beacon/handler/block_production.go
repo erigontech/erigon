@@ -2612,7 +2612,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 				if err != nil {
 					return fmt.Errorf("failed to compute block root: %w", err)
 				}
-				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
 				if err != nil {
 					return fmt.Errorf("failed to get data column sidecars: %w", err)
 				}

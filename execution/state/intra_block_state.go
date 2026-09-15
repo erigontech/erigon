@@ -544,6 +544,13 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
 		// skipping createObject and its AddressPath write that OCC needs.
+		// The empty verdict depends on the balance being zero; record that read on
+		// the destruct so a later funding tx invalidates this reader.
+		if destructed, sdRes, ok := sdb.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
+			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
+			})
+		}
 		return true, nil
 	}
 

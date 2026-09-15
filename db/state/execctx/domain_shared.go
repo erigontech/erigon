@@ -575,6 +575,24 @@ func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.Te
 	return sd.flushPendingUpdates(ctx, tx, true)
 }
 
+// FlushPendingUpdatesWithoutChangeset applies the pending deferred commitment
+// update as raw branch records, bypassing the changeset accumulator. Used by an
+// isolated compute whose branch deltas must not pend into another block's
+// changeset; lock-free, so it can run deferred after the accumulator is
+// re-attached.
+func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) error {
+	upd := sd.sdCtx.TakePendingUpdate()
+	if upd == nil {
+		return nil
+	}
+	defer upd.Clear()
+	putBranch := func(prefix, data, prevData []byte) error {
+		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
+	}
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+	return err
+}
+
 func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
@@ -1189,16 +1207,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// Runs on the in-flight (pre-Commit) tx so the preload sees the just-flushed bytes.
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
-				if err != nil {
-					return nil, 0, false, err
-				}
-				return v, uint64(step), len(v) > 0, nil
-			}
-			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				return pinBranchResolver(ttx), nil, nil
-			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}
 				c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
@@ -1233,7 +1241,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				scan(oddFrom, oddTo)
 				return m
 			}
-			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, factory, provider)
+			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, pinBranchResolver(ttx), provider)
 		}
 	}
 	if err := requireStateVersion(tx, committedStateVersion); err != nil {
