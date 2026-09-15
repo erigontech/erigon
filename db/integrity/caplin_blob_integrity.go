@@ -5,6 +5,14 @@
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package integrity
 
@@ -20,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 )
@@ -32,7 +41,9 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	if beaconCfg == nil {
 		return fmt.Errorf("blob snapshot integrity: beacon chain config is missing")
 	}
-	reader := freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconCfg)
+	if db == nil {
+		return fmt.Errorf("blob snapshot integrity: canonical database is unavailable")
+	}
 	view := snapshots.View()
 	defer view.Close()
 
@@ -52,11 +63,15 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 			return reportErr
 		}
 	}
+	if err := checkCaplinBlobSnapshotLayout(ctx, view); err != nil {
+		logger.Error("[integrity] CaplinBlobSidecars", "err", err)
+		return err
+	}
 	return db.View(ctx, func(tx kv.Tx) error {
 		for _, segment := range view.BlobSidecars() {
 			from, to := segment.Src().GetRange()
 			for slot := from; slot < to; slot++ {
-				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, reader, snapshots, slot); slotErr != nil {
+				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, slot); slotErr != nil {
 					if errors.Is(slotErr, context.Canceled) || errors.Is(slotErr, context.DeadlineExceeded) {
 						return slotErr
 					}
@@ -70,7 +85,92 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	})
 }
 
-func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, reader freezeblocks.BeaconSnapshotReader, snapshots *freezeblocks.CaplinSnapshots, slot uint64) error {
+func checkCaplinBlobSnapshotLayout(ctx context.Context, view *freezeblocks.CaplinView) error {
+	blobSegments := view.BlobSidecars()
+	for _, segment := range blobSegments {
+		if err := checkCaplinSnapshotSegment(ctx, "blob", segment); err != nil {
+			return err
+		}
+	}
+
+	beaconSegments := view.BeaconBlocks()
+	for _, blobSegment := range blobSegments {
+		from, to := blobSegment.Src().GetRange()
+		next := from
+		for _, beaconSegment := range beaconSegments {
+			beaconFrom, beaconTo := beaconSegment.Src().GetRange()
+			if beaconTo <= next || beaconFrom >= to {
+				continue
+			}
+			if beaconFrom > next {
+				return fmt.Errorf("beacon snapshot coverage missing %d-%d for blob range %d-%d", next, beaconFrom, from, to)
+			}
+			if err := checkCaplinSnapshotSegment(ctx, "beacon", beaconSegment); err != nil {
+				return err
+			}
+			next = min(to, beaconTo)
+			if next == to {
+				break
+			}
+		}
+		if next < to {
+			return fmt.Errorf("beacon snapshot coverage missing %d-%d for blob range %d-%d", next, to, from, to)
+		}
+	}
+	return nil
+}
+
+func checkCaplinSnapshotSegment(ctx context.Context, name string, segment *snapshotsync.VisibleSegment) (err error) {
+	from, to := segment.Src().GetRange()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%s snapshot segment %d-%d: corrupt index/segment traversal: %v", name, from, to, recovered)
+		}
+	}()
+	if to <= from {
+		return fmt.Errorf("%s snapshot segment %d-%d: invalid range", name, from, to)
+	}
+	expected := to - from
+	if count := uint64(segment.Src().Count()); count != expected {
+		return fmt.Errorf("%s snapshot segment %d-%d: expected %d words, got %d", name, from, to, expected, count)
+	}
+	index := segment.Src().Index()
+	if index == nil {
+		return fmt.Errorf("%s snapshot segment %d-%d: index is missing", name, from, to)
+	}
+	if keyCount := index.KeyCount(); keyCount != expected {
+		return fmt.Errorf("%s snapshot segment %d-%d: expected %d index keys, got %d", name, from, to, expected, keyCount)
+	}
+	if base := index.BaseDataID(); base != from {
+		return fmt.Errorf("%s snapshot segment %d-%d: expected index base %d, got %d", name, from, to, from, base)
+	}
+	getter := segment.Src().MakeGetter()
+	getterSize := uint64(getter.DataLen())
+	var wordOffset uint64
+	for ordinal := range expected {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		indexedOffset := index.OrdinalLookup(ordinal)
+		if indexedOffset != wordOffset {
+			return fmt.Errorf("%s snapshot segment %d-%d: index ordinal %d points to offset %d, word starts at %d", name, from, to, ordinal, indexedOffset, wordOffset)
+		}
+		if !getter.HasNext() {
+			return fmt.Errorf("%s snapshot segment %d-%d: word %d is missing", name, from, to, ordinal)
+		}
+		nextOffset, _ := getter.Skip()
+		if nextOffset > getterSize {
+			return fmt.Errorf("%s snapshot segment %d-%d: word %d ends at offset %d beyond data size %d", name, from, to, ordinal, nextOffset, getterSize)
+		}
+		wordOffset = nextOffset
+	}
+	if wordOffset != getterSize {
+		return fmt.Errorf("%s snapshot segment %d-%d: final word ends at offset %d, data size is %d", name, from, to, wordOffset, getterSize)
+	}
+	return nil
+}
+
+func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, slot uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -78,7 +178,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, reader freezeblo
 	if err != nil {
 		return fmt.Errorf("blob snapshot slot %d: read canonical root: %w", slot, err)
 	}
-	block, err := reader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+	block, err := snapshots.ReadFrozenBeaconBlockBodyForIntegrity(slot)
 	if err != nil {
 		return fmt.Errorf("blob snapshot slot %d: read beacon block: %w", slot, err)
 	}
@@ -98,6 +198,9 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, reader freezeblo
 	if block.Block == nil || block.Block.Body == nil {
 		return fmt.Errorf("blob snapshot slot %d: beacon block is incomplete", slot)
 	}
+	if block.Block.Slot != slot {
+		return fmt.Errorf("blob snapshot slot %d: beacon block has slot %d", slot, block.Block.Slot)
+	}
 	if canonicalRoot == (common.Hash{}) {
 		return fmt.Errorf("blob snapshot slot %d: canonical block root is missing", slot)
 	}
@@ -116,9 +219,9 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, reader freezeblo
 	if beaconRoot != canonicalRoot {
 		return fmt.Errorf("blob snapshot slot %d: beacon snapshot root does not match canonical root", slot)
 	}
-
+	commitments := block.GetBlobKzgCommitments()
 	expected := 0
-	if commitments := block.GetBlobKzgCommitments(); commitments != nil {
+	if commitments != nil {
 		expected = commitments.Len()
 	}
 	if len(sidecars) != expected {
@@ -130,6 +233,10 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, reader freezeblo
 		}
 		if sidecar.Index != uint64(i) {
 			return fmt.Errorf("blob snapshot slot %d: expected index %d, got %d", slot, i, sidecar.Index)
+		}
+		commitment := commitments.Get(i)
+		if commitment == nil || sidecar.KzgCommitment != common.Bytes48(*commitment) {
+			return fmt.Errorf("blob snapshot slot %d index %d: sidecar commitment does not match beacon block", slot, i)
 		}
 		if sidecar.SignedBlockHeader.Header.Slot != slot {
 			return fmt.Errorf("blob snapshot slot %d index %d: header has slot %d", slot, i, sidecar.SignedBlockHeader.Header.Slot)
@@ -173,7 +280,10 @@ func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *c
 	denebSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
 	expectedFrom := denebSlot / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
 	beaconTo := beaconSegments[len(beaconSegments)-1].To()
-	requiredTo := (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
+	var requiredTo uint64
+	if beaconTo > 0 {
+		requiredTo = (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
+	}
 
 	next := expectedFrom
 	for _, segment := range blobSegments {

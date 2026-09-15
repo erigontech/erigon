@@ -1676,18 +1676,11 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			if res.CaplinSnaps == nil {
-				if checkStr != "" {
-					return fmt.Errorf("CaplinBlobSidecars: caplin snapshots are unavailable on chain %s", chainConfig.ChainName)
-				}
-				logger.Info("[integrity] CaplinBlobSidecars skipped because caplin snapshots are unavailable on this chain")
-				return nil
-			}
-			_, beaconCfg, _, err := clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+			caplinDB, caplinSnaps, beaconCfg, err := caplinBlobIntegrityInputs(res)
 			if err != nil {
 				return err
 			}
-			return integrity.CheckCaplinBlobSidecars(ctx, chainDB, res.CaplinSnaps, beaconCfg, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, caplinDB, caplinSnaps, beaconCfg, failFast, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
@@ -3069,6 +3062,8 @@ type OpenSnapsResult struct {
 	BlockSnaps       *blocksnapshots.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
+	CaplinIndexDB    kv.RwDB
+	BeaconConfig     *clparams.BeaconChainConfig
 	BlockRetire      *freezeblocks.BlockRetire
 	Aggregator       *state.Aggregator
 	// TemporalDB wraps the caller's chainDB with BlockSnaps, so its txs pin a
@@ -3081,6 +3076,11 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	clean func(),
 	err error,
 ) {
+	defer func() {
+		if err != nil && res.CaplinIndexDB != nil {
+			res.CaplinIndexDB.Close()
+		}
+	}()
 	if _, err = features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
 		return
 	}
@@ -3096,6 +3096,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	var beaconConfig *clparams.BeaconChainConfig
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 	if err == nil {
+		res.BeaconConfig = beaconConfig
 		res.CaplinSnaps = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
 		if err = res.CaplinSnaps.OpenFolder(); err != nil {
 			return
@@ -3106,6 +3107,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		if err != nil {
 			return res, nil, err
 		}
+		res.CaplinIndexDB = indexDB
 
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
@@ -3130,8 +3132,12 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, res.TemporalDB, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	clean = func() {
+		if res.CaplinIndexDB != nil {
+			defer res.CaplinIndexDB.Close()
+		}
 		defer res.BlockSnaps.Close()
 		defer res.CaplinSnaps.Close()
+		defer res.CaplinStateSnaps.Close()
 		defer res.Aggregator.Close()
 		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
 	}
@@ -3148,6 +3154,19 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	return
+}
+
+func caplinBlobIntegrityInputs(res OpenSnapsResult) (kv.RoDB, *freezeblocks.CaplinSnapshots, *clparams.BeaconChainConfig, error) {
+	if res.CaplinSnaps == nil {
+		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: caplin snapshots are unavailable")
+	}
+	if res.CaplinIndexDB == nil {
+		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: caplin index database is unavailable")
+	}
+	if res.BeaconConfig == nil {
+		return nil, nil, nil, fmt.Errorf("CaplinBlobSidecars: beacon config is unavailable")
+	}
+	return res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, nil
 }
 
 func doUncompress(ctx context.Context, cliCtx *cli.Command) error {

@@ -27,12 +27,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type bundle struct {
@@ -40,6 +45,24 @@ type bundle struct {
 }
 
 type RootNum = kv.RootNum
+
+func TestCaplinBlobIntegrityInputsUseCaplinIndexDBInsteadOfChainDB(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	caplinDB := mdbxtest.NewTestDB(t, dbcfg.CaplinDB)
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+
+	db, gotSnapshots, gotCfg, err := caplinBlobIntegrityInputs(OpenSnapsResult{
+		CaplinSnaps:   snapshots,
+		CaplinIndexDB: caplinDB,
+		BeaconConfig:  &cfg,
+	})
+	require.NoError(t, err)
+	require.Same(t, caplinDB, db)
+	require.Same(t, snapshots, gotSnapshots)
+	require.Same(t, &cfg, gotCfg)
+}
 
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
