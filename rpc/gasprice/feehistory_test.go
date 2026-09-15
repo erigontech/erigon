@@ -252,10 +252,11 @@ func TestFeeHistoryValues(t *testing.T) {
 		wantReward  [][]uint64 // gwei
 		wantFetches int32
 	}{
-		{"gas-weighted percentiles", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 3},
-		{"repeated request served from cache", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 0},
-		{"other percentiles are not served from the first entry", []float64{50}, [][]uint64{{2}, {0}, {4}}, 3},
 		{"no percentiles", nil, nil, 3},
+		{"header-only entries do not serve rewards", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 3},
+		{"repeated request served from cache", []float64{0, 25, 50, 75, 100}, [][]uint64{{1, 2, 2, 3, 3}, {0, 0, 0, 0, 0}, {4, 4, 4, 4, 4}}, 0},
+		{"other percentiles are served from the same entry", []float64{50}, [][]uint64{{2}, {0}, {4}}, 0},
+		{"no percentiles are served from an entry with rewards", nil, nil, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
