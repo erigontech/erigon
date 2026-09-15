@@ -98,8 +98,19 @@ func sameBuildRequest(previous, current *builder.Parameters) bool {
 // builderEntry keeps a builder with the immutable parameters it was created for, so the two cannot
 // drift apart and eviction can drop the timestamp index without scanning it.
 type builderEntry struct {
-	builder *builder.BlockBuilder
-	params  *builder.Parameters
+	builder      *builder.BlockBuilder
+	params       *builder.Parameters
+	txnRevision  uint64
+	txnRefreshes uint8
+}
+
+const maxPayloadTxnRefreshesPerRequest = 2
+
+func (e *ExecModule) currentPayloadTxnRevision() uint64 {
+	if e.payloadTxnRevision == nil {
+		return 0
+	}
+	return e.payloadTxnRevision()
 }
 
 // isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
@@ -382,18 +393,26 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
-	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
-	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
-	// discarded with its work still winding down - has to be passed over.
+	txnRevision := e.currentPayloadTxnRevision()
+	var txnRefreshes uint8
+	// A stopped builder is reusable until its transaction source changes. Only one that cannot
+	// produce - failed, or discarded with its work still winding down - has to be passed over.
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
-			!previous.builder.Failed() && !previous.builder.Discarded() {
-			if sameBuildRequest(previous.params, params) {
-				if !hasCompletedPayload(previous) {
-					e.dropTransientBuilders()
+		if previous := e.builders[previousID]; previous != nil {
+			sameRequest := sameBuildRequest(previous.params, params)
+			if sameRequest {
+				txnRefreshes = previous.txnRefreshes
+			}
+			if sameRequest && previous.builder != nil && !previous.builder.Failed() && !previous.builder.Discarded() {
+				needsRefresh := hasCompletedPayload(previous) && previous.txnRevision != txnRevision
+				if !needsRefresh || txnRefreshes >= maxPayloadTxnRefreshesPerRequest {
+					if !hasCompletedPayload(previous) {
+						e.dropTransientBuilders()
+					}
+					e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+					return AssembleBlockResult{PayloadID: previousID}, nil
 				}
-				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-				return AssembleBlockResult{PayloadID: previousID}, nil
+				txnRefreshes++
 			}
 		}
 	}
@@ -417,8 +436,10 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	blockBuilder := builder.NewBlockBuilder(buildCtx, e.builderFunc, ownedParams,
 		buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot))
 	e.builders[e.nextPayloadId] = &builderEntry{
-		builder: blockBuilder,
-		params:  ownedParams,
+		builder:      blockBuilder,
+		params:       ownedParams,
+		txnRevision:  txnRevision,
+		txnRefreshes: txnRefreshes,
 	}
 	if params.TransientPayload {
 		e.transientBuilders++

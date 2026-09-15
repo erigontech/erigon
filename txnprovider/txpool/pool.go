@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -143,6 +144,7 @@ type TxPool struct {
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
+	transactionSetRevision  atomic.Uint64
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
@@ -447,6 +449,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
+	if announcements.Len() > 0 {
+		p.transactionSetRevision.Add(1)
+	}
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxns <- p.promoted.Copy():
@@ -545,6 +550,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	transactionSetChanged := slices.Contains(reasons, txpoolcfg.NotSet)
 
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
@@ -562,6 +568,9 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
+	if transactionSetChanged {
+		p.transactionSetRevision.Add(1)
+	}
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
 		select {
@@ -989,6 +998,10 @@ func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
+}
+
+func (p *TxPool) TransactionSetRevision() uint64 {
+	return p.transactionSetRevision.Load()
 }
 
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
@@ -1494,6 +1507,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	if err != nil {
 		return nil, err
 	}
+	transactionSetChanged := slices.Contains(addReasons, txpoolcfg.NotSet)
 	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
 	// Walk reasons and advance j only on slots that survived validation.
 	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
@@ -1517,6 +1531,9 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 			}
 			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
 		}
+	}
+	if transactionSetChanged {
+		p.transactionSetRevision.Add(1)
 	}
 	if p.promoted.Len() > 0 {
 		select {

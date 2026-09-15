@@ -197,6 +197,7 @@ type ExecModule struct {
 	builderFunc          builder.BlockBuilderFunc
 	builders             map[uint64]*builderEntry
 	buildersByTimestamp  map[uint64]uint64
+	payloadTxnRevision   func() uint64
 	transientBuilders    int
 	transientAdmission   chan struct{}
 	transientAdmissionMu sync.Mutex
@@ -259,6 +260,13 @@ func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOpt
 func WithConditionalForkChoiceReadyHook(hook func() error) ExecModuleOption {
 	return func(module *ExecModule) {
 		module.conditionalReadyHook = hook
+	}
+}
+
+// WithPayloadTransactionsRevision supplies a monotonic revision for the builder's transaction source.
+func WithPayloadTransactionsRevision(revision func() uint64) ExecModuleOption {
+	return func(e *ExecModule) {
+		e.payloadTxnRevision = revision
 	}
 }
 

@@ -934,6 +934,12 @@ func New(
 		backend.readAheader,
 		backend.stopNode,
 		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
+		execmodule.WithPayloadTransactionsRevision(func() uint64 {
+			if backend.txPool == nil {
+				return 0
+			}
+			return backend.txPool.TransactionSetRevision()
+		}),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 
