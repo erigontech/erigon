@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +74,12 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 			got, value, err := ProofFromNodes(byHash, root[:], key)
 			require.NoError(t, err)
 			require.Equal(t, want, got, "key %d", i)
-			require.Equal(t, values[i] != nil, value != nil, "key %d", i)
+			var wantValue []byte
+			if values[i] != nil { // a leaf holds its value as an RLP string, which is what an account proof decodes
+				wantValue = make([]byte, rlp.StringLen(values[i]))
+				rlp.EncodeStringToBuf(values[i], wantValue)
+			}
+			require.Equal(t, wantValue, value, "key %d", i)
 		}
 	}
 }
