@@ -1764,11 +1764,14 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
+	switch {
+	case witnessSkipBranchUpdates && hph.witness.active():
+		// a witness fold changes no state, so its branches are not written back
+	case hph.branchEncoder.DeferUpdatesEnabled():
 		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
-	} else {
+	default:
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -2439,6 +2442,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // capturing consensus node bytes as they are hashed. It returns the captured superset
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
 var witnessMemo = dbg.EnvBool("WITNESS_MEMO", false)
+var witnessSkipBranchUpdates = dbg.EnvBool("WITNESS_SKIP_BRANCH_UPDATES", false)
 
 // witnessKeepsSiblingHashes reports whether a witness fold reuses the stored hashes of cells off the proven paths:
 // a proof needs their hashes only, not their leaf nodes, so their state is not loaded and hashed again.
