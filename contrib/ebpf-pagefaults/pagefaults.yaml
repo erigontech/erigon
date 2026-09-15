@@ -1,0 +1,17 @@
+metrics:
+  counters:
+    - name: page_faults_total
+      help: Page faults per process and backing file (anonymous faults bucketed as [anon])
+      labels:
+        - name: pid
+          size: 4
+          decoders:
+            - name: uint
+        - name: comm
+          size: 16
+          decoders:
+            - name: string
+        - name: filename
+          size: 64
+          decoders:
+            - name: string
