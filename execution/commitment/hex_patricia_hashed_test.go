@@ -1904,3 +1904,11 @@ func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
 		"a round reads each branch prefix once; preparing an update's prev must reuse what the unfold read, not read it again")
 	t.Logf("branch reads %d for %d records, %d of them merged onto a previous value", totalReads, len(pending), withPrev)
 }
+
+func TestStateDecodeRejectsTruncatedInput(t *testing.T) {
+	enc, err := (&state{Root: []byte{1, 2, 3}}).Encode(nil)
+	require.NoError(t, err)
+	for n := range len(enc) {
+		require.Error(t, new(state).Decode(enc[:n]), "prefix of %d bytes", n)
+	}
+}
