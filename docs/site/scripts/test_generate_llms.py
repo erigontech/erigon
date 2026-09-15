@@ -1157,12 +1157,34 @@ class SourceFenceContainmentTests(unittest.TestCase):
             contained += parser.count
         self.assertGreater(contained, 0, "no contained <pre> found; check the scan")
 
+        # Mermaid diagrams are the one kind of block the HTML side cannot see:
+        # Docusaurus draws them client-side, so the built page holds no <pre>
+        # for them, while the corpus holds the fence the generator splices back.
+        # Counting only <pre> therefore reports a *correctly* contained diagram
+        # as a missing one and turns valid documentation red. The source says
+        # which diagrams were written inside a container, so add those to the
+        # expectation and keep both sides counting the same set of blocks.
+        contained_diagrams = 0
+        for _, base_dir, _ in g.SECTIONS:
+            sources = sorted(set(list(base_dir.rglob("*.md"))
+                                 + list(base_dir.rglob("*.mdx"))))
+            for fpath in sources:
+                text = fpath.read_text(encoding="utf-8")
+                meta, _ = g.parse_frontmatter(text)
+                if str(meta.get("draft", "")).lower() == "true":
+                    continue          # a draft page is in neither artifact
+                for *_rest, container, _block in g.mermaid_blocks(text):
+                    if container:
+                        contained_diagrams += 1
+
         _, full, _ = g.build()
+        expected = contained + contained_diagrams
         in_container = _contained_fences(full)
         self.assertEqual(
-            contained, in_container,
+            expected, in_container,
             f"the built pages put {contained} fenced blocks inside a list item "
-            f"or blockquote, but {in_container} are contained in the corpus: a "
+            f"or blockquote and the sources add {contained_diagrams} contained "
+            f"diagram(s), but {in_container} are contained in the corpus: a "
             f"fence has escaped its container")
 
 
@@ -1397,6 +1419,83 @@ class ContainedFencePatternTests(unittest.TestCase):
 
     def test_a_top_level_block_does_not_count(self):
         self.assertEqual(0, self.contained("```bash\necho hi\n```\n"))
+
+    def test_a_correctly_contained_diagram_counts_as_contained(self):
+        # The built page has no <pre> for a diagram at all, so this is the only
+        # side that can see one. A diagram indented back into its list item has
+        # to read as contained here, or the whole-corpus comparison reports a
+        # correctly placed diagram as one that escaped.
+        src = ("## Steps\n\n1. Inspect this graph:\n\n"
+               "   ```mermaid\n   graph TD; Inspect-->Continue\n   ```\n\n"
+               "   Continue inside this step.\n")
+        body = ("## Steps\n\n1. Inspect this graph:\n\n"
+                "   Continue inside this step.")
+        (heading, occurrence, preceding, container, block), = g.mermaid_blocks(src)
+        out = g.splice_diagram(body, heading, block, occurrence, preceding,
+                               container)
+        self.assertEqual(1, self.contained(out))
+
+
+class ConsecutiveDiagramTests(unittest.TestCase):
+    """A run of diagrams under one heading keeps its source order and place."""
+
+    def splice_all(self, src, body):
+        for heading, occurrence, preceding, container, block in \
+                g.mermaid_blocks(src):
+            body = g.splice_diagram(body, heading, block, occurrence, preceding,
+                                    container)
+        return body
+
+    @staticmethod
+    def shape(out):
+        return [ln.strip() for ln in out.split("\n")
+                if "-->" in ln or ln.startswith(("#", "This", "Intro", "Tail"))]
+
+    def test_consecutive_diagrams_stay_after_their_introduction(self):
+        # Only the first diagram of a run has prose to anchor to: the line
+        # before each of the others closes the previous fence. Sending those to
+        # the heading put the run in reverse order and ahead of the very
+        # paragraph that introduces it.
+        src = ("## Flow\n\nThis introduction belongs before both diagrams.\n\n"
+               "```mermaid\ngraph TD; First-->Diagram\n```\n\n"
+               "```mermaid\ngraph TD; Second-->Diagram\n```\n\n"
+               "This conclusion belongs after both diagrams.\n")
+        body = ("## Flow\n\nThis introduction belongs before both diagrams.\n\n"
+                "This conclusion belongs after both diagrams.")
+        self.assertEqual(
+            ["## Flow",
+             "This introduction belongs before both diagrams.",
+             "graph TD; First-->Diagram",
+             "graph TD; Second-->Diagram",
+             "This conclusion belongs after both diagrams."],
+            self.shape(self.splice_all(src, body)))
+
+    def test_a_run_does_not_reach_into_the_next_section(self):
+        # The search for the run's tail stops at the next heading of the same or
+        # a shallower level, so section one cannot adopt section two's diagram.
+        src = ("## Alpha\n\nIntro alpha.\n\n"
+               "```mermaid\ngraph TD; A1-->x\n```\n\n"
+               "```mermaid\ngraph TD; A2-->x\n```\n\n"
+               "## Beta\n\nIntro beta.\n\n"
+               "```mermaid\ngraph TD; B1-->x\n```\n\n"
+               "```mermaid\ngraph TD; B2-->x\n```\n\nTail.\n")
+        body = ("## Alpha\n\nIntro alpha.\n\n## Beta\n\nIntro beta.\n\nTail.")
+        self.assertEqual(
+            ["## Alpha", "Intro alpha.", "graph TD; A1-->x", "graph TD; A2-->x",
+             "## Beta", "Intro beta.", "graph TD; B1-->x", "graph TD; B2-->x",
+             "Tail."],
+            self.shape(self.splice_all(src, body)))
+
+    def test_a_run_of_three_keeps_source_order(self):
+        src = ("## Flow\n\nIntro.\n\n"
+               "```mermaid\ngraph TD; One-->x\n```\n\n"
+               "```mermaid\ngraph TD; Two-->x\n```\n\n"
+               "```mermaid\ngraph TD; Three-->x\n```\n\nTail.\n")
+        body = "## Flow\n\nIntro.\n\nTail."
+        self.assertEqual(
+            ["## Flow", "Intro.", "graph TD; One-->x", "graph TD; Two-->x",
+             "graph TD; Three-->x", "Tail."],
+            self.shape(self.splice_all(src, body)))
 
 
 class SourceContainmentTests(unittest.TestCase):
