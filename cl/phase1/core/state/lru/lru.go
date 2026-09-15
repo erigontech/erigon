@@ -18,6 +18,7 @@ package lru
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -57,29 +58,127 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 	return v, ok
 }
 
+// sweepsPerTTL matches the cleanup cadence of the expirable cache this used to rely on.
+const sweepsPerTTL = 100
+
+// minSweepInterval keeps a very short ttl from producing a non-positive ticker interval.
+const minSweepInterval = time.Millisecond
+
+type ttlEntry[V any] struct {
+	value     V
+	expiresAt time.Time
+}
+
+func (e ttlEntry[V]) expired(now time.Time) bool {
+	return !e.expiresAt.IsZero() && now.After(e.expiresAt)
+}
+
+// CacheWithTTL is a size- and time-bounded cache. Its expiry sweep runs on a goroutine that
+// lives until Close is called, so a cache built per request, per peer or per test must be closed.
 type CacheWithTTL[K comparable, V any] struct {
-	*expirable.LRU[K, V]
+	// The cache is built without a ttl of its own: the cleanup goroutine the dependency starts
+	// for an expiring cache cannot be stopped, so expiry is owned here instead.
+	cache  *expirable.LRU[K, ttlEntry[V]]
+	ttl    time.Duration
 	metric string
 	// metrics
 	metricTTLHit, metricTTLMiss metrics.Counter
+
+	mu        sync.Mutex
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
-	cache := expirable.NewLRU[K, V](size, nil, ttl)
-	return &CacheWithTTL[K, V]{
-		LRU:           cache,
+	c := &CacheWithTTL[K, V]{
+		cache:         expirable.NewLRU[K, ttlEntry[V]](size, nil, 0),
+		ttl:           ttl,
 		metric:        metricName,
+		done:          make(chan struct{}),
 		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s=%q}`, "cache", metricName)),
 		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}
+	if ttl > 0 {
+		go c.sweep(sweepInterval(ttl))
+	}
+	return c
+}
+
+func sweepInterval(ttl time.Duration) time.Duration {
+	if interval := ttl / sweepsPerTTL; interval > minSweepInterval {
+		return interval
+	}
+	return minSweepInterval
+}
+
+// Close stops the expiry sweep. It is safe to call more than once.
+func (c *CacheWithTTL[K, V]) Close() {
+	c.closeOnce.Do(func() { close(c.done) })
+}
+
+func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
+	e := ttlEntry[V]{value: v}
+	if c.ttl > 0 {
+		e.expiresAt = time.Now().Add(c.ttl)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cache.Add(k, e)
 }
 
 func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
-	v, ok := c.LRU.Get(k)
-	if ok {
-		c.metricTTLHit.Inc()
-	} else {
-		c.metricTTLMiss.Inc()
+	c.mu.Lock()
+	e, ok := c.cache.Get(k)
+	if ok && e.expired(time.Now()) {
+		c.cache.Remove(k)
+		ok = false
 	}
-	return v, ok
+	c.mu.Unlock()
+
+	if !ok {
+		c.metricTTLMiss.Inc()
+		var zero V
+		return zero, false
+	}
+	c.metricTTLHit.Inc()
+	return e.value, true
+}
+
+func (c *CacheWithTTL[K, V]) Remove(k K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cache.Remove(k)
+}
+
+func (c *CacheWithTTL[K, V]) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cache.Len()
+}
+
+func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			c.removeExpired(time.Now())
+		}
+	}
+}
+
+// removeExpired drops the expired tail. An entry that a Get moved back to the front outlives the
+// sweep and is reclaimed by the Get that finds it expired, or once it reaches the tail again.
+func (c *CacheWithTTL[K, V]) removeExpired(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for {
+		k, e, ok := c.cache.GetOldest()
+		if !ok || !e.expired(now) {
+			return
+		}
+		c.cache.Remove(k)
+	}
 }
