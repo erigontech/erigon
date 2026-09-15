@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,8 +359,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
 	var stream jsonstream.Stream
+	var out *countingWriter
 	if !s.disableStreaming {
-		stream = jsonstream.Get(w)
+		out = &countingWriter{w: w}
+		stream = jsonstream.Get(out)
 		defer jsonstream.Put(stream)
 	}
 
@@ -373,6 +376,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.disableStreaming {
+		// A response still whole in the buffer gets its length, so net/http sends it unchunked: no chunk framing
+		// and no separate write for the terminating chunk.
+		if rpcContentLength && out.n == 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
+		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already
 		// buffered in the stream. Set 503 before flushing so the status is correct.
 		if *overloaded {
@@ -458,4 +466,18 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	return false
+}
+
+var rpcContentLength = dbg.EnvBool("RPC_CONTENT_LENGTH", false)
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += n
+	return n, err
 }
