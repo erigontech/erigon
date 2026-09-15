@@ -772,6 +772,7 @@ def _dedent_to(line, base):
 
 _JSX_COMMENT_RE = re.compile(r"\{/\*.*?\*/\}", re.DOTALL)
 _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
+_ATX_LEVEL_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+\S")
 _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
 
 
@@ -1183,25 +1184,51 @@ def splice_diagram(body, heading, block, occurrence=0, preceding="",
         if spliced is not None:
             return spliced
 
-    # Step over diagrams already spliced under this heading, so a heading
-    # carrying several of them keeps them in source order.
-    ins, j = idx, idx + 1
-    while j < len(lines):
-        if not lines[j].strip():
-            j += 1
+    # The diagram belongs to the section this heading opens, which ends at the
+    # next heading of the same or a shallower level. Without that bound the
+    # search below runs on into later sections and can place the diagram under
+    # a heading it was never written under.
+    level = len(_ATX_LEVEL_RE.match(lines[idx]).group(1))
+    end, fence = len(lines), None
+    for i in range(idx + 1, len(lines)):
+        m = _FENCE_LINE_RE.match(lines[i])
+        if m:
+            marker = m.group(1)
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = None
             continue
-        m = _FENCE_LINE_RE.match(lines[j])
-        if not (m and m.group(2).lower() == "mermaid"):
+        if fence is not None:
+            continue
+        h = _ATX_LEVEL_RE.match(lines[i])
+        if h and len(h.group(1)) <= level:
+            end = i
             break
-        marker = m.group(1)
-        j += 1
-        while j < len(lines):
+
+    # Land after the last diagram already spliced into this section, not against
+    # the heading. Consecutive diagrams in the source have no prose of their own
+    # to anchor to — the line before each closes the previous fence — so placing
+    # every one of them at the heading emits the run in reverse. Any mermaid
+    # fence standing here was spliced by an earlier call: Docusaurus draws
+    # diagrams client-side and leaves none in the built page.
+    ins, i = idx, idx + 1
+    while i < end:
+        m = _FENCE_LINE_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        marker, info = m.group(1), m.group(2).lower()
+        j = i + 1
+        while j < end:
             c = _FENCE_LINE_RE.match(lines[j])
-            j += 1
-            if c and c.group(1)[0] == marker[0] and len(c.group(1)) >= len(marker) \
-                    and not c.group(2):
+            if c and c.group(1)[0] == marker[0] \
+                    and len(c.group(1)) >= len(marker) and not c.group(2):
                 break
-        ins = j - 1
+            j += 1
+        if info == "mermaid":
+            ins = min(j, end - 1)
+        i = j + 1
     return "\n".join(lines[:ins + 1] + ["", block] + lines[ins + 1:])
 
 
