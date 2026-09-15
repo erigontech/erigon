@@ -144,3 +144,66 @@ func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
 	c.removeExpired(time.Now().Add(time.Hour))
 	require.Equal(t, 0, c.Len(), "every key written was removed or swept")
 }
+
+// TestCacheWithTTLTickerReclaimsPromotedEntry drives the promoted-entry case through the ticker
+// rather than by calling removeExpired directly, which is the only path production code ever takes:
+// nothing outside this package calls removeExpired, so a sweep that stops at the first live entry
+// has to be caught through the goroutine NewWithTTL starts. The entries are spaced so there is a
+// full second in which the promoted entry is past its deadline and the entry behind it is not.
+func TestCacheWithTTLTickerReclaimsPromotedEntry(t *testing.T) {
+	const ttl = 2 * time.Second
+	c := NewWithTTL[uint64, uint64]("ticker_reclaims_promoted", 16, ttl)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	time.Sleep(ttl / 2)
+	c.Add(2, 2)
+
+	// A Get promotes the older entry to the front without renewing it, so the still live entry is
+	// the one the eviction order reaches first.
+	_, ok := c.Get(1)
+	require.True(t, ok)
+
+	// Between the two deadlines the sweep must have reclaimed the promoted entry and nothing else.
+	require.Eventually(t, func() bool { return c.Len() == 1 }, ttl, 5*time.Millisecond,
+		"the background sweep must reclaim a promoted entry it has to walk past a live one to reach")
+
+	// Peek under the lock the sweep holds: reading the entries directly would otherwise race it,
+	// and going through Get would reclaim the expired entry itself and hide what the sweep did.
+	c.mu.Lock()
+	_, held1 := c.cache.Peek(1)
+	_, held2 := c.cache.Peek(2)
+	c.mu.Unlock()
+
+	require.False(t, held1, "the promoted entry was past its deadline when the sweep ran")
+	require.True(t, held2, "the entry still within its deadline must survive the sweep")
+}
+
+// TestCacheWithTTLCloseDuringLiveSweep (control): Close races the sweep goroutine it stops — the
+// ticker fires on the interval floor here, so close(done) lands while the walk is running or
+// between two of its ticks. Run under -race this pins that the once-guarded close and the sweep's
+// select do not race, and that a closed cache stays readable.
+func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("close_during_sweep", 64, 5*time.Millisecond)
+
+	for i := range 64 {
+		c.Add(uint64(i), uint64(i))
+	}
+
+	const closers = 4
+	var wg sync.WaitGroup
+	for range closers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.NotPanics(t, c.Close, "closing a cache whose sweep is running must be safe")
+		}()
+	}
+	wg.Wait()
+
+	// The cache is still usable once its sweep is stopped, just no longer reclaimed in background.
+	c.Add(1, 1)
+	v, ok := c.Get(1)
+	require.True(t, ok, "a closed cache must still serve reads")
+	require.Equal(t, uint64(1), v)
+}
