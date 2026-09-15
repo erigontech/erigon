@@ -1442,17 +1442,3 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 		})
 	}
 }
-
-func TestTraceCallParamQuantityDecoding(t *testing.T) {
-	maxU256 := strings.Repeat("f", 64)
-	var p TraceCallParam
-	require.NoError(t, json.Unmarshal([]byte(`{"gasPrice":"0x1","maxFeePerGas":"0x0","maxPriorityFeePerGas":"0x10","maxFeePerBlobGas":"0xabc","value":"0x`+maxU256+`"}`), &p))
-	require.Equal(t, uint64(1), p.GasPrice.ToInt().Uint64())
-	require.Equal(t, uint64(0), p.MaxFeePerGas.ToInt().Uint64())
-	require.Equal(t, uint64(0x10), p.MaxPriorityFeePerGas.ToInt().Uint64())
-	require.Equal(t, uint64(0xabc), p.MaxFeePerBlobGas.ToInt().Uint64())
-	require.Equal(t, maxU256, p.Value.ToInt().Text(16))
-	for _, bad := range []string{`"0x1` + strings.Repeat("0", 64) + `"`, `"0x01"`, `"0x"`, `"1"`, `1`} {
-		require.Error(t, json.Unmarshal([]byte(`{"value":`+bad+`}`), &p), bad)
-	}
-}

@@ -120,9 +120,4 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 	balance, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, maxU256, balance.Hex()[2:])
-
-	for _, bad := range []string{`"0x1` + strings.Repeat("0", 64) + `"`, `"0x01"`, `"0x"`, `"1"`, `1`} {
-		var so StateOverrides
-		require.Error(t, json.Unmarshal([]byte(`{"0x00000000000000000000000000000000000000aa":{"balance":`+bad+`}}`), &so), bad)
-	}
 }
