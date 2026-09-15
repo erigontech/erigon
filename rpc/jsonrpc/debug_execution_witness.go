@@ -72,6 +72,7 @@ type RecordingState struct {
 	ModifiedCode          map[common.Address][]byte
 	DeletedAccounts       map[common.Address]struct{}
 	CreatedContracts      map[common.Address]struct{}
+	DeletedInBlock        map[common.Address]struct{}
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -100,6 +101,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		ModifiedCode:          make(map[common.Address][]byte),
 		DeletedAccounts:       make(map[common.Address]struct{}),
 		CreatedContracts:      make(map[common.Address]struct{}),
+		DeletedInBlock:        make(map[common.Address]struct{}),
 	}
 }
 
@@ -345,6 +347,7 @@ func (s *RecordingState) DeleteAccount(address accounts.Address, original *accou
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.DeletedAccounts[addr] = struct{}{}
+	s.DeletedInBlock[addr] = struct{}{}
 	delete(s.accountOverlay, addr)
 	// Clear storage overlay for this account
 	delete(s.storageOverlay, addr)
@@ -1015,8 +1018,9 @@ type accessedState struct {
 	Deleted     map[common.Address]struct{}
 	// ModifiedCode is the code the block writes, per address. The binary trie
 	// commits code, so a witness for it has to cover the chunk keys these imply.
-	ModifiedCode map[common.Address][]byte
-	Created      map[common.Address]struct{}
+	ModifiedCode   map[common.Address][]byte
+	Created        map[common.Address]struct{}
+	DeletedInBlock map[common.Address]struct{}
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1111,6 +1115,8 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		ModifiedCode: make(map[common.Address][]byte),
 		Deleted:      make(map[common.Address]struct{}),
 		Created:      make(map[common.Address]struct{}, len(rs.CreatedContracts)),
+
+		DeletedInBlock: make(map[common.Address]struct{}, len(rs.DeletedInBlock)),
 	}
 
 	for addr := range rs.DeletedAccounts {
@@ -1118,6 +1124,9 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	}
 	for addr := range rs.CreatedContracts {
 		out.Created[addr] = struct{}{}
+	}
+	for addr := range rs.DeletedInBlock {
+		out.DeletedInBlock[addr] = struct{}{}
 	}
 
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
@@ -1405,6 +1414,9 @@ func buildWitnessTrie(
 			block.Code[string(addr[:])] = code
 		}
 		for addr := range accessed.Deleted {
+			block.Removed[string(addr[:])] = struct{}{}
+		}
+		for addr := range accessed.DeletedInBlock {
 			block.Removed[string(addr[:])] = struct{}{}
 		}
 		for addr := range accessed.Created {

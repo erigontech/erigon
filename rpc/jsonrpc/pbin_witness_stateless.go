@@ -244,6 +244,7 @@ func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, original 
 	delete(s.storageWrites, addr)
 	delete(s.codeUpdates, addr)
 	s.deleted[addr] = struct{}{}
+	s.wiped[addr] = struct{}{}
 	return nil
 }
 

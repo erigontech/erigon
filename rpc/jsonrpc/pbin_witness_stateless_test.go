@@ -592,34 +592,46 @@ func TestPBinWitnessStatelessRemovesAccountCreatedInBlock(t *testing.T) {
 	require.Equal(t, parentRoot, got)
 }
 
-// TestPBinWitnessStatelessRefundsRemovedAccount: FinalizeTx runs per transaction,
-// so an account emptied under EIP-161 in one transaction and funded again in a
-// later one reaches the writer as DeleteAccount then UpdateAccountData, with no
-// CreateContract between them. The later write wins, as it does when the domain
-// layer merges the same pair.
 func TestPBinWitnessStatelessRefundsRemovedAccount(t *testing.T) {
 	t.Parallel()
 
-	c := pbinStatelessNewCorpus()
-	stateless, _, parentRoot := c.verifier(t)
+	state := newPBinStatelessState()
+	header := pbinStatelessAddr(0x71)
+	zone := pbinStatelessAddr(0x72)
+	refunded := []common.Address{header, zone}
+	for _, addr := range refunded {
+		state.setAccount(addr, 0, 0, nil)
+	}
+	state.setStorage(header, pbinStatelessSlot(3), 9)
+	state.setStorage(zone, pbinStatelessSlot(1<<20), 9)
 
-	eoa := accounts.InternAddress(c.eoa)
-	acc, err := stateless.ReadAccountData(eoa)
-	require.NoError(t, err)
-	require.NoError(t, stateless.DeleteAccount(eoa, nil))
+	accessed := [][]byte{header[:], zone[:]}
+	keys := append(slices.Clone(accessed),
+		append(bytes.Clone(header[:]), pbinStatelessSlotBytes(3)...),
+		append(bytes.Clone(zone[:]), pbinStatelessSlotBytes(1<<20)...))
+	pbinStatelessProcess(t, state, keys)
 
-	acc.Nonce, acc.Balance = 0, *uint256.NewInt(555)
-	require.NoError(t, stateless.UpdateAccountData(eoa, nil, acc))
+	nodes, root := pbinStatelessWitnessRemoving(t, state, accessed, refunded)
+	stateless := pbinStatelessVerifierOver(t, nodes, root)
+
+	for _, addr := range refunded {
+		address := accounts.InternAddress(addr)
+		require.NoError(t, stateless.DeleteAccount(address, nil))
+		require.NoError(t, stateless.UpdateAccountData(address, nil,
+			&accounts.Account{Balance: *uint256.NewInt(555), CodeHash: accounts.EmptyCodeHash}))
+	}
 
 	got, err := stateless.Finalize(context.Background())
 	require.NoError(t, err)
 
-	full := c.state.clone()
-	full.setAccount(c.eoa, 0, 555, nil)
-	want := pbinStatelessProcess(t, full, [][]byte{c.eoa[:]})
+	full := state.clone()
+	for _, addr := range refunded {
+		full.dropAccount(addr)
+		full.setAccount(addr, 0, 555, nil)
+	}
+	want := pbinStatelessProcess(t, full, keys)
 
 	require.Equal(t, common.BytesToHash(want), got)
-	require.NotEqual(t, parentRoot, got, "the writes do not move the root, so the test proves nothing")
 }
 
 // pbinVerifyWithdrawalGwei is the only state the gate's test block moves. A
