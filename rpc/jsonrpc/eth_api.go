@@ -24,8 +24,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -145,7 +147,7 @@ type EthAPI interface {
 type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
-	blocksLRU  *lru.Cache[common.Hash, *types.Block]
+	blocksLRU  *cache.HashByteLRU[*types.Block]
 
 	filters                   *rpchelper.Filters
 	_chainConfig              atomic.Pointer[chain.Config]
@@ -176,19 +178,22 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
+// blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
+// transaction struct per transaction, which hold inline integers and hash and sender caches.
+func blockHeapSize(b *types.Block) int64 {
+	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRUSize := 128 // ~32Mb
+	blocksLRUBytes := 32 * datasize.MB
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !conf.SingleNodeMode {
-		blocksLRUSize *= 5
+		blocksLRUBytes *= 5
 	}
-	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
-	if err != nil {
-		panic(err)
-	}
+	blocksLRU := cache.NewHashByteLRU(blocksLRUBytes, blockHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
