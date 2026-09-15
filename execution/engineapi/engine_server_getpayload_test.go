@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -365,6 +366,8 @@ func payloadIDBytes(payloadID uint64) hexutil.Bytes {
 type getPayloadStubModule struct {
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 }
+
+func (s *getPayloadStubModule) AddSendersRecovery(common.Hash, *exec.SendersRecovery) {}
 
 func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 	return s.getAssembledBlockFunc(ctx, payloadID)

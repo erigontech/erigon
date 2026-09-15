@@ -778,6 +778,10 @@ func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+func (e *ExecModule) AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery) {
+	e.readAheader.AddSendersRecovery(blockHash, recovery)
+}
+
 func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *uint64) (bool, error) {
 	if blockHash == nil {
 		return false, errors.New("block hash is nil, HasBlock supports lookup by hash only")

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -746,3 +748,42 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 }
 
 func emptyVisibleEnd(kv.Domain) (uint64, bool) { return 0, true }
+
+func TestStartSendersRecovery(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	txns := make(types.Transactions, 64)
+	want := make([]byte, 0, len(txns)*length.Addr)
+	for i := range txns {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		txns[i], err = types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21_000},
+			GasPrice: *uint256.NewInt(1),
+		}, *signer, key)
+		require.NoError(t, err)
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		want = append(want, addr[:]...)
+	}
+	blockHash := common.HexToHash("0x01")
+	bra := NewBlockReadAheader()
+	bra.AddSendersRecovery(blockHash, StartSendersRecovery(signer, txns))
+
+	senders, ok := bra.RecoveredSenders(context.Background(), blockHash)
+	require.True(t, ok)
+	require.Equal(t, want, senders)
+}
+
+func TestRecoveredSendersMissingOrInvalid(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	bra := NewBlockReadAheader()
+	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
+	require.False(t, ok)
+
+	unsigned := types.Transactions{&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}}
+	bra.AddSendersRecovery(common.HexToHash("0x02"), StartSendersRecovery(signer, unsigned))
+	_, ok = bra.RecoveredSenders(context.Background(), common.HexToHash("0x02"))
+	require.False(t, ok)
+}

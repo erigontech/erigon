@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -54,15 +55,16 @@ import (
 // ---------------------------------------------------------------------------
 
 type stubExecutionModule struct {
-	getHeaderFunc         func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
-	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
-	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
-	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
-	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
-	currentHeaderFunc     func(ctx context.Context) (*types.Header, error)
-	insertBlocksFunc      func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
-	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
-	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
+	getHeaderFunc          func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	headerNumberFunc       func(ctx context.Context, hash common.Hash) (*uint64, error)
+	assembleBlockFunc      func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
+	getAssembledBlockFunc  func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
+	getForkChoiceFunc      func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	currentHeaderFunc      func(ctx context.Context) (*types.Header, error)
+	insertBlocksFunc       func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
+	validateChainFunc      func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
+	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
+	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -86,6 +88,12 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 		return s.getAssembledBlockFunc(ctx, payloadID)
 	}
 	return execmodule.AssembledBlockResult{}, nil
+}
+
+func (s *stubExecutionModule) AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery) {
+	if s.addSendersRecoveryFunc != nil {
+		s.addSendersRecoveryFunc(blockHash, recovery)
+	}
 }
 
 // --- No-op implementations for the rest of the interface ---
@@ -1488,6 +1496,75 @@ func TestNewPayloadWithoutBaseFeeDoesNotPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		_, _ = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
 	})
+}
+
+func signedElectraPayload(t *testing.T, config *chain.Config) (*engine_types.ExecutionPayload, common.Address) {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+
+	zero := uint64(0)
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		GasLimit:              30_000_000,
+		BaseFee:               uint256.NewInt(1),
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &common.Hash{},
+		RequestsHash:          types.FlatRequests{}.Hash(),
+	}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, []*types.Withdrawal{}, nil)
+	resp, err := assembledBlockToPayloadResponse(&types.BlockWithReceipts{Block: block, Requests: types.FlatRequests{}}, uint256.NewInt(0), clparams.ElectraVersion)
+	require.NoError(t, err)
+	resp.ExecutionPayload.Withdrawals = []*types.Withdrawal{}
+	return resp.ExecutionPayload, crypto.PubkeyToAddress(key.PublicKey)
+}
+
+func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
+	t.Parallel()
+
+	config := preAmsterdamChainConfig()
+	config.TerminalTotalDifficulty = nil
+	payload, sender := signedElectraPayload(t, config)
+
+	var registeredHash common.Hash
+	var recovery *exec.SendersRecovery
+	stub := &stubExecutionModule{addSendersRecoveryFunc: func(blockHash common.Hash, r *exec.SendersRecovery) {
+		registeredHash, recovery = blockHash, r
+	}}
+	srv := NewEngineServer(log.New(), config, stub, nil, false, false, false, true, nil, nil, 0, 0)
+	_, err := srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.ErrorContains(t, err, "not a proof-of-stake chain")
+
+	require.Equal(t, payload.BlockHash, registeredHash)
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddSendersRecovery(registeredHash, recovery)
+	senders, ok := readAheader.RecoveredSenders(t.Context(), registeredHash)
+	require.True(t, ok)
+	require.Equal(t, sender[:], senders)
+}
+
+func TestNewPayloadSkipsSendersRecoveryOnBlockHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	config := preAmsterdamChainConfig()
+	payload, _ := signedElectraPayload(t, config)
+	payload.BlockHash = common.Hash{0x1}
+
+	registered := false
+	stub := &stubExecutionModule{addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) {
+		registered = true
+	}}
+	srv := NewEngineServer(log.New(), config, stub, nil, false, false, false, true, nil, nil, 0, 0)
+	status, err := srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.False(t, registered)
 }
 
 func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
