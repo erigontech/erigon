@@ -257,12 +257,7 @@ func (p *ParallelPatriciaHashed) Process(
 
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
-		pu.deferredMu.Lock()
-		for _, upd := range pu.deferredCombined {
-			putDeferredUpdate(upd)
-		}
-		pu.deferredCombined = nil
-		pu.deferredMu.Unlock()
+		pu.drainDeferred()
 		return nil, mErr
 	}
 
