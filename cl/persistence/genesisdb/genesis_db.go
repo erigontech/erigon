@@ -51,6 +51,17 @@ func (g *genesisDB) Initialize(state *state.CachingBeaconState) error {
 	return afero.WriteFile(g.fs, genesisStateFileName, utils.CompressSnappy(enc), 0644)
 }
 
+func (g *genesisDB) Reinitialize(state *state.CachingBeaconState) error {
+	if state == nil {
+		return nil
+	}
+	enc, err := state.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	return afero.WriteFile(g.fs, genesisStateFileName, utils.CompressSnappy(enc), 0644)
+}
+
 func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 	enc, err := afero.ReadFile(g.fs, genesisStateFileName)
 	if err != nil {

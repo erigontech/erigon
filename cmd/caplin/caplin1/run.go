@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
@@ -82,6 +83,8 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
@@ -633,6 +636,41 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		if !eth_clock.StartChainAt(ethClock, genesisTime) {
 			return errors.New("caplin: this clock cannot be given a genesis time")
+		}
+		// Every copy of the genesis time is brought to the real value here, together. The clock alone was
+		// not enough: the in-memory states, the stored genesis state, the genesis beacon block, the fork
+		// graph and the fork choice anchor were all built from the placeholder, and payload timestamps
+		// are computed from the state — so every block's timestamp lagged its slot by the startup time
+		// (3-6s measured, every boot). genesis_time is part of the state root, so the anchor root and
+		// everything keyed by it move too. A restart keeps the genesis it was born with and skips this.
+		if state.GenesisTime() != genesisTime {
+			if genesisState != nil {
+				genesisState.SetGenesisTime(genesisTime)
+			}
+			state.SetGenesisTime(genesisTime)
+			stored := genesisState
+			if stored == nil {
+				stored = state
+			}
+			if err := genesisDb.Reinitialize(stored); err != nil {
+				return fmt.Errorf("caplin: re-store genesis state at the real genesis time: %w", err)
+			}
+			anchorRoot, err := forkChoice.ReanchorGenesisTime(state)
+			if err != nil {
+				return fmt.Errorf("caplin: re-anchor fork choice at the real genesis time: %w", err)
+			}
+			if err := writeDevGenesisBeaconBlock(ctx, state, beaconConfig, indexDB); err != nil {
+				return fmt.Errorf("caplin: re-write genesis beacon block at the real genesis time: %w", err)
+			}
+			if _, err := sentinel.SetStatus(ctx, &sentinelproto.Status{
+				ForkDigest:     utils.Bytes4ToUint32(forkDigest),
+				FinalizedRoot:  gointerfaces.ConvertHashToH256(anchorRoot),
+				FinalizedEpoch: forkChoice.FinalizedCheckpoint().Epoch,
+				HeadRoot:       gointerfaces.ConvertHashToH256(anchorRoot),
+				HeadSlot:       0,
+			}); err != nil {
+				return fmt.Errorf("caplin: re-announce the genesis anchor: %w", err)
+			}
 		}
 		logger.Info("[Caplin] chain start applied", "genesisTime", genesisTime,
 			"startsIn", int64(genesisTime)-time.Now().Unix())

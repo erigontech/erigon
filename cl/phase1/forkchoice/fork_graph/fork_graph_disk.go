@@ -225,6 +225,43 @@ func (f *forkGraphDisk) AnchorRoot() common.Hash {
 	return f.anchorRoot
 }
 
+// ReanchorGenesisTime re-derives a GENESIS anchor after its state's genesis time was set post-init. A dev
+// chain decides its start once its consensus layer is ready, which is after this graph was built from the
+// placeholder; genesis_time is part of the state root, so the anchor header, the anchor root, the cached
+// previous state root and the dumped anchor state all have to move with it.
+func (f *forkGraphDisk) ReanchorGenesisTime(anchorState *state.CachingBeaconState) (common.Hash, error) {
+	if anchorState.Slot() != 0 {
+		return common.Hash{}, fmt.Errorf("reanchor genesis time: anchor is at slot %d, not genesis", anchorState.Slot())
+	}
+	f.currentStateMu.Lock()
+	defer f.currentStateMu.Unlock()
+
+	oldRoot := f.anchorRoot
+	// The cached previous state root was computed from the placeholder; BlockRoot prefers it, so it must go
+	// before the root is re-derived.
+	anchorState.SetPreviousStateRoot(common.Hash{})
+	newRoot, err := anchorState.BlockRoot()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	anchorHeader := anchorState.LatestBlockHeader()
+	if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
+		return common.Hash{}, err
+	}
+	anchorState.SetPreviousStateRoot(anchorHeader.Root)
+
+	f.headers.Delete(oldRoot)
+	f.headers.Store(common.Hash(newRoot), &anchorHeader)
+	f.genesisTime = anchorState.GenesisTime()
+	f.anchorRoot = newRoot
+	f.currentState = anchorState
+	f.currentStateBlockRoot = newRoot
+	if err := f.DumpBeaconStateOnDisk(newRoot, anchorState, true); err != nil {
+		return common.Hash{}, err
+	}
+	return newRoot, nil
+}
+
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 	if f.currentState == nil {
 		return false

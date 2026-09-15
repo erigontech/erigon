@@ -624,6 +624,62 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 }
 
 // AnchorRoot returns the block root of the anchor state. [New in Gloas:EIP7732]
+// ReanchorGenesisTime moves the store to its anchor state's genesis time when that time was set after the
+// store was built — a dev chain decides its start once its consensus layer is ready. genesis_time is part
+// of the state root, so the anchor root changes, and everything the store seeded under the old root at
+// construction is moved to the new one. Only a genesis anchor is ever re-timed.
+func (f *ForkChoiceStore) ReanchorGenesisTime(anchorState *state2.CachingBeaconState) (common.Hash, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	oldRoot := f.forkGraph.AnchorRoot()
+	newRoot, err := f.forkGraph.ReanchorGenesisTime(anchorState)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	f.genesisTime = anchorState.GenesisTime()
+	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+	if newRoot == oldRoot {
+		return newRoot, nil
+	}
+
+	rekeyLRU(f.preverifiedSizes, oldRoot, newRoot)
+	rekeyLRU(f.totalActiveBalances, oldRoot, newRoot)
+	rekeyLRU(f.randaoMixesLists, oldRoot, newRoot)
+	rekeyLRU(f.eth2Roots, oldRoot, newRoot)
+	if _, ok := f.headSet[oldRoot]; ok {
+		delete(f.headSet, oldRoot)
+		f.headSet[newRoot] = struct{}{}
+	}
+
+	checkpoint := solid.Checkpoint{Root: newRoot, Epoch: state2.Epoch(anchorState.BeaconState)}
+	f.justifiedCheckpoint.Store(checkpoint)
+	f.finalizedCheckpoint.Store(checkpoint)
+	f.unrealizedFinalizedCheckpoint.Store(checkpoint)
+	f.unrealizedJustifiedCheckpoint.Store(checkpoint)
+	f.unrealizedJustifications.Delete(oldRoot)
+	f.unrealizedJustifications.Store(newRoot, checkpoint)
+	f.unrealizedFinalizations.Delete(oldRoot)
+	f.unrealizedFinalizations.Store(newRoot, checkpoint)
+	if seen, ok := f.highestSeenRoot.Load().(common.Hash); ok && seen == oldRoot {
+		f.highestSeenRoot.Store(newRoot)
+	}
+	for _, votes := range []*sync.Map{&f.payloadTimelinessVote, &f.payloadDataAvailabilityVote} {
+		if v, ok := votes.LoadAndDelete(oldRoot); ok {
+			votes.Store(newRoot, v)
+		}
+	}
+	return newRoot, nil
+}
+
+// rekeyLRU moves one cache entry from one key to another, if present.
+func rekeyLRU[V any](c *lru.Cache[common.Hash, V], from, to common.Hash) {
+	if v, ok := c.Get(from); ok {
+		c.Remove(from)
+		c.Add(to, v)
+	}
+}
+
 func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

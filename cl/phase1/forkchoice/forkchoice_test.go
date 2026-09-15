@@ -113,6 +113,10 @@ func (g *getFinalizedExecutionHashForkGraph) AnchorRoot() common.Hash {
 	panic("not used")
 }
 
+func (g *getFinalizedExecutionHashForkGraph) ReanchorGenesisTime(*state.CachingBeaconState) (common.Hash, error) {
+	panic("not used")
+}
+
 func (g *getFinalizedExecutionHashForkGraph) Prune(uint64, uint64) error {
 	panic("not used")
 }

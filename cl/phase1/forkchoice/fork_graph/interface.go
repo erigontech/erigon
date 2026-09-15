@@ -46,6 +46,9 @@ type ForkGraph interface {
 	MarkHeaderAsInvalid(blockRoot common.Hash)
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
+	// ReanchorGenesisTime re-derives the anchor after the anchor state's genesis time was set post-init,
+	// returning the new anchor root. genesis_time is part of the state root, so the root moves with it.
+	ReanchorGenesisTime(anchorState *state.CachingBeaconState) (common.Hash, error)
 	Prune(pruneSlot uint64, rebuildSlot uint64) error
 	GetBlockRewards(blockRoot common.Hash) (*eth2.BlockRewardsCollector, bool)
 	LowestAvailableSlot() uint64
