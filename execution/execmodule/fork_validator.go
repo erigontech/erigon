@@ -54,13 +54,11 @@ const retainedCandidateLimit = 4
 type validatedCandidate struct {
 	domains       *execctx.SharedDomains
 	notifications *Accumulation
-	number        uint64
 }
 
 type ForkValidator struct {
-	candidates            *lru.Cache[common.Hash, *validatedCandidate]
-	extendingForkHeadHash common.Hash
-	maxReorgDepth         uint64
+	candidates    *lru.Cache[common.Hash, *validatedCandidate]
+	maxReorgDepth uint64
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader dbservices.FullBlockReader
@@ -113,13 +111,6 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 		blockMetricsCache: blockMetricsCache,
 		maxReorgDepth:     maxReorgDepth,
 	}
-}
-
-// ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
-func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.extendingForkHeadHash
 }
 
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
@@ -181,9 +172,6 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	candidate.notifications.CopyAndReset(target)
 	fv.candidates.Remove(hash)
 	candidate.domains.Close()
-	if fv.extendingForkHeadHash == hash {
-		fv.extendingForkHeadHash = common.Hash{}
-	}
 	return nil
 }
 
@@ -214,12 +202,8 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	_, valid := fv.validHashes.Get(hash)
-	if _, ok := fv.candidates.Get(hash); ok {
-		valid = true
-		fv.extendingForkHeadHash = hash
-	}
-	if valid {
+	_, known := fv.validHashes.Get(hash)
+	if _, ok := fv.candidates.Get(hash); known || ok {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -311,8 +295,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		if overlay := sd.BlockOverlay(); overlay != nil {
 			overlay.DetachDB()
 		}
-		fv.candidates.Add(hash, &validatedCandidate{domains: sd, notifications: owned, number: number})
-		fv.extendingForkHeadHash = hash
+		fv.candidates.Add(hash, &validatedCandidate{domains: sd, notifications: owned})
 		retained = true
 	}
 
@@ -324,7 +307,6 @@ func (fv *ForkValidator) clear() {
 		candidate.domains.Close()
 	}
 	fv.candidates.Purge()
-	fv.extendingForkHeadHash = common.Hash{}
 }
 
 // ClearWithUnwind releases all retained candidate states.
@@ -436,12 +418,12 @@ func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) *blockmetrics.Record
 	return nil
 }
 
-func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
+func (fv *ForkValidator) ValidatedState(hash common.Hash) *execctx.SharedDomains {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	candidate, ok := fv.candidates.Peek(fv.extendingForkHeadHash)
+	candidate, ok := fv.candidates.Peek(hash)
 	if !ok {
-		return common.Hash{}, 0, nil
+		return nil
 	}
-	return fv.extendingForkHeadHash, candidate.number, candidate.domains
+	return candidate.domains
 }

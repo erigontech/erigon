@@ -284,7 +284,7 @@ func TestSlowBlockMetricsReuseRetainedValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, resultB.ValidationStatus)
 
-	_, _, retainedB := m.ForkValidator.ExtendingFork()
+	retainedB := m.ForkValidator.ValidatedState(tipB.Hash())
 	var sequence uint64
 	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 		var err error

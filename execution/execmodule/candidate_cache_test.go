@@ -63,7 +63,7 @@ func testValidatedCandidateEvictionAndForkChoiceCleanup(t *testing.T, parallel b
 			validate(blocks[0])
 		}
 		validate(blocks[i])
-		_, _, states[i] = m.ForkValidator.ExtendingFork()
+		states[i] = m.ForkValidator.ValidatedState(blocks[i].Hash())
 		require.NotNil(t, states[i])
 	}
 	require.True(t, m.ForkValidator.HasValidatedState(blocks[0].Hash()))
@@ -116,14 +116,14 @@ func TestValidatedCandidateClosedAfterValidHashEviction(t *testing.T) {
 
 	retained := sibling()
 	validate(retained)
-	_, _, first := m.ForkValidator.ExtendingFork()
+	first := m.ForkValidator.ValidatedState(retained.Hash())
 	require.NotNil(t, first)
 	for _, block := range filler[1:] {
 		validate(block)
 	}
 	validate(sibling())
 	validate(retained)
-	_, _, second := m.ForkValidator.ExtendingFork()
+	second := m.ForkValidator.ValidatedState(retained.Hash())
 	require.NotNil(t, second)
 
 	m.ForkValidator.ClearWithUnwind()
@@ -146,7 +146,7 @@ func TestValidatedCandidateClosedBySetHead(t *testing.T) {
 	result, err := m.ValidateChain(t.Context(), child.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
-	_, _, state := m.ForkValidator.ExtendingFork()
+	state := m.ForkValidator.ValidatedState(child.Blocks[0].Hash())
 	require.NotNil(t, state)
 
 	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1))
