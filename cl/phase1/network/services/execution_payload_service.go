@@ -415,6 +415,9 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 			job.processing.Store(false)
 			return pendingJobKeep
 		}
+		if persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err); persistedKnown && persisted == nil {
+			s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.blockRoot, job.envelope.Message.BuilderIndex)
+		}
 		return pendingJobRemoveThenProcess
 	}
 	err = s.processMessage(ctx, job.envelope, job.receivedAt, &admissionToken)
