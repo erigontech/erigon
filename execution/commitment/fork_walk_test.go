@@ -326,6 +326,38 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 	require.Len(t, pool.free, 1, "exactly one lease returns to the pool, so a panic neither leaks nor double-releases")
 }
 
+func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
+	pool := newCtxLeasePool(context.Background(), func(context.Context) (PatriciaContext, func()) {
+		return &noopPatriciaContext{}, nil
+	}, 1)
+	defer pool.close()
+	pu := &parallelUpdate{}
+	fw := &forkWalk{
+		leases:        pool,
+		accountKeyLen: length.Addr,
+		cfg:           DefaultTrieConfig(),
+		pu:            pu,
+		metrics:       NewMetrics(""),
+		grain:         ForkGrainNever,
+	}
+	l, err := pool.acquire(context.Background())
+	require.NoError(t, err)
+	defer pool.release(l)
+	wk := &walker{lease: l, bindsCtx: true}
+
+	fw.checkout(wk, nil)
+	w := wk.trie
+	upd := &DeferredBranchUpdate{encoded: BranchData{1}}
+	w.branchEncoder.deferred = append(w.branchEncoder.deferred, upd)
+	collected := w.branchEncoder.deferred
+	fw.checkin(wk)
+
+	require.Equal(t, []*DeferredBranchUpdate{upd}, pu.deferredCombined, "checkin must hand the collected records to the round")
+	require.NotNil(t, upd.encoded, "checkin must not return a record the round owns to the update pool")
+	require.Empty(t, w.branchEncoder.deferred, "the released trie must hold none of the records the round now owns")
+	require.Same(t, &collected[:1][0], &w.branchEncoder.deferred[:1][0], "the released trie must keep the slice it collected into")
+}
+
 func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 	keys, upds := buildMixedCorpus(20260915, 64)
 	ms := NewMockState(t)

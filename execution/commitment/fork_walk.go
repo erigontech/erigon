@@ -373,6 +373,9 @@ func (fw *forkWalk) checkin(wk *walker) {
 	wk.trie = nil
 	w.ResetContext(nil)
 	fw.metrics.Merge(w.metrics)
-	fw.pu.appendDeferred(w.TakeDeferredUpdates())
+	recs := w.branchEncoder.deferred
+	fw.pu.appendDeferred(recs)
+	clear(recs)
+	w.branchEncoder.deferred = recs[:0]
 	w.Release()
 }
