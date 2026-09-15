@@ -348,7 +348,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out m
 			if newSeg.frozen {
 				dirtySegments.Walk(func(items []*DirtySegment) bool {
 					for _, item := range items {
-						if item.frozen || item.to > newSeg.to {
+						if item.frozen || item.from < newSeg.from || item.to > newSeg.to {
 							continue
 						}
 						if out[enum] == nil {

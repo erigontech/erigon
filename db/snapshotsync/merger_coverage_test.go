@@ -125,3 +125,72 @@ func TestMerge_FailedMemberLeavesNoSiblings(t *testing.T) {
 			"%s survived a failed merge of the same range — an incomplete range must not reach disk", snT.Name())
 	}
 }
+
+// TestIntegrateMergedDirtyFiles_FrozenOutputRetiresOnlyContainedSegments pins
+// that integrating a frozen merge output retires only the non-frozen segments
+// its range contains. A non-frozen segment of the same type that ends at or
+// before the output's end but starts below it lies outside the merge, and
+// retiring it unlinks a file no merge replaced.
+func TestIntegrateMergedDirtyFiles_FrozenOutputRetiresOnlyContainedSegments(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	v := version.V1_1
+	x := snaptype2.Transactions.Enum()
+
+	createTestSegmentFile(t, 3_400_000, 3_500_000, x, dir, v, logger)
+	for from := uint64(3_500_000); from < 3_600_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, x, dir, v, logger)
+	}
+	createTestSegmentFile(t, 3_500_000, 3_600_000, x, dir, v, logger)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var neighbour, output *DirtySegment
+	var inside []*DirtySegment
+	s.dirty[x].Walk(func(items []*DirtySegment) bool {
+		for _, it := range items {
+			switch {
+			case it.from == 3_400_000 && it.to == 3_500_000:
+				neighbour = it
+			case it.from == 3_500_000 && it.to == 3_600_000:
+				output = it
+			default:
+				inside = append(inside, it)
+			}
+		}
+		return true
+	})
+	require.NotNil(t, neighbour)
+	require.NotNil(t, output)
+	require.Len(t, inside, 10)
+	neighbour.frozen = false
+	for _, sub := range inside {
+		sub.frozen = false
+	}
+
+	// Integrate the output as a fresh merge result.
+	s.dirty[x].Delete(output)
+	merged := &DirtySegment{segType: snaptype2.Transactions, version: v, Range: Range{3_500_000, 3_600_000}, frozen: true}
+	require.NoError(t, merged.Open(dir))
+
+	m := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	m.integrateMergedDirtyFiles(s, map[snaptype.Enum][]*DirtySegment{x: {merged}}, map[snaptype.Enum][]*DirtySegment{})
+
+	dirty := map[*DirtySegment]bool{}
+	s.dirty[x].Walk(func(items []*DirtySegment) bool {
+		for _, it := range items {
+			dirty[it] = true
+		}
+		return true
+	})
+
+	require.True(t, dirty[neighbour], "segment below the merged range must not be retired")
+	_, err := os.Stat(filepath.Join(dir, snaptype.SegmentFileName(v, 3_400_000, 3_500_000, x)))
+	require.NoError(t, err, "segment below the merged range must stay on disk")
+
+	for _, sub := range inside {
+		require.False(t, dirty[sub], "sub-segment [%d,%d) inside the merged range must be retired", sub.from, sub.to)
+	}
+}
