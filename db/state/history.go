@@ -29,8 +29,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -65,6 +68,8 @@ type History struct {
 	// readers against that snapshot in zero-copy way.
 	dirtyFiles *DirtyFiles
 
+	pageCache *freelru.ShardedLRU[historyPageKey, []byte] // decompressed .v pages; nil when disabled
+
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
 	_testBuildVIHook func(rs *recsplit.RecSplit)
 }
@@ -94,6 +99,13 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 	}
 	h.InvertedIndex.Name = h.HistoryIdx
 
+	if historyPageCacheSize > 0 {
+		c, err := freelru.NewSharded[historyPageKey, []byte](historyPageCacheSize, func(k historyPageKey) uint32 { return uint32((k.offset * 0x9E3779B97F4A7C15) >> 32) })
+		if err != nil {
+			return nil, err
+		}
+		h.pageCache = c
+	}
 	return &h, nil
 }
 
@@ -1164,6 +1176,13 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+	}
+	if compressedPageValuesCount > 1 && ht.h.pageCache != nil {
+		return ht.valueFromCachedPage(historyItem, offset, historyKey)
+	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
 	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
@@ -1172,15 +1191,37 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 
-	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
-	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-	}
-
 	if compressedPageValuesCount > 1 {
 		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
 	}
+	return v, true, nil
+}
+
+var historyPageCacheSize = uint32(dbg.EnvInt("HISTORY_PAGE_CACHE", 0))
+
+// historyPageKey names a .v page by its file and offset; the key holds the decompressor, so a closed file's pages
+// can never be mistaken for pages of a file opened later at the same address.
+type historyPageKey struct {
+	d      *seg.Decompressor
+	offset uint64
+}
+
+// valueFromCachedPage looks key up in the decompressed page at offset, decompressing and caching the page on a miss.
+// The returned value points into the shared page, so callers must not modify it.
+func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key []byte) ([]byte, bool, error) {
+	pk := historyPageKey{d: item.src.decompressor, offset: offset}
+	page, ok := ht.h.pageCache.Get(pk)
+	if !ok {
+		g := ht.statelessGetter(item.i)
+		g.Reset(offset)
+		compressed, _ := g.Next(nil)
+		var err error
+		if page, _, err = compress.DecodeZstdIfNeed(nil, compressed, true); err != nil {
+			return nil, false, err
+		}
+		ht.h.pageCache.Add(pk, page)
+	}
+	v, _ := seg.GetFromPage(key, page, nil, false)
 	return v, true, nil
 }
 
