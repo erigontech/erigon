@@ -17,9 +17,13 @@
 package chain
 
 // ParliaConfig is the consensus-engine config for BSC's Parlia (PoSA) L1 engine.
-// It is currently empty: epoch length, block interval and turn length are
-// Parlia snapshot state rather than static chain config.
+// Epoch length, block interval and turn length are Parlia snapshot state rather
+// than static chain config.
+//
+// BlockAlloc holds the system-contract code upgrades applied at fork boundaries,
+// keyed by block number or unix timestamp (as a decimal string) → genesis-alloc.
 type ParliaConfig struct {
+	BlockAlloc map[string]any `json:"blockAlloc,omitempty"`
 }
 
 func (c *ParliaConfig) String() string { return "parlia" }

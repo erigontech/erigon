@@ -19,6 +19,8 @@ package parlia
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -149,7 +151,42 @@ func (p *Parlia) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 }
 
 func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	return p.upgradeSystemContracts(chain, header, ibs)
+}
+
+// upgradeSystemContracts overwrites system-contract bytecode at fork boundaries
+// from Parlia.BlockAlloc, keyed by block number or unix timestamp. It runs at
+// block initialisation so the block's transactions observe the upgraded code.
+func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
+	if p.chainConfig.Parlia == nil || len(p.chainConfig.Parlia.BlockAlloc) == 0 {
+		return nil
+	}
+	number := header.Number.Uint64()
+	var parentTime uint64
+	if number > 0 {
+		if parent := chain.GetHeader(header.ParentHash, number-1); parent != nil {
+			parentTime = parent.Time
+		}
+	}
+	for key, raw := range p.chainConfig.Parlia.BlockAlloc {
+		numOrTime, err := strconv.ParseUint(key, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parlia: bad BlockAlloc key %q: %w", key, err)
+		}
+		if numOrTime != number && !(parentTime < numOrTime && header.Time >= numOrTime) {
+			continue
+		}
+		alloc, err := types.DecodeGenesisAlloc(raw)
+		if err != nil {
+			return fmt.Errorf("parlia: decode BlockAlloc[%s]: %w", key, err)
+		}
+		for addr, account := range alloc {
+			if err := ibs.SetCode(accounts.InternAddress(addr), account.Code, tracing.CodeChangeUnspecified); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
