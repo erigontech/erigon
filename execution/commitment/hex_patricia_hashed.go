@@ -132,6 +132,7 @@ type HexPatriciaHashed struct {
 	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
 	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
+	witnessPath   [128]uint16   // For each row, bitmap of cells on a proven key's path; only they drop memoized hashes in witness mode
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -1171,7 +1172,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
-	if hph.memoizationOff {
+	if hph.memoizationOff && !hph.witnessKeepsSiblingHashes() {
 		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
 	}
 	if cell.storageAddrLen > 0 {
@@ -1610,7 +1611,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
-	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
+	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row], hph.witnessPath[row] = 0, 0, false, 0
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
@@ -1903,7 +1904,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
 
-		if hph.memoizationOff {
+		if hph.memoizationOff && (!hph.witnessKeepsSiblingHashes() || hph.witnessPath[row]&bit != 0) {
 			cell.stateHashLen = 0
 		}
 		/* memoization of state hashes*/
@@ -2437,6 +2438,12 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // Witnesses builds the execution-witness node set on the fly during the fold,
 // capturing consensus node bytes as they are hashed. It returns the captured superset
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
+var witnessMemo = dbg.EnvBool("WITNESS_MEMO", false)
+
+// witnessKeepsSiblingHashes reports whether a witness fold reuses the stored hashes of cells off the proven paths:
+// a proof needs their hashes only, not their leaf nodes, so their state is not loaded and hashed again.
+func (hph *HexPatriciaHashed) witnessKeepsSiblingHashes() bool { return witnessMemo && hph.witness.active() }
+
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
@@ -2501,6 +2508,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 				if err := hph.unfold(hashedKey, 1); err != nil {
 					return fmt.Errorf("extra unfold: %w", err)
 				}
+			}
+		}
+		for row := range hph.activeRows {
+			if d := int(hph.depths[row]); d <= len(hashedKey) {
+				hph.witnessPath[row] |= uint16(1) << hashedKey[d-1]
 			}
 		}
 		return nil
