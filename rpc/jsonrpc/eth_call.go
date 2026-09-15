@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -540,7 +541,7 @@ func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalT
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{Key: storageKey.EncodeKey(), Value: new(hexutil.U256), Proof: []hexutil.Bytes{}}
 		}
-		return proof, nil
+		return proof, assertProofVerifies(header.Root, proof)
 	}
 	var acc accounts.Account
 	if err := acc.DecodeForHashing(accountRLP); err != nil {
@@ -572,8 +573,8 @@ func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalT
 			return nil, err
 		}
 		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
-		if err != nil {
-			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
+		if err != nil { // a zero value next to a proof of the real one would be worse than no answer
+			return nil, fmt.Errorf("read storage %x of %x: %w", storageKey.Hash, address, err)
 		}
 		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -581,7 +582,24 @@ func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalT
 			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
-	return proof, nil
+	return proof, assertProofVerifies(header.Root, proof)
+}
+
+// assertProofVerifies re-verifies the answer under ERIGON_ASSERT: the nodes come from the fold's own hashes, so a
+// serving node only checks the root, but a capture or walk defect must fail loudly in tests and on asserting nodes.
+func assertProofVerifies(stateRoot common.Hash, proof *accounts.AccProofResult) error {
+	if !dbg.AssertEnabled {
+		return nil
+	}
+	if err := trie.VerifyAccountProof(stateRoot, proof); err != nil {
+		return fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
+	for _, storageProof := range proof.StorageProof {
+		if err := trie.VerifyStorageProof(proof.StorageHash, storageProof); err != nil {
+			return fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
+		}
+	}
+	return nil
 }
 
 func toHexBytes(in [][]byte) []hexutil.Bytes {
