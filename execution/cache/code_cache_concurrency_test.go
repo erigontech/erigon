@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -198,6 +199,191 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
 }
 
+// The O(1) entry counter that replaced freelru's all-shard Len on growLRU's add
+// path must not drift from the LRU's real length on any mutation path.
+func TestGrowLRU_LenTracksLRU(t *testing.T) {
+	var evictions int
+	g := newGrowLRU[uint64](8*datasize.MB, 16, func(uint64, uint64) { evictions++ })
+	defer g.Close()
+	check := func(phase string) {
+		t.Helper()
+		require.Equal(t, g.cur.Load().lru.Len(), g.Len(), "entry counter drifted after %s", phase)
+	}
+	// growLRU hashes keys with the identity function, so spread the shard-selection
+	// bits the way its real maphash/keccak-derived keys do.
+	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+	for i := range uint64(500) {
+		g.Add(key(i), i)
+	}
+	check("adds")
+	require.Equal(t, 500, g.Len(), "500 distinct keys must fit below the 1024-slot start capacity")
+
+	for i := range uint64(100) {
+		g.Remove(key(i))
+	}
+	check("removes")
+	require.Equal(t, 100, evictions, "the caller's OnEvict must still fire for each removal")
+
+	before := g.cur.Load()
+	for i := uint64(500); i < 4000; i++ {
+		g.Add(key(i), i)
+	}
+	require.NotEqual(t, before, g.cur.Load(), "grow did not happen")
+	check("grow")
+
+	g.Purge()
+	require.Equal(t, 0, g.Len())
+	check("purge")
+}
+
+// A grow can copy a key into the new generation while a same-key refresh is in
+// flight. Put resolves g.cur once so its removal and its store land on the same
+// generation; split across the swap, the store would replace the copy in place
+// without firing OnEvict and double-count it.
+func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+
+	h := uint64(7)
+	g.Add(h, 1)
+	gen1 := g.cur.Load()
+
+	// Build the next generation exactly like maybeGrow's copy loop, and
+	// publish it while h is still present in gen1.
+	newCap := g.curCap.Load() * genericCacheGrowFactor
+	gen2 := g.newShards(newCap)
+	for _, k := range gen1.lru.Keys() {
+		if v, ok := gen1.lru.Peek(k); ok {
+			gen2.add(k, v)
+		}
+	}
+	g.cur.Store(gen2)
+	g.curCap.Store(newCap)
+
+	g.Add(h, 2)
+
+	require.Equal(t, gen2.lru.Len(), g.Len(),
+		"counter must not double-count a grow-copied key replaced in place")
+	got, ok := g.Get(h)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), got, "the refreshed value must be the one served")
+
+	// A refresh that resolved the retired generation must leave the live count alone.
+	live := g.Len()
+	gen1.lru.Remove(h)
+	gen1.add(h, 3)
+	require.Equal(t, live, g.Len(), "a write lost in the retired generation must not move the live counter")
+	require.Equal(t, gen1.lru.Len(), gen1.len(), "the retired generation's own counter must stay exact")
+}
+
+// Each layer's counter must equal its LRU's real length while all three are
+// driven through putContentLocked's displacing path. The fixture repeats keys
+// and keeps unwinding them so that path runs, with budget left to grow into.
+func TestCodeCache_GrowLRULenCounterUnderConcurrency(t *testing.T) {
+	// 64MB over avgCodeEntryBytes puts the two code layers' ceiling well above
+	// genericCacheStartCapacity; at 8MB it lands below and they never grow.
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 8*datasize.MB))
+	// Floor 0, so every later Unwind turns the whole resident set stale on its
+	// epoch bump alone.
+	cc.Unwind(0)
+
+	const workers = 8
+	const perWorker = 3000
+	const keySpace = 4096
+
+	var unwinder sync.WaitGroup
+	done := make(chan struct{})
+	unwinder.Go(func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			cc.Unwind(0)
+			runtime.Gosched()
+		}
+	})
+
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			addr := make([]byte, 20)
+			code := make([]byte, 40)
+			codeHash := make([]byte, 32)
+			for i := range perWorker {
+				k := uint64(w*perWorker+i) % keySpace
+				binary.BigEndian.PutUint64(addr[12:], k)
+				binary.BigEndian.PutUint64(code, k)
+				binary.BigEndian.PutUint64(codeHash, k)
+				cc.PutWithCodeHash(addr, code, codeHash, uint64(i))
+			}
+		})
+	}
+	wg.Wait()
+	close(done)
+	unwinder.Wait()
+
+	// Only the size layer is still a growLRU; the content layers are byteLRU,
+	// which bounds by bytes and keeps no generation counter.
+	require.Equal(t, cc.codeSizeByCodeHash.cur.Load().lru.Len(), cc.codeSizeByCodeHash.Len(),
+		"codeSizeByCodeHash counter drifted")
+	require.Greater(t, cc.codeSizeByCodeHash.curCap.Load(), cc.codeSizeByCodeHash.startCap,
+		"codeSizeByCodeHash never grew")
+}
+
+// Parallel adds while the LRU is still below its ceiling — the window where
+// every add runs the grow check.
+func BenchmarkGrowLRUParallelPutGrow(b *testing.B) {
+	g := newGrowLRU[uint64](256*datasize.MB, 48, nil)
+	defer g.Close()
+	var seq atomic.Uint64
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := seq.Add(1) * 0x9E3779B97F4A7C15
+			g.Add(n, n)
+		}
+	})
+}
+
+// CodeCache's read-path stale drops hold no put stripe, so they interleave
+// freely with a striped refresh while the LRU grows. The counter must still
+// equal the real length: both grow gates read it, so an under-count wedges
+// growth for good.
+func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+
+	const keySpace = 4096
+	key := func(i uint64) uint64 { return (i % keySpace) * 0x9E3779B97F4A7C15 }
+
+	var stripes [256]sync.Mutex
+	var wg sync.WaitGroup
+	for w := range 8 {
+		wg.Go(func() {
+			for i := range uint64(20000) {
+				h := key(uint64(w)*20000 + i)
+				stripe := &stripes[uint8(h)]
+				stripe.Lock()
+				g.Add(h, i)
+				stripe.Unlock()
+			}
+		})
+	}
+	wg.Go(func() {
+		for i := range uint64(60000) {
+			g.Remove(key(i))
+		}
+	})
+	wg.Wait()
+
+	gen := g.cur.Load()
+	require.Equal(t, gen.lru.Len(), gen.len(), "live generation's counter drifted from its real length")
+	require.NotEqual(t, g.startCap, g.curCap.Load(), "the LRU never grew, so the growth gates were not exercised")
+}
+
 // The grow copy must carry the retiring generation over in Keys() order --
 // oldest first -- because insertion order alone sets the new generation's
 // recency. Reading each entry back with Get re-links it in the generation being
@@ -222,11 +408,11 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	grew := false
 	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
 		old := g.cur.Load()
-		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
-			oldKeys = old.Keys() // snapshot the generation this add is about to retire
+		if g.curCap.Load() < g.maxCap && old.len() >= int(g.curCap.Load()) {
+			oldKeys = old.lru.Keys() // snapshot the generation this add is about to retire
 			oldVals = make([]uint64, len(oldKeys))
 			for j, k := range oldKeys {
-				oldVals[j], _ = old.Peek(k)
+				oldVals[j], _ = old.lru.Peek(k)
 			}
 		}
 		g.Add(key(i), i)
@@ -239,18 +425,18 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	// Replay the snapshot into the geometry the grow chose.
 	want := g.newShards(g.curCap.Load())
 	for j, k := range oldKeys {
-		want.Add(k, oldVals[j])
+		want.add(k, oldVals[j])
 	}
-	want.Add(key(trigger), trigger)
+	want.add(key(trigger), trigger)
 
 	got := g.cur.Load()
-	require.Positive(t, want.Len())
-	require.Equal(t, want.Len(), got.Len(), "the grown generation must hold every copied entry")
-	require.Equal(t, want.Keys(), got.Keys(), "the grown generation must keep the pre-grow order")
-	for _, k := range got.Keys() {
-		wantV, ok := want.Peek(k)
+	require.Positive(t, want.len())
+	require.Equal(t, want.len(), got.len(), "the grown generation must hold every copied entry")
+	require.Equal(t, want.lru.Keys(), got.lru.Keys(), "the grown generation must keep the pre-grow order")
+	for _, k := range got.lru.Keys() {
+		wantV, ok := want.lru.Peek(k)
 		require.True(t, ok)
-		gotV, ok := got.Peek(k)
+		gotV, ok := got.lru.Peek(k)
 		require.True(t, ok)
 		require.Equal(t, wantV, gotV)
 	}
