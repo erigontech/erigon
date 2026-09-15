@@ -357,6 +357,18 @@ func (r *Receipt) statusEncoding() []byte {
 	return r.PostState
 }
 
+// Size returns the approximate memory held by the receipt and its logs.
+func (r *Receipt) Size() int {
+	n := int(unsafe.Sizeof(*r)) + len(r.PostState)
+	if r.BlockNumber != nil {
+		n += int(unsafe.Sizeof(*r.BlockNumber))
+	}
+	for _, l := range r.Logs {
+		n += int(unsafe.Sizeof(l)) + int(unsafe.Sizeof(*l)) + len(l.Topics)*length.Hash + len(l.Data)
+	}
+	return n
+}
+
 // LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
 func (r *Receipt) LogsBloom() Bloom {
 	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
