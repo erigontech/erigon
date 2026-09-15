@@ -1614,6 +1614,37 @@ func TestResolveApplyLoopClosePrecedence(t *testing.T) {
 	})
 }
 
+func TestResolveApplyLoopCloseParentCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		lastBlockNum uint64
+		observed     map[uint64]struct{}
+	}{
+		{name: "empty stream"},
+		{name: "validated prefix", lastBlockNum: 5, observed: map[uint64]struct{}{5: {}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			pe := &parallelExecutor{maxBlockNum: 10}
+			infraErr := fmt.Errorf("commitment: %w", context.Canceled)
+
+			err := pe.resolveApplyLoopClose(ctx, infraErr, failCandidate{}, nil, 1, tc.lastBlockNum, tc.observed, tc.observed)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, pe.verdict)
+			require.Nil(t, pe.exhausted, "a canceled batch cannot authorize committing partial state")
+
+			// Executor-local teardown is filtered, but the caller's abort must
+			// survive the remaining exit checks and reach the stage as an error.
+			err = reconcileExecErrors(err, context.Canceled)
+			err = pe.checkBlocksDrained(ctx, ctx, err)
+			err = reconcileParentCause(ctx, err)
+			require.ErrorIs(t, err, context.Canceled)
+			require.True(t, commonerrors.IsOnlyCanceled(err))
+		})
+	}
+}
+
 // Undrained work is an executor failure, not proof that a block is invalid.
 func TestCheckBlocksDrained(t *testing.T) {
 	withPending := func() *parallelExecutor {

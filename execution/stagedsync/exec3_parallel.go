@@ -1493,6 +1493,12 @@ func (pe *parallelExecutor) resolveApplyLoopClose(ctx context.Context, infraErr 
 	if err := applyLoopMissingBlocksError(ctx, lastBlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
 		return err
 	}
+	// Parent cancellation can interrupt commitment after state writes were applied.
+	// Even a complete observed stream is not a safe commit boundary in that case;
+	// return the cause instead of treating the abort as executor-local teardown.
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
 	pe.exhausted = classifyApplyClose(sc, startBlockNum, lastBlockNum, pe.maxBlockNum, len(txResultBlocks))
 	return nil
 }
