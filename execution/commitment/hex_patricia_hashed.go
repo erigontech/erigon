@@ -995,7 +995,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 
 	// Use a temporary buffer for hashed key computation to avoid corrupting cell.hashedExtension
 	// which may be needed for subsequent witness operations on other keys
-	// note that the cell.hashedExtension overwrite is still present in the `computeCellHash()`
 	var hashedKeyBuf [128]byte
 
 	if cell.storageAddrLen > 0 {
