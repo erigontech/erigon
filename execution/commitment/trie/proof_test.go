@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,4 +47,28 @@ func TestPrintProof(t *testing.T) {
 		fmt.Printf("\t #%d key=%x, value=%v \n", i, storageProof.Key, storageProof.Value)
 		require.NoError(t, PrintProof(storageProof.Proof))
 	}
+}
+
+func TestVerifyStorageProofRejectsValueForAbsentKey(t *testing.T) {
+	tr := New(common.Hash{})
+	present := crypto.Keccak256([]byte("present"))
+	enc, err := rlp.EncodeToBytes([]byte{0x2a})
+	require.NoError(t, err)
+	tr.Update(present, enc)
+	root := tr.Hash()
+
+	prove := func(key []byte, value uint64) error {
+		nodes, err := tr.Prove(key, 0, false)
+		require.NoError(t, err)
+		proof := accounts.StorProofResult{Value: (*hexutil.U256)(uint256.NewInt(value))}
+		for _, n := range nodes {
+			proof.Proof = append(proof.Proof, n)
+		}
+		return VerifyStorageProofByHash(root, common.BytesToHash(key), proof)
+	}
+
+	absent := crypto.Keccak256([]byte("absent"))
+	require.NoError(t, prove(present, 0x2a))
+	require.NoError(t, prove(absent, 0))
+	require.Error(t, prove(absent, 0x2a))
 }
