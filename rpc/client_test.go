@@ -538,7 +538,8 @@ func TestClientNotificationStorm(t *testing.T) {
 	}{
 		{name: "full", count: maxClientSubscriptionBuffer},
 		{name: "overflow", count: maxClientSubscriptionBuffer + 1, wantOverflow: true},
-		{name: "overflow_with_pending_notifications", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
+		// Delivery must also unblock after the forwarding goroutine exits.
+		{name: "notification_after_overflow", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -555,7 +556,6 @@ func TestClientNotificationStorm(t *testing.T) {
 				if err != nil {
 					t.Fatal("can't subscribe:", err)
 				}
-				defer sub.Unsubscribe()
 
 				// Keep the subscriber unread until the notification burst has finished.
 				// Overflow then depends on queue capacity, not producer/consumer scheduling.
