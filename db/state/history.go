@@ -1212,15 +1212,11 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 	})
 }
 
-func historyPageKey(d *seg.Decompressor, offset uint64) uint64 {
-	return offset*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(d)))
-}
-
 // valueFromCachedPage looks key up in the decompressed page at offset, decompressing and caching the page on a miss.
 // The returned value points into the shared page, so callers must not modify it.
 func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key []byte) ([]byte, bool, error) {
 	d := item.src.decompressor
-	k := historyPageKey(d, offset)
+	k := offset*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(d)))
 	p, ok := ht.h.pages.Get(k)
 	if !ok || p.d != d || p.offset != offset {
 		g := ht.statelessGetter(item.i)
