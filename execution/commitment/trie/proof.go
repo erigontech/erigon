@@ -623,13 +623,16 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 		return fmt.Errorf("could not verify proof: %w", err)
 	}
 
-	var expected []byte
-	if value != nil {
-		// A non-nil value proves the storage does exist.
-		expected, err = rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
-		if err != nil {
-			return err
+	if value == nil {
+		if proof.Value.ToInt().Sign() != 0 {
+			return errors.New("storage is not in state, but has a non-zero value")
 		}
+		return nil
+	}
+
+	expected, err := rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
+	if err != nil {
+		return err
 	}
 
 	if !bytes.Equal(expected, value) {
