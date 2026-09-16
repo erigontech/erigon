@@ -582,3 +582,44 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
 }
+
+type writeCountingConn struct {
+	net.Conn
+	writes int
+	bytes  int
+}
+
+func (c *writeCountingConn) Write(p []byte) (int, error) {
+	c.writes++
+	c.bytes += len(p)
+	return len(p), nil
+}
+
+// A response net/http writes in three pieces - headers, body, chunk terminator - must reach the socket as one write.
+func TestCorkConnWritesResponseOnce(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	for _, part := range [][]byte{[]byte("HTTP/1.1 200 OK\r\n\r\n"), bytes.Repeat([]byte("a"), 8*1024), []byte("0\r\n\r\n")} {
+		_, err := c.Write(part)
+		require.NoError(t, err)
+	}
+	require.Zero(t, counting.writes, "a corked connection holds the response")
+	require.NoError(t, c.flush())
+	require.Equal(t, 1, counting.writes)
+	require.Equal(t, 19+8*1024+5, counting.bytes)
+
+	c.uncork()
+	_, err := c.Write([]byte("x"))
+	require.NoError(t, err)
+	require.Equal(t, 2, counting.writes, "an uncorked connection writes straight through")
+}
+
+// A body past the cork limit cannot be held: it goes out and the connection keeps taking writes.
+func TestCorkConnFlushesPastLimit(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	_, err := c.Write(bytes.Repeat([]byte("a"), corkFlushBytes+1))
+	require.NoError(t, err)
+	require.Equal(t, 1, counting.writes)
+	require.Equal(t, corkFlushBytes+1, counting.bytes)
+}

@@ -26,8 +26,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -70,6 +72,9 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	h2 := &http2.Server{}
 	// enable h2c support
 	handler = h2c.NewHandler(handler, h2)
+	if !cfg.HTTPS { // an ALPN-negotiated h2 connection is handed to the HTTP/2 server with the state hooks skipped, so it would never be uncorked
+		listener = corkListener{listener}
+	}
 	// Bundle the http server
 	httpSrv := &http.Server{
 		Handler:           handler,
@@ -77,6 +82,18 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		WriteTimeout:      cfg.Timeouts.WriteTimeout,
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
+		ConnState: func(conn net.Conn, state http.ConnState) {
+			c, ok := conn.(*corkConn)
+			if !ok {
+				return
+			}
+			switch state {
+			case http.StateIdle, http.StateClosed:
+				c.flush()
+			case http.StateHijacked: // the handler owns the connection now and expects its writes to reach the wire
+				c.uncork()
+			}
+		},
 	}
 	// start the HTTP server
 	go func() {
@@ -94,6 +111,79 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		}
 	}()
 	return httpSrv, listener.Addr(), err
+}
+
+// corkFlushBytes bounds a corked connection: a streamed answer still reaches the client in pieces of
+// this size, and a connection cannot hold more than this before its buffer is handed to the socket.
+const corkFlushBytes = int(256 * datasize.KB)
+
+// corkListener holds a response in one buffer so it leaves as one write syscall. net/http writes the
+// headers, the body and the chunk terminator separately, and only marks the connection idle once the
+// whole response is written, which is where the buffer is flushed.
+type corkListener struct{ net.Listener }
+
+func (l corkListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &corkConn{Conn: conn}, nil
+}
+
+type corkConn struct {
+	net.Conn
+	mu       sync.Mutex
+	buf      []byte
+	uncorked bool
+}
+
+func (c *corkConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.uncorked {
+		return c.Conn.Write(p)
+	}
+	c.buf = append(c.buf, p...)
+	if len(c.buf) >= corkFlushBytes {
+		if err := c.flushLocked(); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+// Read flushes first: the peer may be waiting for what is buffered before it sends anything more - a
+// TLS handshake record, a "100 Continue", or the previous response on a keep-alive connection.
+func (c *corkConn) Read(p []byte) (int, error) {
+	c.flush()
+	return c.Conn.Read(p)
+}
+
+func (c *corkConn) Close() error {
+	c.flush()
+	return c.Conn.Close()
+}
+
+func (c *corkConn) flush() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.flushLocked()
+}
+
+func (c *corkConn) uncork() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.uncorked = true
+	c.flushLocked()
+}
+
+func (c *corkConn) flushLocked() error {
+	if len(c.buf) == 0 {
+		return nil
+	}
+	_, err := c.Conn.Write(c.buf)
+	c.buf = c.buf[:0]
+	return err
 }
 
 func isIgnoredHttpServerError(serveErr error) bool {
