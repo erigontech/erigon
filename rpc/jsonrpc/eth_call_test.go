@@ -2035,7 +2035,9 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 }
 
 func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	chainConfig := new(chain.Config)
 	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
 	historyAddr := params.HistoryStorageAddress.Value()
