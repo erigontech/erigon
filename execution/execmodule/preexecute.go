@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -61,6 +62,42 @@ func copyFrontierChainTables(src, dst *membatchwithdb.MemoryMutation, roTx kv.Te
 // generation with ZERO body re-execution. It reads and executes only in pre-exec space — the block from its
 // generation's overlay, state from the generation — so a fork choice between the block's last round and its close
 // cannot take anything out from under it. Caller holds e.semaphore.
+// traceCanonicalStatus records the bookkeeping the pre-exec close used to JUDGE the block by: the generation
+// overlay's canonical row for this height against the header about to be sealed, and the stage progress the
+// block's own rounds advanced. The close no longer acts on any of it — it does not unwind — but a
+// disagreement here is the signature of that bookkeeping going stale underneath a block, which is exactly
+// what let a re-stamped block seal a body its state transition never applied.
+//
+// Warn when it disagrees, so the next occurrence names itself in one line. Measured on live48 this was worth
+// a day of archive forensics and still left two things unexplained: 221 re-stamps produced no unwind, and 4
+// unwinds had no re-stamp — neither answerable because these values were computed and thrown away.
+func (e *ExecModule) traceCanonicalStatus(ctx context.Context, tx kv.TemporalRwTx, header *types.Header, blockNumber uint64, when string) {
+	hash := header.Hash()
+	canonical, cerr := e.canonicalHash(ctx, tx, blockNumber)
+	headersAt, herr := stages.GetStageProgress(tx, stages.Headers)
+	sendersAt, serr := stages.GetStageProgress(tx, stages.Senders)
+	execAt, eerr := stages.GetStageProgress(tx, stages.Execution)
+
+	var readErr error
+	for _, err := range []error{cerr, herr, serr, eerr} {
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+	agrees := readErr == nil && canonical == hash &&
+		headersAt == blockNumber && sendersAt == blockNumber && execAt == blockNumber
+
+	record := e.logger.Debug
+	if !agrees {
+		record = e.logger.Warn
+	}
+	record("[CANON-TRACE] pre-exec bookkeeping", "when", when, "block", blockNumber,
+		"header", hash, "canonical", canonical, "canonicalMatches", canonical == hash,
+		"headers", headersAt, "senders", sendersAt, "execution", execAt,
+		"agrees", agrees, "err", readErr)
+}
+
 func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	ov := e.generationOverlay(blockHash, blockNumber)
 	if ov == nil {
@@ -117,6 +154,8 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 	// It also cannot be harmless: with anything stale in that bookkeeping the walk fails to recognise the
 	// block, settles on its parent, and unwinds the block's own accumulated state away — the block-end then
 	// runs on the parent's state and the block seals a body its state transition never applied.
+
+	e.traceCanonicalStatus(ctx, tx, header, blockNumber, "close")
 
 	status, _, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
 	if criticalError != nil {

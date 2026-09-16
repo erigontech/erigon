@@ -812,7 +812,7 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: in.Withdrawals}}
 	// Into the generation's own overlay — the block is in pre-exec space.
-	_, _, sd := e.preExec.Active()
+	oldHash, _, sd := e.preExec.Active()
 	if sd == nil || sd.BlockOverlay() == nil {
 		return fmt.Errorf("restampWithdrawals: no block in progress for num=%d", num)
 	}
@@ -833,12 +833,22 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	// transactions its own state transition never applied — and those transactions, still unapplied and still
 	// pending, are included AGAIN in a later block. SealActive re-keys both rows for this same reason at the
 	// seal; the re-stamp, which also re-hashes a block whose body has already executed, never did.
+	// Read the row THIS overlay holds, not through the block reader: it is the row itself that went stale,
+	// and a reader that can fall through to snapshots would hide that.
+	canonBefore, _ := rawdb.ReadCanonicalHash(sd.BlockOverlay(), num)
 	if err := rawdb.WriteHeadHeaderHash(sd.BlockOverlay(), hash); err != nil {
 		return fmt.Errorf("restampWithdrawals: head header hash num=%d: %w", num, err)
 	}
 	if err := rawdb.WriteCanonicalHash(sd.BlockOverlay(), hash, num); err != nil {
 		return fmt.Errorf("restampWithdrawals: canonical hash num=%d: %w", num, err)
 	}
+	canonAfter, _ := rawdb.ReadCanonicalHash(sd.BlockOverlay(), num)
+	// Two things are still unexplained live and this is where they would show: 221 re-stamps produced no
+	// unwind at the close (so the row may already have named the new hash), and 4 unwinds had no re-stamp at
+	// all. Record what the row said on each side of the move rather than inferring it afterwards.
+	e.logger.Debug("[CANON-TRACE] re-stamp", "block", num, "oldHash", oldHash, "newHash", hash,
+		"canonicalBefore", canonBefore, "canonicalAfter", canonAfter,
+		"wasStale", canonBefore != hash, "movedToNew", canonAfter == hash, "bodyTxs", len(body))
 	e.preExec.SetActiveHead(hash, num)
 
 	e.flash.mu.Lock()
