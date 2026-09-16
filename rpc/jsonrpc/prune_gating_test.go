@@ -223,6 +223,12 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	// Header endpoints read the header alone: a retention window takes away
 	// transactions and state history, never headers.
+	{"eth_getHeaderByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.GetHeaderByNumber(ctx, rpc.BlockNumber(ref.num))
+	}},
+	{"eth_getHeaderByHash", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.GetHeaderByHash(ctx, ref.hash)
+	}},
 	{"erigon_getHeaderByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetHeaderByNumber(ctx, rpc.BlockNumber(ref.num))
 	}},
