@@ -458,7 +458,9 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-const roTxPoolSize = 256
+// roTxPoolSize bounds the pooled read txns. ERIGON_MDBX_RO_TX_POOL=0 disables pooling,
+// so a misbehaving node can fall back to a fresh txn per BeginRo without a rebuild.
+var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
 	log          log.Logger
@@ -761,7 +763,7 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 }
 
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
-	if tx.Reset() == nil {
+	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
 		select {
 		case db.roTxPool <- tx:
 			return
