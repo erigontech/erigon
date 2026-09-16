@@ -1256,6 +1256,17 @@ func TestGetProofRequestShapes(t *testing.T) {
 		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
 	})
 
+	// A key longer than 32 bytes must be refused: Hash.SetBytes keeps the trailing 32
+	// bytes, so accepting one would answer with a valid proof for a different slot.
+	t.Run("key longer than 32 bytes is rejected", func(t *testing.T) {
+		overlong := append(hexutil.Bytes{0xff, 0xee}, make(hexutil.Bytes, 32)...)
+		proof, err := api.GetProof(ctx, contractAddr, []hexutil.Bytes{overlong}, head)
+		require.Nil(t, proof)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
+	})
+
 	t.Run("duplicate keys each get a proof, in request order", func(t *testing.T) {
 		keys := []hexutil.Bytes{key(4), key(0), key(4)}
 		proof, err := api.GetProof(ctx, contractAddr, keys, head)
