@@ -465,6 +465,12 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 	}
 
 	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// During the initial cycle a wrong trie root is fatal: there is no fork to
+		// recover from, and handleIncorrectRootHashError can return nil (hiding the
+		// mismatch) or unwind a canonical block. Propagate it instead.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return execErr
+		}
 		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 

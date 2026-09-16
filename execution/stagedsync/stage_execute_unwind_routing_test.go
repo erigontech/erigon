@@ -111,17 +111,17 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
 	})
 
-	t.Run("wrong root on initial cycle also routes through handleIncorrectRootHashError", func(t *testing.T) {
-		// Wrong-trie-root routes through handleIncorrectRootHashError regardless of
-		// cycle; it no longer falls back to the plain lastHeader-1 unwind on the
-		// initial cycle. failedBlock (5) <= s.BlockNumber (10) returns nil at the
-		// guard, taking no unwind — same as the non-initial case above.
+	t.Run("wrong root on initial cycle is fatal and not routed through the recovery handler", func(t *testing.T) {
+		// On the initial cycle there is no fork to recover from, and
+		// handleIncorrectRootHashError would return nil for failedBlock (5) <=
+		// s.BlockNumber (10), hiding the mismatch. The wrong trie root must
+		// propagate as a fatal error instead, scheduling no unwind.
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
 		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xdead")}
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
-		require.NoError(t, got)
-		require.Empty(t, u.calls, "wrong-root routes through handleIncorrectRootHashError, not the plain lastHeader-1 branch")
+		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		require.Empty(t, u.calls, "must not schedule an unwind on the initial cycle")
 	})
 }
