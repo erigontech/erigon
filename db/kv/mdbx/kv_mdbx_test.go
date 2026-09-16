@@ -1158,6 +1158,7 @@ func TestCursorOnPooledTxn(t *testing.T) {
 
 	first, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer first.Rollback() // a safety net: the explicit rollback below is what the test exercises
 	first.Rollback()
 
 	second, err := db.BeginRo(t.Context())
@@ -1178,6 +1179,7 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	db := BaseCaseDB(t)
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback() // a safety net: the concurrent rollbacks below are what the test exercises
 
 	var wg sync.WaitGroup
 	for range 2 {
