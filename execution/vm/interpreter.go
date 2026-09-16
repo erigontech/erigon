@@ -523,18 +523,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	for {
 		callContext.cacheGen++
-		if inlineDispatch {
-			var halt bool
-			pc, halt, err = evm.runGoInline(callContext, &contract, pc)
-			if err != nil {
-				break
-			}
-			if halt {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, nil
-			}
-			// pc is now at an opcode the inline loop does not handle; fall
-			// through to the generic path for that one op, then re-enter.
-		}
 		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas

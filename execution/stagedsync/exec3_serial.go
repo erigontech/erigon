@@ -39,7 +39,6 @@ type serialExecutor struct {
 	blockGasUsed      uint64 // accumulated execution gas (pre-Amsterdam: same as block gas)
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
 	blobGasUsed       uint64
-	lastBlockResult   *blockResult
 	worker            *exec.WorkerContext
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
@@ -544,10 +543,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)
-		se.lastBlockResult = &blockResult{
-			BlockNum:  txTask.BlockNumber(),
-			lastTxNum: txTask.TxNum,
-		}
 		se.lastExecutedTxNum.Store(int64(txTask.TxNum))
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 

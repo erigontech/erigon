@@ -664,17 +664,11 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 type DomainReader interface {
 	membatchwithdb.DomainReader
 	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
-	AsGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter
 	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 }
 
 // AsGetter returns a metrics-free execution getter.
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
-	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
-}
-
-// AsGetterNoMetrics is an explicit-intent alias of AsGetter for concurrent callers.
-func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }
 

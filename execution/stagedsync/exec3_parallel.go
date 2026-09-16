@@ -2703,7 +2703,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		} else {
 			// finalize reads sd.mem for the committed base; the IBS's versionMap
 			// composes the intra-block view.
-			*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx)), be.blockNum)
+			*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 		}
 	}
 
@@ -3325,7 +3325,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// Historic finalize chains sd.mem → applyTx so withdrawals see prior-tx in-block writes.
 				reader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), finalVersion.TxNum), be.blockNum)
 			} else {
-				reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx)), be.blockNum)
+				reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 			}
 			pe.RUnlock()
 
