@@ -24,11 +24,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -74,8 +76,8 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	h2 := &http2.Server{}
 	// enable h2c support
 	handler = h2c.NewHandler(handler, h2)
-	if !cfg.HTTPS { // an ALPN-negotiated h2 connection is handed to the HTTP/2 server with the state hooks skipped, so it would never be uncorked
-		listener = corkListener{Listener: listener, writeTimeout: cfg.Timeouts.WriteTimeout}
+	if mode := dbg.EnvString("HTTP_CORK_MODE", "user"); !cfg.HTTPS && mode != "off" {
+		listener = corkListener{Listener: listener, writeTimeout: cfg.Timeouts.WriteTimeout, kernel: mode == "kernel"}
 		handler = flushThroughCork(handler)
 	}
 	// Bundle the http server
@@ -132,6 +134,7 @@ const corkBufferBytes = int(64 * datasize.KB)
 type corkListener struct {
 	net.Listener
 	writeTimeout time.Duration
+	kernel       bool
 }
 
 func (l corkListener) Accept() (net.Conn, error) {
@@ -139,7 +142,16 @@ func (l corkListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &corkConn{Conn: conn, writeTimeout: l.writeTimeout}, nil
+	c := &corkConn{Conn: conn, writeTimeout: l.writeTimeout}
+	if l.kernel {
+		if tc, ok := conn.(*net.TCPConn); ok {
+			if raw, err := tc.SyscallConn(); err == nil {
+				c.raw = raw
+				setTCPCork(raw, 1)
+			}
+		}
+	}
+	return c, nil
 }
 
 type corkConn struct {
@@ -150,6 +162,8 @@ type corkConn struct {
 	// must not wait on each other through the cork.
 	uncorked     atomic.Bool
 	writeTimeout time.Duration
+	raw          syscall.RawConn
+	dirty        bool
 	// failed records a flush that never reached the socket. net/http has already counted those bytes as
 	// written, so the response cannot be completed: the connection must not serve anything else.
 	failed error
@@ -167,6 +181,10 @@ func (c *corkConn) Write(p []byte) (int, error) {
 	defer c.mu.Unlock()
 	if c.failed != nil {
 		return 0, c.failed
+	}
+	if c.raw != nil {
+		c.dirty = true
+		return c.Conn.Write(p)
 	}
 	if len(p) >= corkBufferBytes {
 		if err := c.flushLocked(); err != nil {
@@ -251,6 +269,9 @@ func (c *corkConn) uncork() {
 	if c.writeTimeout > 0 {
 		_ = c.Conn.SetWriteDeadline(time.Time{}) // the handler sets its own deadlines from here on
 	}
+	if c.raw != nil {
+		setTCPCork(c.raw, 0)
+	}
 	c.uncorked.Store(true)
 }
 
@@ -285,6 +306,14 @@ func (w *corkFlushWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func (c *corkConn) flushLocked() error {
+	if c.raw != nil {
+		if c.dirty {
+			setTCPCork(c.raw, 0)
+			setTCPCork(c.raw, 1)
+			c.dirty = false
+		}
+		return nil
+	}
 	if len(c.buf) == 0 {
 		return nil
 	}
