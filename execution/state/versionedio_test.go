@@ -143,6 +143,26 @@ func (r *minimalStateReader) TracePrefix() string                     { return "
 
 // TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
 // system address (0xff...fe) is excluded from the BAL when it has no actual
+// TestPrepareRecordsSystemCoinbaseInBlockAccessList pins that when the system
+// address is the block coinbase, the EIP-3651 warming records it as a real
+// (non-revertable) access so EIP-7928 keeps it in the block access list even
+// with a zero tip.
+func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, accounts.NilAddress, nil, nil)
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	bal := io.AsBlockAccessList()
+
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress, bal[0].Address)
+}
+
 // state changes and only revertable accesses (e.g. incidental gas-calculation
 // reads during system calls).
 func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
