@@ -377,8 +377,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !s.disableStreaming {
 		// A response still whole in the buffer gets its length, so net/http sends it unchunked: no chunk
-		// framing, one write less, and the client can size its buffer up front.
-		if !sent.sent {
+		// framing, one write less, and the client can size its buffer up front. An empty buffer means the
+		// answer never went through the stream - a batch goes out through the codec - and its length is
+		// unknown here.
+		if !sent.sent && len(stream.Buffer()) > 0 {
 			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
 		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already

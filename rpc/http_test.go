@@ -480,32 +480,42 @@ type errReader struct{}
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 // A response still whole in the buffer carries Content-Length, so net/http sends it unchunked. One that
-// outgrew the buffer has already started streaming and stays chunked.
+// outgrew the buffer has already started streaming, and a batch never goes through the stream at all: both
+// stay chunked, and a batch must keep its whole body.
 func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	logger := log.New()
-	srv := newTestServer(logger)
+	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, false /* disableStreaming */, logger, 100)
 	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("test", new(testService)))
 	require.NoError(t, srv.RegisterName("big", largeRespService{4 * jsonstream.FlushThreshold}))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	post := func(body string) (contentLength int64, transferEncoding []string) {
+	post := func(body string) (contentLength int64, transferEncoding []string, answer string) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(body))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := ts.Client().Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
-		_, err = io.Copy(io.Discard, resp.Body)
+		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		return resp.ContentLength, resp.TransferEncoding
+		return resp.ContentLength, resp.TransferEncoding, string(raw)
 	}
 
-	length, encoding := post(`{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1,{"S":"y"}]}`)
+	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1,{"S":"y"}]}`)
 	require.Positive(t, length)
 	require.Empty(t, encoding)
+	require.Equal(t, int(length), len(answer))
 
-	length, encoding = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
+	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
+
+	length, _, answer = post(`[{"jsonrpc":"2.0","id":3,"method":"test_echo","params":["a",1,{"S":"b"}]},` +
+		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["c",2,{"S":"d"}]}]`)
+	require.NotEqual(t, int64(0), length, "a batch answer must not be cut off by a zero length")
+	var batch []json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(answer), &batch))
+	require.Len(t, batch, 2)
 }
