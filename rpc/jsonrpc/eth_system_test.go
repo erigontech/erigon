@@ -719,6 +719,7 @@ func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
 		"empty slices":   {OldestBlock: (*hexutil.Big)(big.NewInt(1)), Reward: [][]hexutil.U256{}, BaseFee: []hexutil.U256{}, GasUsedRatio: []float64{}},
 		"nil oldest":     {GasUsedRatio: []float64{1}},
 		"negative float": {OldestBlock: (*hexutil.Big)(big.NewInt(1)), GasUsedRatio: []float64{-0.75, -3e-9}},
+		"nil result":     nil,
 	}
 	for name, res := range cases {
 		t.Run(name, func(t *testing.T) {

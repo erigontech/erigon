@@ -367,6 +367,9 @@ type feeHistoryResult struct {
 
 // MarshalFastJSON encodes r byte-identically to encoding/json, without a reflective call per element.
 func (r *feeHistoryResult) MarshalFastJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("null"), nil
+	}
 	if !allFinite(r.GasUsedRatio) || !allFinite(r.BlobGasUsedRatio) {
 		return json.Marshal(r) // for its error
 	}
