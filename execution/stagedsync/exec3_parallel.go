@@ -1145,6 +1145,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+				blockExecutor.releaseSelfLoop()
 
 				if terminal {
 					// The calculator drains commitResults on its own uncancelled ctx;
@@ -2912,9 +2913,21 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 // selfLoopWatchdog wakes every parked self-loop worker when the workers' context
 // is cancelled, so shutdown/error never strands one in waitFrontier.
 func (be *blockExecutor) selfLoopWatchdog(ctx context.Context) {
-	done := func() { be.slDoneOnce.Do(func() { close(be.slDone) }) }
-	<-ctx.Done()
-	done()
+	// Exit as soon as the block is done (releaseSelfLoop closed slDone) so the
+	// blockExecutor and its versionMap/IO/receipts can be collected, rather than
+	// pinning them for the whole batch on workersCtx.
+	select {
+	case <-ctx.Done():
+		be.slDoneOnce.Do(func() { close(be.slDone) })
+	case <-be.slDone:
+	}
+}
+
+// releaseSelfLoop closes slDone, waking any still-parked self-loop worker and
+// letting the watchdog return. Called once the block is published and dropped
+// from the executor map.
+func (be *blockExecutor) releaseSelfLoop() {
+	be.slDoneOnce.Do(func() { close(be.slDone) })
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
