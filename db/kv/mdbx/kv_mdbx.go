@@ -768,8 +768,13 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 }
 
 func (db *MdbxKV) drainRoTxPool() {
-	for len(db.roTxPool) > 0 {
-		(<-db.roTxPool).Abort()
+	for {
+		select {
+		case tx := <-db.roTxPool:
+			tx.Abort()
+		default:
+			return
+		}
 	}
 }
 
