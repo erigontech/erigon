@@ -278,12 +278,11 @@ func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 }
 
 type blobRecoveryMetadata struct {
-	slot         uint64
-	blockRoot    common.Hash
-	version      clparams.StateVersion
-	signature    common.Bytes96
-	hasSignature bool
-	commitments  []common.Bytes48
+	slot        uint64
+	blockRoot   common.Hash
+	version     clparams.StateVersion
+	signature   common.Bytes96
+	commitments []common.Bytes48
 }
 
 func newBlobRecoveryMetadata(block cltypes.ColumnSyncableSignedBlock, blockRoot common.Hash) (*blobRecoveryMetadata, error) {
@@ -297,10 +296,9 @@ func newBlobRecoveryMetadata(block cltypes.ColumnSyncableSignedBlock, blockRoot 
 		version:     block.Version(),
 		commitments: make([]common.Bytes48, commitments.Len()),
 	}
-	// Read through the interface, not a concrete type switch: a wrapper that overrides the root
-	// would otherwise leave hasSignature false and silently disable the mismatch rejection below.
+	// Read through the interface: a concrete type switch here let a wrapper that overrides the root
+	// skip the signature, which turned the mismatch rejections below into no-ops.
 	metadata.signature = block.BlockSignature()
-	metadata.hasSignature = true
 	for i := range commitments.Len() {
 		commitment := commitments.Get(i)
 		if commitment == nil {
@@ -339,7 +337,7 @@ func (d *peerdas) validateStoredBlobRecoveryMetadata(ctx context.Context, metada
 			return blobRecoveryInvalid
 		}
 		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-		if err != nil || root != metadata.blockRoot || sidecar.SignedBlockHeader.Header.Slot != metadata.slot || metadata.hasSignature && sidecar.SignedBlockHeader.Signature != metadata.signature || sidecar.KzgCommitment != metadata.commitments[sidecar.Index] {
+		if err != nil || root != metadata.blockRoot || sidecar.SignedBlockHeader.Header.Slot != metadata.slot || sidecar.SignedBlockHeader.Signature != metadata.signature || sidecar.KzgCommitment != metadata.commitments[sidecar.Index] {
 			return blobRecoveryInvalid
 		}
 		seen[sidecar.Index] = true
@@ -1563,7 +1561,7 @@ mainloop:
 					break
 				}
 				metadata := req.recovery(blockRoot)
-				if sidecar.Version() < clparams.GloasVersion && metadata != nil && metadata.hasSignature && sidecar.SignedBlockHeader.Signature != metadata.signature {
+				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
 					validResponse = false
 					break
 				}
