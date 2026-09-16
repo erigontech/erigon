@@ -29,12 +29,6 @@ func DefaultTrieConfig() TrieConfig {
 	}
 }
 
-func (c TrieConfig) Subtrie() TrieConfig {
-	s := c
-	s.DeferBranchUpdates = false
-	return s
-}
-
 func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 	if c.WarmupNumWorkers != 0 {
 		return c.WarmupNumWorkers

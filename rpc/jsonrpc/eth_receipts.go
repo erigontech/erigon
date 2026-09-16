@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
@@ -386,30 +387,34 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+			logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
 			if err != nil {
 				return nil, err
 			}
 			continue
 		}
 
-		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		r, ok, err := api.receiptsGenerator.PersistedReceipt(ctx, tx, header, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			continue
-		}
-
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
-		if err != nil {
-			return nil, err
+			var txn types.Transaction
+			if txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex); err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
+				return nil, err
+			}
 		}
 		if r == nil {
 			return nil, err
 		}
 
-		logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+		logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
 		if err != nil {
 			return nil, err
 		}
@@ -418,13 +423,20 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendRPCLogs(logs types.RPCLogs, filtered types.Logs, blockTime uint64, maxResults int) (types.RPCLogs, error) {
-	if maxResults != 0 && len(logs)+len(filtered) > maxResults {
+func appendRPCLogs(logs types.RPCLogs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.RPCLogs, error) {
+	// One entry past the cap is enough to detect the overflow without converting the rest.
+	// At math.MaxInt there is no such entry, so the append stays unlimited.
+	var limit int
+	if maxResults != 0 && maxResults != math.MaxInt {
+		limit = maxResults + 1
+	}
+	logs = receiptLogs.AppendFilteredRPCLogs(logs, addrMap, topicMap, blockTime, limit)
+	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 		}
 	}
-	return filtered.AppendRPCLogs(logs, blockTime), nil
+	return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -475,7 +487,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64,
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]any, error) {
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (*ethutils.RPCReceipt, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -554,7 +566,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 }
 
 // GetBlockReceipts - receipts for individual block
-func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]any, error) {
+func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethutils.RPCReceipt, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -596,7 +608,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	result := make([]map[string]any, 0, len(receipts))
+	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))

@@ -366,7 +366,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		codec.WriteJSON(ctx, errorMsg)
+		if err := codec.WriteJSON(ctx, errorMsg); err != nil {
+			s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+		}
 		return
 	}
 

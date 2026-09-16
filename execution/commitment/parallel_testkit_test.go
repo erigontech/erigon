@@ -398,3 +398,5 @@ func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 		}
 	}
 }
+
+func keyHasherNoop(key []byte) []byte { return key }

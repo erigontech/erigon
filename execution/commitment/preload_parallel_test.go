@@ -317,22 +317,6 @@ func TestPreloadParallel_DbHitsShadowFiles(t *testing.T) {
 	}
 }
 
-func TestNextSubtree(t *testing.T) {
-	cases := []struct{ in, want []byte }{
-		{[]byte{0x01, 0x02}, []byte{0x01, 0x03}},
-		{[]byte{0x01, 0xff}, []byte{0x02}},
-		{[]byte{0x00}, []byte{0x01}},
-	}
-	for _, c := range cases {
-		if got := NextSubtree(c.in); !bytes.Equal(got, c.want) {
-			t.Fatalf("NextSubtree(%x) = %x, want %x", c.in, got, c.want)
-		}
-	}
-	if NextSubtree([]byte{0xff, 0xff}) != nil {
-		t.Fatalf("NextSubtree(0xffff) should be nil")
-	}
-}
-
 func TestContractTrunkKeyRanges(t *testing.T) {
 	hashA := make([]byte, 32)
 	for i := range hashA {

@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,15 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !disable_libutp
-
-package downloadercfg
+package chaos_monkey
 
 import (
-	utp "github.com/anacrolix/go-libutp"
-	lg "github.com/anacrolix/log"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	utp.Logger.Handlers = []lg.Handler{noopHandler{}}
+func TestDeterministicFaultsAreIsolated(t *testing.T) {
+	for _, want := range []error{errors.New("first worker fault"), errors.New("second worker fault")} {
+		t.Run(want.Error(), func(t *testing.T) {
+			t.Parallel()
+			ctx := WithFaults(t.Context(), Faults{WorkerError: want})
+			require.ErrorIs(t, FaultsFromContext(ctx).WorkerError, want)
+		})
+	}
 }

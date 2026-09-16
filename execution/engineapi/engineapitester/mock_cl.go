@@ -426,12 +426,16 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 	for i, txn := range elPayload.Transactions {
 		txns[i] = txn
 	}
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if elPayload.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(elPayload.BaseFeePerGas))
+	}
 	header := &types.Header{
 		ParentHash:            elPayload.ParentHash,
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
+		BaseFee:               baseFee,
 		Extra:                 elPayload.ExtraData,
 		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),

@@ -58,12 +58,12 @@ func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 	copy(h[:], hash)
 
 	c.mu.Lock()
-	state, err := c.promoteLocked(context.Background(), h, 1, resolve, nil, nil)
+	state, err := c.promoteLocked(context.Background(), h, 1, resolve, nil)
 	c.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.usedBytes() == 0 {
+	if state.parallel.UsedBytes() == 0 {
 		t.Fatal("promote pinned nothing, so the metric assertions below would be vacuous")
 	}
 
@@ -83,17 +83,17 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	state, err := c.promoteLocked(context.Background(), h, 1, resolve, nil, nil)
+	state, err := c.promoteLocked(context.Background(), h, 1, resolve, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.queueRemaining() == 0 {
+	if state.parallel.QueueRemaining() == 0 {
 		t.Fatal("initial view drained the queue, so there is no extension to measure")
 	}
 
 	bytesBefore := mxPreloadBytesTotal.GetValue()
 
-	if err := c.runExtensionLocked(context.Background(), state, 2, 1<<20, resolve, nil, nil); err != nil {
+	if err := c.runExtensionLocked(context.Background(), state, 2, 1<<20, resolve, nil); err != nil {
 		t.Fatal(err)
 	}
 
