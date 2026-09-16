@@ -31,8 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -112,45 +111,25 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// fastJSONAppender is a fastJSONResult that encodes into a buffer reused across responses.
-type fastJSONAppender interface {
-	AppendFastJSON(dst []byte) ([]byte, error)
-}
-
-const maxPooledFastJSON = int(1 * datasize.MB)
-
-var fastJSONBufs = sync.Pool{New: func() any { return new([]byte) }}
-
-func appendFastJSON(w *responseWriter, r fastJSONAppender) error {
-	buf := fastJSONBufs.Get().(*[]byte)
-	defer fastJSONBufs.Put(buf)
-	enc, err := r.AppendFastJSON((*buf)[:0])
-	if cap(enc) <= maxPooledFastJSON {
-		*buf = enc[:0]
-	}
-	if err != nil {
-		return err
-	}
-	w.writeResult(enc)
-	return nil
+// jsonWriterTo is a result that cannot fail to encode, so it writes itself straight into the response stream.
+type jsonWriterTo interface {
+	WriteJSONTo(w hexutil.JSONWriter)
 }
 
 // writeResponse encodes result straight into stream as the success response and returns nil.
 // If result does not encode, nothing is written and the error response is returned instead.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
-	w := &responseWriter{stream: stream, id: msg.ID}
-	if fa, ok := result.(fastJSONAppender); ok {
-		if err := appendFastJSON(w, fa); err != nil {
-			return msg.errorResponse(err)
-		}
+	if wt, ok := result.(jsonWriterTo); ok {
+		writeResultField(stream, msg.ID)
+		wt.WriteJSONTo(stream)
 	} else if fm, ok := result.(fastJSONResult); ok {
 		enc, err := fm.MarshalFastJSON()
 		if err != nil {
 			return msg.errorResponse(err)
 		}
-		w.writeResult(enc)
-	} else if err := json.NewEncoder(w).Encode(result); err != nil {
+		writeResult(stream, msg.ID, enc)
+	} else if err := json.NewEncoder(&responseWriter{stream: stream, id: msg.ID}).Encode(result); err != nil {
 		return msg.errorResponse(err)
 	}
 	stream.WriteObjectEnd()
@@ -165,23 +144,27 @@ type responseWriter struct {
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
-	w.writeResult(bytes.TrimSuffix(b, []byte{'\n'}))
+	writeResult(w.stream, w.id, bytes.TrimSuffix(b, []byte{'\n'}))
 	return len(b), nil
 }
 
-func (w *responseWriter) writeResult(enc []byte) {
+func writeResult(stream jsonstream.Stream, id json.RawMessage, enc []byte) {
 	if len(enc) == 0 {
 		enc = null
 	}
-	w.stream.WriteObjectStart()
-	w.stream.WriteObjectField("jsonrpc")
-	w.stream.WriteString(vsn)
-	w.stream.WriteMore()
-	w.stream.WriteObjectField("id")
-	w.stream.WriteRawBytes(w.id)
-	w.stream.WriteMore()
-	w.stream.WriteObjectField("result")
-	w.stream.WriteRawBytes(enc)
+	writeResultField(stream, id)
+	stream.WriteRawBytes(enc)
+}
+
+func writeResultField(stream jsonstream.Stream, id json.RawMessage) {
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString(vsn)
+	stream.WriteMore()
+	stream.WriteObjectField("id")
+	stream.WriteRawBytes(id)
+	stream.WriteMore()
+	stream.WriteObjectField("result")
 }
 
 func errorMessage(err error) *jsonrpcMessage {

@@ -46,11 +46,18 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
-// AppendFastJSON appends b as a JSON string without the escape scan json does: hex never needs escaping.
-func (b Bytes) AppendFastJSON(dst []byte) ([]byte, error) {
-	dst = append(dst, `"`+HexPrefix...)
-	dst = hex.AppendEncode(dst, b)
-	return append(dst, '"'), nil
+// JSONWriter is what a value needs from a JSON stream to write itself without an intermediate
+// buffer, like json/v2's MarshalJSONTo does with a jsontext.Encoder.
+type JSONWriter interface {
+	AvailableBuffer() []byte
+	WriteRawBytes([]byte)
+}
+
+// WriteJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
+func (b Bytes) WriteJSONTo(w JSONWriter) {
+	enc := append(w.AvailableBuffer(), `"`+HexPrefix...)
+	enc = hex.AppendEncode(enc, b)
+	w.WriteRawBytes(append(enc, '"'))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

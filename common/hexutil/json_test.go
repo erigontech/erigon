@@ -79,13 +79,18 @@ func TestUnmarshalBytes(t *testing.T) {
 	}
 }
 
-func TestBytesAppendFastJSON(t *testing.T) {
+type sliceJSONWriter []byte
+
+func (w *sliceJSONWriter) AvailableBuffer() []byte { return (*w)[len(*w):] }
+func (w *sliceJSONWriter) WriteRawBytes(v []byte)  { *w = append(*w, v...) }
+
+func TestBytesWriteJSONTo(t *testing.T) {
 	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
 		want, err := json.Marshal(b)
 		require.NoError(t, err)
-		got, err := b.AppendFastJSON([]byte("keep"))
-		require.NoError(t, err)
-		require.Equal(t, "keep"+string(want), string(got))
+		w := sliceJSONWriter("keep")
+		b.WriteJSONTo(&w)
+		require.Equal(t, "keep"+string(want), string(w))
 	}
 }
 

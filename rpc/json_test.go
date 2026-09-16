@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -545,12 +546,14 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type appendedFastJSON string
+type streamedJSON string
 
-func (a appendedFastJSON) AppendFastJSON(dst []byte) ([]byte, error) { return append(dst, a...), nil }
+func (a streamedJSON) WriteJSONTo(w hexutil.JSONWriter) {
+	w.WriteRawBytes(append(w.AvailableBuffer(), a...))
+}
 
-func TestResponseAppendsFastJSON(t *testing.T) {
-	for _, result := range []appendedFastJSON{`"first-and-longer"`, `"2nd"`} {
+func TestResponseWritesJSONToStream(t *testing.T) {
+	for _, result := range []streamedJSON{`"first-and-longer"`, `"2nd"`} {
 		var out bytes.Buffer
 		s := jsonstream.Get(&out)
 		respond(s, json.RawMessage(`7`), result)

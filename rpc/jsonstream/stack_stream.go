@@ -64,6 +64,11 @@ func (s *StackStream) Buffer() []byte {
 	return s.stream.Buffer()
 }
 
+func (s *StackStream) AvailableBuffer() []byte {
+	buf := s.stream.Buffer()
+	return buf[len(buf):]
+}
+
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
@@ -78,6 +83,11 @@ func (s *StackStream) Reset(out io.Writer) {
 // FlushThreshold goes straight to the writer. Such a response commits the HTTP
 // status either way, since flushIfFull drains the buffer the moment this returns.
 func (s *StackStream) WriteRawBytes(content []byte) {
+	if buf := s.stream.Buffer(); len(content) > 0 && cap(buf)-len(buf) >= len(content) && &buf[:len(buf)+1][len(buf)] == &content[0] {
+		s.stream.SetBuffer(buf[:len(buf)+len(content)])
+		s.popCommaOrField()
+		return
+	}
 	if s.out != nil && len(content) >= FlushThreshold {
 		s.writeThrough(content)
 		s.popCommaOrField()
