@@ -1195,6 +1195,7 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	db := BaseCaseDB(t)
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	tx.Rollback()
 	tx.Rollback()
 
