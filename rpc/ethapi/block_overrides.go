@@ -40,6 +40,7 @@ type BlockOverrides struct {
 	Number        *hexutil.U256           `json:"number"`
 	Difficulty    *hexutil.U256           `json:"difficulty"`
 	Time          *hexutil.Uint64         `json:"time"`
+	SlotNumber    *hexutil.Uint64         `json:"slotNumber"`
 	GasLimit      *hexutil.Uint64         `json:"gasLimit"`
 	FeeRecipient  *common.Address         `json:"feeRecipient"`
 	PrevRandao    *common.Hash            `json:"prevRandao"`
@@ -77,6 +78,9 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 	if overrides.Time != nil {
 		context.Time = uint64(*overrides.Time)
+	}
+	if overrides.SlotNumber != nil {
+		context.SlotNumber = uint64(*overrides.SlotNumber)
 	}
 	if overrides.GasLimit != nil {
 		context.GasLimit = uint64(*overrides.GasLimit)
@@ -122,6 +126,10 @@ func (overrides *BlockOverrides) OverrideHeader(header *types.Header) *types.Hea
 	if overrides.Time != nil {
 		h.Time = uint64(*overrides.Time)
 	}
+	if overrides.SlotNumber != nil {
+		slotNumber := uint64(*overrides.SlotNumber)
+		h.SlotNumber = &slotNumber
+	}
 	if overrides.GasLimit != nil {
 		h.GasLimit = uint64(*overrides.GasLimit)
 	}
@@ -155,6 +163,9 @@ func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockCo
 	}
 	if overrides.Time != nil {
 		blockCtx.Time = uint64(*overrides.Time)
+	}
+	if overrides.SlotNumber != nil {
+		blockCtx.SlotNumber = uint64(*overrides.SlotNumber)
 	}
 	if overrides.GasLimit != nil {
 		blockCtx.GasLimit = uint64(*overrides.GasLimit)

@@ -20,6 +20,8 @@
 package protocol
 
 import (
+	"errors"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -31,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+var errRequiredSuccessTransactionFailed = errors.New("required-success transaction failed")
 
 type GasUsed struct {
 	Receipt        uint64 // Gas used with refunds (what the user pays) - see EIP-7778
@@ -56,7 +60,7 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	evm *vm.EVM, cfg vm.Config, requireSuccess bool) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
 		err     error
@@ -92,6 +96,9 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
+	if requireSuccess && result.Failed() {
+		return nil, errRequiredSuccessTransactionFailed
+	}
 	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, err
 	}
@@ -122,7 +129,17 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, false)
+}
+
+// ApplyTransactionWithRequiredSuccess rejects failed EVM execution before finalizing transaction state.
+func ApplyTransactionWithRequiredSuccess(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
+	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
+	header *types.Header, txn types.Transaction, gasUsed *GasUsed, cfg vm.Config,
+) (*types.Receipt, error) {
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
+	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, true)
 }
 
 func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
@@ -136,7 +153,7 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
 	cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, error) {
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, false)
 }
 
 func MakeReceipt(

@@ -171,7 +171,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	}
 	execCfg := StageBuilderExecCfg(
 		state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId,
-		txnProvider, b.blockReader, param.TransientPayload,
+		param.SlotNumber, param.ParentHash, param.privateBundleGeneration, txnProvider, b.blockReader, param.TransientPayload,
 	)
 	finishCfg := StageBuilderFinishCfg(
 		b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore, param.TransientPayload,

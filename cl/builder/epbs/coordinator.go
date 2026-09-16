@@ -630,6 +630,7 @@ func buildParameters(input SlotInput, preferences *cltypes.ProposerPreferences) 
 		ParentHash: input.ParentBlockHash, Timestamp: input.Timestamp, PrevRandao: input.PrevRandao,
 		SuggestedFeeRecipient: input.BuilderExecutionAddress, Withdrawals: withdrawals,
 		ParentBeaconBlockRoot: &parentRoot, SlotNumber: &slot, TargetGasLimit: &targetGasLimit,
+		ValidatedProposerContext: true,
 	}
 }
 

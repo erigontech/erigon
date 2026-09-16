@@ -74,6 +74,8 @@ type SimulationRequest struct {
 	TraceTransfers         bool             `json:"traceTransfers"`
 	Validation             bool             `json:"validation"`
 	ReturnFullTransactions bool             `json:"returnFullTransactions"`
+	strictTransactions     bool
+	strictBlobGasLimit     uint64
 }
 
 // SimulatedBlock defines the simulation for a single block.
@@ -101,6 +103,10 @@ type SimulationResult []SimulatedBlockResult
 
 // SimulateV1 implements the eth_simulateV1 JSON-RPC method.
 func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
+	return api.simulateV1(ctx, req, blockParameter, false)
+}
+
+func (api *APIImpl) simulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash, withOverlay bool) (SimulationResult, error) {
 	if len(req.BlockStateCalls) == 0 {
 		return nil, errors.New("empty input")
 	}
@@ -116,7 +122,13 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	var tx kv.TemporalTx
+	var err error
+	if withOverlay {
+		tx, err = api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	} else {
+		tx, err = api.db.BeginTemporalRo(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -208,20 +220,22 @@ func validateSimulationRequest(blocks []SimulatedBlock) error {
 }
 
 type simulator struct {
-	base              *types.Header
-	chainConfig       *chain.Config
-	dirs              datadir.Dirs
-	engine            protocolrules.EngineReader
-	txNumReader       rawdbv3.TxNumsReader
-	blockReader       dbservices.FullBlockReader
-	logger            log.Logger
-	gasPool           *protocol.GasPool
-	returnDataLimit   int
-	evmCallTimeout    time.Duration
-	commitmentHistory bool
-	traceTransfers    bool
-	validation        bool
-	fullTransactions  bool
+	base               *types.Header
+	chainConfig        *chain.Config
+	dirs               datadir.Dirs
+	engine             protocolrules.EngineReader
+	txNumReader        rawdbv3.TxNumsReader
+	blockReader        dbservices.FullBlockReader
+	logger             log.Logger
+	gasPool            *protocol.GasPool
+	returnDataLimit    int
+	evmCallTimeout     time.Duration
+	commitmentHistory  bool
+	traceTransfers     bool
+	validation         bool
+	fullTransactions   bool
+	strictTransactions bool
+	strictBlobGasLimit uint64
 }
 
 func newSimulator(
@@ -242,21 +256,27 @@ func newSimulator(
 	// (similar to eth_call's gas cap). Per-block gas limits are enforced separately via
 	// blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the total gas
 	// consumed across the entire simulation request.
+	gasBudget := gasCap
+	if req.strictTransactions {
+		gasBudget = uint64(math.MaxUint64 / 2)
+	}
 	return &simulator{
-		base:              header,
-		chainConfig:       chainConfig,
-		dirs:              dirs,
-		engine:            engine,
-		txNumReader:       txNumReader,
-		blockReader:       blockReader,
-		logger:            logger,
-		gasPool:           new(protocol.GasPool).AddGas(gasCap),
-		returnDataLimit:   returnDataLimit,
-		evmCallTimeout:    evmCallTimeout,
-		commitmentHistory: commitmentHistory,
-		traceTransfers:    req.TraceTransfers,
-		validation:        req.Validation,
-		fullTransactions:  req.ReturnFullTransactions,
+		base:               header,
+		chainConfig:        chainConfig,
+		dirs:               dirs,
+		engine:             engine,
+		txNumReader:        txNumReader,
+		blockReader:        blockReader,
+		logger:             logger,
+		gasPool:            new(protocol.GasPool).AddGas(gasBudget),
+		returnDataLimit:    returnDataLimit,
+		evmCallTimeout:     evmCallTimeout,
+		commitmentHistory:  commitmentHistory,
+		traceTransfers:     req.TraceTransfers,
+		validation:         req.Validation,
+		fullTransactions:   req.ReturnFullTransactions,
+		strictTransactions: req.strictTransactions,
+		strictBlobGasLimit: req.strictBlobGasLimit,
 	}
 }
 
@@ -388,7 +408,7 @@ func (s *simulator) sanitizeCall(
 		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
 		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
-	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
+	if !s.strictTransactions && gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
 
@@ -507,6 +527,7 @@ func (s *simulator) simulateBlock(
 	blockHashOverrides ethapi.BlockHashOverrides,
 ) (SimulatedBlockResult, *types.Block, error) {
 	header.ParentHash = parent.Hash()
+	s.resetStrictGasPool(header)
 	if s.chainConfig.IsLondon(header.Number.Uint64()) {
 		// In non-validation mode base fee is set to 0 if not overridden to avoid an edge case in EVM where gasPrice < baseFee.
 		if header.BaseFee == nil {
@@ -754,6 +775,37 @@ func (s *simulator) computeSimulatedStateRoot(
 	return nil
 }
 
+func (s *simulator) resetStrictGasPool(header *types.Header) {
+	if s.strictTransactions {
+		s.gasPool.Reset(header.GasLimit, s.strictBlobGasLimit)
+	}
+}
+
+func (s *simulator) callGasCap() uint64 {
+	if s.strictTransactions {
+		return 0
+	}
+	return s.gasPool.Gas()
+}
+
+func (s *simulator) messageFromCall(call *ethapi.CallArgs, baseFee *uint256.Int) (*types.Message, error) {
+	msg, err := call.ToMessage(s.callGasCap(), baseFee)
+	if err != nil {
+		return nil, err
+	}
+	msg.SetCheckNonce(s.validation)
+	msg.SetCheckTransaction(s.strictTransactions)
+	msg.SetCheckGas(s.strictTransactions)
+	return msg, nil
+}
+
+func simulationCallStatus(result *evmtypes.ExecutionResult, returnDataLimit int, strictTransactions bool) hexutil.Uint64 {
+	if result.Failed() || len(result.ReturnData) > returnDataLimit && !strictTransactions {
+		return hexutil.Uint64(types.ReceiptStatusFailed)
+	}
+	return hexutil.Uint64(types.ReceiptStatusSuccessful)
+}
+
 // simulateCall simulates a single call in the EVM using the given intra-block state and possibly tracing transfers.
 func (s *simulator) simulateCall(
 	ctx context.Context,
@@ -771,20 +823,18 @@ func (s *simulator) simulateCall(
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
 	defer cleanup()
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.callGasCap())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasPool.Gas(), &blockCtx.BaseFee)
+	msg, err := s.messageFromCall(call, &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
-	msg.SetCheckNonce(s.validation)
 	txCtx := protocol.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.callGasCap(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -798,7 +848,9 @@ func (s *simulator) simulateCall(
 	evm.SetPrecompiles(precompiles)
 	storeEVM(evm)
 
-	s.gasPool.AddBlobGas(msg.BlobGas())
+	if !s.strictTransactions {
+		s.gasPool.AddBlobGas(msg.BlobGas())
+	}
 	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
@@ -818,7 +870,11 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
+	callResult := CallResult{
+		GasUsed:    hexutil.Uint64(result.ReceiptGasUsed),
+		MaxUsedGas: hexutil.Uint64(result.MaxGasUsed),
+		Status:     simulationCallStatus(result, s.returnDataLimit, s.strictTransactions),
+	}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -828,13 +884,11 @@ func (s *simulator) simulateCall(
 		callResult.Logs = append(callResult.Logs, rpcLog)
 	}
 	if len(result.ReturnData) > s.returnDataLimit {
-		callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
 		callResult.ReturnData = "0x"
 		callResult.Error = rpc.NewJsonErrorFromErr(
 			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit))
 	} else {
 		if result.Failed() {
-			callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
 			callResult.ReturnData = "0x"
 			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				// If the result contains a revert reason, try to unpack and return it.
@@ -846,7 +900,6 @@ func (s *simulator) simulateCall(
 			}
 		} else {
 			// If the call was successful, we capture the return data, the gas used and logs.
-			callResult.Status = hexutil.Uint64(types.ReceiptStatusSuccessful)
 			callResult.ReturnData = fmt.Sprintf("0x%x", result.ReturnData)
 		}
 	}

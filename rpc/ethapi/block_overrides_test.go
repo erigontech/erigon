@@ -40,6 +40,7 @@ func TestOverride_AllFields(t *testing.T) {
 		Number:        bigHex(100),
 		Difficulty:    bigHex(200),
 		Time:          u64Hex(300),
+		SlotNumber:    u64Hex(350),
 		GasLimit:      u64Hex(400),
 		FeeRecipient:  &coinbase,
 		PrevRandao:    &prevRandao,
@@ -53,6 +54,7 @@ func TestOverride_AllFields(t *testing.T) {
 	assert.Equal(t, uint64(100), ctx.BlockNumber)
 	assert.Equal(t, *uint256.NewInt(200), ctx.Difficulty)
 	assert.Equal(t, uint64(300), ctx.Time)
+	assert.Equal(t, uint64(350), ctx.SlotNumber)
 	assert.Equal(t, uint64(400), ctx.GasLimit)
 	assert.Equal(t, accounts.InternAddress(coinbase), ctx.Coinbase)
 	assert.Equal(t, &prevRandao, ctx.PrevRanDao)
@@ -196,6 +198,7 @@ func TestOverrideHeader_AllFields(t *testing.T) {
 		Number:        bigHex(1000),
 		Difficulty:    bigHex(2000),
 		Time:          u64Hex(3000),
+		SlotNumber:    u64Hex(3500),
 		GasLimit:      u64Hex(4000),
 		FeeRecipient:  &coinbase,
 		BaseFeePerGas: bigHex(5000),
@@ -207,6 +210,8 @@ func TestOverrideHeader_AllFields(t *testing.T) {
 	assert.Equal(t, uint64(1000), result.Number.Uint64())
 	assert.Equal(t, uint64(2000), result.Difficulty.Uint64())
 	assert.Equal(t, uint64(3000), result.Time)
+	require.NotNil(t, result.SlotNumber)
+	assert.Equal(t, uint64(3500), *result.SlotNumber)
 	assert.Equal(t, uint64(4000), result.GasLimit)
 	assert.Equal(t, coinbase, result.Coinbase)
 	assert.Equal(t, uint256.NewInt(5000), result.BaseFee)
@@ -254,6 +259,7 @@ func TestOverrideBlockContext_AllFields(t *testing.T) {
 		Number:        bigHex(10),
 		Difficulty:    bigHex(20),
 		Time:          u64Hex(30),
+		SlotNumber:    u64Hex(35),
 		GasLimit:      u64Hex(40),
 		FeeRecipient:  &coinbase,
 		PrevRandao:    &prevRandao,
@@ -267,6 +273,7 @@ func TestOverrideBlockContext_AllFields(t *testing.T) {
 	assert.Equal(t, uint64(10), ctx.BlockNumber)
 	assert.Equal(t, *uint256.NewInt(20), ctx.Difficulty)
 	assert.Equal(t, uint64(30), ctx.Time)
+	assert.Equal(t, uint64(35), ctx.SlotNumber)
 	assert.Equal(t, uint64(40), ctx.GasLimit)
 	assert.Equal(t, accounts.InternAddress(coinbase), ctx.Coinbase)
 	assert.Equal(t, &prevRandao, ctx.PrevRanDao)

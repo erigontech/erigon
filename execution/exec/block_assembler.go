@@ -172,6 +172,8 @@ func (ba *BlockAssembler) AddTransactions(
 	coinbase accounts.Address,
 	vmConfig *vm.Config,
 	ibs *state.IntraBlockState,
+	requiresSuccess func(common.Hash) bool,
+	dependency func(common.Hash) (common.Hash, bool),
 	interrupt *atomic.Bool,
 	logPrefix string,
 	logger log.Logger) (types.Logs, bool, error) {
@@ -226,6 +228,12 @@ func (ba *BlockAssembler) AddTransactions(
 	}
 
 	gasUsed := &ba.gasUsed
+	included := make(map[common.Hash]struct{}, len(ba.Txns)+len(txns))
+	for i, txn := range ba.Txns {
+		if i >= len(ba.Receipts) || receiptSucceeded(ba.Receipts[i]) {
+			included[txn.Hash()] = struct{}{}
+		}
+	}
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
@@ -239,6 +247,7 @@ func (ba *BlockAssembler) AddTransactions(
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
 		defer ibs.PopSnapshot(snap)
+		gasSnapshot := *gasUsed
 
 		if txn.Type() == types.AccountAbstractionTxType {
 			aaTxn := txn.(*types.AccountAbstractionTransaction)
@@ -266,16 +275,24 @@ func (ba *BlockAssembler) AddTransactions(
 			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
+			if shouldDiscardFailedTransaction(txn.Hash(), receipt, requiresSuccess) {
+				*gasUsed = gasSnapshot
+				protocol.SetGasUsed(header, gasUsed)
+				ibs.RevertToSnapshot(snap, errRequiredSuccessTransactionFailed)
+				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
+				return nil, errRequiredSuccessTransactionFailed
+			}
 
 			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
 			return receipt.Logs, nil
 		}
 
-		// Snapshot cumulative gas so we can restore on tx failure.
-		gasSnapshot := *gasUsed
-
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
+		applyTransaction := protocol.ApplyTransaction
+		if requiresSuccess != nil && requiresSuccess(txn.Hash()) {
+			applyTransaction = protocol.ApplyTransactionWithRequiredSuccess
+		}
+		receipt, err := applyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
 			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
@@ -283,6 +300,13 @@ func (ba *BlockAssembler) AddTransactions(
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 			return nil, err
+		}
+		if shouldDiscardFailedTransaction(txn.Hash(), receipt, requiresSuccess) {
+			*gasUsed = gasSnapshot
+			protocol.SetGasUsed(header, gasUsed)
+			ibs.RevertToSnapshot(snap, errRequiredSuccessTransactionFailed)
+			gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
+			return nil, errRequiredSuccessTransactionFailed
 		}
 		protocol.SetGasUsed(header, gasUsed)
 
@@ -302,6 +326,10 @@ func (ba *BlockAssembler) AddTransactions(
 
 LOOP:
 	for _, txn := range txns {
+		if !transactionDependencySatisfied(txn.Hash(), included, dependency) {
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with missing dependency", logPrefix), "hash", txn.Hash())
+			continue
+		}
 		// see if we need to stop now
 		if stopped != nil {
 			select {
@@ -371,6 +399,9 @@ LOOP:
 		case err == nil:
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", ba.PayloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
+			if len(ba.Receipts) == 0 || receiptSucceeded(ba.Receipts[len(ba.Receipts)-1]) {
+				included[txn.Hash()] = struct{}{}
+			}
 			txnIdx++
 		default:
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
@@ -378,6 +409,28 @@ LOOP:
 	}
 
 	return coalescedLogs, done, nil
+}
+
+var errRequiredSuccessTransactionFailed = errors.New("required-success transaction reverted")
+
+func receiptSucceeded(receipt *types.Receipt) bool {
+	return receipt == nil || receipt.Status == types.ReceiptStatusSuccessful
+}
+
+func shouldDiscardFailedTransaction(hash common.Hash, receipt *types.Receipt, requiresSuccess func(common.Hash) bool) bool {
+	return receipt != nil && receipt.Status == types.ReceiptStatusFailed && requiresSuccess != nil && requiresSuccess(hash)
+}
+
+func transactionDependencySatisfied(hash common.Hash, included map[common.Hash]struct{}, dependency func(common.Hash) (common.Hash, bool)) bool {
+	if dependency == nil {
+		return true
+	}
+	target, dependent := dependency(hash)
+	if !dependent {
+		return true
+	}
+	_, ok := included[target]
+	return ok
 }
 
 func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {

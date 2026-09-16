@@ -22,6 +22,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -32,6 +33,7 @@ type TxnProvider interface {
 	//   - WithAmount
 	//   - WithGasTarget
 	//   - WithTxnIdsFilter
+	//   - WithIncludedTxnIds
 	//   - WithAvailableRlpSpace
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
@@ -42,7 +44,13 @@ type RevisionedTxnProvider interface {
 	TransactionSetRevision(blockTime, parentBlockNum uint64) uint64
 }
 
+type TransactionPolicy struct {
+	RequiresSuccess bool
+	Dependency      common.Hash
+}
+
 type txnRevisionObserverKey struct{}
+type txnPolicyObserverKey struct{}
 
 // WithTxnRevisionObserver records the provider snapshot used by a block build.
 func WithTxnRevisionObserver(ctx context.Context, observer func(uint64)) context.Context {
@@ -60,6 +68,20 @@ func ObserveTxnRevision(ctx context.Context, revision uint64) {
 	}
 }
 
+func WithTxnPolicyObserver(ctx context.Context, observer func(map[common.Hash]TransactionPolicy)) context.Context {
+	if observer == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, txnPolicyObserverKey{}, observer)
+}
+
+func ObserveTxnPolicies(ctx context.Context, policies map[common.Hash]TransactionPolicy) {
+	observer, ok := ctx.Value(txnPolicyObserverKey{}).(func(map[common.Hash]TransactionPolicy))
+	if ok {
+		observer(policies)
+	}
+}
+
 type ProvideOption func(opt *ProvideOptions)
 
 func WithParentBlockNum(blockNum uint64) ProvideOption {
@@ -71,6 +93,24 @@ func WithParentBlockNum(blockNum uint64) ProvideOption {
 func WithBlockTime(blockTime uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.BlockTime = blockTime
+	}
+}
+
+func WithTargetSlot(slot uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.TargetSlot = slot
+	}
+}
+
+func WithTargetParentHash(parentHash common.Hash) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.TargetParentHash = parentHash
+	}
+}
+
+func WithTargetGeneration(generation uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.TargetGeneration = generation
 	}
 }
 
@@ -92,6 +132,12 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 	}
 }
 
+func WithIncludedTxnIds(includedTxnIds mapset.Set[[32]byte]) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.IncludedTxnIds = includedTxnIds
+	}
+}
+
 func WithAvailableRlpSpace(size int) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.AvailableRlpSpace = size
@@ -101,9 +147,13 @@ func WithAvailableRlpSpace(size int) ProvideOption {
 type ProvideOptions struct {
 	BlockTime         uint64
 	ParentBlockNum    uint64
+	TargetSlot        uint64
+	TargetParentHash  common.Hash
+	TargetGeneration  uint64
 	Amount            int
 	GasTarget         mdgas.FullMdGas
 	TxnIdsFilter      mapset.Set[[32]byte]
+	IncludedTxnIds    mapset.Set[[32]byte]
 	AvailableRlpSpace int
 }
 
@@ -119,6 +169,7 @@ var defaultProvideOptions = ProvideOptions{
 	ParentBlockNum:    0,           // no parent block to wait for by default
 	Amount:            math.MaxInt, // all transactions by default
 	GasTarget:         mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64),
-	TxnIdsFilter:      nil,         // no filter by default
+	TxnIdsFilter:      nil, // no filter by default
+	IncludedTxnIds:    nil,
 	AvailableRlpSpace: math.MaxInt, // unlimited by default
 }

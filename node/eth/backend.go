@@ -116,6 +116,7 @@ import (
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/privatepool"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -187,6 +188,8 @@ type Ethereum struct {
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
+	privateBundlePool         *privatepool.Pool
+	privateBundleContexts     *builder.BuildContextStore
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
@@ -782,6 +785,14 @@ func New(
 		)
 		txnProvider = backend.shutterPool
 	}
+	if config.CaplinConfig.EpbsBuilder.Enabled {
+		if txnProvider == nil {
+			return nil, errors.New("embedded ePBS builder private bundles require the transaction pool")
+		}
+		backend.privateBundleContexts = builder.NewBuildContextStore()
+		backend.privateBundlePool = privatepool.New(txnProvider, 1024, privatepool.WithContextActive(backend.privateBundleContexts.IsContextActive))
+		txnProvider = backend.privateBundlePool
+	}
 
 	blkBuilder := builder.NewBuilder(
 		backend.chainDB,
@@ -914,6 +925,10 @@ func New(
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
+	buildBlock := blkBuilder.Build
+	if backend.privateBundleContexts != nil {
+		buildBlock = backend.privateBundleContexts.Wrap(buildBlock)
+	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -921,7 +936,7 @@ func New(
 		pipelineExecutor,
 		currentBlockNumber,
 		chainConfig,
-		blkBuilder.Build,
+		buildBlock,
 		hook,
 		accum,
 		execmoduleCache,
@@ -1135,6 +1150,17 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// RPC server and MCP share the BaseApi block/receipt caches instead of
 	// each holding their own.
 	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
+	if s.privateBundlePool != nil {
+		builderBaseAPI := jsonrpc.NewBaseApi(s.rpcFilters, s.rpcDaemonStateCache, blockReader, s.engine, jsonrpc.NewBaseApiConfig(&httpRpcCfg))
+		builderEthAPI := jsonrpc.NewEthAPI(builderBaseAPI, chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, jsonrpc.NewEthApiConfig(&httpRpcCfg), s.logger)
+		bundleSimulator := jsonrpc.NewPrivateBundleSimulator(builderEthAPI, chainConfig, s.privateBundleContexts, s.privateBundlePool, config.Builder.MaxBlobsPerBlock)
+		allAPIs = append(allAPIs, rpc.API{
+			Namespace: "builder",
+			Public:    false,
+			Service:   jsonrpc.BuilderAPI(jsonrpc.NewBuilderAPI(s.privateBundlePool, chainConfig, bundleSimulator, s.privateBundleContexts)),
+			Version:   "1.0",
+		})
+	}
 	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
 
 	if config.MCPAddress != "" {

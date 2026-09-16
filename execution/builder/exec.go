@@ -19,6 +19,7 @@ package builder
 import (
 	context0 "context"
 	"fmt"
+	"maps"
 	"sync/atomic"
 	"time"
 
@@ -58,6 +59,9 @@ type BuilderExecCfg struct {
 	tmpdir           string
 	interrupt        *atomic.Bool
 	payloadId        uint64
+	targetSlot       *uint64
+	targetParentHash common.Hash
+	targetGeneration uint64
 	txnProvider      txnprovider.TxnProvider
 	transientPayload bool
 }
@@ -71,6 +75,9 @@ func StageBuilderExecCfg(
 	tmpdir string,
 	interrupt *atomic.Bool,
 	payloadId uint64,
+	targetSlot *uint64,
+	targetParentHash common.Hash,
+	targetGeneration uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader dbservices.FullBlockReader,
 	transientPayload bool,
@@ -85,6 +92,9 @@ func StageBuilderExecCfg(
 		tmpdir:           tmpdir,
 		interrupt:        interrupt,
 		payloadId:        payloadId,
+		targetSlot:       targetSlot,
+		targetParentHash: targetParentHash,
+		targetGeneration: targetGeneration,
 		txnProvider:      txnProvider,
 		transientPayload: transientPayload,
 	}
@@ -180,18 +190,30 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
+	policies := make(map[common.Hash]txnprovider.TransactionPolicy)
+	ctx = txnprovider.WithTxnPolicyObserver(ctx, func(observed map[common.Hash]txnprovider.TransactionPolicy) {
+		maps.Copy(policies, observed)
+	})
+	requiresSuccess := func(hash common.Hash) bool {
+		policy, ok := policies[hash]
+		return ok && policy.RequiresSuccess
+	}
+	dependency := func(hash common.Hash) (common.Hash, bool) {
+		policy, ok := policies[hash]
+		return policy.Dependency, ok && policy.Dependency != (common.Hash{})
+	}
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, policies, logger, filtration)
 		if err != nil {
 			return err
 		}
 
 		if len(txns) > 0 {
-			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
+			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, requiresSuccess, dependency, interrupt, logPrefix, logger)
 			if err != nil {
 				return err
 			}
@@ -288,9 +310,11 @@ func getNextTransactions(
 	alreadyYielded mapset.Set[[32]byte],
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
+	policies map[common.Hash]txnprovider.TransactionPolicy,
 	logger log.Logger,
 	stats *filtrationStats,
 ) ([]types.Transaction, error) {
+	clear(policies)
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -301,6 +325,7 @@ func getNextTransactions(
 		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
+	includedTxnIds := successfulTxnIds(cfg.builderState.BuiltBlock)
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
@@ -313,7 +338,15 @@ func getNextTransactions(
 			remainingBlobGas,
 		)),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
+		txnprovider.WithIncludedTxnIds(includedTxnIds),
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
+	}
+	if cfg.targetSlot != nil {
+		provideOpts = append(provideOpts,
+			txnprovider.WithTargetSlot(*cfg.targetSlot),
+			txnprovider.WithTargetParentHash(cfg.targetParentHash),
+			txnprovider.WithTargetGeneration(cfg.targetGeneration),
+		)
 	}
 
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
@@ -322,7 +355,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
+	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, policies, includedTxnIds, logger, stats)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +392,19 @@ func getNextTransactions(
 	}
 
 	return txns, nil
+}
+
+func successfulTxnIds(block *exec.AssembledBlock) mapset.Set[[32]byte] {
+	included := mapset.NewSet[[32]byte]()
+	if block == nil {
+		return included
+	}
+	for i, txn := range block.Txns {
+		if i >= len(block.Receipts) || block.Receipts[i] == nil || block.Receipts[i].Status == types.ReceiptStatusSuccessful {
+			included.Add(txn.Hash())
+		}
+	}
+	return included
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a
@@ -399,10 +445,14 @@ func (s *filtrationStats) logArgs() []any {
 	return args
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger, stats *filtrationStats) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, policies map[common.Hash]txnprovider.TransactionPolicy, includedTxnIds mapset.Set[[32]byte], logger log.Logger, stats *filtrationStats) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
+	acceptedTxnIds := mapset.NewSet[[32]byte]()
+	for _, hash := range includedTxnIds.ToSlice() {
+		acceptedTxnIds.Add(hash)
+	}
 
 	missedTxs := 0
 	badChainId := 0
@@ -415,6 +465,18 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	overflowCnt := 0
 	for len(transactions) > 0 && missedTxs != len(transactions) {
 		transaction := transactions[0]
+		if policy, ok := policies[transaction.Hash()]; ok && policy.Dependency != (common.Hash{}) {
+			if acceptedTxnIds.Contains(policy.Dependency) {
+				filtered = append(filtered, transaction)
+				acceptedTxnIds.Add(transaction.Hash())
+				transactions = transactions[1:]
+				missedTxs = 0
+			} else {
+				missedTxs++
+				transactions = append(transactions[1:], transaction)
+			}
+			continue
+		}
 		transactionChainId := transaction.GetChainID()
 		if !transactionChainId.IsZero() && transactionChainId.Cmp(chainID) != 0 {
 			transactions = transactions[1:]
@@ -516,6 +578,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		}
 		// Mark transaction as valid
 		filtered = append(filtered, transaction)
+		acceptedTxnIds.Add(transaction.Hash())
 		transactions = transactions[1:]
 	}
 	logger.Debug("Filtration", "initial", initialCnt, "noSender", noSenderCnt, "noAccount", noAccountCnt, "nonceTooLow", nonceTooLowCnt, "nonceTooHigh", missedTxs, "senderNotEOA", notEOACnt, "feeTooLow", feeTooLowCnt, "overflow", overflowCnt, "balanceTooLow", balanceTooLowCnt, "badChainID", badChainId, "filtered", len(filtered))

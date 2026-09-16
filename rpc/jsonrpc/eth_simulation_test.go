@@ -19,7 +19,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -504,6 +506,139 @@ func TestNewSimulatorZeroGasCap(t *testing.T) {
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
 	assert.Equal(t, uint64(0), sim.gasPool.Gas())
+}
+
+func TestStrictSimulatorPreservesTransactionGasAndChecks(t *testing.T) {
+	req := &SimulationRequest{Validation: true, strictTransactions: true}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
+	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 25_000, 1024, 0, false)
+	requestedGas := hexutil.Uint64(30_000)
+	call := ethapi.CallArgs{Gas: &requestedGas}
+
+	msg, err := sim.messageFromCall(&call, uint256.NewInt(1))
+	require.NoError(t, err)
+	require.Equal(t, uint64(requestedGas), msg.Gas())
+	require.True(t, msg.CheckNonce())
+	require.True(t, msg.CheckTransaction())
+	require.True(t, msg.CheckGas())
+}
+
+func TestStrictSimulatorDefersMultidimensionalGasChecksToGasPool(t *testing.T) {
+	sim := newTestSimulator(uint256.NewInt(1))
+	sim.strictTransactions = true
+	firstGas := hexutil.Uint64(20_000_000)
+	secondGas := hexutil.Uint64(20_000_000)
+	first := callArgs()
+	first.Gas = &firstGas
+	second := callArgs()
+	second.Gas = &secondGas
+	bc := blockCtx(30_000_000)
+
+	require.NoError(t, sim.sanitizeCall(&first, nil, &bc, nil, 0, 0))
+	require.NoError(t, sim.sanitizeCall(&second, nil, &bc, nil, 20_000_000, 0))
+}
+
+func TestStrictSimulatorResetsExactBlockBudgets(t *testing.T) {
+	req := &SimulationRequest{strictTransactions: true, strictBlobGasLimit: 262_144}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
+	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 1, 1024, 0, false)
+
+	sim.resetStrictGasPool(&types.Header{GasLimit: 30_000_000})
+	require.Equal(t, uint64(30_000_000), sim.gasPool.ExecutionGasAvailable())
+	require.Equal(t, uint64(30_000_000), sim.gasPool.StateGasAvailable())
+	require.Equal(t, uint64(262_144), sim.gasPool.BlobGas())
+}
+
+func TestStrictSimulationEnforcesAggregateBlobBudget(t *testing.T) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+	gas := hexutil.Uint64(1_000_000)
+	feeCap := (*hexutil.U256)(uint256.NewInt(2_000_000_000))
+	tipCap := (*hexutil.U256)(uint256.NewInt(1))
+	blobFeeCap := (*hexutil.U256)(uint256.NewInt(1_000_000_000_000))
+	call := func() ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:                 &bankAddress,
+			To:                   &receiverAddress,
+			Gas:                  &gas,
+			MaxFeePerGas:         feeCap,
+			MaxPriorityFeePerGas: tipCap,
+			MaxFeePerBlobGas:     blobFeeCap,
+			BlobVersionedHashes:  []common.Hash{{1}},
+		}
+	}
+
+	_, err := api.simulateV1(t.Context(), SimulationRequest{
+		BlockStateCalls:    []SimulatedBlock{{Calls: []ethapi.CallArgs{call(), call()}}},
+		Validation:         true,
+		strictTransactions: true,
+		strictBlobGasLimit: params.GasPerBlob,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), false)
+	require.ErrorContains(t, err, protocol.ErrBlobGasLimitReached.Error())
+}
+
+func TestStrictSimulationEnforcesAggregateExecutionAndStateBudgets(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+	feeCap := (*hexutil.U256)(uint256.NewInt(2_000_000_000))
+	tipCap := (*hexutil.U256)(uint256.NewInt(1))
+	call := func(gas uint64, data hexutil.Bytes) ethapi.CallArgs {
+		gasJSON := hexutil.Uint64(gas)
+		return ethapi.CallArgs{
+			From:                 &bankAddress,
+			To:                   &contractAddress,
+			Gas:                  &gasJSON,
+			Data:                 &data,
+			MaxFeePerGas:         feeCap,
+			MaxPriorityFeePerGas: tipCap,
+		}
+	}
+
+	t.Run("execution", func(t *testing.T) {
+		gasLimit := hexutil.Uint64(30_000_000)
+		loopCode := hexutil.Bytes{0x5b, 0x60, 0x00, 0x56}
+		first := call(20_000_000, nil)
+		second := call(20_000_000, nil)
+		_, err := api.simulateV1(t.Context(), SimulationRequest{
+			BlockStateCalls: []SimulatedBlock{{
+				BlockOverrides: &ethapi.BlockOverrides{GasLimit: &gasLimit},
+				StateOverrides: &ethapi.StateOverrides{
+					accounts.InternAddress(contractAddress): {Code: &loopCode},
+				},
+				Calls: []ethapi.CallArgs{first, second},
+			}},
+			Validation:         true,
+			strictTransactions: true,
+		}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), false)
+		require.ErrorContains(t, err, protocol.ErrGasLimitReached.Error())
+	})
+
+	t.Run("state", func(t *testing.T) {
+		gasLimit := hexutil.Uint64(500_000)
+		data := hexutil.Bytes(contractInvocationData(42))
+		first := call(400_000, data)
+		second := call(400_000, data)
+		_, err := api.simulateV1(t.Context(), SimulationRequest{
+			BlockStateCalls: []SimulatedBlock{{
+				BlockOverrides: &ethapi.BlockOverrides{GasLimit: &gasLimit},
+				Calls:          []ethapi.CallArgs{first, second},
+			}},
+			Validation:         true,
+			strictTransactions: true,
+		}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), false)
+		require.ErrorContains(t, err, protocol.ErrGasLimitReached.Error())
+	})
+}
+
+func TestStrictSimulationReturnDataLimitDoesNotChangeExecutionStatus(t *testing.T) {
+	result := &evmtypes.ExecutionResult{ReturnData: []byte{0x01, 0x02}}
+	require.Equal(t, hexutil.Uint64(types.ReceiptStatusFailed), simulationCallStatus(result, 1, false))
+	require.Equal(t, hexutil.Uint64(types.ReceiptStatusSuccessful), simulationCallStatus(result, 1, true))
+
+	result.Err = errors.New("reverted")
+	require.Equal(t, hexutil.Uint64(types.ReceiptStatusFailed), simulationCallStatus(result, 10, true))
 }
 
 // ─── SimulationRequest validation tests ──────────────────────────────────────

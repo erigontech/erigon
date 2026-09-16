@@ -245,6 +245,7 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	require.Equal(t, input.ParentBlockRoot, *assembler.parameters.ParentBeaconBlockRoot)
 	require.Equal(t, input.Slot, *assembler.parameters.SlotNumber)
 	require.Equal(t, input.ValidatedPreferences.Message.TargetGasLimit, *assembler.parameters.TargetGasLimit)
+	require.True(t, assembler.parameters.ValidatedProposerContext)
 
 	identity := PayloadIdentity{
 		Slot:            input.Slot,
