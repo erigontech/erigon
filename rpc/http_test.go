@@ -478,3 +478,34 @@ func TestReadAllBodyError(t *testing.T) {
 type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// A response still whole in the buffer carries Content-Length, so net/http sends it unchunked. One that
+// outgrew the buffer has already started streaming and stays chunked.
+func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("big", largeRespService{4 * jsonstream.FlushThreshold}))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	post := func(body string) (contentLength int64, transferEncoding []string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, err = io.Copy(io.Discard, resp.Body)
+		require.NoError(t, err)
+		return resp.ContentLength, resp.TransferEncoding
+	}
+
+	length, encoding := post(`{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1,{"S":"y"}]}`)
+	require.Positive(t, length)
+	require.Empty(t, encoding)
+
+	length, encoding = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
+	require.Equal(t, int64(-1), length)
+	require.Equal(t, []string{"chunked"}, encoding)
+}

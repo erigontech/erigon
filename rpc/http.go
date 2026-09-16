@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,8 +359,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
 	var stream jsonstream.Stream
+	var sent *sentWriter
 	if !s.disableStreaming {
-		stream = jsonstream.Get(w)
+		sent = &sentWriter{w: w}
+		stream = jsonstream.Get(sent)
 		defer jsonstream.Put(stream)
 	}
 
@@ -373,6 +376,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.disableStreaming {
+		// A response still whole in the buffer gets its length, so net/http sends it unchunked: no chunk
+		// framing, one write less, and the client can size its buffer up front.
+		if !sent.sent {
+			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
+		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already
 		// buffered in the stream. Set 503 before flushing so the status is correct.
 		if *overloaded {
@@ -458,4 +466,16 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	return false
+}
+
+// sentWriter records whether any of the response has reached the client: what is still whole in the stream
+// buffer can be given a length, what has started streaming cannot.
+type sentWriter struct {
+	w    io.Writer
+	sent bool
+}
+
+func (s *sentWriter) Write(p []byte) (int, error) {
+	s.sent = true
+	return s.w.Write(p)
 }
