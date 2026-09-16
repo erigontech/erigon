@@ -3041,16 +3041,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.number(), txVersion.TxIndex, txVersion.Incarnation)
 		}
 
-		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Caveat: the tip write is stamped at the
-		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-		// downstream tx that read coinbase via versionMap between the worker
-		// write and the tip write records the same Version the validator
-		// observes — the version-only validator will NOT catch that case.
-		// In practice this is unusual: only sender==coinbase produces a
-		// worker coinbase write, and downstream BALANCE(coinbase) reads
-		// across this window are rare. Value-aware validation would close
-		// the gap if it surfaces.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
