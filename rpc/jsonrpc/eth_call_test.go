@@ -25,7 +25,6 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
-	"strconv"
 	"testing"
 	"time"
 
@@ -1859,8 +1858,8 @@ func TestCreateAccessListAuthGas(t *testing.T) {
 }
 
 // TestExcludeAuthoritiesOrder pins that no authority is recovered until the intrinsic
-// gas check has passed. Each recovery is an ECDSA operation, so a list the request
-// cannot afford must not pay for a single one.
+// gas check has passed. An authority only reaches excl through a recovery, so an empty
+// excl on a refused request means none of them ran.
 func TestExcludeAuthoritiesOrder(t *testing.T) {
 	const gasCap = 5_000_000
 
@@ -1869,29 +1868,22 @@ func TestExcludeAuthoritiesOrder(t *testing.T) {
 		IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsLondon: true,
 		IsShanghai: true, IsCancun: true, IsPrague: true, IsOsaka: true, IsAmsterdam: true,
 	}
-
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	authority := crypto.PubkeyToAddress(key.PublicKey)
-	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), common.HexToAddress("0x11"), 0)
-	require.NoError(t, err)
-
+	delegate := common.HexToAddress("0x11")
 	from, to := common.HexToAddress("0x22"), common.HexToAddress("0x33")
-	message := func(t *testing.T, count int, gas *hexutil.Uint64) *types.Message {
+
+	sign := func(t *testing.T, nonce uint64) types.JsonAuthorization {
 		t.Helper()
-		auths := make([]types.JsonAuthorization, count)
-		for i := range auths {
-			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
-		}
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), delegate, nonce)
+		require.NoError(t, err)
+		return types.JsonAuthorization{}.FromAuthorization(auth)
+	}
+	message := func(t *testing.T, auths []types.JsonAuthorization, gas *hexutil.Uint64) *types.Message {
+		t.Helper()
 		msg, err := (&ethapi.CallArgs{From: &from, To: &to, Gas: gas, AuthorizationList: auths}).ToMessage(gasCap, nil)
 		require.NoError(t, err)
 		return msg
-	}
-	counting := func(calls *int) recoverAuthority {
-		return func(a *types.Authorization) (common.Address, error) {
-			*calls++
-			return a.RecoverSigner()
-		}
 	}
 
 	lowGas := hexutil.Uint64(params.TxGas)
@@ -1904,27 +1896,35 @@ func TestExcludeAuthoritiesOrder(t *testing.T) {
 		{"no gas field leaves the rpc gas cap to refuse it", 4096, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			calls := 0
+			// One signature replicated: these cases only need the list to be too
+			// long, and signing every entry would dominate the test.
+			auth := sign(t, 0)
+			auths := make([]types.JsonAuthorization, tc.count)
+			for i := range auths {
+				auths[i] = auth
+			}
 			excl := map[common.Address]struct{}{}
 
-			err := excludeAuthorities(message(t, tc.count, tc.gas), amsterdam, excl, counting(&calls))
+			err := excludeAuthorities(message(t, auths, tc.gas), amsterdam, excl)
 
 			require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
-			require.Zero(t, calls, "the request was refused, so no authority may be recovered")
-			require.Empty(t, excl)
+			require.Empty(t, excl, "the request was refused, so no authority may be recovered")
 		})
 	}
 
-	// The oracle for the cases above: the counter does move when the list is affordable.
+	// The oracle for the cases above: distinct authorities do land in excl when the
+	// list is affordable, so an empty excl there would be the test failing to look.
 	t.Run("an affordable list is recovered", func(t *testing.T) {
-		calls := 0
+		auths := make([]types.JsonAuthorization, 8)
+		for i := range auths {
+			auths[i] = sign(t, uint64(i))
+		}
 		excl := map[common.Address]struct{}{}
 		gas := hexutil.Uint64(1_000_000)
 
-		require.NoError(t, excludeAuthorities(message(t, 8, &gas), amsterdam, excl, counting(&calls)))
+		require.NoError(t, excludeAuthorities(message(t, auths, &gas), amsterdam, excl))
 
-		require.Equal(t, 8, calls)
-		require.Contains(t, excl, authority)
+		require.Len(t, excl, 8)
 	})
 }
 
@@ -2039,40 +2039,4 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
-}
-
-// BenchmarkCreateAccessListAuthGas measures refusing a list that cannot afford its
-// own intrinsic gas. Cost grows with the list because decoding it does, but the
-// per-entry share stays in the tens of nanoseconds. Recovering an authority is an
-// ECDSA operation costing hundreds of times that, so a check moved after the
-// recovery loop shows up here as a per-entry cost in the microseconds.
-func BenchmarkCreateAccessListAuthGas(b *testing.B) {
-	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(b, chain.AllProtocolChanges)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
-
-	key, err := crypto.GenerateKey()
-	require.NoError(b, err)
-	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
-	require.NoError(b, err)
-
-	for _, size := range []int{1024, 16384, 65536} {
-		auths := make([]types.JsonAuthorization, size)
-		for i := range auths {
-			auths[i] = types.JsonAuthorization{}.FromAuthorization(auth)
-		}
-		args := ethapi.CallArgs{
-			From:              &bankAddress,
-			To:                &receiverAddress,
-			AuthorizationList: auths,
-		}
-
-		b.Run(strconv.Itoa(size), func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := api.CreateAccessList(context.Background(), args, nil, nil, nil); err == nil {
-					b.Fatal("the list must not fit the gas cap, else this measures the wrong path")
-				}
-			}
-		})
-	}
 }

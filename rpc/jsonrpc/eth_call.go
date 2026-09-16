@@ -900,14 +900,10 @@ type accessListResult struct {
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
-// recoverAuthority is types.Authorization.RecoverSigner, taken as a parameter so a
-// test can count the calls.
-type recoverAuthority func(*types.Authorization) (common.Address, error)
-
 // excludeAuthorities adds the message's EIP-7702 authorities to excl, which the state
 // transition pre-warms. Each one costs an ECDSA recovery, so a list that cannot cover
 // its intrinsic gas is refused before any of them runs.
-func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}, recoverSigner recoverAuthority) error {
+func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}) error {
 	if err := checkIntrinsicGas(msg, chainRules); err != nil {
 		return err
 	}
@@ -917,7 +913,7 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 		if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(chainRules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 			continue
 		}
-		authority, err := recoverSigner(auth)
+		authority, err := auth.RecoverSigner()
 		if err != nil {
 			continue
 		}
@@ -1074,7 +1070,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if err != nil {
 			return nil, err
 		}
-		if err := excludeAuthorities(msg, blockCtx.Rules(chainConfig), excl, (*types.Authorization).RecoverSigner); err != nil {
+		if err := excludeAuthorities(msg, blockCtx.Rules(chainConfig), excl); err != nil {
 			return nil, err
 		}
 	}
