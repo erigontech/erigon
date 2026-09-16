@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -135,9 +136,11 @@ func (l corkListener) Accept() (net.Conn, error) {
 
 type corkConn struct {
 	net.Conn
-	mu           sync.Mutex
-	buf          []byte
-	uncorked     bool
+	mu  sync.Mutex
+	buf []byte
+	// uncorked is read without the lock: a hijacked connection carries concurrent reads and writes, which
+	// must not wait on each other through the cork.
+	uncorked     atomic.Bool
 	writeTimeout time.Duration
 	// failed records a flush that never reached the socket. net/http has already counted those bytes as
 	// written, so the response cannot be completed: the connection must not serve anything else.
@@ -145,13 +148,13 @@ type corkConn struct {
 }
 
 func (c *corkConn) Write(p []byte) (int, error) {
+	if c.uncorked.Load() {
+		return c.Conn.Write(p)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.failed != nil {
 		return 0, c.failed
-	}
-	if c.uncorked {
-		return c.Conn.Write(p)
 	}
 	if len(p) >= corkBufferBytes {
 		if err := c.flushLocked(); err != nil {
@@ -171,7 +174,9 @@ func (c *corkConn) Write(p []byte) (int, error) {
 // Read flushes first: the peer may be waiting for what is buffered before it sends anything more - a
 // TLS handshake record, a "100 Continue", or the previous response on a keep-alive connection.
 func (c *corkConn) Read(p []byte) (int, error) {
-	c.flush()
+	if !c.uncorked.Load() {
+		c.flush()
+	}
 	return c.Conn.Read(p)
 }
 
@@ -214,8 +219,8 @@ func (c *corkConn) flush() error {
 func (c *corkConn) uncork() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.uncorked = true
 	_ = c.flushLocked() // the handler owns the connection; a failed flush surfaces on its next write
+	c.uncorked.Store(true)
 }
 
 func (c *corkConn) flushLocked() error {

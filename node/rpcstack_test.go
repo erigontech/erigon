@@ -674,3 +674,23 @@ func TestCorkConnForwardsCloseWrite(t *testing.T) {
 	require.True(t, half.closedWrite)
 	require.Equal(t, 1, half.writes, "the buffer reaches the peer before the half-close")
 }
+
+// A hijacked connection carries concurrent reads and writes (WebSocket), so its writes must not wait on the
+// cork lock: a writer blocked on a slow peer would otherwise stall the reader.
+func TestCorkConnUncorkedWritesWithoutTheLock(t *testing.T) {
+	c := &corkConn{Conn: &writeCountingConn{}}
+	c.uncork()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.Write([]byte("frame"))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hijacked write waited for the cork lock")
+	}
+}
