@@ -73,6 +73,11 @@ type commitmentCalculator struct {
 	// updates is the calculator's OWN buffer — only this goroutine touches it.
 	updates *commitment.Updates
 
+	// spare is the other half of the compute buffer ring. handOffUpdates gives
+	// updates to the compute for it to drain, and rotates this one in; the compute
+	// drains synchronously, so by the next rotation the handed-off buffer is idle.
+	spare *commitment.Updates
+
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// to avoid reallocating a fresh prefix-trie arena each block.
 	balUpdates *commitment.Updates
@@ -183,8 +188,10 @@ func newCommitmentCalculator(
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
+	spareUpdates := sdCtxUpdates.NewEmpty()
 	if sdCtxUpdates.Mode() != commitment.ModeParallel {
 		calcUpdates.SetMode(commitment.ModeUpdate)
+		spareUpdates.SetMode(commitment.ModeUpdate)
 	}
 
 	// Persistent read-only tx for lazy-loading state, living for the calculator's
@@ -206,6 +213,7 @@ func newCommitmentCalculator(
 		logPrefix:            logPrefix,
 		logger:               logger,
 		updates:              calcUpdates,
+		spare:                spareUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
@@ -596,8 +604,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	incUpdates := cc.updates
-	cc.updates = cc.updates.NewEmpty()
+	incUpdates := cc.handOffUpdates()
 	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
@@ -662,6 +669,16 @@ type computeMode struct {
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
+// handOffUpdates returns the filled buffer for the caller to compute against and
+// rotates the spare into cc.updates. The compute drains the returned buffer
+// synchronously, so it is idle again by the next rotation.
+func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
+	filled := cc.updates
+	cc.updates, cc.spare = cc.spare, filled
+	cc.updates.Reset()
+	return filled
+}
+
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 
@@ -681,8 +698,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
+	sdCtx.SetUpdates(cc.handOffUpdates())
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
