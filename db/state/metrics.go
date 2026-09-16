@@ -37,6 +37,8 @@ var (
 	mxPrunableHSto         = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
 	mxPrunableHCode        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
 	mxPrunableHComm        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
+	mxHistoryPageHitRatio  = metrics.GetOrCreateGauge(`history_page_cache{type="hit_ratio"}`)
+	mxHistoryPageEvicted   = metrics.GetOrCreateGauge(`history_page_cache{type="evicted"}`)
 	mxUnwindTook           = metrics.GetOrCreateHistogram(`domain_unwind_took{type="domain"}`)
 	mxRunningUnwind        = metrics.GetOrCreateGauge("domain_running_unwind")
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
