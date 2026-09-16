@@ -140,7 +140,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 
 // distributeReceipts receives native receipt notifications, filters them, and converts
 // to protobuf only when sending over gRPC.
-func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) error {
+func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
@@ -171,7 +171,6 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 		a.subtractReceiptsFilters(filter)
 		delete(a.receiptsFilters, filterId)
 	}
-	return nil
 }
 
 // receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.

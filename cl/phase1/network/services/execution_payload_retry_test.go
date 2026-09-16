@@ -42,7 +42,8 @@ func newPendingEnvelopeTestService(t *testing.T) (*executionPayloadService, *moc
 	require.NoError(t, err)
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	service := &executionPayloadService{forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache}
-	service.pending = service.newPendingQueue()
+	service.pending = service.newPendingQueue(canceledPendingQueueContext(t))
+	service.pending.stopAndWait()
 	return service, fcu
 }
 

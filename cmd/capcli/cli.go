@@ -325,6 +325,9 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
 	}
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -354,25 +357,8 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if c.Blobs && currentBlock.Block.Body.GetBlobKzgCommitments() != nil && currentBlock.Block.Body.GetBlobKzgCommitments().Len() > 0 {
-			ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{currentBlock}, beaconConfig)
-			if err != nil {
-				// Return an error if blob identifiers could not be retrieved
-				err = fmt.Errorf("failed to get blob identifiers: %w", err)
-				return false, err
-			}
-			blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, beaconConfig, baseUriBlob, currentBlock)
-			if err != nil {
-				return false, fmt.Errorf("failed to retrieve blobs: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUriBlob, stringifiedRoot))
-			}
-			if _, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
-				if header.Signature == currentBlock.Signature {
-					return nil
-				}
-				return errors.New("mismatched block header in blob sidecar")
-			}); err != nil {
-				return false, fmt.Errorf("failed to verify and store blobs: %w", err)
-			}
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+			return false, err
 		}
 
 		currentRoot = currentBlock.Block.ParentRoot
@@ -1047,6 +1033,10 @@ func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Du
 }
 
 type BlobArchiveStoreCheck struct {
+	// A partial sidecar set is still worth refetching one blob for, so discarding it is opt-in:
+	// the audit has to be safe to run on a datadir about to be published from.
+	RemoveMismatched bool
+
 	chainCfg
 	outputFolder
 	FromSlot uint64
@@ -1083,10 +1073,21 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for i := b.FromSlot; i >= targetSlot; i-- {
+	mismatched, unresolved, err := checkBlobStore(ctx, tx, snr, blobStorage, b.FromSlot, targetSlot, b.RemoveMismatched)
+	log.Info("Blob archive store check finished", "mismatchedSlots", mismatched, "unresolvedSlots", unresolved,
+		"scannedFrom", b.FromSlot, "scannedTo", targetSlot, "removed", b.RemoveMismatched)
+	return err
+}
+
+// checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
+// their block commits to, and how many could not be checked at all. Unresolved slots are an error:
+// an audit that silently skips them reports completeness it never established.
+func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
+	var mismatched, unresolved uint64
+	for i := fromSlot; i >= targetSlot; i-- {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
-			return err
+			return mismatched, unresolved, err
 		}
 		if blk == nil {
 			continue
@@ -1097,28 +1098,59 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 		if blk.Block.Slot%10_000 == 0 {
 			log.Info("Checking slot", "slot", blk.Block.Slot)
 		}
-		blockRoot, err := blk.Block.HashSSZ()
+		// Sidecars are keyed by the canonical root, and ReadBeaconBlockBodyBySlot returns a block
+		// without its execution payload, so its own hash is not that root.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
 		if err != nil {
-			return err
+			return mismatched, unresolved, err
+		}
+		if blockRoot == (common.Hash{}) {
+			unresolved++
+			log.Warn("Slot has no canonical root, cannot be checked", "slot", i)
+			continue
 		}
 
 		haveBlobs, err := blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 		if err != nil {
-			return err
+			return mismatched, unresolved, err
 		}
 		wantBlobs := 0
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantBlobs = c.Len()
 		}
-		if haveBlobs != uint32(wantBlobs) {
-			if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
-				return err
+		// PruneBelow drops sidecar files but leaves their count rows, so a matching count is not
+		// evidence the store can still serve the slot. Stat each expected file rather than reading
+		// it back: the scan runs to the Deneb fork, so decoding every blob is not affordable, and
+		// an absent file is the failure this has to catch.
+		missingIndex := -1
+		if haveBlobs == uint32(wantBlobs) {
+			for idx := 0; idx < wantBlobs; idx++ {
+				present, err := blobStorage.BlobSidecarExists(ctx, i, blockRoot, uint64(idx))
+				if err != nil {
+					return mismatched, unresolved, err
+				}
+				if !present {
+					missingIndex = idx
+					break
+				}
 			}
-			log.Warn("Slot", "slot", i, "have", haveBlobs, "want", wantBlobs)
+		}
+		if haveBlobs != uint32(wantBlobs) || missingIndex >= 0 {
+			mismatched++
+			if removeMismatched {
+				if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
+					return mismatched, unresolved, err
+				}
+			}
+			log.Warn("Slot", "slot", i, "blockRoot", fmt.Sprintf("%x", blockRoot),
+				"have", haveBlobs, "want", wantBlobs, "missingIndex", missingIndex,
+				"removed", removeMismatched)
 		}
 	}
-	log.Info("Blob archive store check passed")
-	return nil
+	if unresolved > 0 {
+		return mismatched, unresolved, fmt.Errorf("%d slots could not be checked: no canonical block root, so the index is incomplete over this range", unresolved)
+	}
+	return mismatched, unresolved, nil
 }
 
 type DumpBlobsSnapshots struct {

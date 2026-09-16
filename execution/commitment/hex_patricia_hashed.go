@@ -160,11 +160,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
-	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
-	// applies deferred updates inline.
-	leaveDeferredForCaller bool
-
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
@@ -182,15 +177,6 @@ type HexPatriciaHashed struct {
 	// can exist on disk beneath it.
 	lastUpdateCellWasEmpty bool
 	hadToLoadL             map[uint64]skipStat
-}
-
-// Clones current trie state to allow concurrent processing.
-func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	subCfg := hph.cfg.Subtrie()
-	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
-
-	subTrie.mountTo(hph, forNibble)
-	return subTrie
 }
 
 var hphPool sync.Pool
@@ -213,7 +199,6 @@ func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
-	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
 	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
@@ -280,7 +265,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
-	hph.leaveDeferredForCaller = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -541,6 +525,10 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	} else {
 		cell.accountAddrLen = 0
 	}
+	if depth == 64 && cell.hashedExtLen == 0 && cell.extLen > 0 {
+		copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+		cell.hashedExtLen = cell.extLen
+	}
 	cell.storageAddrLen = upCell.storageAddrLen
 	if upCell.storageAddrLen > 0 {
 		copy(cell.storageAddr[:], upCell.storageAddr[:upCell.storageAddrLen])
@@ -554,6 +542,9 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
 	cell.loaded = upCell.loaded
+	if cell.accountAddrLen == 0 {
+		cell.loaded &^= cellLoadAccount
+	}
 }
 
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
@@ -602,8 +593,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	if lowDepth > 64 {
-		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	if lowDepth > 64 && lowCell.accountAddrLen == 0 {
+		cell.loaded = cell.loaded&cellLoadAccount | lowCell.loaded&cellLoadStorage
 	} else {
 		cell.loaded = lowCell.loaded
 	}
@@ -640,7 +631,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
 			}
-			if depth == 0 {
+			if depth == 0 && cell.accountAddrLen == 0 {
 				accountKeyLen = 0
 			}
 			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
@@ -2304,11 +2295,12 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
+		unfoldErr := hph.unfold(hashedKey, unfolding)
 		if unfoldDone != nil {
 			unfoldDone()
+		}
+		if unfoldErr != nil {
+			return fmt.Errorf("unfold: %w", unfoldErr)
 		}
 		if printLater {
 			fmt.Fprintf(hph.traceW, "[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
@@ -2324,11 +2316,12 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
-		if err := hph.fold(); err != nil {
-			return fmt.Errorf("fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return fmt.Errorf("fold: %w", foldErr)
 		}
 	}
 	// Now unfold the path so the cell at hashedKey is reachable.
@@ -2378,8 +2371,13 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
-		if err := hph.fold(); err != nil {
-			return cell{}, fmt.Errorf("final fold: %w", err)
+		foldDone := hph.metrics.StartFolding(nil)
+		foldErr := hph.fold()
+		if foldDone != nil {
+			foldDone()
+		}
+		if foldErr != nil {
+			return cell{}, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2624,11 +2622,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
+		foldErr := hph.fold()
 		if foldDone != nil {
 			foldDone()
+		}
+		if foldErr != nil {
+			return nil, fmt.Errorf("final fold: %w", foldErr)
 		}
 	}
 
@@ -2643,7 +2642,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.cfg.LeaveDeferredForCaller {
 		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
@@ -2705,7 +2704,6 @@ func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	if hph.branchEncoder.pendingPrefixes != nil {
 		hph.branchEncoder.pendingPrefixes.Clear()
 	}
-	ResetDeferredUpdateMetrics()
 	return deferred
 }
 
@@ -2726,7 +2724,7 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
-	hph.leaveDeferredForCaller = leave
+	hph.cfg.LeaveDeferredForCaller = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
@@ -2791,28 +2789,18 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		rootFlags |= stateRootTouched
 	}
 
-	ee := bytes.NewBuffer(buf)
-	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
-		return nil, fmt.Errorf("encode rootFlags: %w", err)
+	buf = slices.Grow(buf, 3+len(s.Root)+len(s.Depths)+2*len(s.TouchMap)+2*len(s.AfterMap)+16)
+	buf = append(buf, byte(rootFlags))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(s.Root)))
+	buf = append(buf, s.Root...)
+	for _, d := range s.Depths[:] {
+		buf = append(buf, byte(d))
 	}
-	if err := binary.Write(ee, binary.BigEndian, uint16(len(s.Root))); err != nil {
-		return nil, fmt.Errorf("encode root len: %w", err)
+	for _, m := range s.TouchMap[:] {
+		buf = binary.BigEndian.AppendUint16(buf, m)
 	}
-	if n, err := ee.Write(s.Root); err != nil || n != len(s.Root) {
-		return nil, fmt.Errorf("encode root: %w", err)
-	}
-	d := make([]byte, len(s.Depths))
-	for i := range len(s.Depths) {
-		d[i] = byte(s.Depths[i])
-	}
-	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
-		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
-		return nil, fmt.Errorf("encode afterMap: %w", err)
+	for _, m := range s.AfterMap[:] {
+		buf = binary.BigEndian.AppendUint16(buf, m)
 	}
 
 	var before1, before2 uint64
@@ -2826,22 +2814,15 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 			before2 |= 1 << j
 		}
 	}
-	if err := binary.Write(ee, binary.BigEndian, before1); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_1: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, before2); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_2: %w", err)
-	}
-	return ee.Bytes(), nil
+	buf = binary.BigEndian.AppendUint64(buf, before1)
+	return binary.BigEndian.AppendUint64(buf, before2), nil
 }
 
 func (s *state) Decode(buf []byte) error {
-	aux := bytes.NewBuffer(buf)
-	var rootFlags stateRootFlag
-	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
-		return fmt.Errorf("rootFlags: %w", err)
+	if len(buf) < 3 {
+		return fmt.Errorf("state header: %w", io.ErrUnexpectedEOF)
 	}
-
+	rootFlags := stateRootFlag(buf[0])
 	if rootFlags&stateRootPresent != 0 {
 		s.RootPresent = true
 	}
@@ -2852,34 +2833,22 @@ func (s *state) Decode(buf []byte) error {
 		s.RootChecked = true
 	}
 
-	var rootSize uint16
-	if err := binary.Read(aux, binary.BigEndian, &rootSize); err != nil {
-		return fmt.Errorf("root size: %w", err)
+	rootSize := int(binary.BigEndian.Uint16(buf[1:]))
+	buf = buf[3:]
+	if len(buf) < rootSize+len(s.Depths)+2*len(s.TouchMap)+2*len(s.AfterMap)+16 {
+		return fmt.Errorf("state body: %w", io.ErrUnexpectedEOF)
 	}
 	s.Root = make([]byte, rootSize)
-	if _, err := aux.Read(s.Root); err != nil {
-		return fmt.Errorf("root: %w", err)
+	buf = buf[copy(s.Root, buf):]
+	for i := range s.Depths {
+		s.Depths[i] = int16(buf[i])
 	}
-	d := make([]byte, len(s.Depths))
-	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
-		return fmt.Errorf("depths: %w", err)
+	buf = buf[len(s.Depths):]
+	for i := range s.TouchMap {
+		s.TouchMap[i], s.AfterMap[i] = binary.BigEndian.Uint16(buf[2*i:]), binary.BigEndian.Uint16(buf[2*len(s.TouchMap)+2*i:])
 	}
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(d[i])
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
-		return fmt.Errorf("afterMap: %w", err)
-	}
-	var branch1, branch2 uint64
-	if err := binary.Read(aux, binary.BigEndian, &branch1); err != nil {
-		return fmt.Errorf("branchBefore1: %w", err)
-	}
-	if err := binary.Read(aux, binary.BigEndian, &branch2); err != nil {
-		return fmt.Errorf("branchBefore2: %w", err)
-	}
+	buf = buf[4*len(s.TouchMap):]
+	branch1, branch2 := binary.BigEndian.Uint64(buf), binary.BigEndian.Uint64(buf[8:])
 
 	for i := range 64 {
 		if branch1&(1<<i) != 0 {

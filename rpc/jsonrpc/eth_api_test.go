@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -530,4 +531,40 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
 	a.NoError(err)
 	a.Equal(svLatest, svNil)
+}
+
+func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	want, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestForksServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	want, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
