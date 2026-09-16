@@ -1208,7 +1208,7 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 		return nil
 	}
 	return cache.NewByteLRU(size, func(_ uint64, p historyPage) int64 {
-		return int64(len(p.data)) + cache.ByteLRUEntryOverheadBytes + 32
+		return int64(len(p.data)) + cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(historyPage{}))
 	})
 }
 
