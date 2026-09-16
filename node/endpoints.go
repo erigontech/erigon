@@ -174,7 +174,7 @@ func (c *corkConn) uncork() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.uncorked = true
-	c.flushLocked()
+	_ = c.flushLocked() // the handler owns the connection; a failed flush surfaces on its next write
 }
 
 func (c *corkConn) flushLocked() error {
