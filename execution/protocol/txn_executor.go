@@ -636,6 +636,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 
+	var hookChargedExecution, hookChargedState uint64
 	if l2 := st.evm.Context.L2; l2 != nil && l2.GasCharging != nil {
 		adjustedGasRemaining, tipRecipient, hookErr := l2.GasCharging(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
 		if hookErr != nil {
@@ -644,8 +645,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if adjustedGasRemaining.Execution > st.gasRemaining.Execution || adjustedGasRemaining.State > st.gasRemaining.State {
 			return nil, fmt.Errorf("%w: GasCharging hook raised gas above the tx budget (execution %d->%d, state %d->%d)", ErrTxnExecutionFailed, st.gasRemaining.Execution, adjustedGasRemaining.Execution, st.gasRemaining.State, adjustedGasRemaining.State)
 		}
+		hookChargedExecution = st.gasRemaining.Execution - adjustedGasRemaining.Execution
+		hookChargedState = st.gasRemaining.State - adjustedGasRemaining.State
 		st.gasRemaining = adjustedGasRemaining
 		if !tipRecipient.IsNil() {
+			if st.noFeeBurnAndTip {
+				return nil, fmt.Errorf("%w: GasCharging tip redirect is unsupported under delayed fee processing", ErrTxnExecutionFailed)
+			}
 			coinbase = tipRecipient
 		}
 	}
@@ -675,7 +681,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		createAddress   accounts.Address
 		createNonce     uint64
 	)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	st.state.Prepare(rules, msg.From(), st.evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()
@@ -728,6 +734,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	totalGasUsed := gasUsed.total()
+	totalGasUsed.Execution += hookChargedExecution
+	totalGasUsed.State += int64(hookChargedState)
 	switch {
 	case refunds && !gasBailout:
 		if l2 := st.evm.Context.L2; l2 != nil && l2.ComputeRefund != nil {

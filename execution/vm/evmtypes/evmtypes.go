@@ -62,7 +62,6 @@ type BlockContext struct {
 // L2 is the per-block L2 context a rules engine installs through
 // AmendBlockContext. Every field is optional.
 type L2 struct {
-	// Version is the L2 stack's own upgrade version, feeding fork resolution.
 	Version uint64
 
 	// StartTx runs at the very top of TxnExecutor.Execute, before intrinsic
@@ -70,14 +69,8 @@ type L2 struct {
 	// transition, returning result and err as-is (system/deposit txs).
 	StartTx StartTxFunc
 
-	// GasCharging runs once gas has been purchased and split for execution,
-	// letting a chain charge extra cost out of the tx's own gas budget (via
-	// ibs) and redirect the tip recipient. A non-nil error aborts the
-	// transaction before execution starts.
 	GasCharging GasChargingFunc
 
-	// ComputeRefund, when non-nil, replaces TxnExecutor's built-in refund
-	// ladder for this tx.
 	ComputeRefund ComputeRefundFunc
 }
 
@@ -106,10 +99,6 @@ type ExecutionResult struct {
 	FeeTipped             uint256.Int
 	FeeBurnt              uint256.Int
 	BurntContractAddress  accounts.Address
-
-	// L2 is an opaque value the lifecycle hooks may populate (e.g. an L1-fee
-	// split or retryable ticket info); nil unless a hook sets it.
-	L2 any
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -196,7 +185,6 @@ type Message interface {
 	Authorizations() []types.Authorization
 
 	IsFree() bool
-	SetIsFree(bool)
 }
 
 // IntraBlockState is an EVM database for full state querying.

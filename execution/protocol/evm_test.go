@@ -45,8 +45,6 @@ func (f fakeAmendEngine) AmendBlockContext(bc *evmtypes.BlockContext, _ *types.H
 	bc.L2 = &evmtypes.L2{Version: f.l2Version}
 }
 
-// fakeL2Config resolves Rules.L2Version straight from BlockContext.L2.Version,
-// mirroring the fork-oracle commit's evmtypes rules_test fake.
 type fakeL2Config struct{}
 
 func (fakeL2Config) Name() string { return "fakel2" }

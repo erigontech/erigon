@@ -97,8 +97,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
 	}
-	if engine != nil {
-		engine.AmendBlockContext(&blockContext, header)
+	if a, ok := engine.(interface {
+		AmendBlockContext(*evmtypes.BlockContext, *types.Header)
+	}); ok {
+		a.AmendBlockContext(&blockContext, header)
 	}
 	return blockContext
 }

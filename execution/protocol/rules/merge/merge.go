@@ -501,7 +501,11 @@ func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 }
 
 func (s *Merge) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {
-	s.eth1Engine.AmendBlockContext(bc, header)
+	if a, ok := s.eth1Engine.(interface {
+		AmendBlockContext(*evmtypes.BlockContext, *types.Header)
+	}); ok {
+		a.AmendBlockContext(bc, header)
+	}
 }
 
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,

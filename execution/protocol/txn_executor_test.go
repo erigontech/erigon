@@ -1018,6 +1018,164 @@ func TestComputeRefundHook_ReplacesLadder(t *testing.T) {
 		"pool must be debited by the hook's BlockExecutionGasUsed, not the ladder's")
 }
 
+func TestGasChargingHook_ChargeIsBilledToTheTransaction(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	const hookCharge = 10_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		L2: &evmtypes.L2{
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				gasRemaining.Execution -= hookCharge
+				return gasRemaining, accounts.NilAddress, nil
+			},
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	st := NewTxnExecutor(evm, msg, gp)
+	result, err := st.Execute(true, false)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(params.TxGas+hookCharge), result.ReceiptGasUsed,
+		"gas the hook charged must be billed to the tx, not handed back to the sender")
+	require.Equal(t, uint64(params.TxGas+hookCharge), result.BlockExecutionGasUsed)
+	require.Equal(t, uint64(blockGasLimit-params.TxGas-hookCharge), gp.Gas())
+}
+
+func TestGasChargingHook_RedirectKeepsBlockCoinbaseWarm(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	tipRecipient := accounts.InternAddress(common.HexToAddress("0x4444444444444444444444444444444444444444"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		Coinbase:    coinbase,
+		L2: &evmtypes.L2{
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				return gasRemaining, tipRecipient, nil
+			},
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
+		nil, nil,
+		false, false, true, false, nil,
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	st := NewTxnExecutor(evm, msg, gp)
+	result, err := st.Execute(true, false)
+
+	require.NoError(t, err)
+	require.True(t, ibs.AddressInAccessList(coinbase),
+		"EIP-3651 must warm the block coinbase even when the hook redirects the tip")
+	require.False(t, ibs.AddressInAccessList(tipRecipient),
+		"the tip recipient must not take the block coinbase's access-list slot")
+
+	require.False(t, result.FeeTipped.IsZero(), "fixture must produce a non-zero tip")
+	tipBalance, err := ibs.GetBalance(tipRecipient)
+	require.NoError(t, err)
+	require.Equal(t, result.FeeTipped, tipBalance, "the redirected recipient must still be paid the tip")
+	coinbaseBalance, err := ibs.GetBalance(coinbase)
+	require.NoError(t, err)
+	require.True(t, coinbaseBalance.IsZero(), "the block coinbase must not be paid a redirected tip")
+}
+
+func TestGasChargingHook_TipRedirectRejectedUnderDelayedFees(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	tipRecipient := accounts.InternAddress(common.HexToAddress("0x4444444444444444444444444444444444444444"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		L2: &evmtypes.L2{
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				return gasRemaining, tipRecipient, nil
+			},
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	st := NewTxnExecutor(evm, msg, gp)
+	st.noFeeBurnAndTip = true
+	result, err := st.Execute(true, false)
+
+	require.ErrorIs(t, err, ErrTxnExecutionFailed)
+	require.ErrorContains(t, err, "tip redirect is unsupported under delayed fee processing")
+	require.Nil(t, result)
+}
+
+func TestGasChargingHook_StateChargeIsBilledUnderAmsterdam(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	const stateReservoir = 50_000
+	const hookStateCharge = 10_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	run := func(charge uint64) *evmtypes.ExecutionResult {
+		t.Helper()
+		ibs := state.New(state.NewNoopReader())
+		blockCtx := evmtypes.BlockContext{
+			CanTransfer: CanTransfer,
+			Transfer:    misc.Transfer,
+			GasLimit:    blockGasLimit,
+		}
+		if charge > 0 {
+			blockCtx.L2 = &evmtypes.L2{
+				GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+					gasRemaining.State -= charge
+					return gasRemaining, accounts.NilAddress, nil
+				},
+			}
+		}
+		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+stateReservoir, true)
+		st := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, blockGasLimit))
+		result, err := st.Execute(true, false)
+		require.NoError(t, err)
+		return result
+	}
+
+	base := run(0)
+	require.Zero(t, base.BlockStateGasUsed, "a plain transfer must not consume state gas on its own")
+
+	charged := run(hookStateCharge)
+	require.Equal(t, uint64(hookStateCharge), charged.BlockStateGasUsed,
+		"state gas the hook charged must be billed to the tx, not handed back")
+	require.Equal(t, base.BlockExecutionGasUsed, charged.BlockExecutionGasUsed,
+		"a state-dimension charge must not move execution gas")
+}
+
 // TestNilHooks_GoldenPathUnchanged pins the existing EIP-7825 golden-path
 // expectation (a valid tx debits the gas pool normally) with all three
 // lifecycle hooks left nil, proving their absence leaves Execute untouched.
