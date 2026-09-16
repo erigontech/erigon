@@ -68,10 +68,6 @@ type Stream interface {
 	WriteMore()
 	WriteObjectField(fieldName string)
 
-	// AvailableBuffer returns an empty slice over the buffer's spare capacity. A value
-	// appended to it and passed straight to WriteRawBytes is not copied.
-	AvailableBuffer() []byte
-
 	// Utility methods
 
 	WriteEmptyArray()

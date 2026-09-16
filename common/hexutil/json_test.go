@@ -81,8 +81,7 @@ func TestUnmarshalBytes(t *testing.T) {
 
 type sliceJSONWriter []byte
 
-func (w *sliceJSONWriter) AvailableBuffer() []byte { return (*w)[len(*w):] }
-func (w *sliceJSONWriter) WriteRawBytes(v []byte)  { *w = append(*w, v...) }
+func (w *sliceJSONWriter) WriteRawBytes(v []byte) { *w = append(*w, v...) }
 
 func TestBytesWriteJSONTo(t *testing.T) {
 	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {

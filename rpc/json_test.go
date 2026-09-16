@@ -548,9 +548,7 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 
 type streamedJSON string
 
-func (a streamedJSON) WriteJSONTo(w hexutil.JSONWriter) {
-	w.WriteRawBytes(append(w.AvailableBuffer(), a...))
-}
+func (a streamedJSON) WriteJSONTo(w hexutil.JSONWriter) { w.WriteRawBytes([]byte(a)) }
 
 func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
 	var out bytes.Buffer

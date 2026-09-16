@@ -20,6 +20,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+
+	"github.com/erigontech/erigon/common/pool"
 )
 
 var bytesT = reflect.TypeFor[Bytes]()
@@ -46,16 +48,17 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
-// JSONWriter is what a value needs from a JSON stream to write itself without an intermediate
-// buffer, like json/v2's MarshalJSONTo does with a jsontext.Encoder.
+// JSONWriter is what a value needs from a JSON stream to write itself, like json/v2's MarshalJSONTo does with a jsontext.Encoder.
 type JSONWriter interface {
-	AvailableBuffer() []byte
 	WriteRawBytes([]byte)
 }
 
 // WriteJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
 func (b Bytes) WriteJSONTo(w JSONWriter) {
-	enc := append(w.AvailableBuffer(), `"`+HexPrefix...)
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+	buf.Grow(len(b)*2 + 4)
+	enc := append(buf.AvailableBuffer(), `"`+HexPrefix...)
 	enc = hex.AppendEncode(enc, b)
 	w.WriteRawBytes(append(enc, '"'))
 }
