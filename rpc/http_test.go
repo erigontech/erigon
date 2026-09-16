@@ -479,9 +479,6 @@ type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
-// A response still whole in the buffer carries Content-Length, so net/http sends it unchunked. One that
-// outgrew the buffer has already started streaming, and a batch never goes through the stream at all: both
-// stay chunked, and a batch must keep its whole body.
 func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	logger := log.New()
 	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, false /* disableStreaming */, logger, 100)
@@ -504,8 +501,7 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 		return resp.ContentLength, resp.TransferEncoding, string(raw)
 	}
 
-	// Past net/http's own 2KB buffer, so only this change can size it, and below the stream's flush
-	// threshold, so the whole answer is still in the buffer when the header is set.
+	// Above net/http's 2KB auto-buffer and below FlushThreshold, so only this change can set the length.
 	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"mid_largeResp"}`)
 	require.Greater(t, length, int64(8*1024))
 	require.Empty(t, encoding)
@@ -515,9 +511,7 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
 
-	// A batch answer goes out through the codec, never through the stream, so it has to stay chunked: a
-	// length taken from the empty stream buffer would cut the body off at zero bytes. The batch is built
-	// past net/http's own buffer, which would otherwise size the response itself and hide a regression.
+	// Past net/http's 2KB auto-buffer, which would otherwise set the length and hide a zero-length regression.
 	const batchSize = 200
 	calls := make([]string, batchSize)
 	for i := range calls {

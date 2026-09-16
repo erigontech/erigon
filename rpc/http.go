@@ -376,10 +376,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.disableStreaming {
-		// A response still whole in the buffer gets its length, so net/http sends it unchunked: no chunk
-		// framing, one write less, and the client can size its buffer up front. An empty buffer means the
-		// answer never went through the stream - a batch goes out through the codec - and its length is
-		// unknown here.
+		// An empty buffer means the answer went out through the codec (a batch), so its length is unknown here.
 		if !sent.sent && len(stream.Buffer()) > 0 {
 			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
 		}
@@ -470,8 +467,6 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	return false
 }
 
-// sentWriter records whether any of the response has reached the client: what is still whole in the stream
-// buffer can be given a length, what has started streaming cannot.
 type sentWriter struct {
 	w    io.Writer
 	sent bool
