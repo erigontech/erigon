@@ -389,3 +389,47 @@ func TestBlobsIdentifiersUseTheSuppliedRoot(t *testing.T) {
 	require.Equal(t, canonical, ids.Get(0).BlockRoot,
 		"identifiers must carry the canonical root, not the payload-stripped hash")
 }
+
+// collectIncompleteBlocks is where the canonical root enters the pipeline; the recovery paths can
+// only carry what it hands them. Without this, reverting the pair to the block's own hash would
+// leave every other root test green.
+func TestCollectIncompleteBlocksCarriesTheCanonicalRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const slot = 1_000
+	canonical := common.HexToHash("0xc0ffee")
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+	}))
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	commitment := cltypes.KZGCommitment{}
+	commitment[0] = 0x01
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+
+	selfRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfRoot), "fixture must separate the two roots")
+
+	// Nothing stored anywhere, so the slot is queued and we can inspect the root it carries.
+	store := blob_mock_services.NewMockBlobStorage(ctrl)
+	store.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+
+	b := &BlobHistoryDownloader{
+		ctx:         context.Background(),
+		beaconCfg:   &clparams.MainnetBeaconConfig,
+		indiciesDB:  db,
+		blobStorage: store,
+		blockReader: stubBlockReader{slot: slot, block: block},
+		logger:      log.New(),
+	}
+
+	batch, _, err := b.collectIncompleteBlocks(slot, slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "an incomplete slot must be queued")
+	require.Equal(t, canonical, batch[0].root,
+		"the queued block must carry the indexed root, not the payload-stripped hash")
+	require.NotEqual(t, common.Hash(selfRoot), batch[0].root)
+}
