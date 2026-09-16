@@ -113,13 +113,10 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	return httpSrv, listener.Addr(), err
 }
 
-// corkPassthroughBytes is the write size above which the buffer is skipped: copying a body that large costs
-// more than the syscall the copy would save.
-const corkPassthroughBytes = int(64 * datasize.KB)
-
-// corkFlushBytes bounds a corked connection: a streamed answer still reaches the client in pieces of
-// this size, and a connection cannot hold more than this before its buffer is handed to the socket.
-const corkFlushBytes = int(256 * datasize.KB)
+// corkBufferBytes is how much of a response a connection holds before handing it to the socket, and the size
+// above which a single write skips the buffer entirely: copying a body that large costs more than the syscall
+// it would save, and a streamed answer still reaches the client in pieces of this size.
+const corkBufferBytes = int(64 * datasize.KB)
 
 // corkListener holds a response in one buffer so it leaves as one write syscall. net/http writes the
 // headers, the body and the chunk terminator separately, and only marks the connection idle once the
@@ -139,22 +136,28 @@ type corkConn struct {
 	mu       sync.Mutex
 	buf      []byte
 	uncorked bool
+	// failed records a flush that never reached the socket. net/http has already counted those bytes as
+	// written, so the response cannot be completed: the connection must not serve anything else.
+	failed error
 }
 
 func (c *corkConn) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.failed != nil {
+		return 0, c.failed
+	}
 	if c.uncorked {
 		return c.Conn.Write(p)
 	}
-	if len(p) >= corkPassthroughBytes {
+	if len(p) >= corkBufferBytes {
 		if err := c.flushLocked(); err != nil {
 			return 0, err
 		}
 		return c.Conn.Write(p)
 	}
 	c.buf = append(c.buf, p...)
-	if len(c.buf) >= corkFlushBytes {
+	if len(c.buf) >= corkBufferBytes {
 		if err := c.flushLocked(); err != nil {
 			return 0, err
 		}
@@ -193,6 +196,10 @@ func (c *corkConn) flushLocked() error {
 	}
 	_, err := c.Conn.Write(c.buf)
 	c.buf = c.buf[:0]
+	if err != nil {
+		c.failed = err
+		_ = c.Conn.Close()
+	}
 	return err
 }
 

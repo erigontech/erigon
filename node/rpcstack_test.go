@@ -614,24 +614,45 @@ func TestCorkConnWritesResponseOnce(t *testing.T) {
 	require.Equal(t, 2, counting.writes, "an uncorked connection writes straight through")
 }
 
-// A body past the cork limit cannot be held: it goes out and the connection keeps taking writes.
-func TestCorkConnFlushesPastLimit(t *testing.T) {
-	counting := &writeCountingConn{}
-	c := &corkConn{Conn: counting}
-	_, err := c.Write(bytes.Repeat([]byte("a"), corkFlushBytes+1))
-	require.NoError(t, err)
-	require.Equal(t, 1, counting.writes)
-	require.Equal(t, corkFlushBytes+1, counting.bytes)
-}
-
 // A body past the passthrough size goes straight to the socket, after whatever is already buffered.
 func TestCorkConnPassesLargeBodyThrough(t *testing.T) {
 	counting := &writeCountingConn{}
 	c := &corkConn{Conn: counting}
 	_, err := c.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	require.NoError(t, err)
-	_, err = c.Write(bytes.Repeat([]byte("a"), corkPassthroughBytes))
+	_, err = c.Write(bytes.Repeat([]byte("a"), corkBufferBytes))
 	require.NoError(t, err)
 	require.Equal(t, 2, counting.writes, "headers flushed, then the body written directly")
-	require.Equal(t, 19+corkPassthroughBytes, counting.bytes)
+	require.Equal(t, 19+corkBufferBytes, counting.bytes)
+}
+
+type failingConn struct {
+	net.Conn
+}
+
+func (failingConn) Write(p []byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+func (failingConn) Close() error                { return nil }
+
+// Small writes that together fill the buffer are flushed at once, without waiting for the connection to go idle.
+func TestCorkConnFlushesWhenBufferFills(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	chunk := bytes.Repeat([]byte("a"), corkBufferBytes/8)
+	for range 8 {
+		_, err := c.Write(chunk)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, counting.writes)
+	require.Equal(t, corkBufferBytes, counting.bytes)
+}
+
+// net/http counts a buffered write as delivered, so a connection whose flush failed must refuse further writes
+// instead of serving the next request on a truncated response.
+func TestCorkConnFailsAfterFlushError(t *testing.T) {
+	c := &corkConn{Conn: failingConn{}}
+	_, err := c.Write([]byte("small"))
+	require.NoError(t, err)
+	require.Error(t, c.flush())
+	_, err = c.Write([]byte("more"))
+	require.Error(t, err)
 }
