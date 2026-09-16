@@ -253,14 +253,9 @@ type SharedDomains struct {
 	// disableInlineTouchKey skips the inline TouchKey in DomainPut/DomainDel when
 	// the commitment calculator owns the Updates buffer and feeds touches itself.
 	disableInlineTouchKey bool
-	// discardCommitment mirrors ExecuteBlockCfg.discardCommitment (exec-only mode):
-	// the single source of truth is the cfg, threaded here via SetDiscardCommitment
-	// at exec start, so IsUnfrozenStepEdge does not read dbg.DiscardCommitment()
-	// independently.
-	discardCommitment bool
-	mem               kv.TemporalMemBatch
-	metrics           kvmetrics.DomainMetrics
-	nonExecMetrics    kvmetrics.DomainMetrics
+	mem                   kv.TemporalMemBatch
+	metrics               kvmetrics.DomainMetrics
+	nonExecMetrics        kvmetrics.DomainMetrics
 
 	commitmentNanos atomic.Int64
 
@@ -973,7 +968,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // must be written.
 func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
 	ss := sd.stepSize
-	if ss == 0 || sd.discardCommitment {
+	if ss == 0 {
 		return false
 	}
 	if (txNum+1)%ss != 0 {
@@ -996,12 +991,6 @@ func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 // TouchKey must be disabled to avoid concurrent writes.
 func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
 	sd.disableInlineTouchKey = disable
-}
-
-// SetDiscardCommitment threads ExecuteBlockCfg.discardCommitment (exec-only mode)
-// into the domains so IsUnfrozenStepEdge uses the cfg value, not a separate env read.
-func (sd *SharedDomains) SetDiscardCommitment(v bool) {
-	sd.discardCommitment = v
 }
 
 // InlineTouchKeyDisabled returns true when inline TouchKey is disabled.

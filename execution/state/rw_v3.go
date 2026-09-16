@@ -481,16 +481,6 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
-// ClearAccountsCache drops all entries from the cross-block account cache. Must
-// be called after a block's writes are fully applied to SharedDomains and before
-// the next block's workers read, or stale entries leak forward and workers read
-// outdated values from the cache instead of sd.mem.
-func (s *StateV3Buffered) ClearAccountsCache() {
-	s.accountsMutex.Lock()
-	clear(s.accounts)
-	s.accountsMutex.Unlock()
-}
-
 func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
 		StateV3:       NewStateV3(domains, s.persistReceiptsCacheV2, s.logger),
