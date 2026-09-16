@@ -120,7 +120,7 @@ type jsonWriterTo interface {
 // If result does not encode, nothing is written and the error response is returned instead.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
-	if wt, ok := result.(jsonWriterTo); ok {
+	if wt, ok := result.(jsonWriterTo); ok && !isNilPointer(result) {
 		writeResultField(stream, msg.ID)
 		wt.WriteJSONTo(stream)
 	} else if fm, ok := result.(fastJSONResult); ok {
@@ -146,6 +146,12 @@ type responseWriter struct {
 func (w *responseWriter) Write(b []byte) (int, error) {
 	writeResult(w.stream, w.id, bytes.TrimSuffix(b, []byte{'\n'}))
 	return len(b), nil
+}
+
+// isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
 func writeResult(stream jsonstream.Stream, id json.RawMessage, enc []byte) {

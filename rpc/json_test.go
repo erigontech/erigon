@@ -552,6 +552,16 @@ func (a streamedJSON) WriteJSONTo(w hexutil.JSONWriter) {
 	w.WriteRawBytes(append(w.AvailableBuffer(), a...))
 }
 
+func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	respond(s, json.RawMessage(`7`), (*hexutil.Bytes)(nil))
+	require.NoError(t, s.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
 func TestResponseWritesJSONToStream(t *testing.T) {
 	for _, result := range []streamedJSON{`"first-and-longer"`, `"2nd"`} {
 		var out bytes.Buffer
