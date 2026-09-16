@@ -650,3 +650,82 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.ErrorIs(t, err, errWitnessOutOfWindow)
 }
+
+// TestGetWitness covers the eth_getWitness / eth_getTxWitness inputs the head-capture
+// tests do not reach: genesis, a block hash, an unknown block, and the transaction
+// index bound.
+func TestGetWitness(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	emptyWitness, err := emptyWitnessBytes()
+	require.NoError(t, err)
+
+	var block1Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	}))
+
+	t.Run("genesis is an empty witness", func(t *testing.T) {
+		bn := rpc.BlockNumber(0)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+		require.NoError(t, err)
+		require.Equal(t, emptyWitness, got)
+	})
+
+	bn := rpc.BlockNumber(1)
+	byNumber, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEmpty(t, byNumber)
+
+	t.Run("by hash matches by number", func(t *testing.T) {
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHashWithHash(block1Hash, true))
+		require.NoError(t, err)
+		require.Equal(t, byNumber, got)
+	})
+
+	t.Run("unknown block", func(t *testing.T) {
+		unknown := rpc.BlockNumber(999_999)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &unknown})
+		require.Error(t, err)
+		require.Nil(t, got)
+	})
+
+	t.Run("tx witness for the first transaction", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+		require.NoError(t, err)
+		require.NotEmpty(t, got)
+	})
+
+	t.Run("tx index out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 100)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
+}
+
+// TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
+// prerequisite rather than failing deeper in the build.
+func TestGetWitnessRequiresCommitmentHistory(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorContains(t, err, "requires commitment history")
+	require.Nil(t, got)
+}
