@@ -1232,6 +1232,7 @@ func TestGetProofRequestShapes(t *testing.T) {
 	t.Run("earliest tag is genesis", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)))
 		require.NoError(t, err)
+		require.Equal(t, hexutil.Uint64(0), proof.Nonce, "the bank has sent no transaction at genesis")
 		require.NotEqual(t, headProof.AccountProof, proof.AccountProof)
 	})
 

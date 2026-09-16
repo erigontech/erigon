@@ -697,7 +697,8 @@ func TestGetWitness(t *testing.T) {
 	t.Run("unknown block", func(t *testing.T) {
 		unknown := rpc.BlockNumber(999_999)
 		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &unknown})
-		require.Error(t, err)
+		var notFound rpc.BlockNotFoundErr
+		require.ErrorAs(t, err, &notFound)
 		require.Nil(t, got)
 	})
 
