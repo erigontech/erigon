@@ -1257,7 +1257,8 @@ func TestGetProofRequestShapes(t *testing.T) {
 	})
 
 	t.Run("key longer than 32 bytes is rejected", func(t *testing.T) {
-		proof, err := api.GetProof(ctx, contractAddr, []hexutil.Bytes{make(hexutil.Bytes, 33)}, head)
+		// Not first: a guard that only checked storageKeys[0] would pass this request.
+		proof, err := api.GetProof(ctx, contractAddr, []hexutil.Bytes{key(4), make(hexutil.Bytes, 33)}, head)
 		require.Nil(t, proof)
 		var customErr *rpc.CustomError
 		require.ErrorAs(t, err, &customErr)
