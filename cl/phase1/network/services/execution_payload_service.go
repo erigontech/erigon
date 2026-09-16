@@ -55,12 +55,18 @@ type pendingEnvelopeJob struct {
 	processing atomic.Bool
 }
 
+type pendingEnvelopeLookupRetry struct {
+	owner   *pendingEnvelopeJob
+	retryAt int64
+}
+
 const (
-	seenEnvelopeCacheSize        = 1000
-	pendingEnvelopeExpiry        = 30 * time.Second
-	pendingEnvelopeCheckInterval = 100 * time.Millisecond
-	maxPendingEnvelopes          = 1024
-	maxPendingEnvelopeBytes      = 4 * clparams.MaxChunkSize
+	seenEnvelopeCacheSize              = 1000
+	pendingEnvelopeExpiry              = 30 * time.Second
+	pendingEnvelopeCheckInterval       = 100 * time.Millisecond
+	pendingEnvelopeLookupRetryInterval = 5 * time.Second
+	maxPendingEnvelopes                = 1024
+	maxPendingEnvelopeBytes            = 4 * clparams.MaxChunkSize
 )
 
 var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block unavailable")
@@ -74,10 +80,11 @@ type executionPayloadService struct {
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
 
 	// Pending envelopes waiting for block to arrive
-	pending      *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
-	pendingBytes atomic.Uint64
-	pendingMu    sync.Mutex
-	now          func() time.Time
+	pending              *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
+	pendingBytes         atomic.Uint64
+	pendingMu            sync.Mutex
+	pendingLookupRetryAt sync.Map
+	now                  func() time.Time
 }
 
 // NewExecutionPayloadService creates a new execution payload service
@@ -115,8 +122,34 @@ func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJ
 		},
 		func(key pendingEnvelopeKey, job *pendingEnvelopeJob) {
 			s.releasePendingEnvelopeBytes(job.ownedBytes)
+			if job.envelope != nil && job.envelope.Message != nil {
+				seenKey := seenEnvelopeKey{key.blockRoot, job.envelope.Message.BuilderIndex}
+				s.clearPendingLookupRetryIfUnused(seenKey)
+			}
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
 		})
+}
+
+func (s *executionPayloadService) clearPendingLookupRetryIfUnused(seenKey seenEnvelopeKey) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	identityPending := false
+	s.pending.jobs.Range(func(_, value any) bool {
+		job := value.(*pendingJob[*pendingEnvelopeJob]).msg
+		if job.envelope != nil && job.envelope.Message != nil &&
+			job.envelope.Message.BeaconBlockRoot == seenKey.beaconBlockRoot &&
+			job.envelope.Message.BuilderIndex == seenKey.builderIndex {
+			identityPending = true
+			return false
+		}
+		return true
+	})
+	if identityPending {
+		return
+	}
+	if retry, ok := s.pendingLookupRetryAt.Load(seenKey); ok {
+		s.pendingLookupRetryAt.CompareAndDelete(seenKey, retry)
+	}
 }
 
 func (s *executionPayloadService) Names() []string {
@@ -300,6 +333,10 @@ func (s *executionPayloadService) processMessage(
 			return fmt.Errorf("failed to validate execution payload envelope with pending indices: %w", err)
 		}
 	}
+	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+		s.emitExecutionPayloadGossip(block, envelope)
+		return nil
+	}
 	seen = true
 
 	// Mark as seen AFTER successful validation
@@ -402,6 +439,18 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, job.envelope); err != nil {
 		return pendingJobRemoveThenProcess
 	}
+	seenKey := seenEnvelopeKey{key.blockRoot, job.envelope.Message.BuilderIndex}
+	if s.seenEnvelopesCache.Contains(seenKey) {
+		s.pendingLookupRetryAt.Delete(seenKey)
+		return pendingJobRemoveThenProcess
+	}
+	if retryAt, ok := s.pendingLookupRetryAt.Load(seenKey); ok {
+		if retryAt.(pendingEnvelopeLookupRetry).retryAt > time.Now().UnixNano() && s.forkchoiceStore.HasEnvelope(key.blockRoot) {
+			job.processing.Store(false)
+			return pendingJobKeep
+		}
+		s.pendingLookupRetryAt.Delete(seenKey)
+	}
 	admissionToken, err := s.forkchoiceStore.TryClaimExecutionPayloadEnvelopeForGossip(
 		key.blockRoot,
 		job.envelope.Message.BuilderIndex,
@@ -414,9 +463,15 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired) {
 			persisted, readErr := s.forkchoiceStore.ReadEnvelopeFromDisk(key.blockRoot)
 			if readErr == nil && persisted != nil && persisted.Message != nil {
+				s.pendingLookupRetryAt.Delete(seenKey)
+				s.seenEnvelopesCache.Add(seenKey, struct{}{})
 				return pendingJobRemoveThenProcess
 			}
 			s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.blockRoot, job.envelope.Message.BuilderIndex)
+			s.pendingLookupRetryAt.Store(seenKey, pendingEnvelopeLookupRetry{
+				owner:   job,
+				retryAt: time.Now().Add(pendingEnvelopeLookupRetryInterval).UnixNano(),
+			})
 			job.processing.Store(false)
 			return pendingJobKeep
 		}

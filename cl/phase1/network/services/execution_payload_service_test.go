@@ -597,9 +597,12 @@ func TestExecutionPayloadServiceDropsPersistedPendingEnvelopeWhenAdmissionIsSatu
 	impl := service.(*executionPayloadService)
 	blockRoot := common.HexToHash("0xffff")
 	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+	duplicate := newTestSignedEnvelope(100, blockRoot, 7)
+	duplicate.Signature[0] = 1
 
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-	require.Equal(t, int32(1), impl.pending.count.Load())
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, duplicate), ErrIgnore)
+	require.Equal(t, int32(2), impl.pending.count.Load())
 	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
 	for i := range 1024 {
 		token, err := fcu.EnvelopeGossipAdmissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
@@ -636,6 +639,7 @@ func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlread
 		wantKept          bool
 		wantForgotten     bool
 		wantReads         int32
+		wantLocalSeen     bool
 	}{
 		{name: "lookup required from stale first check", staleFirstCheck: true, wantKept: true, wantForgotten: true, wantReads: 1},
 		{name: "lookup required from persisted TOCTOU", wantKept: true, wantForgotten: true, wantReads: 1},
@@ -645,6 +649,7 @@ func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlread
 			claimError:        forkchoice.ErrExecutionPayloadEnvelopeLookupRequired,
 			persistedEnvelope: true,
 			wantReads:         1,
+			wantLocalSeen:     true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -683,15 +688,23 @@ func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlread
 
 			if tc.wantKept {
 				require.Equal(t, int32(1), impl.pending.count.Load())
+				owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				require.NoError(t, err)
+				fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+				impl.pending.processPending(t.Context())
+				require.Equal(t, tc.wantReads, reads.Load())
+				_, err = fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+				fcu.ForgetExecutionPayloadEnvelopeForGossip(blockRoot, 1)
 			} else {
 				require.Zero(t, impl.pending.count.Load())
 			}
 			require.False(t, fcu.OnExecutionPayloadCalled)
 			require.Equal(t, tc.wantReads, reads.Load())
-			require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			require.Equal(t, tc.wantLocalSeen, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 			fcu.HasEnvelopeFunc = func(common.Hash) bool { return false }
 			token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-			if tc.wantForgotten {
+			if tc.wantForgotten || tc.wantKept {
 				require.NoError(t, claimErr)
 				fcu.EnvelopeGossipAdmissions.Finish(token, false)
 			} else {
@@ -705,6 +718,59 @@ func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlread
 			}
 		})
 	}
+}
+
+func TestExecutionPayloadServicePacesPendingLookupPerIdentity(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	first := newTestSignedEnvelope(100, blockRoot, 1)
+	second := newTestSignedEnvelope(100, blockRoot, 1)
+	second.Signature[0] = 1
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, first), ErrIgnore)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, second), ErrIgnore)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return nil, errors.New("persisted envelope unavailable")
+	}
+
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(2), impl.pending.count.Load())
+	require.Equal(t, int32(1), reads.Load())
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(1), reads.Load())
+}
+
+func TestExecutionPayloadServiceLookupOwnerExpiryPreservesSiblingPacing(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	older := newTestSignedEnvelope(100, blockRoot, 1)
+	younger := newTestSignedEnvelope(100, blockRoot, 1)
+	younger.Signature[0] = 1
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return nil, errors.New("persisted envelope unavailable")
+	}
+	olderHash, err := older.HashSSZ()
+	require.NoError(t, err)
+	olderJob := &pendingEnvelopeJob{envelope: older}
+	require.Equal(t, pendingJobKeep, impl.tryProcessPendingEnvelope(t.Context(), pendingEnvelopeKey{blockRoot, olderHash}, olderJob))
+	require.Equal(t, int32(1), reads.Load())
+
+	youngerHash, err := younger.HashSSZ()
+	require.NoError(t, err)
+	youngerJob := &pendingEnvelopeJob{envelope: younger}
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, youngerHash}, youngerJob, time.Now())
+	impl.pending.onExpired(pendingEnvelopeKey{blockRoot, olderHash}, olderJob)
+	require.Equal(t, pendingJobKeep, impl.tryProcessPendingEnvelope(t.Context(), pendingEnvelopeKey{blockRoot, youngerHash}, youngerJob))
+	require.Equal(t, int32(1), reads.Load())
 }
 
 func TestExecutionPayloadServicePendingBusyIdentityDoesNotBlockOtherJobs(t *testing.T) {
@@ -1063,13 +1129,13 @@ func TestExecutionPayloadServiceIgnoresIndicesPendingWhenRevalidationCrossesFina
 	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
-func TestExecutionPayloadServiceMarksValidatedPersistenceFailureSeen(t *testing.T) {
+func TestExecutionPayloadServiceAcceptsPersistenceFailureWithoutMarkingSeen(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
 	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
 	service.(*executionPayloadService).pending.stopAndWait()
-	events := make(chan *beaconevents.EventStream, 1)
+	events := make(chan *beaconevents.EventStream, 2)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 
@@ -1086,16 +1152,14 @@ func TestExecutionPayloadServiceMarksValidatedPersistenceFailureSeen(t *testing.
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
 	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
 	seenKey := seenEnvelopeKey{blockRoot, 1}
-	require.True(t, impl.seenEnvelopesCache.Contains(seenKey))
-	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-	select {
-	case event := <-events:
-		t.Fatalf("duplicate persistence failure emitted event %s", event.Event)
-	default:
-	}
-	require.Equal(t, int32(1), calls.Load())
-	_, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
-	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenKey))
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenKey))
+	require.Equal(t, int32(2), calls.Load())
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
 func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
