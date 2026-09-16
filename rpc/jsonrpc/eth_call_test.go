@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
@@ -1264,6 +1265,36 @@ func TestGetProofRequestShapes(t *testing.T) {
 			require.Equal(t, hexutil.Encode(k), proof.StorageProof[i].Key)
 		}
 		require.Equal(t, proof.StorageProof[0], proof.StorageProof[2])
+	})
+}
+
+// TestGetProofJSONShape pins the wire format the execution-apis fixtures require: an
+// empty storage-key list serializes as an array rather than null, and a short key is
+// echoed minimized next to a zero value.
+func TestGetProofJSONShape(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
+
+	t.Run("no keys serializes as an empty array", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[]`)
+	})
+
+	t.Run("short key echoes minimized", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{{0x00}}, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[{"key":"0x0","value":"0x0","proof":[]}]`)
 	})
 }
 
