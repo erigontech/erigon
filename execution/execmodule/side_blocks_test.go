@@ -109,6 +109,33 @@ func TestRetainedSideBlockTransactionsSurviveLaterCommits(t *testing.T) {
 	}))
 }
 
+func TestInvalidPayloadKeepsValidSiblings(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	good := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
+	bad := tamperBlockGasUsed(t, good, 21_000)
+	insertAndValidateBlocks(t, m, side)
+
+	_, err := m.InsertBlocks(t.Context(), []*types.Block{bad})
+	require.NoError(t, err)
+	result, err := m.ValidateChain(t.Context(), bad.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+
+	hash := side.Hash()
+	has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+	require.NoError(t, err)
+	require.True(t, has, "a valid sibling must survive the rejection of another payload")
+
+	updateForkChoiceTo(t, m, side)
+	requireCanonicalWithTransactions(t, m, side)
+
+	badHash := bad.Hash()
+	hasBad, err := m.ExecModule.HasBlock(t.Context(), &badHash, nil)
+	require.NoError(t, err)
+	require.False(t, hasBad, "a rejected payload must not be retained")
+}
+
 func TestRetainedBlockAboveCommittedSequenceKeepsTransactions(t *testing.T) {
 	m, key, _ := newMetricsTester(t)
 	chainA := generateTransferBlocks(t, m, key, 2, 0x0a)
