@@ -20,6 +20,7 @@
 package node
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -75,6 +76,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	handler = h2c.NewHandler(handler, h2)
 	if !cfg.HTTPS { // an ALPN-negotiated h2 connection is handed to the HTTP/2 server with the state hooks skipped, so it would never be uncorked
 		listener = corkListener{Listener: listener, writeTimeout: cfg.Timeouts.WriteTimeout}
+		handler = flushThroughCork(handler)
 	}
 	// Bundle the http server
 	httpSrv := &http.Server{
@@ -83,6 +85,12 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		WriteTimeout:      cfg.Timeouts.WriteTimeout,
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
+		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
+			if c, ok := conn.(*corkConn); ok {
+				return context.WithValue(ctx, corkConnKey{}, c)
+			}
+			return ctx
+		},
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			c, ok := conn.(*corkConn)
 			if !ok {
@@ -198,16 +206,16 @@ func (c *corkConn) Close() error {
 // CloseWrite keeps the half-close net/http uses for "Connection: close" reachable through the wrapper, so the
 // peer reads the last response instead of an RST.
 func (c *corkConn) CloseWrite() error {
-	closer, ok := c.Conn.(interface{ CloseWrite() error })
-	if !ok {
-		return errors.ErrUnsupported
-	}
 	c.mu.Lock()
 	c.bound()
 	err := c.flushLocked()
 	c.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	closer, ok := c.Conn.(interface{ CloseWrite() error })
+	if !ok {
+		return errors.ErrUnsupported
 	}
 	return closer.CloseWrite()
 }
@@ -244,6 +252,36 @@ func (c *corkConn) uncork() {
 		_ = c.Conn.SetWriteDeadline(time.Time{}) // the handler sets its own deadlines from here on
 	}
 	c.uncorked.Store(true)
+}
+
+type corkConnKey struct{}
+
+// flushThroughCork lets http.Flusher reach the socket: net/http's own Flush stops at the cork.
+func flushThroughCork(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, ok := r.Context().Value(corkConnKey{}).(*corkConn); ok {
+			w = &corkFlushWriter{ResponseWriter: w, conn: c}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type corkFlushWriter struct {
+	http.ResponseWriter
+	conn *corkConn
+}
+
+func (w *corkFlushWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+	_ = w.conn.flush()
+}
+
+func (w *corkFlushWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *corkFlushWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }
 
 func (c *corkConn) flushLocked() error {
