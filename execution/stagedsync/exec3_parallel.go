@@ -3456,7 +3456,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.number(), finalizeErr)), nil
 				}
 
-				lastResult.Logs = append(lastResult.Logs, syscallIBS.GetRawLogs(tt.TxIndex)...)
+				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
+				lastResult.Logs = append(lastResult.Logs, blockEndLogs...)
+
+				// Block-end logs belong to no receipt, so the per-tx publish
+				// loop, which indexes receipt logs only, never sees them. Index
+				// them here, on the exec loop that owns sd.mem, to keep the log
+				// indexes identical to the ones the serial executor builds.
+				if len(blockEndLogs) > 0 {
+					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, be.blobGasUsed,
+						blockEndLogs, nil, nil, true); err != nil {
+						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
+					}
+				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 

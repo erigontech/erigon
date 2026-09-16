@@ -1845,17 +1845,21 @@ func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.
 	return nil, nil
 }
 
-// seedLogEmittingContract deploys `LOG0` bytecode at addr so that every system
+// putLogEmittingContract writes `LOG0` bytecode at addr so that every system
 // call to it appends exactly one log to the caller's IntraBlockState.
-func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
+func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
 	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+		return err
+	}
+	return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+}
+
+func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		acc := accounts.NewAccount()
-		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
-			return err
-		}
-		return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+		return putLogEmittingContract(putter, addr)
 	})
 }
 
