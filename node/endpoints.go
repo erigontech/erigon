@@ -115,7 +115,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 
 // corkPassthroughBytes is the write size above which the buffer is skipped: copying a body that large costs
 // more than the syscall the copy would save.
-const corkPassthroughBytes = int(32 * datasize.KB)
+const corkPassthroughBytes = int(64 * datasize.KB)
 
 // corkFlushBytes bounds a corked connection: a streamed answer still reaches the client in pieces of
 // this size, and a connection cannot hold more than this before its buffer is handed to the socket.
