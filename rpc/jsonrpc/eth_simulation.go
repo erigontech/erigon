@@ -425,7 +425,7 @@ func (s *simulator) sanitizeCall(
 		if args.GasPrice == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
-	} else {
+	} else if args.GasPrice == nil {
 		// A base fee is provided, requiring 1559-type execution
 		if args.MaxFeePerGas == nil {
 			args.MaxFeePerGas = new(hexutil.U256)
