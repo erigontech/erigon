@@ -50,29 +50,14 @@ type blockRange struct {
 	from, to uint64 // inclusive
 }
 
-type rangeDownloader struct {
-	logger       log.Logger
-	svc          *bscp2p.Service
-	rangeSize    uint64
-	maxWorkers   int
-	retryBackOff time.Duration
-}
-
-func newRangeDownloader(logger log.Logger, svc *bscp2p.Service, rangeSize uint64) *rangeDownloader {
-	return &rangeDownloader{
-		logger:       logger,
-		svc:          svc,
-		rangeSize:    rangeSize,
-		maxWorkers:   estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly(),
-		retryBackOff: peerBackoff, // poll for peers, not bor's 1m steady-state wait
-	}
-}
-
-// download fetches [from,to] forward in parallel range-chunks, calling insert
-// with each assembled ascending batch. parent is the header at from-1 (used to
-// verify the first range links to the persisted chain); it may be nil only at
-// genesis. It returns when the range is fully inserted or ctx is cancelled.
-func (d *rangeDownloader) download(ctx context.Context, from, to uint64, parent *types.Header, insert insertFunc) error {
+// downloadRanges fetches [from,to] forward in parallel range-chunks, calling
+// insert with each assembled ascending batch. parent is the header at from-1
+// (used to verify the first range links to the persisted chain); it may be nil
+// only at genesis. It returns when the range is fully inserted or ctx is
+// cancelled. Peer backoff uses peerBackoff (poll for peers, not bor's 1m
+// steady-state wait).
+func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service, from, to uint64, parent *types.Header, insert insertFunc) error {
+	maxWorkers := estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
 	prev := parent
 	fetchStart := time.Now()
 	var done uint64
@@ -85,23 +70,23 @@ func (d *rangeDownloader) download(ctx context.Context, from, to uint64, parent 
 			return ctx.Err()
 		}
 
-		peers := d.svc.ListPeersMayHaveBlockNum(to)
+		peers := svc.ListPeersMayHaveBlockNum(to)
 		if len(peers) == 0 {
-			d.logger.Warn("[bsc] no peers for range, backing off", "from", nextFrom, "to", to, "backoff", d.retryBackOff)
-			if err := common.Sleep(ctx, d.retryBackOff); err != nil {
+			logger.Warn("[bsc] no peers for range, backing off", "from", nextFrom, "to", to, "backoff", peerBackoff)
+			if err := common.Sleep(ctx, peerBackoff); err != nil {
 				return err
 			}
 			continue
 		}
 
-		remaining := (to-nextFrom)/d.rangeSize + 1
-		numWorkers := min(uint64(d.maxWorkers), uint64(len(peers)), remaining)
+		remaining := (to-nextFrom)/rangeSize + 1
+		numWorkers := min(uint64(maxWorkers), uint64(len(peers)), remaining)
 
 		// Build just this batch of ranges (numWorkers of them) from the cursor.
 		batch := make([]blockRange, 0, numWorkers)
 		f := nextFrom
 		for range numWorkers {
-			t := min(f+d.rangeSize-1, to)
+			t := min(f+rangeSize-1, to)
 			batch = append(batch, blockRange{from: f, to: t})
 			f = t + 1
 		}
@@ -111,9 +96,9 @@ func (d *rangeDownloader) download(ctx context.Context, from, to uint64, parent 
 		for i, r := range batch {
 			i, r, peerID := i, r, peers[i]
 			wg.Go(func() {
-				blocks, err := fetchRangeFromPeer(ctx, d.svc, r.from, r.to, peerID)
+				blocks, err := fetchRangeFromPeer(ctx, svc, r.from, r.to, peerID)
 				if err != nil {
-					d.logger.Debug("[bsc] range fetch failed, will retry", "from", r.from, "to", r.to, "peer", peerID, "err", err)
+					logger.Debug("[bsc] range fetch failed, will retry", "from", r.from, "to", r.to, "peer", peerID, "err", err)
 					return // leaves blockBatches[i] nil → treated as a gap
 				}
 				blockBatches[i] = blocks
@@ -134,7 +119,7 @@ func (d *rangeDownloader) download(ctx context.Context, from, to uint64, parent 
 				break
 			}
 			if err := verifyChain(prev, blocks); err != nil {
-				d.logger.Debug("[bsc] range verify failed, will retry", "from", r.from, "to", r.to, "err", err)
+				logger.Debug("[bsc] range verify failed, will retry", "from", r.from, "to", r.to, "err", err)
 				advanceTo = r.from
 				break
 			}
@@ -152,7 +137,7 @@ func (d *rangeDownloader) download(ctx context.Context, from, to uint64, parent 
 		}
 
 		done += uint64(len(assembled))
-		d.logger.Info("[bsc] downloaded blocks",
+		logger.Info("[bsc] downloaded blocks",
 			"to", assembled[len(assembled)-1].NumberU64(),
 			"workers", len(batch), "peers", len(peers),
 			"blk/s", uint64(float64(done)/time.Since(fetchStart).Seconds()))

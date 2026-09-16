@@ -34,7 +34,9 @@ func computeResume(ctx context.Context, chainRW chainreader.ChainReaderWriterEth
 		headNum = head.Number.Uint64()
 	}
 	if frozen > headNum {
-		return frozen, head
+		// Snapshots are ahead of the executed head: resume from the frozen tip and
+		// return its header so the first range's parent linkage is contiguous.
+		return frozen, chainRW.GetHeaderByNumber(ctx, frozen)
 	}
 	return headNum, head
 }
