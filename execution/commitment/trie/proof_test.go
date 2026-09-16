@@ -82,3 +82,11 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 		}
 	}
 }
+
+// An empty trie proves absence with no nodes at all: its root has no encoded node to walk.
+func TestProofFromNodesEmptyTrie(t *testing.T) {
+	proof, value, err := ProofFromNodes(map[string][]byte{}, EmptyRoot[:], crypto.Keccak256([]byte("any")))
+	require.NoError(t, err)
+	require.Empty(t, proof)
+	require.Nil(t, value)
+}
