@@ -560,3 +560,8 @@ func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAtte
 func (b *BlindedBeaconBody) GetParentExecutionRequests() *ExecutionRequests {
 	return nil
 }
+
+// BlockSignature implements ColumnSyncableSignedBlock.
+func (b *SignedBlindedBeaconBlock) BlockSignature() common.Bytes96 {
+	return b.Signature
+}
