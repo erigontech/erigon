@@ -1194,7 +1194,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// A later tx self-destructed the account (no revival), so a read predating the
 		// destruct is stale; checkVersion misses it because the SD doesn't write the read's path.
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
-			path != IncarnationPath && path != CreateContractPath && path != CodePath {
+			path != IncarnationPath && path != CreateContractPath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed {
 				destructTxIndex := sdRR.DepIdx()
 				if destructTxIndex > rr.Version().TxIndex {

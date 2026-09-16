@@ -471,12 +471,22 @@ reread:
 			r.version = prHeader.Version
 			return
 		}
-		// CodePath trumped by SelfDestruct at >= DepIdx
-		if path == CodePath {
-			if destructed, sdres, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdres.resolved() && destructed && sdres.DepIdx() >= res.DepIdx() {
+		// Code/code-size written before an in-block SELFDESTRUCT is wiped; a revival
+		// that rewrote no code must not resurrect it. Use the destruct history, not
+		// the latest SelfDestruct cell (which a revival sets false), and anchor on
+		// canonicalVer like the storage path so a revival above the wipe does not
+		// livelock validation.
+		if path == CodePath || path == CodeSizePath {
+			if state, canonicalVer, destroyedAt := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state != LifecycleLive && hdr.Version.TxIndex <= destroyedAt {
+				if !commited {
+					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: canonicalVer},
+						Val:        true,
+					})
+				}
 				r.outcome = outcomeReturnDefault
 				r.source = MapRead
-				r.version = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+				r.version = canonicalVer
 				return
 			}
 		}

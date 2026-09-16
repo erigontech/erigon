@@ -858,3 +858,57 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
 	}
 }
+
+// TestGetCodeAfterDestructThenRevivalIsEmpty pins that code written before an
+// in-block SELFDESTRUCT is not served after a revival that rewrote no code:
+// the destruct wipes the code and the revival (SelfDestruct=false) must not
+// resurrect it. CodeSize must agree.
+func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(104)
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, CodePath, accounts.NilKey, Version{TxIndex: 0}, accounts.NewCode([]byte{0x60, 0x00}), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
+
+	reader := newAccountStateReader(addr)
+	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader, false), vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 3)
+	ibs.SetVersion(0)
+
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, code, "the destruct removed the code and the revival did not write any")
+
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Zero(t, size, "code size must agree with code")
+}
+
+// TestValidateRead_CodeReadMustSeeLaterSD pins that a code read recorded before a
+// later in-block SELFDESTRUCT (that this reader did not observe) is invalidated,
+// so the reader re-executes and sees the wiped code.
+func TestValidateRead_CodeReadMustSeeLaterSD(t *testing.T) {
+	addr := getAddress(161)
+	code := []byte{0x60, 0x00}
+	newIO := func(readVer Version) *VersionedIO {
+		io := NewVersionedIO(6)
+		rs := ReadSet{}
+		rs.SetCode(addr, VersionedRead[[]byte]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: code})
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+		return io
+	}
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 3}, accounts.NewCode(code), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+	t.Run("version-churn value-equal read sees the later SD", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 0}), validateEqualVersion, true, ""))
+	})
+	t.Run("version-match read sees the later SD", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 3}), validateEqualVersion, true, ""))
+	})
+}
