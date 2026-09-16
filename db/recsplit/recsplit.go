@@ -50,18 +50,6 @@ import (
 
 var ErrCollision = errors.New("duplicate key")
 
-// maxSaltRetries bounds the "collision happened, try another salt" loop.
-//
-// A genuine 64-bit hash collision clears within a salt or two — that is what the retry is for. A DUPLICATED
-// KEY in the input never clears, under any salt, and every caller of Build retries unconditionally, so the
-// loop rebuilds the entire index forever. It reports only the salted 64-bit hash, which changes on every
-// attempt, so it never names the key that cannot be indexed.
-//
-// Measured on a demo node: 255,850 retries against one 1000-block segment, a core pinned for hours, 275,715
-// partial index files left in the snapshot directory, and the segment permanently unindexable. Bounding the
-// retry turns that into one diagnosable error.
-const maxSaltRetries = 16
-
 const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
@@ -199,9 +187,7 @@ type RecSplit struct {
 	bucketKeyBuf       [12]byte
 	numBuf             [8]byte
 	collision          bool
-	saltRetries        int   // ResetNextSalt calls so far, bounding the collision-retry loop
-	lastCollisionErr   error // Most recent collision, reported once the retries are exhausted
-	enums              bool  // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	logger             log.Logger
@@ -451,7 +437,6 @@ func remap16(x uint64, n uint16) uint16 {
 func (rs *RecSplit) ResetNextSalt() {
 	rs.built = false
 	rs.collision = false
-	rs.saltRetries++
 	rs.keysAdded = 0
 	rs.salt++
 	if rs.progress != nil {
@@ -628,8 +613,7 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		for i, key := range rs.currentBucket[1:] {
 			if key == rs.currentBucket[i] {
 				rs.collision = true
-				rs.lastCollisionErr = fmt.Errorf("%w: %x", ErrCollision, key)
-				return rs.lastCollisionErr
+				return fmt.Errorf("%w: %x", ErrCollision, key)
 			}
 		}
 		bitPos := rs.gr.bitCount
@@ -938,15 +922,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
-	}
-	if rs.saltRetries >= maxSaltRetries {
-		// Report it as something OTHER than a collision, so the caller's retry loop exits: the snaptype
-		// builders test errors.Is(err, ErrCollision) and Domain tests Collision(), so both have to stop
-		// seeing a collision here or they retry forever.
-		rs.collision = false
-		return fmt.Errorf("index %s: %d salts failed to resolve a key collision, so the input contains a "+
-			"duplicate key and no salt can ever index it (last collision: %v)",
-			rs.fileName, rs.saltRetries, rs.lastCollisionErr)
 	}
 	if rs.forceCollisionOnce {
 		rs.forceCollisionOnce = false
@@ -1477,7 +1452,6 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		if r.err != nil {
 			if errors.Is(r.err, ErrCollision) {
 				rs.collision = true
-				rs.lastCollisionErr = r.err
 			}
 			consumerErr = r.err
 			putBucketResult(r)
