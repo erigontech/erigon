@@ -24,6 +24,7 @@ package bscsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
@@ -35,9 +36,8 @@ import (
 )
 
 const (
-	fetchChunk       = 1024 // headers per FetchHeaders round (eth.MaxHeadersServe)
 	defaultFcuBlocks = 8192 // fallback FCU interval when LoopBlockLimit is unset
-	defaultRangeSize = 1024 // blocks per worker range (~1GB/worker at 1MB/block, matching bor)
+	rangeSize        = 1024 // blocks per worker range (~1GB/worker at 1MB/block, matching bor)
 	peerBackoff      = 3 * time.Second
 )
 
@@ -45,23 +45,22 @@ const (
 type Config struct {
 	ChainRW     chainreader.ChainReaderWriterEth1
 	Svc         *bscp2p.Service
-	TargetBlock uint64 // upper bound; bounded bulk uses the parallel downloader. 0 = tip-less sequential fallback (until tip-following lands).
+	TargetBlock uint64 // upper bound for the parallel downloader; required (> 0)
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
-	RangeSize   uint64 // per-worker range in the parallel downloader
 }
 
 // RunBlockDownloader runs the p2p service and the forward download loop until ctx
 // is cancelled, the target is reached, or a fatal error occurs.
 func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) error {
+	if cfg.TargetBlock == 0 {
+		return fmt.Errorf("bsc/sync: --sync.target-block is required (tip-following not implemented)")
+	}
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
-	if cfg.RangeSize == 0 {
-		cfg.RangeSize = defaultRangeSize
-	}
 	errCh := make(chan error, 2)
 	go func() { errCh <- cfg.Svc.Run(ctx) }()
-	go func() { errCh <- runLoop(ctx, logger, cfg) }()
+	go func() { errCh <- runParallel(ctx, logger, cfg) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -70,20 +69,11 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 	}
 }
 
-func runLoop(ctx context.Context, logger log.Logger, cfg Config) error {
-	head, parent := computeResume(ctx, cfg.ChainRW)
-	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", cfg.RangeSize)
-	if cfg.TargetBlock == 0 {
-		// No target: fall back to the single-peer sequential loop (crude tip
-		// follow). Parallel bulk needs a finite target to lay out ranges.
-		return runSequential(ctx, logger, cfg, head, parent)
-	}
-	return runParallel(ctx, logger, cfg, head, parent)
-}
-
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
 // downloader, persisting each assembled batch and advancing the head via FCU.
-func runParallel(ctx context.Context, logger log.Logger, cfg Config, head uint64, parent *types.Header) error {
+func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
+	head, parent := computeResume(ctx, cfg.ChainRW)
+	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", rangeSize)
 	if head >= cfg.TargetBlock {
 		logger.Info("[bsc] reached target", "block", head)
 		return nil
@@ -103,65 +93,11 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config, head uint64
 		}
 		return nil
 	}
-	d := newRangeDownloader(logger, cfg.Svc, cfg.RangeSize)
-	if err := d.download(ctx, head+1, cfg.TargetBlock, parent, insert); err != nil {
+	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, insert); err != nil {
 		return err
 	}
 	logger.Info("[bsc] reached target", "block", cfg.TargetBlock)
 	return nil
-}
-
-func runSequential(ctx context.Context, logger log.Logger, cfg Config, head uint64, parent *types.Header) error {
-	lastFcu := head
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if cfg.TargetBlock != 0 && head >= cfg.TargetBlock {
-			logger.Info("[bsc] reached target", "block", head)
-			return nil
-		}
-
-		to := head + fetchChunk
-		if cfg.TargetBlock != 0 && to > cfg.TargetBlock {
-			to = cfg.TargetBlock
-		}
-
-		blocks, err := fetchForwardRange(ctx, cfg.Svc, head+1, to)
-		if err != nil {
-			if errors.Is(err, errNoPeers) || ctx.Err() == nil {
-				logger.Debug("[bsc] fetch failed, backing off", "from", head+1, "to", to, "err", err)
-				if !sleep(ctx, peerBackoff) {
-					return ctx.Err()
-				}
-				continue
-			}
-			return err
-		}
-
-		if err := verifyChain(parent, blocks); err != nil {
-			// A parent-hash break within bulk history is unexpected; stop rather than
-			// auto-reorg (tip-following/reorg is a later phase).
-			logger.Error("[bsc] chain verification failed, stopping", "from", head+1, "err", err)
-			return err
-		}
-
-		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
-			return err
-		}
-		last := blocks[len(blocks)-1]
-		head = last.NumberU64()
-		parent = last.HeaderNoCopy()
-
-		if head-lastFcu >= cfg.FcuInterval || (cfg.TargetBlock != 0 && head >= cfg.TargetBlock) {
-			if err := commitHead(ctx, logger, cfg, last); err != nil {
-				return err
-			}
-			lastFcu = head
-		}
-
-		logger.Info("[bsc] downloaded blocks", "to", head, "hash", last.Hash())
-	}
 }
 
 // commitHead advances the canonical head via the exec module, retrying while the
@@ -176,8 +112,8 @@ func commitHead(ctx context.Context, logger log.Logger, cfg Config, head *types.
 		case execmodule.ExecutionStatusSuccess:
 			return nil
 		case execmodule.ExecutionStatusBusy:
-			if !sleep(ctx, peerBackoff) {
-				return ctx.Err()
+			if err := common.Sleep(ctx, peerBackoff); err != nil {
+				return err
 			}
 			continue
 		default:
@@ -188,16 +124,5 @@ func commitHead(ctx context.Context, logger log.Logger, cfg Config, head *types.
 			logger.Error("[bsc] forkchoice rejected head", "block", head.NumberU64(), "hash", head.Hash(), "status", status, "err", msg)
 			return errors.New("forkchoice rejected head: " + status.String())
 		}
-	}
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
 	}
 }

@@ -18,36 +18,12 @@ package bscsync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-var errNoPeers = errors.New("no peers available for range")
-
-// fetchForwardRange downloads headers [from,to] and their bodies from a single
-// peer and assembles forward-ordered blocks. It tries peers that may have the
-// range until one returns the full set.
-func fetchForwardRange(ctx context.Context, svc *bscp2p.Service, from, to uint64) ([]*types.Block, error) {
-	peers := svc.ListPeersMayHaveBlockNum(to)
-	if len(peers) == 0 {
-		return nil, errNoPeers
-	}
-
-	var lastErr error
-	for _, peerID := range peers {
-		blocks, err := fetchRangeFromPeer(ctx, svc, from, to, peerID)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return blocks, nil
-	}
-	return nil, fmt.Errorf("all %d peers failed for [%d,%d]: %w", len(peers), from, to, lastErr)
-}
 
 func fetchRangeFromPeer(ctx context.Context, svc *bscp2p.Service, from, to uint64, peerID *p2p.PeerId) ([]*types.Block, error) {
 	hResp, err := svc.FetchHeaders(ctx, from, to+1, peerID)
