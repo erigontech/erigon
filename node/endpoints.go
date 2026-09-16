@@ -184,6 +184,7 @@ func (c *corkConn) Read(p []byte) (int, error) {
 // close the connection to interrupt it.
 func (c *corkConn) Close() error {
 	if c.mu.TryLock() {
+		c.bound()
 		_ = c.flushLocked()
 		c.mu.Unlock()
 	}
@@ -197,17 +198,31 @@ func (c *corkConn) CloseWrite() error {
 	if !ok {
 		return errors.ErrUnsupported
 	}
-	_ = c.flush()
+	c.mu.Lock()
+	c.bound()
+	err := c.flushLocked()
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	return closer.CloseWrite()
 }
 
 // flushIdle sends what the finished response left buffered. net/http has cleared the request's write deadline
 // by now, so the endpoint's own timeout bounds this write.
 func (c *corkConn) flushIdle() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bound()
+	_ = c.flushLocked()
+}
+
+// bound gives the flush a deadline. net/http clears the request's write deadline once the handler returns, so
+// every flush after that point would otherwise wait on the peer forever.
+func (c *corkConn) bound() {
 	if c.writeTimeout > 0 {
 		_ = c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
-	_ = c.flush()
 }
 
 func (c *corkConn) flush() error {
