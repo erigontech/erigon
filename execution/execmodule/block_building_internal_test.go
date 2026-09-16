@@ -87,6 +87,30 @@ func TestSameBuildRequestTransientPayloadBypassesReuse(t *testing.T) {
 	require.True(t, sameBuildRequest(previous, previous.Copy()))
 }
 
+func TestAssembleBlockPreparesBuildContextBeforeBuilderStarts(t *testing.T) {
+	store := builder.NewBuildContextStore()
+	slot := uint64(42)
+	started := make(chan struct{})
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		close(started)
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	WithBuildParametersPreparer(store.Prepare)(module)
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		SlotNumber:               &slot,
+		ParentHash:               common.Hash{0x01},
+		Timestamp:                newTestTimestamp(),
+		ValidatedProposerContext: true,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, result.PayloadID)
+	_, generation, ok := store.Resolve(slot)
+	require.True(t, ok)
+	require.NotZero(t, generation)
+	<-started
+}
+
 func TestTransientPayloadDoesNotReplaceNormalTimestampIndex(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan uint64, 3)

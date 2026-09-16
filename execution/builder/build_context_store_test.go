@@ -10,6 +10,7 @@ package builder
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 
@@ -44,24 +45,235 @@ func TestBuildContextStoreCopiesAndKeepsActiveSlots(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestBuildContextStoreWrapPublishesBeforeBuild(t *testing.T) {
+func TestBuildContextStoreWrapKeepsContextAfterBuild(t *testing.T) {
 	store := NewBuildContextStore()
 	slot := uint64(42)
+	var generation uint64
 	wrapped := store.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
-		resolved, _, ok := store.Resolve(slot)
+		resolved, token, ok := store.Resolve(slot)
 		require.True(t, ok)
 		require.Equal(t, params.ParentHash, resolved.ParentHash)
 		require.NotZero(t, params.privateBundleGeneration)
+		require.Equal(t, token, params.privateBundleGeneration)
+		generation = token
 		return nil, nil
 	})
 
-	params := &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x44}, ValidatedProposerContext: true}
+	params := &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}
 	_, err := wrapped(t.Context(), params, nil)
 	require.NoError(t, err)
 	require.Zero(t, params.privateBundleGeneration)
-	_, _, ok := store.Resolve(slot)
+	_, token, ok := store.Resolve(slot)
+	require.True(t, ok)
+	require.Equal(t, generation, token)
+	require.True(t, store.IsActive(slot))
+	require.True(t, store.IsContextActive(slot, generation))
+}
+
+func TestBuildContextStoreWrapReusesContextAcrossBuildRefresh(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	var generations []uint64
+	wrapped := store.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		generations = append(generations, params.privateBundleGeneration)
+		return nil, nil
+	})
+	params := &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}
+
+	_, err := wrapped(t.Context(), params, nil)
+	require.NoError(t, err)
+	_, err = wrapped(t.Context(), params.Copy(), nil)
+	require.NoError(t, err)
+
+	require.Len(t, generations, 2)
+	require.NotZero(t, generations[0])
+	require.Equal(t, generations[0], generations[1])
+}
+
+func TestBuildContextStoreWrapSupersedesPreviousSlot(t *testing.T) {
+	store := NewBuildContextStore()
+	wrapped := store.Wrap(func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	slot42, slot43 := uint64(42), uint64(43)
+
+	_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot42, ParentHash: common.Hash{0x42}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+	_, oldGeneration, ok := store.Resolve(slot42)
+	require.True(t, ok)
+	_, err = wrapped(t.Context(), &Parameters{SlotNumber: &slot43, ParentHash: common.Hash{0x43}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+
+	_, _, ok = store.Resolve(slot42)
 	require.False(t, ok)
+	require.False(t, store.IsContextActive(slot42, oldGeneration))
+	_, _, ok = store.Resolve(slot43)
+	require.True(t, ok)
+}
+
+func TestBuildContextStoreWrapKeepsChangedParentsAtSameSlot(t *testing.T) {
+	store := NewBuildContextStore()
+	wrapped := store.Wrap(func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	slot := uint64(42)
+
+	_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x11}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+	_, oldGeneration, ok := store.Resolve(slot)
+	require.True(t, ok)
+	_, err = wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x22}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+
+	resolved, newGeneration, ok := store.Resolve(slot)
+	require.True(t, ok)
+	require.Equal(t, common.Hash{0x22}, resolved.ParentHash)
+	require.NotEqual(t, oldGeneration, newGeneration)
+	require.True(t, store.IsContextActive(slot, oldGeneration))
+	resolved, generation, ok := store.ResolveForParent(slot, common.Hash{0x11})
+	require.True(t, ok)
+	require.Equal(t, common.Hash{0x11}, resolved.ParentHash)
+	require.Equal(t, oldGeneration, generation)
+	resolved, generation, ok = store.ResolveForParent(slot, common.Hash{0x22})
+	require.True(t, ok)
+	require.Equal(t, common.Hash{0x22}, resolved.ParentHash)
+	require.Equal(t, newGeneration, generation)
+}
+
+func TestBuildContextStoreWrapDoesNotReactivateOlderSlot(t *testing.T) {
+	store := NewBuildContextStore()
+	var generation uint64
+	wrapped := store.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		generation = params.privateBundleGeneration
+		return nil, nil
+	})
+	slot42, slot43 := uint64(42), uint64(43)
+
+	_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot43, ParentHash: common.Hash{0x43}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+	require.NotZero(t, generation)
+	_, err = wrapped(t.Context(), &Parameters{SlotNumber: &slot42, ParentHash: common.Hash{0x42}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+
+	require.Zero(t, generation)
+	_, _, ok := store.Resolve(slot42)
+	require.False(t, ok)
+	_, _, ok = store.Resolve(slot43)
+	require.True(t, ok)
+}
+
+func TestBuildContextStoreWrapDoesNotPublishTransientContext(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	var generation uint64
+	wrapped := store.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		generation = params.privateBundleGeneration
+		return nil, nil
+	})
+	production := &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}
+
+	_, err := wrapped(t.Context(), production, nil)
+	require.NoError(t, err)
+	productionGeneration := generation
+	require.NotZero(t, productionGeneration)
+	transient := production.Copy()
+	transient.TransientPayload = true
+	transientOnlyStore := NewBuildContextStore()
+	_, err = transientOnlyStore.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		require.Zero(t, params.privateBundleGeneration)
+		return nil, nil
+	})(t.Context(), transient.Copy(), nil)
+	require.NoError(t, err)
+	_, _, ok := transientOnlyStore.Resolve(slot)
+	require.False(t, ok)
+	_, err = wrapped(t.Context(), transient, nil)
+	require.NoError(t, err)
+
+	require.Zero(t, generation)
+	_, retainedGeneration, ok := store.Resolve(slot)
+	require.True(t, ok)
+	require.Equal(t, productionGeneration, retainedGeneration)
+}
+
+func TestBuildContextStoreWrapExpiresWithoutReplacement(t *testing.T) {
+	store := NewBuildContextStore()
+	now := uint64(99)
+	store.now = func() uint64 { return now }
+	slot := uint64(42)
+	var retainedGeneration uint64
+	wrapped := store.Wrap(func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		retainedGeneration = params.privateBundleGeneration
+		return nil, nil
+	})
+
+	_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: 100, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+	_, generation, ok := store.Resolve(slot)
+	require.True(t, ok)
+	require.NotZero(t, generation)
+	require.True(t, store.IsActive(slot))
+	require.True(t, store.IsContextActive(slot, retainedGeneration))
+	require.NoError(t, store.WithActive(slot, retainedGeneration, func() error { return nil }))
+
+	now = 100
+
+	_, generation, ok = store.Resolve(slot)
+	require.False(t, ok)
+	require.Zero(t, generation)
 	require.False(t, store.IsActive(slot))
+	require.False(t, store.IsContextActive(slot, retainedGeneration))
+	require.ErrorContains(t, store.WithActive(slot, retainedGeneration, func() error { return nil }), "no longer active")
+}
+
+func TestBuildContextStoreWrapBoundsSameSlotForks(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	wrapped := store.Wrap(func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	var firstGeneration uint64
+	for i := 0; i <= maxRetainedBuildContextsPerSlot; i++ {
+		parent := common.Hash{byte(i + 1)}
+		_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: parent, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+		require.NoError(t, err)
+		_, generation, ok := store.ResolveForParent(slot, parent)
+		require.True(t, ok)
+		if i == 0 {
+			firstGeneration = generation
+		}
+	}
+
+	require.False(t, store.IsContextActive(slot, firstGeneration))
+	_, _, ok := store.ResolveForParent(slot, common.Hash{0x01})
+	require.False(t, ok)
+}
+
+func TestBuildContextStoreWrapKeepsRevisitedContextAtCapacity(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	wrapped := store.Wrap(func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	var firstGeneration uint64
+	for i := range maxRetainedBuildContextsPerSlot {
+		parent := common.Hash{byte(i + 1)}
+		_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: parent, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+		require.NoError(t, err)
+		_, generation, ok := store.ResolveForParent(slot, parent)
+		require.True(t, ok)
+		if i == 0 {
+			firstGeneration = generation
+		}
+	}
+
+	_, err := wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x01}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+	_, err = wrapped(t.Context(), &Parameters{SlotNumber: &slot, ParentHash: common.Hash{0x11}, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
+
+	require.True(t, store.IsContextActive(slot, firstGeneration))
+	_, _, ok := store.ResolveForParent(slot, common.Hash{0x02})
+	require.False(t, ok)
 }
 
 func TestBuildContextStoreIgnoresIncompleteParameters(t *testing.T) {

@@ -51,7 +51,7 @@ type privateBundleAdmission interface {
 }
 
 type privateBundleTargetValidator interface {
-	ValidateTarget(context.Context, common.Hash) error
+	ValidateTarget(context.Context, common.Hash, uint64, common.Hash, uint64) error
 }
 
 type activePrivateBundleAdmission struct {
@@ -64,7 +64,7 @@ func (a *activePrivateBundleAdmission) Submit(ctx context.Context, bundle privat
 	if a == nil || a.submitter == nil || a.contexts == nil || a.validator == nil || simulation == nil || simulation.contextGeneration == 0 {
 		return common.Hash{}, errors.New("private bundle admission context is unavailable")
 	}
-	if err := a.validator.ValidateTarget(ctx, bundle.TargetHash); err != nil {
+	if err := a.validator.ValidateTarget(ctx, bundle.TargetHash, bundle.TargetSlot, simulation.ParentBlockHash, simulation.contextGeneration); err != nil {
 		return common.Hash{}, fmt.Errorf("public target changed before private bundle submission: %w", err)
 	}
 	bundle.TargetParentHash = simulation.ParentBlockHash

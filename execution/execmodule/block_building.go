@@ -420,6 +420,12 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			return AssembleBlockResult{Busy: true}, nil
 		}
 	}
+	if !params.TransientPayload && e.prepareBuildParams != nil {
+		params = e.prepareBuildParams(params)
+		if params == nil {
+			return AssembleBlockResult{}, errors.New("build parameters preparer returned nil")
+		}
+	}
 
 	txnRevision := e.currentPayloadTxnRevision(params.Timestamp, parentBlockNum)
 	// A stopped builder is reusable until its transaction source changes. Only one that cannot

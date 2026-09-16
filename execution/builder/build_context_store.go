@@ -11,10 +11,13 @@ package builder
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -24,22 +27,28 @@ type BuildContextStore struct {
 	contexts       map[uint64][]buildContext
 	active         atomic.Pointer[activeBuildSlots]
 	activeContexts atomic.Pointer[activeBuildContexts]
+	retainedSlot   uint64
+	hasRetained    bool
+	now            func() uint64
 }
 
-type activeBuildSlots map[uint64]struct{}
+type activeBuildSlots map[uint64]uint64
 type activeBuildContext struct {
 	slot  uint64
 	token uint64
 }
-type activeBuildContexts map[activeBuildContext]struct{}
+type activeBuildContexts map[activeBuildContext]uint64
 
 type buildContext struct {
-	token  uint64
-	params *Parameters
+	token     uint64
+	expiresAt uint64
+	params    *Parameters
 }
 
+const maxRetainedBuildContextsPerSlot = 16
+
 func NewBuildContextStore() *BuildContextStore {
-	store := &BuildContextStore{contexts: make(map[uint64][]buildContext)}
+	store := &BuildContextStore{contexts: make(map[uint64][]buildContext), now: currentUnixTime}
 	active := make(activeBuildSlots)
 	store.active.Store(&active)
 	activeContexts := make(activeBuildContexts)
@@ -83,19 +92,89 @@ func (s *BuildContextStore) release(slot, token uint64) {
 	}
 }
 
+func (s *BuildContextStore) retain(params *Parameters) (uint64, uint64) {
+	if s == nil || params == nil || params.SlotNumber == nil || params.Timestamp == 0 || !params.ValidatedProposerContext || params.TransientPayload || params.CustomTxnProvider != nil {
+		return 0, 0
+	}
+	slot := *params.SlotNumber
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hasRetained && slot < s.retainedSlot {
+		return 0, 0
+	}
+	if !s.hasRetained || slot > s.retainedSlot {
+		s.contexts = make(map[uint64][]buildContext)
+		s.retainedSlot = slot
+		s.hasRetained = true
+	}
+	contexts := s.contexts[slot]
+	for i, context := range slices.Backward(contexts) {
+		if sameRetainedBuildContext(context.params, params) {
+			matched := context
+			if i != len(contexts)-1 {
+				contexts = append(slices.Delete(contexts, i, i+1), matched)
+				s.contexts[slot] = contexts
+			}
+			return slot, matched.token
+		}
+	}
+	s.next++
+	contexts = append(contexts, buildContext{token: s.next, expiresAt: params.Timestamp, params: params.Copy()})
+	if len(contexts) > maxRetainedBuildContextsPerSlot {
+		contexts = slices.Clone(contexts[len(contexts)-maxRetainedBuildContextsPerSlot:])
+	}
+	s.contexts[slot] = contexts
+	s.updateActiveSlots()
+	return slot, s.next
+}
+
+func sameRetainedBuildContext(left, right *Parameters) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	left = left.Copy()
+	right = right.Copy()
+	left.PayloadId = 0
+	right.PayloadId = 0
+	left.privateBundleGeneration = 0
+	right.privateBundleGeneration = 0
+	left.CustomTxnProvider = nil
+	right.CustomTxnProvider = nil
+	return reflect.DeepEqual(left, right)
+}
+
 func (s *BuildContextStore) Resolve(slot uint64) (*Parameters, uint64, bool) {
 	if s == nil {
 		return nil, 0, false
 	}
 	s.mu.RLock()
+	now := s.currentTime()
 	contexts := s.contexts[slot]
-	if len(contexts) == 0 {
-		s.mu.RUnlock()
+	for _, context := range slices.Backward(contexts) {
+		if buildContextActive(context, now) {
+			s.mu.RUnlock()
+			return context.params.Copy(), context.token, true
+		}
+	}
+	s.mu.RUnlock()
+	return nil, 0, false
+}
+
+func (s *BuildContextStore) ResolveForParent(slot uint64, parentHash common.Hash) (*Parameters, uint64, bool) {
+	if s == nil {
 		return nil, 0, false
 	}
-	context := contexts[len(contexts)-1]
+	s.mu.RLock()
+	now := s.currentTime()
+	contexts := s.contexts[slot]
+	for _, context := range slices.Backward(contexts) {
+		if context.params.ParentHash == parentHash && buildContextActive(context, now) {
+			s.mu.RUnlock()
+			return context.params.Copy(), context.token, true
+		}
+	}
 	s.mu.RUnlock()
-	return context.params.Copy(), context.token, true
+	return nil, 0, false
 }
 
 func (s *BuildContextStore) IsActive(slot uint64) bool {
@@ -106,8 +185,11 @@ func (s *BuildContextStore) IsActive(slot uint64) bool {
 	if active == nil {
 		return false
 	}
-	_, ok := (*active)[slot]
-	return ok
+	expiresAt, ok := (*active)[slot]
+	if !ok {
+		return false
+	}
+	return expiresAt == 0 || s.currentTime() < expiresAt
 }
 
 func (s *BuildContextStore) IsContextActive(slot, token uint64) bool {
@@ -118,19 +200,23 @@ func (s *BuildContextStore) IsContextActive(slot, token uint64) bool {
 	if active == nil {
 		return false
 	}
-	_, ok := (*active)[activeBuildContext{slot: slot, token: token}]
-	return ok
+	expiresAt, ok := (*active)[activeBuildContext{slot: slot, token: token}]
+	if !ok {
+		return false
+	}
+	return expiresAt == 0 || s.currentTime() < expiresAt
 }
 
 func (s *BuildContextStore) updateActiveSlots() {
 	active := make(activeBuildSlots, len(s.contexts))
 	activeContexts := make(activeBuildContexts)
 	for slot, contexts := range s.contexts {
-		if len(contexts) > 0 {
-			active[slot] = struct{}{}
-		}
 		for _, context := range contexts {
-			activeContexts[activeBuildContext{slot: slot, token: context.token}] = struct{}{}
+			activeContexts[activeBuildContext{slot: slot, token: context.token}] = context.expiresAt
+			expiresAt, exists := active[slot]
+			if !exists || expiresAt != 0 && (context.expiresAt == 0 || context.expiresAt > expiresAt) {
+				active[slot] = context.expiresAt
+			}
 		}
 	}
 	s.active.Store(&active)
@@ -143,23 +229,47 @@ func (s *BuildContextStore) WithActive(slot, token uint64, fn func() error) erro
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	now := s.currentTime()
 	for _, context := range s.contexts[slot] {
-		if context.token == token {
+		if context.token == token && buildContextActive(context, now) {
 			return fn()
 		}
 	}
 	return errors.New("build context is no longer active")
 }
 
+func buildContextActive(context buildContext, now uint64) bool {
+	return context.expiresAt == 0 || now < context.expiresAt
+}
+
+func currentUnixTime() uint64 {
+	now := time.Now().Unix()
+	if now < 0 {
+		return 0
+	}
+	return uint64(now)
+}
+
+func (s *BuildContextStore) currentTime() uint64 {
+	if s.now == nil {
+		return currentUnixTime()
+	}
+	return s.now()
+}
+
+// Prepare attaches the retained private-bundle generation to accepted build parameters.
+func (s *BuildContextStore) Prepare(params *Parameters) *Parameters {
+	_, token := s.retain(params)
+	if token == 0 {
+		return params
+	}
+	prepared := params.Copy()
+	prepared.privateBundleGeneration = token
+	return prepared
+}
+
 func (s *BuildContextStore) Wrap(next BlockBuilderFunc) BlockBuilderFunc {
 	return func(ctx context.Context, params *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-		slot, token := s.publish(params)
-		defer s.release(slot, token)
-		if token == 0 {
-			return next(ctx, params, interrupt)
-		}
-		buildParams := params.Copy()
-		buildParams.privateBundleGeneration = token
-		return next(ctx, buildParams, interrupt)
+		return next(ctx, s.Prepare(params), interrupt)
 	}
 }

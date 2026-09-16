@@ -22,6 +22,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -282,6 +283,24 @@ func TestPrivateBundleSimulatorRejectsTargetDisappearingDuringSimulation(t *test
 	require.ErrorContains(t, err, "public target changed during simulation")
 }
 
+func TestPrivateBundleTargetValidationRejectsChangedBuildContext(t *testing.T) {
+	targetTxn := signedSimulatorTransaction(t, 1, 20)
+	simulator := &privateBundleSimulatorImpl{
+		targetBlock: func(context.Context, uint64) (*privateBundleTargetContext, error) {
+			return &privateBundleTargetContext{
+				Parent:     rpc.BlockNumberOrHashWithHash(common.Hash{0x66}, true),
+				Generation: 8,
+			}, nil
+		},
+		targetTransaction: func(context.Context, common.Hash) (types.Transaction, error) {
+			return targetTxn, nil
+		},
+	}
+
+	err := simulator.ValidateTarget(t.Context(), targetTxn.Hash(), 42, common.Hash{0x55}, 7)
+	require.ErrorContains(t, err, "build context changed")
+}
+
 func TestTransactionCallArgsOmitsZeroChainIDForUnprotectedLegacyTransaction(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -395,6 +414,7 @@ func TestPrivateBundleTargetAndSimulationUsePublishedOverlay(t *testing.T) {
 	store := executionbuilder.NewBuildContextStore()
 	slot := uint64(42)
 	gasLimit := overlayHeader.GasLimit
+	targetTimestamp := max(overlayHeader.Time+1, uint64(time.Now().Add(time.Hour).Unix()))
 	started := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})
@@ -407,7 +427,7 @@ func TestPrivateBundleTargetAndSimulationUsePublishedOverlay(t *testing.T) {
 		defer close(done)
 		_, _ = wrapped(t.Context(), &executionbuilder.Parameters{
 			ParentHash:               overlayHeader.Hash(),
-			Timestamp:                overlayHeader.Time + 1,
+			Timestamp:                targetTimestamp,
 			SlotNumber:               &slot,
 			TargetGasLimit:           &gasLimit,
 			ValidatedProposerContext: true,
@@ -445,7 +465,7 @@ func TestPrivateBundleTargetAndSimulationUsePublishedOverlay(t *testing.T) {
 		defer close(staleDone)
 		_, _ = staleWrapped(t.Context(), &executionbuilder.Parameters{
 			ParentHash:               overlayHeader.ParentHash,
-			Timestamp:                overlayHeader.Time,
+			Timestamp:                targetTimestamp,
 			SlotNumber:               &slot,
 			TargetGasLimit:           &gasLimit,
 			ValidatedProposerContext: true,
@@ -453,7 +473,7 @@ func TestPrivateBundleTargetAndSimulationUsePublishedOverlay(t *testing.T) {
 	}()
 	<-staleStarted
 	_, err = resolvePrivateBundleTarget(t.Context(), api, m.ChainConfig, staleStore, slot)
-	require.ErrorContains(t, err, "parent is no longer latest")
+	require.ErrorContains(t, err, "unavailable")
 	close(staleRelease)
 	<-staleDone
 }

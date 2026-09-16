@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -167,10 +168,10 @@ func (s *recordingPrivateBundleSubmitter) Submit(bundle privatepool.Bundle) (com
 	return bundle.Transaction.Hash(), nil
 }
 
-type privateBundleTargetValidatorFunc func(context.Context, common.Hash) error
+type privateBundleTargetValidatorFunc func(context.Context, common.Hash, uint64, common.Hash, uint64) error
 
-func (fn privateBundleTargetValidatorFunc) ValidateTarget(ctx context.Context, hash common.Hash) error {
-	return fn(ctx, hash)
+func (fn privateBundleTargetValidatorFunc) ValidateTarget(ctx context.Context, hash common.Hash, slot uint64, parentHash common.Hash, generation uint64) error {
+	return fn(ctx, hash, slot, parentHash, generation)
 }
 
 func TestActivePrivateBundleAdmissionChecksContextAndTargetAtSubmit(t *testing.T) {
@@ -186,7 +187,7 @@ func TestActivePrivateBundleAdmissionChecksContextAndTargetAtSubmit(t *testing.T
 	})
 	go func() {
 		defer close(done)
-		_, _ = wrapped(t.Context(), &executionbuilder.Parameters{SlotNumber: &slot, ValidatedProposerContext: true}, nil)
+		_, _ = wrapped(t.Context(), &executionbuilder.Parameters{SlotNumber: &slot, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
 	}()
 	<-started
 	_, generation, ok := store.Resolve(slot)
@@ -198,7 +199,11 @@ func TestActivePrivateBundleAdmissionChecksContextAndTargetAtSubmit(t *testing.T
 	admission := &activePrivateBundleAdmission{
 		submitter: submitter,
 		contexts:  store,
-		validator: privateBundleTargetValidatorFunc(func(context.Context, common.Hash) error {
+		validator: privateBundleTargetValidatorFunc(func(_ context.Context, hash common.Hash, gotSlot uint64, parentHash common.Hash, gotGeneration uint64) error {
+			require.Equal(t, common.Hash{0x33}, hash)
+			require.Equal(t, slot, gotSlot)
+			require.Equal(t, common.Hash{0x44}, parentHash)
+			require.Equal(t, generation, gotGeneration)
 			if !targetValid.Load() {
 				return context.Canceled
 			}
@@ -227,6 +232,11 @@ func TestActivePrivateBundleAdmissionChecksContextAndTargetAtSubmit(t *testing.T
 
 	close(release)
 	<-done
+	nextSlot := slot + 1
+	_, err = store.Wrap(func(context.Context, *executionbuilder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})(t.Context(), &executionbuilder.Parameters{SlotNumber: &nextSlot, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
+	require.NoError(t, err)
 	_, err = admission.Submit(t.Context(), bundle, simulation)
 	require.ErrorContains(t, err, "no longer active")
 	require.Equal(t, uint64(1), submitter.calls.Load())
@@ -245,7 +255,7 @@ func TestActivePrivateBundleAdmissionDoesNotHoldStoreLockDuringTargetValidation(
 	})
 	go func() {
 		defer close(buildDone)
-		_, _ = wrapped(t.Context(), &executionbuilder.Parameters{SlotNumber: &slot, ValidatedProposerContext: true}, nil)
+		_, _ = wrapped(t.Context(), &executionbuilder.Parameters{SlotNumber: &slot, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
 	}()
 	<-buildStarted
 	_, generation, ok := store.Resolve(slot)
@@ -256,7 +266,7 @@ func TestActivePrivateBundleAdmissionDoesNotHoldStoreLockDuringTargetValidation(
 	admission := &activePrivateBundleAdmission{
 		submitter: new(recordingPrivateBundleSubmitter),
 		contexts:  store,
-		validator: privateBundleTargetValidatorFunc(func(context.Context, common.Hash) error {
+		validator: privateBundleTargetValidatorFunc(func(context.Context, common.Hash, uint64, common.Hash, uint64) error {
 			close(validationStarted)
 			<-validationRelease
 			return nil
@@ -280,7 +290,7 @@ func TestActivePrivateBundleAdmissionDoesNotHoldStoreLockDuringTargetValidation(
 		defer close(otherDone)
 		_, _ = store.Wrap(func(context.Context, *executionbuilder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
 			return nil, nil
-		})(t.Context(), &executionbuilder.Parameters{SlotNumber: &otherSlot, ValidatedProposerContext: true}, nil)
+		})(t.Context(), &executionbuilder.Parameters{SlotNumber: &otherSlot, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
 	}()
 	select {
 	case <-otherDone:
@@ -289,7 +299,7 @@ func TestActivePrivateBundleAdmissionDoesNotHoldStoreLockDuringTargetValidation(
 	}
 
 	close(validationRelease)
-	require.NoError(t, <-admissionDone)
+	require.ErrorContains(t, <-admissionDone, "no longer active")
 	close(buildRelease)
 	<-buildDone
 }

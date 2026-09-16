@@ -128,7 +128,10 @@ func (s *privateBundleSimulatorImpl) SimulatePrivateBundle(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ValidateTarget(ctx, targetHash); err != nil {
+	if target.Parent.BlockHash == nil {
+		return nil, errors.New("private bundle target context has no parent block")
+	}
+	if err := s.ValidateTarget(ctx, targetHash, targetSlot, *target.Parent.BlockHash, target.Generation); err != nil {
 		return nil, fmt.Errorf("public target changed during simulation: %w", err)
 	}
 	refreshedTarget, err := s.targetBlock(ctx, targetSlot)
@@ -194,12 +197,21 @@ func (s *privateBundleSimulatorImpl) strictBlobGasLimit(blockTime uint64) uint64
 	return maxBlobs * params.GasPerBlob
 }
 
-func (s *privateBundleSimulatorImpl) ValidateTarget(ctx context.Context, targetHash common.Hash) error {
-	if s == nil || s.targetTransaction == nil {
+func (s *privateBundleSimulatorImpl) ValidateTarget(ctx context.Context, targetHash common.Hash, targetSlot uint64, parentHash common.Hash, generation uint64) error {
+	if s == nil || s.targetTransaction == nil || s.targetBlock == nil {
 		return errors.New("private bundle target validator is unavailable")
 	}
-	_, err := s.targetTransaction(ctx, targetHash)
-	return err
+	if _, err := s.targetTransaction(ctx, targetHash); err != nil {
+		return err
+	}
+	target, err := s.targetBlock(ctx, targetSlot)
+	if err != nil {
+		return err
+	}
+	if target == nil || target.Parent.BlockHash == nil || *target.Parent.BlockHash != parentHash || target.Generation != generation {
+		return errors.New("private bundle build context changed")
+	}
+	return nil
 }
 
 func samePrivateBundleTarget(left, right *privateBundleTargetContext) bool {
@@ -217,10 +229,6 @@ func resolvePrivateBundleTarget(ctx context.Context, api *APIImpl, chainConfig *
 	if api == nil || api.db == nil || api.BaseAPI == nil || chainConfig == nil || contexts == nil {
 		return nil, errors.New("private bundle target resolver is unavailable")
 	}
-	params, generation, ok := contexts.Resolve(targetSlot)
-	if !ok {
-		return nil, fmt.Errorf("private bundle build context for slot %d is unavailable", targetSlot)
-	}
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -230,8 +238,9 @@ func resolvePrivateBundleTarget(ctx context.Context, api *APIImpl, chainConfig *
 	if err != nil {
 		return nil, err
 	}
-	if parentHash != params.ParentHash {
-		return nil, errors.New("private bundle build context parent is no longer latest")
+	params, generation, ok := contexts.ResolveForParent(targetSlot, parentHash)
+	if !ok {
+		return nil, fmt.Errorf("private bundle build context for slot %d is unavailable", targetSlot)
 	}
 	parent, err := api.headerByHashAndNumber(ctx, tx, parentHash, parentNumber)
 	if err != nil {

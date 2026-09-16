@@ -925,10 +925,6 @@ func New(
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
-	buildBlock := blkBuilder.Build
-	if backend.privateBundleContexts != nil {
-		buildBlock = backend.privateBundleContexts.Wrap(buildBlock)
-	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -936,7 +932,7 @@ func New(
 		pipelineExecutor,
 		currentBlockNumber,
 		chainConfig,
-		buildBlock,
+		blkBuilder.Build,
 		hook,
 		accum,
 		execmoduleCache,
@@ -956,6 +952,7 @@ func New(
 			}
 			return revisionProvider.TransactionSetRevision(timestamp, parentBlockNum)
 		}),
+		execmodule.WithBuildParametersPreparer(backend.privateBundleContexts.Prepare),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 

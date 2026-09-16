@@ -198,6 +198,7 @@ type ExecModule struct {
 	builders             map[uint64]*builderEntry
 	buildersByTimestamp  map[uint64]uint64
 	payloadTxnRevision   func(uint64, uint64) uint64
+	prepareBuildParams   func(*builder.Parameters) *builder.Parameters
 	transientBuilders    int
 	transientAdmission   chan struct{}
 	transientAdmissionMu sync.Mutex
@@ -267,6 +268,13 @@ func WithConditionalForkChoiceReadyHook(hook func() error) ExecModuleOption {
 func WithPayloadTransactionsRevision(revision func(timestamp, parentBlockNum uint64) uint64) ExecModuleOption {
 	return func(e *ExecModule) {
 		e.payloadTxnRevision = revision
+	}
+}
+
+// WithBuildParametersPreparer transforms accepted production build parameters before deduplication.
+func WithBuildParametersPreparer(prepare func(*builder.Parameters) *builder.Parameters) ExecModuleOption {
+	return func(e *ExecModule) {
+		e.prepareBuildParams = prepare
 	}
 }
 
