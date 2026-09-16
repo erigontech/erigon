@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -153,8 +152,7 @@ type IntraBlockState struct {
 
 	txIndex  int
 	blockNum uint64
-	logs     []types.Logs
-	logSize  uint
+	logs     logArena
 
 	// Per-transaction access list
 	accessList accessList
@@ -227,7 +225,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
-		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
@@ -329,17 +326,13 @@ func (sdb *IntraBlockState) Reset() {
 	}
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
-	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free pointers
-		sdb.logs[i] = sdb.logs[i][:0]
-	}
+	sdb.logs.reset()
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.logSize = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -383,6 +376,7 @@ func (sdb *IntraBlockState) Close() {
 
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
+	sdb.logs.release()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
@@ -400,77 +394,73 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log *types.Log) {
-	sdb.journal.addLogChange(sdb.txIndex)
-	log.TxIndex = hexutil.Uint(sdb.txIndex)
-	log.Index = hexutil.Uint(sdb.logSize)
-	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
+// AllocLog reserves the next log slot of the current tx and returns it sized for
+// numTopics/dataSize. The caller must write every topic and every data byte, then
+// call NotifyLog; whatever it leaves unwritten belongs to whichever transaction
+// held the entry before. The entry is owned by the arena and handed to a later
+// transaction, so it must never be passed on without copying.
+func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
+	return sdb.logs.alloc(sdb.journal, addr, sdb.txIndex, numTopics, dataSize)
+}
+
+// NotifyLog runs the OnLog hook after a log's fields are populated.
+func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
+	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < 4 && i < len(log.Topics); i++ {
-			topics += "[" + hex.EncodeToString(log.Topics[i][:]) + "]"
+		for i := 0; i < len(lp.Topics); i++ {
+			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
 			topics = "[]"
 		}
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		sdb.tracingHooks.OnLog(log)
-	}
-	sdb.logSize++
-	for len(sdb.logs) <= sdb.txIndex+1 {
-		sdb.logs = append(sdb.logs, nil)
-	}
-	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
-}
-
-// AllocLog returns a fresh log for addr pre-sized for numTopics topics and
-// dataSize data bytes; the LOG opcodes fill Topics/Data then call NotifyLog.
-func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
-	return &types.Log{
-		Address: addr,
-		Topics:  make([]common.Hash, numTopics),
-		Data:    make([]byte, dataSize),
+		// The hook may retain the value; the arena entry is reused by later blocks.
+		sdb.tracingHooks.OnLog(lp.Copy())
 	}
 }
 
-func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
-	sdb.AddLog(lp)
+// AddLog copies log into the next slot. TxIndex and Index are assigned by the
+// state; every other field comes from the caller.
+func (sdb *IntraBlockState) AddLog(log *types.Log) {
+	lp := sdb.AllocLog(log.Address, len(log.Topics), len(log.Data))
+	copy(lp.Topics, log.Topics)
+	copy(lp.Data, log.Data)
+	lp.Removed = log.Removed
+	lp.BlockNumber = log.BlockNumber
+	lp.TxHash, lp.BlockHash = log.TxHash, log.BlockHash
+	sdb.NotifyLog(lp)
 }
 
+// GetLogs deep-copies the tx's logs, so the result is safe to hold after the
+// arena reuses the entry.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
-	if txIndex+1 >= len(sdb.logs) {
-		return nil
-	}
-	logs := sdb.logs[txIndex+1]
+	logs := sdb.logs.forTx(txIndex).Copy()
 	for _, l := range logs {
 		l.TxHash = txnHash
-		l.BlockNumber = hexutil.Uint64(blockNumber)
 		l.BlockHash = blockHash
+		l.BlockNumber = hexutil.Uint64(blockNumber)
 	}
-	return slices.Clone(logs)
+	return logs
 }
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
-	if txIndex+1 >= len(sdb.logs) {
-		return nil
-	}
-	return slices.Clone(sdb.logs[txIndex+1])
+	return sdb.logs.forTx(txIndex).Copy()
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var logs types.Logs
-	for _, lgs := range sdb.logs {
-		logs = append(logs, lgs...)
+	if len(sdb.logs.entries) == 0 {
+		return nil
 	}
-	return logs
+	return sdb.logs.entries.Copy()
 }
 
-// LogsRlpHash is rlpHash of Logs.
+// LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(sdb.Logs())
+	return types.RlpHashLogs(sdb.logs.entries)
 }
 
 // AddRefund adds gas to the refund counter
@@ -2602,8 +2592,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	/* Not sure what this test is for it seems to break some tests
-	if len(sdb.logs) > 0 && ti == 0 {
-		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+	if len(sdb.logs.entries) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.entries)=%d, ti=%d", len(sdb.logs.entries), ti)
 		panic(err)
 	}
 	if sdb.txIndex >= 0 && sdb.txIndex > ti {
@@ -2621,14 +2611,13 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 // transactions it skipped left behind. Called mid-block it renumbers everything
 // after it, so it belongs before the first log of the first transaction.
 func (sdb *IntraBlockState) ResumeLogIndexAt(idx uint32) {
-	sdb.logSize = uint(idx)
+	sdb.logs.indexInBlock = uint(idx)
 }
 
 // ResetLogs empties the block's logs and takes the numbering back to zero,
 // keeping the state changes Reset would drop.
 func (sdb *IntraBlockState) ResetLogs() {
-	sdb.logs = sdb.logs[:0]
-	sdb.logSize = 0
+	sdb.logs.reset()
 }
 
 // no not lock
