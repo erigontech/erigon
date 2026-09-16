@@ -163,8 +163,14 @@ func (g *payloadPreparationGate) idle() bool {
 	return true
 }
 
-func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
+func (g *payloadPreparationGate) tryBeginPreparation(referenceSlot, selectedSlot uint64) (func(), bool) {
 	if !g.blockWork.TryLock() {
+		return nil, false
+	}
+	// Production records its marker while holding the shared side of this gate. Checking after
+	// taking the exclusive side closes the handoff race between production and signing.
+	if g.producedBlockPending(referenceSlot, selectedSlot, time.Now()) {
+		g.blockWork.Unlock()
 		return nil, false
 	}
 	return sync.OnceFunc(g.blockWork.Unlock), true
@@ -250,7 +256,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 
 func (a *ApiHandler) preparePayloadLoopWith(
 	ctx context.Context,
-	prepare func(context.Context, uint64, *payloadPreparationScratch) (payloadPreparationResult, error),
+	prepare func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error),
 ) {
 	logger := a.logger
 	// Polling once per quarter slot gives a newly selected head several chances to trigger
@@ -411,15 +417,8 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		prepareCtx, cancel := context.WithDeadlineCause(
 			ctx, slotStart.Add(-minimumPreparationLead), errPreparationTooLate,
 		)
-		result, err := prepare(prepareCtx, targetSlot, &scratch)
+		outcome, err := prepare(prepareCtx, current, &scratch)
 		cancel()
-		outcome := current
-		outcome.headRoot = result.headRoot
-		// Memoize the build inputs the attempt used, not values sampled before state work.
-		if result.buildInputsResolved {
-			outcome.gloasPath = result.gloasPath
-			outcome.proposerPreferencesGeneration = result.preferenceGeneration
-		}
 		if isSettledPreparationOutcome(err) {
 			lastSettled = outcome
 			scratch.release()
@@ -518,19 +517,14 @@ func gloasPathRequiresForkChoiceUpdate(path gloasPayloadPath) bool {
 	return path == gloasPayloadPathFull || path == gloasPayloadPathReorgToEmpty
 }
 
-type payloadPreparationResult struct {
-	headRoot             common.Hash
-	gloasPath            gloasPayloadPath
-	preferenceGeneration uint64
-	buildInputsResolved  bool
-}
-
+// preparePayloadForWithScratch updates the sampled key with the inputs the attempt resolves.
+// Early skips keep unresolved inputs unchanged so the loop can memoize the same attempted work.
 func (a *ApiHandler) preparePayloadForWithScratch(
 	ctx context.Context,
-	targetSlot uint64,
+	key preparationKey,
 	scratch *payloadPreparationScratch,
-) (payloadPreparationResult, error) {
-	var result payloadPreparationResult
+) (preparationKey, error) {
+	targetSlot := key.targetSlot
 	var (
 		baseBlockRoot      common.Hash
 		proposerIndex      uint64
@@ -543,7 +537,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	// a builder that production can never match.
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
 		baseBlockRoot = root
-		result.headRoot = root
+		key.headRoot = root
 		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
 		// too costly to repeat every tick on a large validator set.
 		if a.proposerLookupTooFarAhead(headState, targetSlot) {
@@ -567,50 +561,49 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, err = scratch.copyFrom(headState, a.beaconChainCfg)
 		return err
 	}); err != nil {
-		return result, err
+		return key, err
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return result, err
+		return key, err
 	}
 	if lookupAfterAdvance {
 		var err error
 		proposerIndex, feeRecipient, err = a.registeredProposer(baseState, targetSlot)
 		if err != nil {
-			return result, err
+			return key, err
 		}
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 	// State derivation can consume the entry lead, so enforce the same floor again.
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
-		return result, errPreparationTooLate
+		return key, errPreparationTooLate
 	}
 	targetGasLimit, preferenceGeneration := a.targetGasLimitForProposal(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
-	result.preferenceGeneration = preferenceGeneration
+	key.proposerPreferencesGeneration = preferenceGeneration
 	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
 	// decision can change without changing the beacon head root.
 	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
-	result.gloasPath = payloadSource.gloasPath
-	result.buildInputsResolved = true
+	key.gloasPath = payloadSource.gloasPath
 	if payloadSource.fallbackCause != nil {
-		return result, payloadSource.fallbackCause
+		return key, payloadSource.fallbackCause
 	}
 	if payloadSource.gloasPath == gloasPayloadPathPending {
-		return result, errGloasPayloadPending
+		return key, errGloasPayloadPending
 	}
 	if gloasPathRequiresForkChoiceUpdate(payloadSource.gloasPath) {
-		return result, errGloasPathNeedsForkChoice
+		return key, errGloasPathNeedsForkChoice
 	}
 	withdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, payloadSource)
 	if err != nil {
-		return result, fmt.Errorf("prepare payload: derive withdrawals state: %w", err)
+		return key, fmt.Errorf("prepare payload: derive withdrawals state: %w", err)
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
 	if err != nil {
-		return result, err
+		return key, err
 	}
 	slotNumber := hexutil.Uint64(targetSlot)
 	attrs := a.payloadBuildAttributes(
@@ -618,19 +611,19 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	)
 	payloadID, err := a.startPayloadBuildForPreparation(ctx, targetSlot, baseBlockRoot, payloadSource.head, attrs)
 	if err != nil {
-		return result, err
+		return key, err
 	}
 	if len(payloadID) == 0 {
-		return result, errNoPayloadID
+		return key, errNoPayloadID
 	}
 	selectedRoot, _, selected := a.syncedData.SelectedHead()
 	if !selected || selectedRoot != baseBlockRoot {
-		return result, errPreparationHeadChanged
+		return key, errPreparationHeadChanged
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
 	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
-	return result, nil
+	return key, nil
 }
 
 func (a *ApiHandler) registeredProposer(beaconState *state.CachingBeaconState, targetSlot uint64) (uint64, common.Address, error) {
@@ -717,16 +710,11 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 	head common.Hash,
 	attrs *engine_types.PayloadAttributes,
 ) ([]byte, error) {
-	finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation()
+	finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation(preparationSlot, selectedSlot)
 	if !ok {
 		return nil, errBlockWorkInFlight
 	}
 	defer finishAttempt()
-	// Production records its marker while holding the shared side of this gate. Checking after
-	// taking the exclusive side closes the handoff race between production and signing.
-	if a.payloadPreparationGate.producedBlockPending(preparationSlot, selectedSlot, time.Now()) {
-		return nil, errBlockWorkInFlight
-	}
 	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
 }
 

@@ -2032,7 +2032,7 @@ func TestPostExecutionPayloadEnvelopeSuppressesPreparationDuringExecutionWork(t 
 	executed := false
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		executed = true
-		finishPreparation, started := handler.payloadPreparationGate.tryBeginPreparation()
+		finishPreparation, started := handler.payloadPreparationGate.tryBeginPreparation(0, 0)
 		if started {
 			finishPreparation()
 		}
