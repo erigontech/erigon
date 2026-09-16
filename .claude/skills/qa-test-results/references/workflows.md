@@ -47,6 +47,9 @@ Notes that change how you read a run:
   (`.github/workflows/scripts/compare_state_snapshot_hashes.py`), writing
   `result-state-hashes-<chain>.json` under `--test_name state-snapshot-hash-check`.
   A red run can be either one — check which step failed before reading a report.
+  Between the two, `erigon seg retire` flushes the DB to files and drains the
+  pending merges, so the comparison sees merged files rather than the fragments
+  an interrupted node leaves behind.
   Only the data files (`domain/*.kv`, `history/*.v`, `idx/*.ef`) are compared;
   accessors are seeded with the node's `salt-state.txt`, which this flag makes
   Erigon generate locally, so their hashes never match the published ones.
@@ -89,7 +92,7 @@ Common shapes:
 | `fd-leak-analysis*` | `fd-leak-analysis-<chain>.md`, sampled every 60 s against a baseline |
 | `torrent-client-status*` | downloader torrent state at the end of the run |
 | `state-snapshot-hashes-<chain>` | exec-from-zero only: `hashes-<chain>.txt` (the local infohashes from `downloader torrent_hashes --rebuild`, recomputed from every snapshot file on disk), the datadir's `preverified.toml`, and `result-state-hashes-<chain>.json` |
-| `datadir-files-<chain>-exec-from-zero` | exec-from-zero only, uploaded even when the test fails: `datadir-files-<chain>.txt` (every file in the datadir as `size_bytes`, `mtime_utc`, `path`) and the datadir's `preverified.toml`. Taken before the hash check rebuilds the `.torrent` files, so it shows which snapshots Erigon itself wrote a `.torrent` for |
+| `datadir-files-<chain>-exec-from-zero` | exec-from-zero only, uploaded even when the test fails: `datadir-files-<chain>-before-retire.txt` and `-after-retire.txt` (every file in the datadir as `size_bytes`, `mtime_utc`, `path`), plus the datadir's `preverified.toml` and `erigondb.toml`. The before listing shows the datadir as the stopped node left it, including which snapshots Erigon itself wrote a `.torrent` for; the after listing shows it once `seg retire` has flushed the DB and drained the merges, which is the state the hash check compares |
 | `rpc-test-results-<chain>` | the RPC suite's result dir (`results/test_report.json`, `output.log`, `summary.md`) |
 
 ## The job log
