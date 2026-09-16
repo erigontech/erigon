@@ -26,7 +26,7 @@ import (
 )
 
 func TestNewAdaptivePinController_ZeroConfigResolvesToDefaults(t *testing.T) {
-	c := NewAdaptivePinController(NewBranchCache(64), AdaptivePinControllerConfig{}, log.Root())
+	c := NewAdaptivePinController(NewBranchCache(64, false), AdaptivePinControllerConfig{}, log.Root())
 	if want := DefaultAdaptivePinControllerConfig(); c.cfg != want {
 		t.Fatalf("zero-value config resolved to %+v, want %+v", c.cfg, want)
 	}
@@ -41,7 +41,7 @@ func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 		ExtensionBudgetBytes:      2 << 20,
 		PerContractMaxBudgetBytes: 3 << 20,
 	}
-	c := NewAdaptivePinController(NewBranchCache(64), cfg, log.Root())
+	c := NewAdaptivePinController(NewBranchCache(64, false), cfg, log.Root())
 	if c.cfg != cfg {
 		t.Fatalf("explicit config was overwritten: got %+v, want %+v", c.cfg, cfg)
 	}
@@ -53,7 +53,7 @@ func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 
 	bytesBefore := mxPreloadBytesTotal.GetValue()
 
-	c := NewAdaptivePinController(NewBranchCache(64), AdaptivePinControllerConfig{}, log.Root())
+	c := NewAdaptivePinController(NewBranchCache(64, false), AdaptivePinControllerConfig{}, log.Root())
 	var h [32]byte
 	copy(h[:], hash)
 
@@ -77,7 +77,7 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	resolve := fakeResolver(tree, nil, 100, "")
 
 	cfg := AdaptivePinControllerConfig{InitialViewBudgetBytes: minEntryBytes + 1}
-	c := NewAdaptivePinController(NewBranchCache(64), cfg, log.Root())
+	c := NewAdaptivePinController(NewBranchCache(64, false), cfg, log.Root())
 	var h [32]byte
 	copy(h[:], hash)
 

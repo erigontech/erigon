@@ -65,6 +65,7 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, referencesInCommitmentBranches)
 
 	writeAndBuild(t, ctx, db, agg, txs)

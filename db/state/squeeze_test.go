@@ -154,6 +154,7 @@ func testAgg(tb testing.TB, dirs datadir.Dirs, aggStep uint64, logger log.Logger
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()
@@ -304,7 +305,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			require.True(t, reader.HasNext(), "value missing for key in %s", vf.Fullpath())
 			_, _ = reader.Next(nil)
 
-			if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			if bytes.Equal(k, commitmentdb.LegacyKeyCommitmentState) {
 				continue
 			}
 
@@ -363,7 +364,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.LegacyKeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
@@ -952,4 +953,59 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
 	}
+}
+
+func TestSqueezeCommitment_LegacyStateKeyPreserved(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
+	txCount := int(cfgd.stepSize) * 128
+	db, agg := testDbAggregatorWithNoFiles(t, txCount, cfgd)
+	require.NoError(t, agg.BuildFiles(db, uint64(txCount), unboundedFinalityCtx))
+
+	preAc := agg.BeginFilesRo()
+	var preStateValue []byte
+	var preStateFound bool
+	for _, f := range preAc.Files(kv.CommitmentDomain) {
+		keys, vals := readKVFile(t, agg, f.Fullpath())
+		for i, k := range keys {
+			if bytes.Equal(k, commitment.LegacyKeyCommitmentState) {
+				preStateFound = true
+				preStateValue = vals[i]
+			}
+		}
+	}
+	preAc.Close()
+	require.True(t, preStateFound, "legacy commitment state key %q not found in any pre-squeeze commitment .kv file — bug is unreachable via this fixture", commitment.LegacyKeyCommitmentState)
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.ReloadFiles())
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 4))
+
+	postAc := agg.BeginFilesRo()
+	defer postAc.Close()
+	var postStateValue []byte
+	var postStateFound bool
+	for _, f := range postAc.Files(kv.CommitmentDomain) {
+		keys, vals := readKVFile(t, agg, f.Fullpath())
+		for i, k := range keys {
+			if bytes.Equal(k, commitment.LegacyKeyCommitmentState) {
+				postStateFound = true
+				postStateValue = vals[i]
+			}
+		}
+	}
+
+	require.True(t, postStateFound, "legacy commitment state key vanished after squeeze")
+	require.Equal(t, preStateValue, postStateValue, "squeeze mutated the legacy commitment state blob: pre=%x post=%x", preStateValue, postStateValue)
 }

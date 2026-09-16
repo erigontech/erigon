@@ -57,7 +57,7 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) (branchKey, branc
 	for it.HasNext() {
 		key, value, err := it.Next()
 		require.NoError(t, err)
-		if bytes.Equal(key, commitment.KeyCommitmentState) || len(value) == 0 {
+		if commitment.IsCommitmentStateKey(key) || len(value) == 0 {
 			continue
 		}
 		key = bytes.Clone(key)

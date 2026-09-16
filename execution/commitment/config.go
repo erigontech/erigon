@@ -12,6 +12,7 @@ type TrieConfig struct {
 	Variant                TrieVariant
 	DeferBranchUpdates     bool
 	LeaveDeferredForCaller bool
+	EdgeRecords            bool
 	EnableTrieWarmup       bool
 	CsvMetricsFilePrefix   string // empty falls back to the env var
 

@@ -364,7 +364,7 @@ func BenchmarkContractHashFromPrefix(b *testing.B) {
 	}
 	prefix[0] = 0x1a
 	for b.Loop() {
-		_, _ = ContractHashFromPrefix(prefix)
+		_, _ = legacyContractHashFromPrefix(prefix)
 	}
 }
 

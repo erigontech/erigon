@@ -54,6 +54,30 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+var ErrCommitmentEdgeRecordsUnsupported = errors.New("commitment edge-record integrity checks are unsupported")
+
+func isCommitmentStateKeyForFile(key []byte, file state.VisibleFile) bool {
+	return commitment.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(file.Version()))
+}
+
+func commitmentEdgeRecordsUnsupported(file state.VisibleFile, check string) error {
+	return fmt.Errorf("%w: %s cannot inspect %s as bundled branch rows", ErrCommitmentEdgeRecordsUnsupported, check, filepath.Base(file.Fullpath()))
+}
+
+func rejectCommitmentEdgeRecords(file state.VisibleFile, check string) error {
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		return commitmentEdgeRecordsUnsupported(file, check)
+	}
+	return nil
+}
+
+func commitmentStateKeyForFile(file state.VisibleFile) []byte {
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		return commitmentdb.KeyCommitmentState
+	}
+	return commitmentdb.LegacyKeyCommitmentState
+}
+
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -147,7 +171,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	maxTxNum := endTxNum - 1
-	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentStateKeyForFile(f), maxTxNum)
 	if err != nil {
 		return info, err
 	}
@@ -316,6 +340,9 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
 		}
+		if err := rejectCommitmentEdgeRecords(file, "CommitmentKvDeref"); err != nil {
+			return err
+		}
 		var fps []fileFingerprint
 		if cache != nil {
 			kvPath := file.Fullpath()
@@ -413,9 +440,13 @@ func checkDerefBranch(
 	newBranchValueBuf, plainKeyBuf []byte,
 	accReader, storageReader *seg.Reader,
 	fileName string,
+	edgeRecords bool,
 	trace bool,
 	logger log.Logger,
 ) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
+	if edgeRecords {
+		return derefCounts{}, nil, fmt.Errorf("%w: CommitmentKvDeref cannot inspect edge record at key %x in %s as a bundled branch row", ErrCommitmentEdgeRecordsUnsupported, branchKey, fileName)
+	}
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
 
@@ -522,8 +553,9 @@ func checkDerefBranch(
 // only when referenced is false: the scan stops at the first shortened key and leaves the tally to
 // the dereferencing pass, which walks the whole file anyway.
 type commitmentFileScan struct {
-	referenced bool
-	counts     derefCounts
+	referenced  bool
+	unsupported bool
+	counts      derefCounts
 }
 
 // commitmentReferencingMemo caches scanCommitmentFile per file path. Integrity checks run
@@ -548,6 +580,9 @@ func scanCommitmentFile(file state.VisibleFile) commitmentFileScan {
 }
 
 func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		return commitmentFileScan{unsupported: true}
+	}
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
 		log.Root().Warn("[integrity] scanCommitmentFile: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
@@ -566,7 +601,7 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			return commitmentFileScan{referenced: true}
 		}
 		v, _ = g.Next(v[:0])
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(k, file) {
 			continue
 		}
 		counts.branchKeys++
@@ -583,9 +618,16 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "CommitmentKvDeref"); err != nil {
+		return derefCounts{}, err
+	}
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if scan := scanCommitmentFile(file); !scan.referenced {
+	scan := scanCommitmentFile(file)
+	if scan.unsupported {
+		return derefCounts{}, commitmentEdgeRecordsUnsupported(file, "CommitmentKvDeref")
+	}
+	if !scan.referenced {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, no shortened keys found (full scan)",
 			"file", fileName,
@@ -668,7 +710,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if isCommitmentStateKeyForFile(branchKey, file) {
 				logger.Info("[integrity] CommitmentKvDeref skipping state key", "valueLen", len(branchValue), "file", fileName)
 				continue
 			}
@@ -725,7 +767,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			var localIntegrityErr error
 			for item := range ch {
 				localCounts.branchKeys++
-				dc, _, err := checkDerefBranch(item.branchKey, item.branchValue, newBranchValueBuf, plainKeyBuf, workerAccReader, workerStorageReader, fileName, trace, logger)
+				dc, _, err := checkDerefBranch(item.branchKey, item.branchValue, newBranchValueBuf, plainKeyBuf, workerAccReader, workerStorageReader, fileName, statecfg.CommitmentEdgeRecords(file.Version()), trace, logger)
 				localCounts.referencedAccounts += dc.referencedAccounts
 				localCounts.plainAccounts += dc.plainAccounts
 				localCounts.referencedStorages += dc.referencedStorages
@@ -857,6 +899,9 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
+		if err := rejectCommitmentEdgeRecords(file, "CommitmentHistVal"); err != nil {
+			return err
+		}
 		filesChecked++
 		sampler := sc.NewWindowSampler(uint64(i))
 		for bucket := range sampler.Buckets(0, numBuckets) {
@@ -924,6 +969,9 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 	const numBuckets = 10000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "CommitmentHistVal"); err != nil {
+		return 0, err
+	}
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 	txCount := endTxNum - startTxNum
@@ -969,7 +1017,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 		if err != nil {
 			return 0, err
 		}
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(k, file) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
@@ -1137,7 +1185,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br dbserv
 		return err
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return err
 	}
@@ -1205,7 +1253,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment(), execctx.WithoutSharedBranchCache())
 			if err != nil {
 				return err
 			}
@@ -1219,7 +1267,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				// Fresh SharedDomains per block: an SD is committed-or-closed,
 				// never reset in place.
-				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment(), execctx.WithoutSharedBranchCache())
 				if err != nil {
 					return err
 				}
@@ -1265,6 +1313,9 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		fileStep := startTxNum / stepSize
 		if fileStep < fromStep {
 			continue
+		}
+		if err := rejectCommitmentEdgeRecords(file, "StateVerify"); err != nil {
+			return err
 		}
 		totalFiles++
 
@@ -1312,6 +1363,9 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "StateVerify"); err != nil {
+		return err
+	}
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 
@@ -1385,7 +1439,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
 		branchKeys++
@@ -1397,7 +1451,17 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 
 		// Check completeness
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			err := fmt.Errorf("%w: cannot parse branch at key=%x: %w in %s", ErrIntegrity, branchKey, parseErr, fileName)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+		if !complete {
 			touchMap := uint16(0)
 			afterMap := uint16(0)
 			if len(branchData) >= 4 {
@@ -1533,6 +1597,9 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "StateVerify"); err != nil {
+		return err
+	}
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 
@@ -1599,7 +1666,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
 		branchKeys++
@@ -1609,7 +1676,17 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			err := fmt.Errorf("%w: cannot parse branch at key=%x: %w in %s", ErrIntegrity, branchKey, parseErr, fileName)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+		if !complete {
 			touchMap := uint16(0)
 			afterMap := uint16(0)
 			if len(branchData) >= 4 {
@@ -1679,6 +1756,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	// Also extract refs from the next commitment file (handles step boundary effects)
 	if nextFile != nil {
 		if err := extractCommitmentRefsToCollectors(ctx, nextFile, accCollector, stoCollector, logger); err != nil {
+			if errors.Is(err, ErrCommitmentEdgeRecordsUnsupported) {
+				return err
+			}
 			logger.Warn("[integrity] StateVerify failed to extract refs from next file", "err", err)
 			// Non-fatal: proceed with what we have
 		}
@@ -1938,6 +2018,9 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 // into its own domain files, not the current file's).
 func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFile, accCollector, stoCollector *etl.Collector, logger log.Logger) error {
 	nextFileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "StateVerify"); err != nil {
+		return err
+	}
 	logger.Info("[integrity] StateVerify also extracting refs from next file", "kv", nextFileName)
 
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
@@ -1978,12 +2061,16 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
-
 		branchData := commitment.BranchData(branchValue)
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			logger.Warn("[integrity] unable to parse commitment branch", "key", fmt.Sprintf("%x", branchKey), "err", parseErr)
+			continue
+		}
+		if !complete {
 			continue
 		}
 
@@ -2043,8 +2130,15 @@ var valMapPool = sync.Pool{New: func() any { return make(map[string][]byte, 8) }
 func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, numWorkers int, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
+	if err := rejectCommitmentEdgeRecords(file, "StateVerify hash verification"); err != nil {
+		return err
+	}
+	scan := scanCommitmentFile(file)
+	if scan.unsupported {
+		return commitmentEdgeRecordsUnsupported(file, "StateVerify hash verification")
+	}
 
-	isReferencing := commitmentFileReferencing(file)
+	isReferencing := scan.referenced
 
 	logger.Info("[integrity] StateVerify hash verification starting",
 		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)
@@ -2119,7 +2213,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 						return nil
 					}
 				}
-				if err := verifyHashItem(item, failFast, fileName, isReferencing,
+				if err := verifyHashItem(item, failFast, fileName, isReferencing, statecfg.CommitmentEdgeRecords(file.Version()),
 					preloadedAccValues, preloadedStoValues,
 					accReader, stoReader,
 					plainKeyBuf, valBuf,
@@ -2168,12 +2262,15 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if isCommitmentStateKeyForFile(branchKey, file) {
 				continue
 			}
-
 			branchData := commitment.BranchData(branchValue)
-			if !branchData.IsComplete() {
+			complete, parseErr := branchData.IsComplete()
+			if parseErr != nil {
+				return fmt.Errorf("parse commitment branch %x: %w", branchKey, parseErr)
+			}
+			if !complete {
 				continue
 			}
 
@@ -2218,12 +2315,16 @@ func verifyHashItem(
 	failFast bool,
 	fileName string,
 	isReferencing bool,
+	edgeRecords bool,
 	preloadedAccValues, preloadedStoValues map[string][]byte,
 	accReader, stoReader *seg.Reader,
 	plainKeyBuf, valBuf []byte,
 	hashMismatches, hashChecked *atomic.Uint64,
 	logger log.Logger,
 ) error {
+	if edgeRecords {
+		return fmt.Errorf("%w: StateVerify cannot inspect edge record at key %x in %s as a bundled branch row", ErrCommitmentEdgeRecordsUnsupported, item.branchKey, fileName)
+	}
 	accountValues := valMapPool.Get().(map[string][]byte)
 	storageValues := valMapPool.Get().(map[string][]byte)
 	defer func() {

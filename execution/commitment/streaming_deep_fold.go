@@ -55,7 +55,25 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
 
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
+	prefix := nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix)
+	if reader := base.recordReader(); reader != nil {
+		records, present, _, err := reader.BranchRecords(prefix, 0, false)
+		if err != nil {
+			return err
+		}
+		effectiveMask, err := base.unfoldRecordsIntoRow(0, d+1, records, present, 0, false)
+		if err != nil {
+			return err
+		}
+		if effectiveMask == 0 {
+			return errStorageBaseNotBranch
+		}
+		base.touchMap[0], base.afterMap[0] = effectiveMask, effectiveMask
+		base.branchBefore[0] = true
+		return nil
+	}
+
+	branch, childMasks, childMasksKnown, err := base.branchWithMasksFromCacheOrDB(prefix)
 	if err != nil {
 		return err
 	}
@@ -66,11 +84,19 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		// A stored branch always carries touchMap+afterMap (4 bytes); shorter means corrupt, not missing.
 		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
-	if BranchData(branch).ChildCount() == 0 {
+	childCount, err := BranchData(branch).ChildCount()
+	if err != nil {
+		return fmt.Errorf("unfoldStorageBase: %w", err)
+	}
+	if childCount == 0 {
 		return errStorageBaseNotBranch
 	}
 	base.branchBefore[0] = true
-	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
+	if err := base.decodeBranchIntoRow(0, d+1, branch[2:], false); err != nil {
+		return err
+	}
+	base.stampChildMasks(0, childMasks, childMasksKnown)
+	return nil
 }
 
 func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
@@ -169,6 +195,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 
 	base, releaseBase := newWorker(ctx)
 	defer releaseBase()
+	base.SetStorageAccount(node.plainKey)
 
 	var accTag string
 	if base.traceW != nil {
@@ -286,6 +313,7 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 		copy(root.extension[1:], child.extension[:child.extLen])
 		root.hashLen = child.hashLen
 		copy(root.hash[:], child.hash[:child.hashLen])
+		root.branchMask = child.branchMask
 	} else {
 		root = child
 	}

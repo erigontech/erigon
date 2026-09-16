@@ -125,6 +125,16 @@ integration stage_exec
 integration commitment rebuild
 ```
 
+## Inspect a CommitmentDomain branch
+
+```sh
+integration commitment branch --chain=mainnet --datadir=<datadir> --prefix=aa
+integration commitment branch --chain=mainnet --datadir=<datadir> --prefix=0a1b --txnum=1000000
+```
+
+The prefix is a hexadecimal nibble prefix. Omit `--txnum` to read the latest
+state; use it to read the historical state as of a transaction number.
+
 ## How to re-generate optional Domain/Index
 
 ```sh

@@ -76,12 +76,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
 func init() {
-	if dbgCommBtIndex {
-		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
-	}
 	InitSchemas()
 }
 
@@ -187,18 +182,41 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
-// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
+var commitmentKVEdgeRecordsVersion = version.Version{Major: 3, Minor: 0}
+
+// commitmentKVWriteVersion keeps the legacy version selection until edge records are enabled.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.EdgeRecordsInCommitment {
+		return commitmentKVEdgeRecordsVersion
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
 	return version.V2_2
 }
 
+// CommitmentKVWriteVersionFor returns the .kv version for a commitment file in the given
+// format, ignoring the process-wide edge-records flag. A merge must name its output from
+// the format its inputs actually carry, not from what this process would write today.
+func CommitmentKVWriteVersionFor(c *DomainCfg, edgeRecords bool) version.Version {
+	cfg := *c
+	cfg.EdgeRecordsInCommitment = edgeRecords
+	return commitmentKVWriteVersion(&cfg)
+}
+
+// CommitmentEdgeRecords reports whether a commitment file uses the v3 edge-record format.
+func CommitmentEdgeRecords(fileVersion version.Version) bool {
+	return !fileVersion.Less(commitmentKVEdgeRecordsVersion)
+}
+
 const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
+
+// ExperimentalCommitmentEdgeRecords selects the record format new commitment.kv files are written
+// in: v3 edge records, one per trie edge, or the legacy bundled row. The two are incompatible and a
+// datadir keeps whichever it was built with, so this is read once at startup and never flipped.
+var ExperimentalCommitmentEdgeRecords = dbg.EnvBool("COMMITMENT_EDGE_RECORDS", true)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -272,8 +290,9 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:                      AccessorHashMap,
+		Accessors:                      AccessorBTree | AccessorExistence,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		EdgeRecordsInCommitment:        ExperimentalCommitmentEdgeRecords,
 		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{

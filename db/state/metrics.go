@@ -122,3 +122,12 @@ var (
 		},
 	}
 )
+
+var (
+	mxCommitmentRecordReadsSatisfied          = metrics.GetOrCreateCounter(`domain_commitment_record_reads{walk="satisfied"}`)
+	mxCommitmentRecordReadsExhausted          = metrics.GetOrCreateCounter(`domain_commitment_record_reads{walk="exhausted"}`)
+	mxCommitmentRecordFilesConsultedSatisfied = metrics.GetOrCreateCounter(`domain_commitment_record_files_consulted{walk="satisfied"}`)
+	mxCommitmentRecordFilesConsultedExhausted = metrics.GetOrCreateCounter(`domain_commitment_record_files_consulted{walk="exhausted"}`)
+	mxCommitmentRecordFilesScannedSatisfied   = metrics.GetOrCreateCounter(`domain_commitment_record_files_scanned{walk="satisfied"}`)
+	mxCommitmentRecordFilesScannedExhausted   = metrics.GetOrCreateCounter(`domain_commitment_record_files_scanned{walk="exhausted"}`)
+)
