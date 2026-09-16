@@ -311,7 +311,7 @@ func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *c
 	beaconTo := beaconSegments[len(beaconSegments)-1].To()
 	var requiredTo uint64
 	if beaconTo > 0 {
-		requiredTo = (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
+		requiredTo = beaconTo / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
 	}
 
 	next := expectedFrom
