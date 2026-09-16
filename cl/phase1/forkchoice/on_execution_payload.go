@@ -419,7 +419,6 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
-	executionBlockHash common.Hash,
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -431,26 +430,28 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
 			return execution_client.PayloadStatusValidated, nil
 		}
-		if f.executionPayloadStatus != nil {
-			if status, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && status == execution_client.PayloadStatusInvalidated {
+		if f.payloadStatusByRoot != nil {
+			if known, ok := f.payloadStatusByRoot.Get(blockRoot); ok && known == execution_client.PayloadStatusInvalidated {
 				return execution_client.PayloadStatusInvalidated, nil
 			}
 		}
 		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
-		if err != nil {
-			return status, err
-		}
 		switch status {
 		case execution_client.PayloadStatusValidated:
-			if f.verifiedExecutionPayload != nil {
+			// A VALID status reported alongside an error is contradictory and is rejected
+			// by the caller, so it must not be published.
+			if err == nil && f.verifiedExecutionPayload != nil {
 				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 		case execution_client.PayloadStatusInvalidated:
-			if f.executionPayloadStatus != nil {
-				f.executionPayloadStatus.Add(executionBlockHash, status)
+			// Both clients report INVALID together with the reason, so this must not be
+			// gated on err. Keyed by the beacon root, which is derived from the block
+			// itself; the execution hash is still unauthenticated at this point.
+			if f.payloadStatusByRoot != nil {
+				f.payloadStatusByRoot.Add(blockRoot, status)
 			}
 		}
-		return status, nil
+		return status, err
 	})
 }
 

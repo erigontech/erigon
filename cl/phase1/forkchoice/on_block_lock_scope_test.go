@@ -298,20 +298,17 @@ func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
 // callers queued for the same payload each resend it to the EL, because the invalid gate
 // they check on entry is only refreshed once the first caller reacquires f.mu.
 func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
-	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, nil)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, errors.New("bad block"))
 	store, block := buildExAnteStorePendingLast(t, engine)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
-
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			blockRoot, executionBlockHash, block.Block.Body.ExecutionPayload,
-			&block.Block.ParentRoot, nil, nil)
+			blockRoot, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -328,13 +325,29 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 
 	// Sending into the admission channel blocks until the caller hands the token back.
 	store.payloadValidationAdmission <- struct{}{}
-	status, ok := store.executionPayloadStatus.Get(executionBlockHash)
+	status, ok := store.payloadStatusByRoot.Get(blockRoot)
 	require.True(t, ok, "the invalid verdict must be published before the token is released")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 	<-store.payloadValidationAdmission
 
 	close(unpin)
 	awaitSignal(t, done, "the validating caller to finish")
+}
+
+// getHead snapshots the justified checkpoint before taking f.mu. If it moved by the time
+// the lock is held, the head computed from the old one must be discarded rather than cached.
+func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
+	store, _ := buildExAnteStorePendingLast(t, nil)
+	stale := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: stale.Epoch + 1, Root: stale.Root})
+
+	_, _, ok, err := store.getHeadOnce(nil, stale)
+	require.NoError(t, err)
+	require.False(t, ok, "a superseded checkpoint must not produce a head")
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	require.Equal(t, common.Hash{}, store.headHash, "nothing may be cached from the stale checkpoint")
 }
 
 // A caller that wins admission only after someone else validated the same payload
@@ -349,7 +362,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 
 	f.mu.Lock()
 	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, common.Hash{}, nil, nil, nil, nil)
+		blockRoot, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 

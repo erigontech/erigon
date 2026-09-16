@@ -276,7 +276,8 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 // getHead returns the head using pre-GLOAS fork choice rules.
 func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
 	for {
-		head, headSlot, ok, err := f.getHeadOnce(auxilliaryState)
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		head, headSlot, ok, err := f.getHeadOnce(auxilliaryState, justifiedCheckpoint)
 		if err != nil {
 			return ForkChoiceNode{}, 0, err
 		}
@@ -290,8 +291,7 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (Fo
 // ok=false when the checkpoint moved while it waited for f.mu, so the caller retries:
 // caching a head computed from a superseded checkpoint would leave it stale until the next
 // attestation, tick or block clears it.
-func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, bool, error) {
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState, justifiedCheckpoint solid.Checkpoint) (ForkChoiceNode, uint64, bool, error) {
 	var justificationState *checkpointState
 	var err error
 	if auxilliaryState == nil {
