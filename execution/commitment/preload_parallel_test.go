@@ -1080,7 +1080,9 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	dbLatest := map[string][]byte{string(r1Key): r1Val}
 
 	fromFiles := fakeResolver(files, nil, valSz, "")
+	calls := 0
 	resolve := func(keys [][]byte) ([][]byte, error) {
+		calls++
 		vals, err := fromFiles(keys)
 		if err != nil {
 			return nil, err
@@ -1101,7 +1103,7 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	}
 
 	rootKey := nibbles.HexToCompact([]byte(root))
-	stepBudget := estimatedEntryCost(rootKey, branchVal(0b110, valSz)) + 10
+	stepBudget := estimatedEntryCost(rootKey, branchVal(0b110, valSz)) + minEntryBytes
 
 	n, done, err := p.Run(stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
 	if err != nil {
@@ -1115,6 +1117,9 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	}
 	if p.QueueRemaining() != 2 {
 		t.Fatalf("queue holds %d, want 2: the deferred db-hit R1 and the deferred miss R2", p.QueueRemaining())
+	}
+	if calls != 1 {
+		t.Fatalf("resolver called %d times, want 1 (the root wave alone): R1 must land in the db-hit partition, whose reserved bytes leave no file budget for R2", calls)
 	}
 
 	if _, done, err = p.Run(1<<20, nil, resolve, c, nil); err != nil {
