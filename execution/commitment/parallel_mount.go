@@ -72,6 +72,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.branchBefore[:], root.branchBefore[:])
 	copy(hph.touchMap[:], root.touchMap[:])
 	copy(hph.afterMap[:], root.afterMap[:])
+	copy(hph.witnessPath[:], root.witnessPath[:])
 	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
 
 	hph.mountedNib = nibble
