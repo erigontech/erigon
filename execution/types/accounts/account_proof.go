@@ -43,6 +43,9 @@ type StorProofResult struct {
 
 // AppendFastJSON appends json.Marshal's output without reflection and without the escape scan: all values are hex.
 func (r *AccProofResult) AppendFastJSON(b []byte) ([]byte, error) {
+	if r == nil {
+		return append(b, "null"...), nil
+	}
 	size := 256 + hexArraySize(r.AccountProof)
 	for i := range r.StorageProof {
 		if !isAlphanumeric(r.StorageProof[i].Key) {

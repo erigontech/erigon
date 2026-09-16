@@ -378,6 +378,7 @@ func TestAccProofResultAppendFastJSON(t *testing.T) {
 	big := hexutil.U256(*uint256.MustFromHex("0x1d6329f1c35ca4bfabb9f5610000000000"))
 	var zero hexutil.U256
 	for _, r := range []*AccProofResult{
+		nil,
 		{},
 		{
 			Address:      common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7"),
