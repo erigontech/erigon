@@ -582,3 +582,159 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
 }
+
+type writeCountingConn struct {
+	net.Conn
+	writes int
+	bytes  int
+}
+
+func (c *writeCountingConn) Write(p []byte) (int, error) {
+	c.writes++
+	c.bytes += len(p)
+	return len(p), nil
+}
+
+func TestCorkConnWritesResponseOnce(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	for _, part := range [][]byte{[]byte("HTTP/1.1 200 OK\r\n\r\n"), bytes.Repeat([]byte("a"), 8*1024), []byte("0\r\n\r\n")} {
+		_, err := c.Write(part)
+		require.NoError(t, err)
+	}
+	require.Zero(t, counting.writes, "a corked connection holds the response")
+	require.NoError(t, c.flush())
+	require.Equal(t, 1, counting.writes)
+	require.Equal(t, 19+8*1024+5, counting.bytes)
+
+	c.uncork()
+	_, err := c.Write([]byte("x"))
+	require.NoError(t, err)
+	require.Equal(t, 2, counting.writes, "an uncorked connection writes straight through")
+}
+
+// A body past the passthrough size goes straight to the socket, after whatever is already buffered.
+func TestCorkConnPassesLargeBodyThrough(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	_, err := c.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	require.NoError(t, err)
+	_, err = c.Write(bytes.Repeat([]byte("a"), corkBufferBytes))
+	require.NoError(t, err)
+	require.Equal(t, 2, counting.writes, "headers flushed, then the body written directly")
+	require.Equal(t, 19+corkBufferBytes, counting.bytes)
+}
+
+type failingConn struct {
+	net.Conn
+}
+
+func (failingConn) Write(p []byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+func (failingConn) Close() error                { return nil }
+
+// Small writes that together fill the buffer are flushed at once, without waiting for the connection to go idle.
+func TestCorkConnFlushesWhenBufferFills(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	chunk := bytes.Repeat([]byte("a"), corkBufferBytes/8)
+	for range 8 {
+		_, err := c.Write(chunk)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, counting.writes)
+	require.Equal(t, corkBufferBytes, counting.bytes)
+}
+
+// net/http counts a buffered write as delivered, so a connection whose flush failed must refuse further writes
+// instead of serving the next request on a truncated response.
+func TestCorkConnFailsAfterFlushError(t *testing.T) {
+	c := &corkConn{Conn: failingConn{}}
+	_, err := c.Write([]byte("small"))
+	require.NoError(t, err)
+	require.Error(t, c.flush())
+	_, err = c.Write([]byte("more"))
+	require.Error(t, err)
+}
+
+type halfCloseConn struct {
+	writeCountingConn
+	closedWrite bool
+}
+
+func (c *halfCloseConn) CloseWrite() error { c.closedWrite = true; return nil }
+
+// net/http half-closes the write side for "Connection: close"; the wrapper must forward that, after flushing.
+func TestCorkConnForwardsCloseWrite(t *testing.T) {
+	half := &halfCloseConn{}
+	c := &corkConn{Conn: half}
+	_, err := c.Write([]byte("last response"))
+	require.NoError(t, err)
+	require.NoError(t, c.CloseWrite())
+	require.True(t, half.closedWrite)
+	require.Equal(t, 1, half.writes, "the buffer reaches the peer before the half-close")
+}
+
+// A hijacked connection carries concurrent reads and writes (WebSocket), so its writes must not wait on the
+// cork lock: a writer blocked on a slow peer would otherwise stall the reader.
+func TestCorkConnUncorkedWritesWithoutTheLock(t *testing.T) {
+	c := &corkConn{Conn: &writeCountingConn{}}
+	c.uncork()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.Write([]byte("frame"))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hijacked write waited for the cork lock")
+	}
+}
+
+func TestCorkConnDeliversEveryFlushedChunk(t *testing.T) {
+	gotFirst, release := make(chan struct{}), make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("first"))
+		w.(http.Flusher).Flush()
+		<-gotFirst
+		_, _ = w.Write([]byte("second"))
+		w.(http.Flusher).Flush()
+		<-release
+	})
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Close() })
+	defer close(release)
+
+	got := make(chan string, 2)
+	go func() {
+		resp, err := http.Get("http://" + addr.String()) //nolint:noctx
+		if err != nil {
+			got <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		for _, want := range []string{"first", "second"} {
+			buf := make([]byte, len(want))
+			if _, err := io.ReadFull(resp.Body, buf); err != nil {
+				got <- err.Error()
+				return
+			}
+			got <- string(buf)
+			if want == "first" {
+				close(gotFirst)
+			}
+		}
+	}()
+	for _, want := range []string{"first", "second"} {
+		select {
+		case s := <-got:
+			require.Equal(t, want, s)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("flushed chunk %q did not reach the client while the handler was still running", want)
+		}
+	}
+}
