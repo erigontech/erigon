@@ -20,6 +20,7 @@ package parlia
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/holiman/uint256"
@@ -58,15 +59,53 @@ var bscSystemContracts = map[common.Address]struct{}{
 	common.HexToAddress("0x0000000000000000000000000000000000003000"): {}, // TokenRecoverPortal
 }
 
+// blockNumberTimeBoundary separates a BlockAlloc key that is a block number from
+// one that is a unix timestamp. BSC's block-numbered forks are all far below it
+// (Chapel's highest is ~3e7) and its timestamped forks all far above it (the
+// earliest is ~1.7e9), so any value in that gap classifies every key correctly.
+const blockNumberTimeBoundary = 1_000_000_000
+
+type systemContractUpgrade struct {
+	numOrTime uint64
+	byTime    bool
+	alloc     types.GenesisAlloc
+}
+
 // Parlia is the permissive stub engine. See package docs.
 type Parlia struct {
 	chainConfig *chain.Config
 	signer      *types.Signer
 	logger      log.Logger
+	upgrades    []systemContractUpgrade
 }
 
 func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
-	return &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
+	p := &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
+	if chainConfig.Parlia != nil {
+		p.upgrades = parseSystemContractUpgrades(chainConfig.Parlia.BlockAlloc)
+	}
+	return p
+}
+
+func parseSystemContractUpgrades(blockAlloc map[string]any) []systemContractUpgrade {
+	upgrades := make([]systemContractUpgrade, 0, len(blockAlloc))
+	for key, raw := range blockAlloc {
+		numOrTime, err := strconv.ParseUint(key, 10, 64)
+		if err != nil {
+			panic(fmt.Errorf("parlia: invalid blockAlloc key %q: %w", key, err))
+		}
+		alloc, err := types.DecodeGenesisAlloc(raw)
+		if err != nil {
+			panic(fmt.Errorf("parlia: invalid blockAlloc[%s]: %w", key, err))
+		}
+		upgrades = append(upgrades, systemContractUpgrade{
+			numOrTime: numOrTime,
+			byTime:    numOrTime >= blockNumberTimeBoundary,
+			alloc:     alloc,
+		})
+	}
+	sort.Slice(upgrades, func(i, j int) bool { return upgrades[i].numOrTime < upgrades[j].numOrTime })
+	return upgrades
 }
 
 // IsSystemTransaction reports whether tx is a Parlia system transaction: a
@@ -155,33 +194,44 @@ func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader,
 	return p.upgradeSystemContracts(chain, header, ibs)
 }
 
-// upgradeSystemContracts overwrites system-contract bytecode at fork boundaries
-// from Parlia.BlockAlloc, keyed by block number or unix timestamp. It runs at
-// block initialisation so the block's transactions observe the upgraded code.
 func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
-	if p.chainConfig.Parlia == nil || len(p.chainConfig.Parlia.BlockAlloc) == 0 {
-		return nil
-	}
 	number := header.Number.Uint64()
+
 	var parentTime uint64
-	if number > 0 {
-		if parent := chain.GetHeader(header.ParentHash, number-1); parent != nil {
+	var haveParentTime bool
+	ensureParentTime := func() error {
+		if haveParentTime {
+			return nil
+		}
+		if number > 0 {
+			parent := chain.GetHeader(header.ParentHash, number-1)
+			if parent == nil {
+				return fmt.Errorf("parlia: missing parent header for block %d, cannot evaluate timestamp system-contract upgrade", number)
+			}
 			parentTime = parent.Time
 		}
+		haveParentTime = true
+		return nil
 	}
-	for key, raw := range p.chainConfig.Parlia.BlockAlloc {
-		numOrTime, err := strconv.ParseUint(key, 10, 64)
-		if err != nil {
-			return fmt.Errorf("parlia: bad BlockAlloc key %q: %w", key, err)
-		}
-		if numOrTime != number && !(parentTime < numOrTime && header.Time >= numOrTime) {
+
+	for i := range p.upgrades {
+		u := &p.upgrades[i]
+		if u.byTime {
+			if header.Time < u.numOrTime {
+				continue
+			}
+			// A silent parentTime == 0 would apply every past timestamp upgrade at
+			// once, so a missing parent header is a hard error.
+			if err := ensureParentTime(); err != nil {
+				return err
+			}
+			if parentTime >= u.numOrTime {
+				continue
+			}
+		} else if u.numOrTime != number {
 			continue
 		}
-		alloc, err := types.DecodeGenesisAlloc(raw)
-		if err != nil {
-			return fmt.Errorf("parlia: decode BlockAlloc[%s]: %w", key, err)
-		}
-		for addr, account := range alloc {
+		for addr, account := range u.alloc {
 			if err := ibs.SetCode(accounts.InternAddress(addr), account.Code, tracing.CodeChangeUnspecified); err != nil {
 				return err
 			}
