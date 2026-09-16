@@ -681,3 +681,14 @@ func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
 	require.Equal(second, string(k)+"|"+string(v),
 		"re-seeking the current page rewound it, so the caller re-reads a consumed entry")
 }
+
+// A fresh reader sits at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderResetLoadsFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	require.True(g.HasNextOnPage(), "Reset must leave the page of that offset loaded")
+}
