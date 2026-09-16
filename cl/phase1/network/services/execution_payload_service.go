@@ -243,6 +243,14 @@ func (s *executionPayloadService) processMessage(
 	var err error
 	if !hasAdmission {
 		admissionToken, err = s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired) {
+			persisted, readErr := s.forkchoiceStore.ReadEnvelopeFromDisk(beaconBlockRoot)
+			if readErr == nil && persisted != nil && persisted.Message != nil {
+				return fmt.Errorf("%w: %w", ErrIgnore, err)
+			}
+			s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot, builderIndex)
+			admissionToken, err = s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+		}
 		if err != nil {
 			if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) {
 				queued, queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt)
@@ -254,7 +262,7 @@ func (s *executionPayloadService) processMessage(
 				}
 				return err
 			}
-			if persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err); persistedKnown && persisted == nil {
+			if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired) {
 				s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot, builderIndex)
 			}
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
@@ -291,14 +299,6 @@ func (s *executionPayloadService) processMessage(
 		if err := s.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 			return fmt.Errorf("failed to validate execution payload envelope with pending indices: %w", err)
 		}
-		s.emitExecutionPayloadGossip(block, envelope)
-		s.seenEnvelopesCache.Add(seenKey, struct{}{})
-		seen = true
-		return nil
-	}
-	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
-		s.emitExecutionPayloadGossip(block, envelope)
-		return nil
 	}
 	seen = true
 
@@ -307,10 +307,12 @@ func (s *executionPayloadService) processMessage(
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
 	s.emitExecutionPayloadGossip(block, envelope)
-	log.Trace("Processed execution payload via gossip",
-		"slot", block.Block.Slot,
-		"beaconBlockRoot", beaconBlockRoot,
-		"builderIndex", builderIndex)
+	if err == nil {
+		log.Trace("Processed execution payload via gossip",
+			"slot", block.Block.Slot,
+			"beaconBlockRoot", beaconBlockRoot,
+			"builderIndex", builderIndex)
+	}
 
 	return nil
 }
@@ -341,12 +343,6 @@ func (s *executionPayloadService) emitExecutionPayloadGossip(block *cltypes.Sign
 }
 
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) (bool, error) {
-	if envelope == nil || envelope.Message == nil {
-		return false, errors.New("missing pending execution payload envelope")
-	}
-	if envelope.Message.BeaconBlockRoot != blockRoot {
-		return false, errors.New("pending execution payload envelope block root mismatch")
-	}
 	envelopeHash, err := envelope.HashSSZ()
 	if err != nil {
 		return false, fmt.Errorf("failed to hash envelope for pending queue: %w", err)
@@ -397,7 +393,7 @@ func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64)
 // tryProcessPendingEnvelope retains queue ownership until validation finishes or forkchoice takes over.
 func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, job *pendingEnvelopeJob) pendingJobDecision {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
-	if !ok || block == nil || !job.processing.CompareAndSwap(false, true) {
+	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
 		return pendingJobKeep
 	}
 	if job.envelope == nil || job.envelope.Message == nil || job.envelope.Message.BeaconBlockRoot != key.blockRoot {
@@ -415,8 +411,14 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 			job.processing.Store(false)
 			return pendingJobKeep
 		}
-		if persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err); persistedKnown && persisted == nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired) {
+			persisted, readErr := s.forkchoiceStore.ReadEnvelopeFromDisk(key.blockRoot)
+			if readErr == nil && persisted != nil && persisted.Message != nil {
+				return pendingJobRemoveThenProcess
+			}
 			s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.blockRoot, job.envelope.Message.BuilderIndex)
+			job.processing.Store(false)
+			return pendingJobKeep
 		}
 		return pendingJobRemoveThenProcess
 	}

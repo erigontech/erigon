@@ -762,7 +762,7 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		f.envelopeGossipAdmissions.Finish(token, true)
-		return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(nil)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
 	}
 	if err := ctx.Err(); err != nil {
 		f.envelopeGossipAdmissions.Finish(token, false)
@@ -776,7 +776,7 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
 	}
 	token, err := f.envelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
 	if err != nil {
@@ -784,7 +784,7 @@ func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		f.envelopeGossipAdmissions.Finish(token, true)
-		return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(nil)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
 	}
 	return token, nil
 }

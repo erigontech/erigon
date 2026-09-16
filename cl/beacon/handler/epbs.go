@@ -892,11 +892,12 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	retryClaimed := false
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
-			persisted, persistedKnown := forkchoice.PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
-			if persistedKnown && persisted == nil {
+			lookupRequired := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired)
+			var persisted *cltypes.SignedExecutionPayloadEnvelope
+			if lookupRequired {
 				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 			}
-			if persistedKnown && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
+			if lookupRequired && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 				return
 			}
@@ -915,7 +916,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 				return
 			}
 			defer a.finishExecutionPayloadEnvelopeRetry(gossipKey)
-			if !persistedKnown {
+			if !lookupRequired {
 				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 				if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 					beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)

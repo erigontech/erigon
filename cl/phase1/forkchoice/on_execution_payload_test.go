@@ -458,16 +458,10 @@ type countingEnvelopeReadForkGraph struct {
 type admissionEnvelopeReadForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope atomic.Bool
-	readEntered chan struct{}
 }
 
 func (g *admissionEnvelopeReadForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope.Load()
-}
-
-func (g *admissionEnvelopeReadForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	close(g.readEntered)
-	return nil, errors.New("unexpected persisted envelope read")
 }
 
 type replacingPendingForkGraph struct {
@@ -481,8 +475,7 @@ type missingBlockForkGraph struct {
 }
 
 func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testing.T) {
-	readEntered := make(chan struct{})
-	graph := &admissionEnvelopeReadForkGraph{readEntered: readEntered}
+	graph := &admissionEnvelopeReadForkGraph{}
 	graph.hasEnvelope.Store(true)
 	store := &ForkChoiceStore{forkGraph: graph}
 	root := common.HexToHash("0x1234")
@@ -490,21 +483,13 @@ func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testi
 	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), root, 42)
 
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
-	persisted, persistedKnown := PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err)
-	require.True(t, persistedKnown)
-	require.Nil(t, persisted)
-	select {
-	case <-readEntered:
-		t.Fatal("persisted envelope presence triggered a disk read")
-	default:
-	}
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeLookupRequired)
 	_, err = store.envelopeGossipAdmissions.TryClaim(root, 42)
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *testing.T) {
-	readEntered := make(chan struct{})
-	graph := &admissionEnvelopeReadForkGraph{readEntered: readEntered}
+	graph := &admissionEnvelopeReadForkGraph{}
 	graph.hasEnvelope.Store(true)
 	store := &ForkChoiceStore{forkGraph: graph}
 	tokens := make([]ExecutionPayloadEnvelopeAdmissionToken, 0, maxInflightExecutionPayloadEnvelopes)
@@ -519,11 +504,6 @@ func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *
 
 	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 	require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
-	select {
-	case <-readEntered:
-		t.Fatal("persisted envelope presence triggered a disk read")
-	default:
-	}
 	for _, token := range tokens {
 		store.envelopeGossipAdmissions.Finish(token, false)
 	}

@@ -746,7 +746,6 @@ type unavailablePersistedEnvelopeCase struct {
 
 func unavailablePersistedEnvelopeCases() []unavailablePersistedEnvelopeCase {
 	return []unavailablePersistedEnvelopeCase{
-		{name: "nil with error", err: errors.New("persisted envelope unavailable")},
 		{name: "non-nil with error", persisted: func(envelope *cltypes.SignedExecutionPayloadEnvelope) *cltypes.SignedExecutionPayloadEnvelope {
 			return envelope
 		}, err: errors.New("persisted envelope unavailable")},
@@ -758,107 +757,73 @@ func unavailablePersistedEnvelopeCases() []unavailablePersistedEnvelopeCase {
 }
 
 func TestPostExecutionPayloadEnvelopeUnavailablePersistedLookupDoesNotPoisonAdmission(t *testing.T) {
-	for _, tc := range unavailablePersistedEnvelopeCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
-			envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
-			otherRoot := common.HexToHash("0x5678")
-			other, err := fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
-			require.NoError(t, err)
-			fcu.EnvelopeGossipAdmissions.Finish(other, true)
-			var staleMarker atomic.Bool
-			staleMarker.Store(true)
-			fcu.HasEnvelopeFunc = func(common.Hash) bool { return staleMarker.Load() }
-			var reads atomic.Int32
-			fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				reads.Add(1)
-				staleMarker.Store(false)
-				if tc.persisted == nil {
-					return nil, tc.err
-				}
-				return tc.persisted(envelope), tc.err
+	for _, admission := range []struct {
+		name             string
+		plainAlreadySeen bool
+	}{
+		{name: "lookup required marker"},
+		{name: "plain already seen retry", plainAlreadySeen: true},
+	} {
+		t.Run(admission.name, func(t *testing.T) {
+			for _, tc := range unavailablePersistedEnvelopeCases() {
+				t.Run(tc.name, func(t *testing.T) {
+					_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+					envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+					envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+					if admission.plainAlreadySeen {
+						token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+						require.NoError(t, err)
+						fcu.FinishExecutionPayloadEnvelopeForGossip(token, true)
+						envelopeRoot, err := envelope.HashSSZ()
+						require.NoError(t, err)
+						handler.recordExecutionPayloadEnvelopeRetry(executionPayloadEnvelopeGossipKey{
+							BeaconBlockRoot: envelope.Message.BeaconBlockRoot,
+							BuilderIndex:    envelope.Message.BuilderIndex,
+						}, executionPayloadEnvelopeRetry{EnvelopeRoot: envelopeRoot})
+					}
+					otherRoot := common.HexToHash("0x5678")
+					other, err := fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
+					require.NoError(t, err)
+					fcu.EnvelopeGossipAdmissions.Finish(other, true)
+					var staleMarker atomic.Bool
+					staleMarker.Store(true)
+					fcu.HasEnvelopeFunc = func(common.Hash) bool { return staleMarker.Load() }
+					var reads atomic.Int32
+					fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+						reads.Add(1)
+						staleMarker.Store(false)
+						if tc.persisted == nil {
+							return nil, tc.err
+						}
+						return tc.persisted(envelope), tc.err
+					}
+					body, err := json.Marshal(envelope)
+					require.NoError(t, err)
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+					request.Header.Set("Eth-Blob-Data-Included", "false")
+					recorder := httptest.NewRecorder()
+
+					handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+					require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+					require.Equal(t, int32(1), reads.Load())
+					token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+					require.NoError(t, err)
+					fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+					token, err = fcu.TryClaimExecutionPayloadEnvelopeForGossip(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+					require.NoError(t, err)
+					fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+					_, err = fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
+					require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+				})
 			}
-			body, err := json.Marshal(envelope)
-			require.NoError(t, err)
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-			request.Header.Set("Eth-Blob-Data-Included", "false")
-			recorder := httptest.NewRecorder()
-
-			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
-
-			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-			require.Equal(t, int32(1), reads.Load())
-			token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-			require.NoError(t, err)
-			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-			token, err = fcu.TryClaimExecutionPayloadEnvelopeForGossip(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-			require.NoError(t, err)
-			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-			_, err = fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
-			require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 		})
 	}
 }
 
-func TestPostExecutionPayloadEnvelopeUnavailablePlainAlreadySeenLookupDoesNotPoisonAdmission(t *testing.T) {
-	for _, tc := range unavailablePersistedEnvelopeCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
-			envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
-			token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-			require.NoError(t, err)
-			fcu.FinishExecutionPayloadEnvelopeForGossip(token, true)
-			otherRoot := common.HexToHash("0x5678")
-			other, err := fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
-			require.NoError(t, err)
-			fcu.EnvelopeGossipAdmissions.Finish(other, true)
-			envelopeRoot, err := envelope.HashSSZ()
-			require.NoError(t, err)
-			handler.recordExecutionPayloadEnvelopeRetry(executionPayloadEnvelopeGossipKey{
-				BeaconBlockRoot: envelope.Message.BeaconBlockRoot,
-				BuilderIndex:    envelope.Message.BuilderIndex,
-			}, executionPayloadEnvelopeRetry{EnvelopeRoot: envelopeRoot})
-			var staleMarker atomic.Bool
-			staleMarker.Store(true)
-			fcu.HasEnvelopeFunc = func(common.Hash) bool { return staleMarker.Load() }
-			var reads atomic.Int32
-			fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				reads.Add(1)
-				staleMarker.Store(false)
-				if tc.persisted == nil {
-					return nil, tc.err
-				}
-				return tc.persisted(envelope), tc.err
-			}
-			body, err := json.Marshal(envelope)
-			require.NoError(t, err)
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-			request.Header.Set("Eth-Blob-Data-Included", "false")
-			recorder := httptest.NewRecorder()
-
-			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
-
-			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-			require.Equal(t, int32(1), reads.Load())
-			token, err = fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-			require.NoError(t, err)
-			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-			token, err = fcu.TryClaimExecutionPayloadEnvelopeForGossip(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-			require.NoError(t, err)
-			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-			_, err = fcu.EnvelopeGossipAdmissions.TryClaim(otherRoot, 99)
-			require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-		})
-	}
-}
-
-func TestExecutionPayloadEnvelopeP2PStaleMarkerHandsOffRecoveryToREST(t *testing.T) {
+func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
@@ -883,27 +848,11 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerHandsOffRecoveryToREST(t *testing
 	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter())
 
 	err := p2pService.ProcessMessage(t.Context(), nil, envelope)
-	require.ErrorIs(t, err, services.ErrIgnore)
-	require.Zero(t, reads.Load())
-	require.False(t, fcu.OnExecutionPayloadCalled)
-	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-	request.Header.Set("Eth-Blob-Data-Included", "false")
-	recorder := httptest.NewRecorder()
-
-	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
-
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 	require.Equal(t, int32(1), reads.Load())
-	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-	require.NoError(t, err)
-	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-	token, err = fcu.TryClaimExecutionPayloadEnvelopeForGossip(envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-	require.NoError(t, err)
-	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+	require.True(t, fcu.OnExecutionPayloadCalled)
+	_, err = fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
