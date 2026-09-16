@@ -109,8 +109,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	block.Extra = solid.NewExtraData()
 	block.Extra.SetBytes(p.ExtraData)
 	if p.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(p.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		_, _ = (*uint256.Int)(p.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 	block.BlockHash = p.BlockHash
 	txs := make([][]byte, len(p.Transactions))
@@ -160,7 +159,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		GasUsed:       hexutil.Uint64(block.GasUsed),
 		Timestamp:     hexutil.Uint64(block.Time),
 		ExtraData:     block.Extra.Bytes(),
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     block.BlockHash,
 		Transactions:  make([]hexutil.Bytes, 0, len(body.Transactions)),
 		Withdrawals:   body.Withdrawals,
