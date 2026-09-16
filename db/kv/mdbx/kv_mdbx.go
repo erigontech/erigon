@@ -841,7 +841,6 @@ type MdbxTx struct {
 
 	toCloseMap map[uint64]kv.Closer
 	cursorID   uint64
-	rolledBack atomic.Bool
 }
 
 type MdbxCursor struct {
@@ -1382,10 +1381,6 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
-	// Two concurrent rollbacks would park one read txn twice, giving two readers one snapshot.
-	if tx.rolledBack.Swap(true) {
-		return
-	}
 	if tx.tx == nil {
 		return
 	}
