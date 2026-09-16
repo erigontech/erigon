@@ -538,6 +538,7 @@ func TestClientNotificationStorm(t *testing.T) {
 	}{
 		{name: "full", count: maxClientSubscriptionBuffer},
 		{name: "overflow", count: maxClientSubscriptionBuffer + 1, wantOverflow: true},
+		{name: "overflow_with_pending_notifications", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
