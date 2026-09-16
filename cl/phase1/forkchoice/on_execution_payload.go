@@ -412,13 +412,13 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 }
 
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
-// the EL, releasing the caller-held f.mu for the call. It records the terminal verdict
-// before releasing the admission token, so callers already queued for the same payload
-// reuse it instead of resending: a caller that published only after the token was released
-// would still be waiting for f.mu while the queue drained.
+// the EL, releasing the caller-held f.mu for the call. It records the verdict before
+// releasing the admission token, because a caller that published after releasing it would
+// still be waiting for f.mu while the queue drained.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
+	stillAdmissible func() error,
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -427,6 +427,13 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	f.mu.Unlock()
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		// Admission was checked before queueing for the token. The wait can be long, so
+		// re-check it here rather than spend an EL call on a block that is already stale.
+		if stillAdmissible != nil {
+			if err := stillAdmissible(); err != nil {
+				return execution_client.PayloadStatusNone, err
+			}
+		}
 		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
 			return execution_client.PayloadStatusValidated, nil
 		}

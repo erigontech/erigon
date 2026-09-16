@@ -308,7 +308,7 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			blockRoot, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			blockRoot, nil, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -350,6 +350,29 @@ func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
 	require.Equal(t, common.Hash{}, store.headHash, "nothing may be cached from the stale checkpoint")
 }
 
+// A caller that queues for the admission token can go stale while it waits. It must not
+// spend an EL call on a block that is no longer admissible, because that call serializes on
+// the shared token and delays unrelated payloads behind it.
+func TestNewPayloadSkipsELWhenBlockWentStaleWhileQueued(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		blockRoot, func() error { return errBlockAtFinalizedHorizon },
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+	store.mu.Unlock()
+
+	require.ErrorIs(t, err, errBlockAtFinalizedHorizon)
+	require.EqualValues(t, execution_client.PayloadStatusNone, status)
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
@@ -362,7 +385,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 
 	f.mu.Lock()
 	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, nil, nil, nil, nil)
+		blockRoot, nil, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
