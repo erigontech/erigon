@@ -11,6 +11,10 @@ type ExecutionStat struct {
 	TxIdx       int
 	Incarnation int
 	Duration    time.Duration
+	// StartNanos/EndNanos are absolute wall timestamps (UnixNano) of the
+	// committed incarnation's execute call. Zero when profiling is off.
+	StartNanos int64
+	EndNanos   int64
 }
 
 // complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions
@@ -57,45 +61,45 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.setInProgress(x)
+	m.ensureLen(x)
+	if !m.inProgress[x] {
+		m.inProgress[x] = true
+		m.inProgressCnt++
+	}
+	if x < m.minInProgressHint {
+		m.minInProgressHint = x
+	}
 
 	return x
 }
 
-type dispatchAction uint8
-
-const (
-	dispatchStop     dispatchAction = iota // leave tx and the rest in pending, end the pass
-	dispatchConsume                        // tx dispatched: drop it from pending
-	dispatchHold                           // tx held back: keep it in pending
-	dispatchHoldStop                       // hold tx back, then end the pass
-)
-
-// dispatchPending walks pending front-to-back, dispatching or holding each tx
-// per decide. Held-back txs are compacted ahead of the suffix in O(consumed
-// prefix): the suffix is never moved and nothing is allocated, and the compacted
-// prefix stays sorted below the suffix, so it needs no re-sort or dedup.
-func (m *execStatusList) dispatchPending(decide func(tx int) dispatchAction) {
-	read, write := 0, 0
-	for read < len(m.pending) {
-		act := decide(m.pending[read])
-		if act == dispatchStop {
-			break
-		}
-		m.setInProgress(m.pending[read])
-		if act == dispatchHold || act == dispatchHoldStop {
-			m.pending[write] = m.pending[read]
-			write++
-		}
-		read++
-		if act == dispatchHoldStop {
-			break
+// takePendingWhere removes and returns every pending tx satisfying pred, in
+// ascending order, marking each in-progress. Unlike takeNextPending (min-only,
+// contiguous), this lets validation select a non-contiguous ready subset for
+// dependency-ordered validation. Returns nil when nothing matches.
+func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	var taken []int
+	kept := m.pending[:0]
+	for _, tx := range m.pending {
+		if pred(tx) {
+			taken = append(taken, tx)
+			m.ensureLen(tx)
+			if !m.inProgress[tx] {
+				m.inProgress[tx] = true
+				m.inProgressCnt++
+			}
+			if tx < m.minInProgressHint {
+				m.minInProgressHint = tx
+			}
+		} else {
+			kept = append(kept, tx)
 		}
 	}
-	if write > 0 {
-		copy(m.pending[read-write:read], m.pending[:write])
-	}
-	m.pending = m.pending[read-write:]
+	m.pending = kept
+	return taken
 }
 
 func (m execStatusList) maxComplete() int {

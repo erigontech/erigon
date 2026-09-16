@@ -60,7 +60,10 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xe2})
 	vm := NewVersionMap(nil)
+	// Model a real create+SELFDESTRUCT: the destroying tx marks the account
+	// destructed and zeroes its balance at the same version.
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
@@ -79,7 +82,7 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	vm.WriteAddress(addr, Version{TxIndex: 1}, &account, true)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, account.Balance, true)
 
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 func TestDestroyedAccountReadRemainsValid(t *testing.T) {
@@ -101,7 +104,7 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 
 	io := NewVersionedIO(3)
 	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
-	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {

@@ -60,41 +60,6 @@ TxnExecutor applies a single transaction to the current world state.
 
 var ErrTxnExecutionFailed = errors.New("txn execution failed")
 
-type ErrExecAbortError struct {
-	DependencyTxIndex int
-	OriginError       error
-}
-
-// ErrExecPanic is a recovered non-dependency panic during transaction execution.
-// It is an operational failure, not evidence that the block is invalid.
-type ErrExecPanic struct {
-	message string
-}
-
-func (e *ErrExecPanic) Error() string {
-	return e.message
-}
-
-func (e ErrExecAbortError) Error() string {
-	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
-	} else {
-		if e.OriginError != nil {
-			return e.OriginError.Error()
-		}
-		return "execution aborted"
-	}
-}
-
-// IsError reports whether the abort carries an execution error rather than only
-// a speculative dependency. Dependency aborts raised by state.ErrDependency
-// carry no OriginError and are retried; DependencyTxIndex is scheduling
-// metadata, not the classifier. An OriginError must be validated against settled
-// input before it can be attributed to block data rather than stale state.
-func (e ErrExecAbortError) IsError() bool {
-	return e.OriginError != nil
-}
-
 // nonceError formats lazily: under parallel execution a nonce mismatch is a
 // routine re-execution signal whose text is discarded.
 type nonceError struct {
@@ -580,14 +545,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				panicErr, isError := r.(error)
-				if isError && errors.Is(panicErr, state.ErrDependency) {
-					err = ErrExecAbortError{DependencyTxIndex: st.evm.IntraBlockState().DepTxIndex()}
-					return
-				}
-				stack := dbg.Stack()
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", stack)
-				err = &ErrExecPanic{message: fmt.Sprintf("transition exec panic: %v at: %s", r, stack)}
+				// Versioned execution no longer panics for control flow — an
+				// in-flight dependency pauses and re-reads (see waitCommit), it does
+				// not abort. Any panic here is therefore a genuine failure.
+				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
 			}
 		}()
 	}

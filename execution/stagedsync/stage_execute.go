@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -83,11 +82,19 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
-	// discardCommitment runs execution without computing/persisting commitment
-	// (exec-only). Initialized from dbg.DiscardCommitment() at the stage boundary;
-	// the ephemeral single-block replay harness sets it directly since the env is
-	// read only at package init.
-	discardCommitment bool
+
+	// balSink, when set, receives the BAL derived from each executed block's
+	// VersionedIO (see ProcessBAL). Test-only seam: lets the block-replay
+	// harness capture the derived BAL for a block whose header carries no BAL
+	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
+	// reference instead of the header.
+	balSink func(blockNum uint64, bal types.BlockAccessList)
+}
+
+// SetBALSink registers a callback receiving each executed block's derived BAL.
+// Test-only.
+func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
+	cfg.balSink = sink
 }
 
 func StageExecuteBlocksCfg(
@@ -113,23 +120,22 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:                db,
-		prune:             pm,
-		batchSize:         batchSize,
-		chainConfig:       chainConfig,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		dirs:              dirs,
-		notifications:     notifications,
-		stateStream:       stateStream,
-		badBlockHalt:      badBlockHalt,
-		blockReader:       blockReader,
-		genesis:           genesis,
-		historyV3:         true,
-		syncCfg:           syncCfg,
-		experimentalBAL:   experimentalBAL,
-		readAheader:       readAheader,
-		discardCommitment: dbg.DiscardCommitment(),
+		db:              db,
+		prune:           pm,
+		batchSize:       batchSize,
+		chainConfig:     chainConfig,
+		engine:          engine,
+		vmConfig:        vmConfig,
+		dirs:            dirs,
+		notifications:   notifications,
+		stateStream:     stateStream,
+		badBlockHalt:    badBlockHalt,
+		blockReader:     blockReader,
+		genesis:         genesis,
+		historyV3:       true,
+		syncCfg:         syncCfg,
+		experimentalBAL: experimentalBAL,
+		readAheader:     readAheader,
 	}
 }
 
@@ -244,13 +250,9 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 ) error {
 	var currentInc uint64
 
-	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
+		// Value changes from previous steps arrive with nil values, which are
+		// indistinguishable from a delete here.
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -300,15 +302,14 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				switch {
-				case len(entry.Value) > 0:
+				if len(entry.Value) > 0 { //nolint:gocritic
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
-				case entry.Value == nil:
+				} else if entry.Value == nil {
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-				default:
+				} else {
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
@@ -370,23 +371,6 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
-// resolveExecResumePoint picks where a resumed exec run restarts. The committed
-// commitment boundary (SeekCommitment) is normally authoritative. Exec-only mode
-// (discardCommitment) never advances KeyCommitmentState, so a resume would restart
-// at the stale pre-run boundary and re-execute blocks whose flat state a prior
-// size-limited batch already flushed. When Execution progress has moved past the
-// commitment boundary, resume from Execution progress instead.
-func resolveExecResumePoint(ctx context.Context, txNumReader rawdbv3.TxNumsReader, tx kv.Tx, discardCommitment bool, execProgress, seekTxNum, seekBlock uint64) (txNum, blockNum uint64, err error) {
-	if !discardCommitment || execProgress <= seekBlock {
-		return seekTxNum, seekBlock, nil
-	}
-	execTxNum, err := txNumReader.Max(ctx, tx, execProgress)
-	if err != nil {
-		return 0, 0, err
-	}
-	return execTxNum, execProgress, nil
-}
-
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
@@ -409,10 +393,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// and exec window from committed domains + the txNum index before handing a
 	// resolved execRange to ExecV3.
 	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, rwTx)
-	if err != nil {
-		return err
-	}
-	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
 	if err != nil {
 		return err
 	}
@@ -455,11 +435,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
-	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
 
-	// Write stage progress to the SharedDomains overlay when present; otherwise
-	// use the caller-owned stage transaction, which parallel execution preserves.
-	if execErr == nil && out.verdict == nil && out.applyTx != nil {
+	// Stage progress: target the SharedDomains overlay (not replaced during exec)
+	// when present, else the live post-exec applyTx (parallel exec may have rolled
+	// the passed-in rwTx via Flush/CommitAndBegin).
+	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -469,34 +450,35 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return renderExecOutcome(execErr, out, cfg, s, u, logger)
+	return unwindOnExecError(execErr, out, cfg, s, u, logger)
 }
 
-// renderExecOutcome maps executor outcomes to the stage's error and unwind contract.
-func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
-	if execErr != nil {
+// unwindOnExecError performs the bad-block unwind at the stage boundary after
+// parallel exec reports an invalid block. A non-initial-cycle wrong trie root
+// binary-searches from the implicated block (out.failedBlock/Hash); any other
+// invalid block unwinds to the last executed header minus one. Under
+// badBlockHalt (in-memory fork validation) or a non-invalid error it unwinds
+// nothing and returns execErr unchanged for the caller to propagate.
+func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
 		return execErr
 	}
 
-	if v := out.verdict; v != nil {
-		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
-			// Initial sync has no competing fork to recover from, so a wrong root
-			// must propagate as a fatal error. The recovery handler can return nil
-			// even without scheduling an unwind, which would hide the mismatch.
-			if !s.CurrentSyncCycle.IsInitialCycle {
-				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
-			}
+	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// During the initial cycle a wrong trie root is fatal: there is no fork to
+		// recover from, and handleIncorrectRootHashError can return nil (hiding the
+		// mismatch) or unwind a canonical block. Propagate it instead.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return execErr
 		}
-		// The caller owns recovery for invalid-block verdicts other than wrong roots.
-		// Setting a stage unwind point here could leave a stale bad-block reason
-		// that is reported again during a later sync cycle.
-		return v.err
+		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 
-	if out.exhausted != nil {
-		return out.exhausted
-	}
-	return nil
+	// A plain invalid block propagates the error without setting a stage unwind
+	// point — the caller owns the unwind. Setting one here would leave a stale
+	// bad-block verdict that blocks a fresh canonical block at the same height
+	// from being re-executed on the next fork-choice.
+	return execErr
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and
@@ -592,11 +574,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
-	// /2 budget. Use a base budget of one-third of a slot and extend it
-	// adaptively when there is a large prunable backlog, capped at two-thirds
-	// of a slot so FCU still has time. The proper fix is a background prune
-	// that defers to FCU when work is pending — out of scope here.
+	// Base budget is one-third of a slot, extended adaptively up to two-thirds when the prunable backlog is large.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
 	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond

@@ -58,7 +58,6 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
-	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -115,6 +114,30 @@ type TxResult struct {
 
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
+
+	// CollectorWrites holds collector-format writes (all 4 account fields per
+	// address) produced during worker execution, with fee-calc balance
+	// adjustments folded in during finalize.
+	CollectorWrites *state.WriteSet
+
+	// WorkerValidated: the worker walked TxIn against the versionMap right after
+	// executing and recorded the verdict here (dep-order fast path). WorkerBlocker
+	// is the highest mismatched writer's TxIndex when the verdict is invalid, so
+	// the exec loop can register it as the true dependency without re-walking.
+	// WorkerVerdictSet distinguishes a real verdict from the zero value
+	// (VersionValid == iota 0), so an unvalidated result is not trusted as valid.
+	WorkerValidated  state.VersionValidity
+	WorkerBlocker    int
+	WorkerVerdictSet bool
+
+	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
+	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
+	// tx's reads were not against a single settled snapshot — an intra-tx
+	// read-consistency failure the version-set validator can't express — so the
+	// tx must re-execute once that predecessor commits. It is a validation
+	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
+	// means every read was settled.
+	Dep int
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -233,10 +256,6 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
-
-	// BlockStateCache holds pre-block account state for stable committed reads.
-	// Shared across all tasks in the same block. Set by the parallel executor.
-	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -385,27 +404,12 @@ func (t *TxTask) GasPool() *protocol.GasPool {
 	if t.gasPool != nil {
 		return t.gasPool
 	}
-	// Parallel exec paths never set the per-task gas pool because workers
-	// cannot safely share the block pool (SubGas is a write — concurrent
-	// workers would race on speculative tx depletion). The shared block
-	// pool is consumed in the post-execution validation loop.
-	//
-	// Returning nil here would make preCheck's CheckBlockGasInclusion
-	// silently no-op (gp==nil short-circuit), so a tx whose gas exceeds
-	// the block limit slips past that check and fails on the next one in
-	// preCheck order (CheckEip1559TxGasFeeCap → ErrFeeCapTooLow when
-	// feeCap < baseFee). Serial returns ErrGasLimitReached for the same
-	// tx; the eest engine matrix asserts the serial error variant and
-	// rejects the parallel one (issue surfaced on PR #21017's
-	// hive-eest parallel legs as GAS_ALLOWANCE_EXCEEDED vs
-	// INSUFFICIENT_MAX_FEE_PER_GAS).
-	//
-	// Hand out a fresh per-invocation pool sized to the block gas limit
-	// so CheckBlockGasInclusion fires for the "tx alone exceeds the block
-	// limit" case (pool depletion across multiple txs is still caught
-	// post-execution by the validation loop against the shared pool).
-	// Each Execute call gets its own pool, so retries at higher
-	// incarnations start with a fresh budget.
+	// Workers can't share the block gas pool (SubGas races on speculative
+	// depletion), so hand out a fresh per-invocation pool sized to the block
+	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
+	// letting a tx that alone exceeds the block limit slip past and fail later
+	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// depletion is still caught post-execution against the shared pool.
 	if t.Header == nil || t.Config == nil {
 		return nil
 	}
@@ -438,10 +442,6 @@ func (t *TxTask) Dependencies() []int {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
-}
-
-func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
-	return t.BlockStateCache
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
@@ -573,7 +573,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return evmtypes.ExecutionResult{}, err
 			}
 
 			// Apply the transaction to the current state (included in the env).
@@ -587,19 +587,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				if _, ok := errors.AsType[*protocol.ErrExecPanic](applyErr); ok {
-					result.Operational = true
-					return evmtypes.ExecutionResult{}, applyErr
-				}
-				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
-					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
-				}
-
 				return evmtypes.ExecutionResult{}, applyErr
 			}
 
 			if applyRes == nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+				return evmtypes.ExecutionResult{}, errors.New("apply returned nil execution result")
 			}
 
 			return *applyRes, err

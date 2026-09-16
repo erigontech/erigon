@@ -26,79 +26,139 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// AccountLifecycle is the single revival definition the scattered consumers
-// (getVersionedAccount, versionedStateReader, validateReadImpl, the create
-// decision) converge onto. Pin it against the cases those sites currently
-// compute ad-hoc — including the same-tx metamorphic SD+CREATE2 that only the
-// AddressPath >= arm catches.
-func TestAccountLifecycle(t *testing.T) {
+// TestAccountLifecycleAt pins the enumerated lifecycle resolver — the single
+// verdict readers, the validator, and the create decision converge on.
+//
+// # States (at a reading txIdx, from the versionMap SelfDestruct + revival signals)
+//
+//	Live     no Done SelfDestruct=true below txIdx. Normal floor reads.
+//	Absent   destroyed and net-absent: no revival above the wipe AND no EIP-8246
+//	         balance/nonce preserved. Reads gone; a base (pre-block) read is not stale.
+//	Revived  destroyed but re-created above the wipe: AddressPath >= wipe (same-tx
+//	         metamorphic) or Balance/Nonce/CodeHash > wipe. Storage from on/before
+//	         the wipe reads zero; stale base reads are invalidated. (EIP-8246
+//	         balance-preserve is NOT resolved here — see the resolver doc — it is a
+//	         fork-aware caller's decision.)
+//
+// # canonicalVer — the point of reader/validator agreement
+//
+// canonicalVer is always the LATEST SelfDestruct cell (what the validator's
+// ReadStatus(SelfDestructPath) resolves), NOT the wipe. When a revival flips
+// SelfDestruct=false above the wipe, canonicalVer is that flip; a reader recording
+// the wipe instead would disagree with the validator forever and livelock (the
+// CREATE2-recreate-then-use bug). destroyedAt stays the wipe, for the reader's
+// "did this slot's last write predate the wipe" decision.
+//
+// # Transitions (across txs in a block) and the fork that produces each
+//
+//	Live -> Absent    a SELFDESTRUCT with no revival. Pre-Cancun: any plain destruct.
+//	                  Cancun+ (EIP-6780): only a same-tx create+destruct nets absent.
+//	Live -> Revived   metamorphic SELFDESTRUCT then CREATE2 re-create (Constantinople+
+//	                  for CREATE2; pre-Cancun the destruct wipes storage).
+//	Absent -> Revived a later tx re-creates the net-absent account.
+//
+// The resolver is fork-agnostic: it reads whatever signals execution wrote. The
+// fork determines which signal pattern appears; these cases construct each pattern.
+func TestAccountLifecycleAt(t *testing.T) {
 	t.Parallel()
 
-	t.Run("not destroyed", func(t *testing.T) {
+	t.Run("Live: no self-destruct", func(t *testing.T) {
 		t.Parallel()
 		vm := NewVersionMap(nil)
 		addr := getAddress(1)
 		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0}, *uint256.NewInt(10), true)
-		destroyed, _, revived := vm.AccountLifecycle(addr, 5)
-		require.False(t, destroyed)
-		require.False(t, revived)
+		state, canonicalVer, _ := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleLive, state)
+		require.Equal(t, Version{}, canonicalVer)
 	})
 
-	t.Run("destroyed, no revival", func(t *testing.T) {
+	t.Run("Absent: destroyed, no revival, zero balance", func(t *testing.T) {
 		t.Parallel()
 		vm := NewVersionMap(nil)
 		addr := getAddress(2)
-		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0}, *uint256.NewInt(10), true)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
-		destroyed, at, revived := vm.AccountLifecycle(addr, 5)
-		require.True(t, destroyed)
-		require.Equal(t, 2, at)
-		require.False(t, revived)
+		state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleAbsent, state)
+		require.Equal(t, 2, destroyedAt)
+		require.Equal(t, 2, canonicalVer.TxIndex, "no revival: canonicalVer is the wipe")
 	})
 
-	t.Run("revived via AddressPath at same tx (metamorphic SD+CREATE2)", func(t *testing.T) {
+	t.Run("Revived via same-tx metamorphic (AddressPath >= wipe)", func(t *testing.T) {
 		t.Parallel()
 		vm := NewVersionMap(nil)
 		addr := getAddress(3)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 3}, true, true)
 		vm.WriteAddress(addr, Version{TxIndex: 3}, &accounts.Account{Nonce: 1}, true)
-		destroyed, at, revived := vm.AccountLifecycle(addr, 5)
-		require.True(t, destroyed)
-		require.Equal(t, 3, at)
-		require.True(t, revived, "AddressPath >= destroyedAt must catch same-tx metamorphic re-create")
+		state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleRevived, state)
+		require.Equal(t, 3, destroyedAt)
+		require.Equal(t, 3, canonicalVer.TxIndex, "latest SD cell is the wipe@3 (no later flip)")
 	})
 
-	t.Run("revived via Balance after destruct", func(t *testing.T) {
+	t.Run("Revived via CREATE2 flip above wipe: canonicalVer is the flip, not the wipe", func(t *testing.T) {
 		t.Parallel()
+		// The CREATE2-recreate-then-use case: wipe@2, re-create@3 (AddressPath +
+		// SelfDestruct=false). canonicalVer MUST be 3 (what the validator resolves);
+		// recording the wipe@2 is the livelock bug.
 		vm := NewVersionMap(nil)
 		addr := getAddress(4)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
-		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 3}, *uint256.NewInt(7), true)
-		destroyed, _, revived := vm.AccountLifecycle(addr, 5)
-		require.True(t, destroyed)
-		require.True(t, revived)
+		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 3}, false, true)
+		vm.WriteAddress(addr, Version{TxIndex: 3}, &accounts.Account{Nonce: 1}, true)
+		state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleRevived, state)
+		require.Equal(t, 2, destroyedAt, "destroyedAt stays the wipe for the slot-predates-wipe check")
+		require.Equal(t, 3, canonicalVer.TxIndex, "canonicalVer is the latest SD cell (the flip), never the wipe")
 	})
 
-	t.Run("revived via CodeHash after destruct", func(t *testing.T) {
+	t.Run("EIP-8246 balance-preserve signature resolves Absent (fork-aware caller decides existence)", func(t *testing.T) {
 		t.Parallel()
+		// A non-zero balance at the destruct with no revival above it is
+		// indistinguishable from a pre-Cancun credit to a doomed account, so the
+		// fork-agnostic resolver reports Absent; only a fork-aware caller applies
+		// EIP-8246's "still exists".
 		vm := NewVersionMap(nil)
 		addr := getAddress(5)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
-		writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 4}, accounts.NewCode([]byte{0x60}).Hash, true)
-		destroyed, _, revived := vm.AccountLifecycle(addr, 6)
-		require.True(t, destroyed)
-		require.True(t, revived)
+		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(9), true)
+		state, _, destroyedAt := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleAbsent, state)
+		require.Equal(t, 2, destroyedAt)
 	})
 
-	t.Run("field write at same tx as destruct is not a revival (strict >)", func(t *testing.T) {
+	// Negative cases: signals that must NOT flip the verdict.
+
+	t.Run("negative: the destruct's zero-balance write governs, not stale history", func(t *testing.T) {
 		t.Parallel()
 		vm := NewVersionMap(nil)
 		addr := getAddress(6)
+		// Pre-wipe non-zero balance, then a plain (pre-EIP-8246) destruct that zeroes
+		// the balance in its own tx. The zero at the wipe must win over the stale
+		// history → Absent, not a spurious balance-preserve Revived.
+		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 1}, *uint256.NewInt(9), true)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
 		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, uint256.Int{}, true)
-		destroyed, _, revived := vm.AccountLifecycle(addr, 5)
-		require.True(t, destroyed)
-		require.False(t, revived, "a same-tx SD-zero balance write is not a revival; only AddressPath uses >=")
+		state, _, _ := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleAbsent, state)
+	})
+
+	t.Run("negative: same-tx zero-balance write is not a preserve", func(t *testing.T) {
+		t.Parallel()
+		vm := NewVersionMap(nil)
+		addr := getAddress(7)
+		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
+		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, uint256.Int{}, true)
+		state, _, _ := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleAbsent, state, "a same-tx SD-zero balance is not an EIP-8246 preserve")
+	})
+
+	t.Run("negative: self-destruct AT the reading tx is not yet in effect", func(t *testing.T) {
+		t.Parallel()
+		vm := NewVersionMap(nil)
+		addr := getAddress(8)
+		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 5}, true, true)
+		state, _, _ := vm.AccountLifecycleAt(addr, 5)
+		require.Equal(t, LifecycleLive, state, "the reading tx does not observe its own/equal-tx destruct via the floor")
 	})
 }
 

@@ -266,6 +266,25 @@ func TestPrecompileBlake2FMalformedInput(t *testing.T) {
 }
 
 func TestPrecompiledEcrecover(t *testing.T) { testJson("ecRecover", "01", t) }
+
+// TestPrecompiledEcrecoverCacheNotPoisonedByCallerMutation pins that mutating a
+// returned recovery result does not corrupt the process-global ecrecover cache
+// (the value handed back must not alias the cached entry).
+func TestPrecompiledEcrecoverCacheNotPoisonedByCallerMutation(t *testing.T) {
+	c := &ecrecover{}
+	input := common.Hex2Bytes("18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c000000000000000000000000000000000000000000000000000000000000001c73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75feeb940b1d03b21e36b0e47e79769f095fe2ab855bd91e3a38756b7d75a9c4549")
+	want := common.Hex2Bytes("000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+
+	out1, err := c.Run(input)
+	require.NoError(t, err)
+	require.Equal(t, want, out1)
+
+	out1[0] ^= 0xff // caller mutates its copy
+
+	out2, err := c.Run(input) // cache hit
+	require.NoError(t, err)
+	require.Equal(t, want, out2, "ecrecover cache must not be poisoned by caller mutation")
+}
 func testJson(name, addr string, t *testing.T) {
 	tests, err := loadJson(name)
 	if err != nil {

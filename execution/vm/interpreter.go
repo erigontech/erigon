@@ -47,6 +47,8 @@ type Config struct {
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
+	NoInlineDispatch bool // Disable the inline fast-path loop (equivalence-oracle / debug seam; production leaves it enabled)
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
@@ -76,6 +78,20 @@ type CallContext struct {
 	cachedAddrGen uint64
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
+
+	// Frame-local read cache; invalidated on sub-call return (see invalidateFrameCaches)
+	// since a callee can change this frame's storage.
+	slotCache map[accounts.StorageKey]uint256.Int
+
+	// Frame-local read caches; invalidated on sub-call return (see invalidateFrameCaches)
+	// since a callee can change any account's balance or code.
+	balanceCache  map[accounts.Address]uint256.Int
+	codeSizeCache map[accounts.Address]uint64
+	codeHashCache map[accounts.Address]uint256.Int
+
+	// cachesOff disables the frame-local read caches so traced execution takes the
+	// canonical per-read path.
+	cachesOff bool
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
@@ -142,6 +158,14 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	return ctx
 }
 
+// invalidateFrameCaches drops memoized reads after a sub-call may have mutated shared state.
+func (c *CallContext) invalidateFrameCaches() {
+	clear(c.slotCache)
+	clear(c.balanceCache)
+	clear(c.codeSizeCache)
+	clear(c.codeHashCache)
+}
+
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
@@ -156,6 +180,10 @@ func (c *CallContext) put() {
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
 	c.cachedAddr = accounts.NilAddress
+	clear(c.slotCache)
+	clear(c.balanceCache)
+	clear(c.codeSizeCache)
+	clear(c.codeHashCache)
 	c.input = nil
 	c.Contract = Contract{}
 	contextPool.Put(c)
@@ -475,11 +503,38 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	// The inline fast loop runs the hottest ops with constant-folded prologues;
+	// tracing must stay on the generic per-op path that drives the hooks.
+	inlineDispatch := !anyTrace && !evm.config.NoInlineDispatch
+	// Under tracing, disable the frame-local read caches so every state read
+	// takes the canonical accessor path (fully observable).
+	callContext.cachesOff = anyTrace
+	if inlineDispatch {
+		inlineConstsOnce.Do(func() { assertInlineConsts(evm.jt) })
+	}
+
+	if !anyTrace {
+		res, err = evm.runOptimized(callContext, &contract)
+		return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+	}
+
 	stack := &callContext.Stack
 	jt := evm.jt
 
 	for {
 		callContext.cacheGen++
+		if inlineDispatch {
+			var halt bool
+			pc, halt, err = evm.runGoInline(callContext, &contract, pc)
+			if err != nil {
+				break
+			}
+			if halt {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, nil
+			}
+			// pc is now at an opcode the inline loop does not handle; fall
+			// through to the generic path for that one op, then re-enter.
+		}
 		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
@@ -601,4 +656,82 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// runOptimized is the trace-free interpreter loop: a single clean gas deduct with no tracer bookkeeping.
+func (evm *EVM) runOptimized(callContext *CallContext, contract *Contract) (res []byte, err error) {
+	pc := uint64(0)
+	inline := !evm.config.NoInlineDispatch
+	jt := evm.jt
+	for {
+		callContext.cacheGen++
+		if inline {
+			var halt bool
+			pc, halt, err = evm.runGoInline(callContext, contract, pc)
+			if err != nil {
+				// An inlined-op fault ends the frame with no output; do not leak
+				// the return data of an earlier sub-call in this frame.
+				res = nil
+				break
+			}
+			if halt {
+				return nil, nil
+			}
+		}
+		op := contract.GetOp(pc)
+		operation := &jt[op]
+		if sLen := callContext.Stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+			return nil, stackBoundsErr(sLen, operation)
+		}
+		if callContext.gas < operation.constantGas {
+			return nil, ErrOutOfGas
+		}
+		callContext.gas -= operation.constantGas
+
+		var memorySize uint64
+		if operation.dynamicGas != nil {
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(callContext)
+				if overflow {
+					return nil, ErrGasUintOverflow
+				}
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, ErrGasUintOverflow
+				}
+			}
+			evm.callGasTemp = 0
+			var dynamicCost mdgas.MdGas
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+			if err != nil {
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+				}
+				return nil, err
+			}
+			if callContext.gas < dynamicCost.Execution {
+				return nil, ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Execution
+			if dynamicCost.State > 0 {
+				if !callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored) {
+					return nil, ErrOutOfGas
+				}
+			}
+		}
+
+		if memorySize > 0 {
+			callContext.Memory.Resize(memorySize)
+		}
+
+		pc, res, err = operation.execute(pc, evm, callContext)
+		if err != nil {
+			break
+		}
+		pc++
+	}
+
+	if errors.Is(err, errStopToken) {
+		err = nil
+	}
+	return res, err
 }
