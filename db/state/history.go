@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"path/filepath"
 	"strings"
@@ -1212,6 +1213,7 @@ type historyPage struct {
 	d      *seg.Decompressor // holding it keeps a closed file's address from being reused while its pages are cached
 	offset uint64
 	data   []byte
+	sum    uint32 // assert builds only: a page is shared by every reader, so a caller writing into one must fail loudly
 }
 
 func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
@@ -1238,7 +1240,12 @@ func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key 
 			return nil, false, err
 		}
 		p = historyPage{d: d, offset: offset, data: data}
+		if dbg.AssertEnabled {
+			p.sum = crc32.ChecksumIEEE(data)
+		}
 		ht.h.pages.Add(k, p)
+	} else if dbg.AssertEnabled && crc32.ChecksumIEEE(p.data) != p.sum {
+		panic(fmt.Sprintf("history page %s:%d was modified after caching", d.FileName(), offset))
 	}
 	v, _ := seg.GetFromPage(key, p.data, nil, false)
 	return v, true, nil
