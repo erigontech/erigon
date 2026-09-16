@@ -542,6 +542,26 @@ func TestFeeHistory_WarmHotRangeResolvesOnlyItsTop(t *testing.T) {
 		"the second request must be served from hash-keyed cache entries")
 }
 
+// A pending top is never cached, so the walk starts at the head below it.
+func TestFeeHistory_WarmPendingRangeResolvesOnlyTheHead(t *testing.T) {
+	header := func(n uint64) *types.Header {
+		h := types.NewEmptyHeaderForAssembling()
+		h.Number.SetUint64(n)
+		h.GasLimit = 30_000_000
+		h.BaseFee = uint256.NewInt(1_000_000_000)
+		return h
+	}
+	backend := &mockOracleBackend{head: header(20), pending: types.NewBlockWithHeader(header(21), nil)}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.PendingBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, [][2]uint64{{20, 20}, {14, 19}, {20, 20}}, backend.resolvedRanges(),
+		"a warm pending request must resolve only the head below its pending slot")
+}
+
 func TestFeeHistoryResolvesSafeAndFinalizedBlocks(t *testing.T) {
 	head := types.NewEmptyHeaderForAssembling()
 	head.Number.SetUint64(25)

@@ -383,8 +383,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	if oracle.historyCache != nil && lastBlock > frozenBound {
 		hotFrom = max(oldestBlock, frozenBound+1)
 		hotHashes = make([]common.Hash, lastBlock-hotFrom+1)
-		if pendingBlock == nil { // a pending top is never cached
-			resolveHot(lastBlock, lastBlock)
+		top := lastBlock
+		if pendingBlock != nil {
+			top = pendingBlock.NumberU64() - 1 // the pending slot is never cached
+		}
+		if top >= hotFrom {
+			resolveHot(top, top)
 		}
 	}
 
