@@ -506,28 +506,46 @@ func TestUnpricedBlobsIgnoreBlobBaseFeeOverride(t *testing.T) {
 	require.Equal(t, zeroWord, result.String())
 }
 
-// TestPricedBlobsRejectBlobBaseFeeOverride pins that a blob fee cap below the
-// overridden block blob fee is rejected, as eth_estimateGas rejects it.
-func TestPricedBlobsRejectBlobBaseFeeOverride(t *testing.T) {
+// TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride pins that a priced blob call
+// compares the caller's blob fee cap against the overridden block blob fee:
+// below it the call is rejected, as eth_estimateGas rejects it, at or above it
+// the call traces and reads BLOBBASEFEE as the override.
+func TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
 
 	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
 	contractAddr := c.deployOpcodeContract(t, opBlobbasefee)
-	args := ethapi.CallArgs{
-		From:                &c.bankAddress,
-		To:                  &contractAddr,
-		MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(10)),
-		BlobVersionedHashes: []common.Hash{{1}},
+	argsWithFeeCap := func(feeCap uint64) ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:                &c.bankAddress,
+			To:                  &contractAddr,
+			MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(feeCap)),
+			BlobVersionedHashes: []common.Hash{{1}},
+		}
 	}
-	overrides := &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(11))}
+	blobBaseFee := func(fee uint64) *ethapi.BlockOverrides {
+		return &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(fee))}
+	}
 
-	var buf bytes.Buffer
-	err := c.debugAPI().TraceCall(context.Background(), args, nil, &tracersConfig.TraceConfig{
-		BlockOverrides: overrides,
-	}, jsonstream.New(&buf))
-	require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
+	t.Run("fee cap below the override", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := c.debugAPI().TraceCall(context.Background(), argsWithFeeCap(10), nil, &tracersConfig.TraceConfig{
+			BlockOverrides: blobBaseFee(11),
+		}, jsonstream.New(&buf))
+		require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
+	})
+
+	t.Run("fee cap equal to the override", func(t *testing.T) {
+		returnValue := callDebugTraceCall(t, c.debugAPI(), argsWithFeeCap(10), blobBaseFee(10))
+		require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000a", returnValue)
+	})
+
+	t.Run("fee cap above the override", func(t *testing.T) {
+		returnValue := callDebugTraceCall(t, c.debugAPI(), argsWithFeeCap(11), blobBaseFee(10))
+		require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000a", returnValue)
+	})
 }
 
 // TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
