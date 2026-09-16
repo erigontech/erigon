@@ -292,24 +292,34 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 	}
 }
 
-// handleMsg handles a single message.
+// handleMsg handles a single message on a new goroutine.
 func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
-	h.startCallProc(func(cp *callProc) {
-		if stream == nil {
-			h.answerBuffered(cp, msg)
-		} else {
-			h.answerInto(cp, msg, stream)
-			stream.WriteRaw("\n")
+	h.startCallProc(func(cp *callProc) { h.answerMsg(cp, msg, stream) })
+}
+
+// serveMsg handles a single message on the calling goroutine, for a caller that waits for the answer anyway.
+func (h *handler) serveMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
+	if ok := h.handleImmediate(msg); ok {
+		return
+	}
+	h.runCallProc(func(cp *callProc) { h.answerMsg(cp, msg, stream) })
+}
+
+func (h *handler) answerMsg(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
+	if stream == nil {
+		h.answerBuffered(cp, msg)
+	} else {
+		h.answerInto(cp, msg, stream)
+		stream.WriteRaw("\n")
+	}
+	for _, n := range cp.notifiers {
+		if err := n.activate(); err != nil {
+			h.logger.Debug("Failed to activate RPC notifier", "err", err)
 		}
-		for _, n := range cp.notifiers {
-			if err := n.activate(); err != nil {
-				h.logger.Debug("Failed to activate RPC notifier", "err", err)
-			}
-		}
-	})
+	}
 }
 
 // handleResponses processes method call responses.
@@ -440,11 +450,13 @@ func (h *handler) cancelServerSubscriptions(err error) {
 
 // startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	h.callWG.Go(func() {
-		ctx, cancel := context.WithCancel(h.rootCtx)
-		defer cancel()
-		fn(&callProc{ctx: ctx})
-	})
+	h.callWG.Go(func() { h.runCallProc(fn) })
+}
+
+func (h *handler) runCallProc(fn func(*callProc)) {
+	ctx, cancel := context.WithCancel(h.rootCtx)
+	defer cancel()
+	fn(&callProc{ctx: ctx})
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
