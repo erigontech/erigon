@@ -1103,7 +1103,12 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	}
 
 	rootKey := nibbles.HexToCompact([]byte(root))
-	stepBudget := estimatedEntryCost(rootKey, branchVal(0b110, valSz)) + minEntryBytes
+	rootCost := estimatedEntryCost(rootKey, branchVal(0b110, valSz))
+	r1Cost := estimatedEntryCost(r1Key, r1Val)
+	stepBudget := rootCost + minEntryBytes
+	if slack := stepBudget - rootCost; slack < minEntryBytes || slack >= r1Cost {
+		t.Fatalf("step budget slack %d outside [%d, %d): below it the file fetch is skipped whether or not R1 is a db-hit, at or above it R1 is pinned instead of deferred", slack, minEntryBytes, r1Cost)
+	}
 
 	n, done, err := p.Run(stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
 	if err != nil {
