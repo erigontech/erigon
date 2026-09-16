@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,8 +34,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -567,4 +572,46 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	got, err := api.GetChainID(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	written, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn-1), at)
+	require.NoError(t, err)
+	require.Equal(t, ch.Blocks[bn-2].Hash(), common.HexToHash(written))
+
+	notYetWritten, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn), at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.HexToHash(notYetWritten), "slot %d is written by block %d", bn, bn+1)
+
+	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.BytesToHash(values[historyAddr][0]))
+
+	gql := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	stored, err := gql.GetAccountStorage(context.Background(), historyAddr, hexutil.EncodeUint64(bn), rpc.BlockNumber(bn))
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.HexToHash(stored))
+
+	slot := common.BigToHash(big.NewInt(bn))
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot[:]}, at)
+	require.NoError(t, err)
+	require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
 }
