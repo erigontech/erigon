@@ -66,6 +66,15 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 				touchSlots = tc.slots
 			}
 			touchAccountsSlots(toWitness, addrs[:tc.touch], touchSlots)
+			// the read-only fold runs first: the full fold leaves deferred branch updates behind
+			indexedUpdates := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+			defer indexedUpdates.Close()
+			touchAccountsSlots(indexedUpdates, addrs[:tc.touch], touchSlots)
+			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, indexedUpdates, tc.exclude)
+			require.NoError(t, err)
+			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
+			require.NoError(t, err)
+
 			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude, "")
 			require.NoError(t, err)
 
@@ -92,14 +101,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 			require.Zero(t, missing, "byHash prune missing nodes present in RLPDecode prune")
 			require.Zero(t, extra, "byHash prune has extra nodes")
 
-			again := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-			defer again.Close()
-			touchAccountsSlots(again, addrs[:tc.touch], touchSlots)
-			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, again, tc.exclude)
-			require.NoError(t, err)
-			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
-			require.NoError(t, err)
-			require.Equal(t, ws, nodeSet(indexed), "the indexed fold and prune must give the RLPDecode prune's nodes")
+			require.Equal(t, ws, nodeSet(indexed), "the read-only indexed fold and prune must give the RLPDecode prune's nodes")
 		})
 	}
 }

@@ -2455,6 +2455,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 
 // WitnessesByHash is Witnesses with the captured nodes left indexed by their hash.
 func (hph *HexPatriciaHashed) WitnessesByHash(ctx context.Context, updates *Updates, produceExclusionProofs bool) (byHash map[string][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+	if len(hph.branchEncoder.deferred) > 0 {
+		return nil, nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
+	}
+	hph.readOnlyWitness = true
+	defer func() { hph.readOnlyWitness = false }()
 	set, provedKeys, rootHash, err := hph.witnessNodeSet(ctx, updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, nil, err
@@ -2486,9 +2491,6 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 
 	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		if hph.readOnlyWitness && len(hashedKey) != 64 && len(hashedKey) != 128 {
-			return fmt.Errorf("read-only witness fold needs a whole hashed key, got %d nibbles", len(hashedKey))
-		}
 		provedKeys = append(provedKeys, bytes.Clone(hashedKey))
 		if len(plainKey) > 0 {
 			if int16(len(plainKey)) == hph.accountKeyLen {
