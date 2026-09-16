@@ -747,11 +747,14 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 
 func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 	select {
-	case tx := <-db.roTxPool:
-		if err := tx.Renew(); err == nil {
-			return tx, nil
+	case tx, ok := <-db.roTxPool:
+		// A closed pool is always ready and yields nil, so default: does not guard this.
+		if ok {
+			if err := tx.Renew(); err == nil {
+				return tx, nil
+			}
+			tx.Abort()
 		}
-		tx.Abort()
 	default:
 	}
 	return db.env.BeginTxn(nil, mdbx.Readonly)
@@ -820,6 +823,7 @@ type MdbxTx struct {
 
 	toCloseMap map[uint64]kv.Closer
 	cursorID   uint64
+	rolledBack atomic.Bool
 }
 
 type MdbxCursor struct {
@@ -1360,12 +1364,19 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
+	// Only one caller may release the txn: two concurrent rollbacks would park the same
+	// read txn twice and hand it to two readers, who would then share one snapshot.
+	if tx.rolledBack.Swap(true) {
+		return
+	}
 	if tx.tx == nil {
 		return
 	}
 	tx.closeCursors()
 	t := tx.tx
-	tx.tx = nil // before the txn goes back to the pool, so a second Rollback cannot park it twice
+	tx.tx = nil
+	// The pool send stays ahead of trackTxEnd: Close waits on that count before closing
+	// the env, and mdbx Reset has no close guard of its own.
 	if tx.readOnly {
 		tx.db.releaseRoTxn(t)
 	} else {
