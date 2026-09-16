@@ -778,6 +778,54 @@ class RenderingFidelityTests(unittest.TestCase):
         out = g.mermaid_blocks("```mermaid\ngraph TD\n> a label\n```\n")
         self.assertIn("> a label", out[0][2])
 
+    def test_literal_markdown_in_prose_is_escaped(self):
+        # The source escaped these backticks, so Docusaurus renders a paragraph
+        # saying ```sh. Writing them back live opens a fence that never closes
+        # and swallows the rest of the page — and the next page's sentinel.
+        out = self.render("<p>A literal marker follows.</p><p>```sh</p>"
+                          "<p>This paragraph must remain prose.</p>")
+        self.assertIn("\\`\\`\\`sh", out)
+        self.assertIn("This paragraph must remain prose.", out)
+
+    def test_escaping_prose_leaves_real_code_alone(self):
+        # The delimiters this converter emits for <code> and <pre> are written
+        # into the buffer, not passed through the prose path, and must survive.
+        self.assertEqual("`--datadir`",
+                         self.render("<p><code>--datadir</code></p>"))
+        self.assertEqual("```bash\nls\n```",
+                         self.render('<pre class="language-bash"><code>ls</code></pre>'))
+
+    def test_a_block_marker_is_escaped_only_at_the_start_of_a_line(self):
+        self.assertEqual("\\# not a heading",
+                         self.render("<p># not a heading</p>"))
+        self.assertEqual("issue # 1 is not a heading",
+                         self.render("<p>issue # 1 is not a heading</p>"))
+
+    def test_a_marker_inside_link_text_is_not_escaped(self):
+        # `[#1516](…)` writes the `#` one column into the line, behind the
+        # link's own bracket, where it opens nothing.
+        self.assertEqual(
+            "See issue [#1516](https://github.com/erigontech/erigon/issues/1516).",
+            self.render('<p>See issue <a href="https://github.com/erigontech/'
+                        'erigon/issues/1516">#1516</a>.</p>'))
+
+    def test_an_emphasised_heading_still_places_its_diagram(self):
+        # Source `_Flow_`, built `*Flow*`: the same heading, written two ways.
+        src = "## _Flow_\n\n```mermaid\ngraph TD\n```\n"
+        self.assertEqual("Flow", g.mermaid_blocks(src)[0][0])
+        body = "## *Flow*\n\nEvery box above is a Go package.\n\n## Later\n\nx"
+        out = g.splice_diagram(body, "Flow", "```mermaid\ngraph TD\n```")
+        self.assertLess(out.index("graph TD"), out.index("Every box above"))
+
+    def test_a_linked_heading_still_places_its_diagram(self):
+        # The built page resolves the target; the text is what both sides share.
+        src = "## [Architecture](/fundamentals/architecture)\n\n```mermaid\nA\n```\n"
+        self.assertEqual("Architecture", g.mermaid_blocks(src)[0][0])
+        body = ("## [Architecture](https://docs.erigon.tech/fundamentals/architecture)"
+                "\n\nExplanation.\n\n## Later\n\nx")
+        out = g.splice_diagram(body, "Architecture", "```mermaid\nA\n```")
+        self.assertLess(out.index("mermaid"), out.index("Explanation."))
+
     def test_a_custom_heading_id_is_not_part_of_the_heading_text(self):
         # Docusaurus renders `## Flow {#custom-flow}` as `Flow` and uses the
         # rest as the id, so recording the source text finds no such heading in
@@ -1107,18 +1155,51 @@ def _contained_fences(corpus):
     block as a fence that escaped its container. Openers only — a closer moves
     independently of what encloses it.
     """
-    n, inside = 0, False
+    n, open_fence = 0, None
     for line in corpus.split("\n"):
         m = re.match(r"^([ \t]*(?:>[ \t]?)*[ \t]*)(`{3,}|~{3,})", line)
         if not m:
             continue
-        if inside:
-            inside = False
+        marker = m.group(2)
+        if open_fence is not None:
+            # Only a run of the same character, at least as long as the opener,
+            # closes the block (CommonMark 4.5). A shorter or different run
+            # inside it is a fence being displayed — a Markdown example written
+            # inside a longer fence — not a second block.
+            if marker[0] == open_fence[0] and len(marker) >= len(open_fence):
+                open_fence = None
             continue
-        inside = True
+        open_fence = marker
         if m.group(1):
             n += 1
     return n
+
+
+class ContainedFenceCountTests(unittest.TestCase):
+    """The counter has to read fences the way CommonMark does."""
+
+    def test_a_fence_shown_inside_a_longer_fence_is_one_block(self):
+        # A Markdown example displayed inside a four-backtick block: the inner
+        # runs are content. Flipping on every fence-looking line counts two
+        # contained blocks where the built page has one, and valid docs fail.
+        corpus = ("1. Read this Markdown example:\n\n"
+                  "   ````markdown\n"
+                  "   ```sh\n"
+                  "   echo example\n"
+                  "   ```\n"
+                  "   ````\n\n"
+                  "2. Finish the procedure.\n")
+        self.assertEqual(1, _contained_fences(corpus))
+
+    def test_two_separate_contained_fences_are_both_counted(self):
+        # The shape the generator emits: the marker takes its own line and the
+        # fence sits at the item's column.
+        corpus = ("- Step one:\n\n  ```sh\n  a\n  ```\n\n"
+                  "- Step two:\n\n  ```sh\n  b\n  ```\n")
+        self.assertEqual(2, _contained_fences(corpus))
+
+    def test_a_top_level_fence_is_not_counted(self):
+        self.assertEqual(0, _contained_fences("```sh\na\n```\n"))
 
 
 class SourceFenceContainmentTests(unittest.TestCase):

@@ -559,14 +559,20 @@ class _ArticleText(HTMLParser):
             return
         if not self._in_pre:
             data = re.sub(r"\s+", " ", data)
+            # Collapse inter-tag whitespace to a single separator. The buffer
+            # tested has to be the one being written to, or the space between
+            # two inline elements inside a link is dropped and the words fuse.
+            buf = self._link_cur if self._href is not None else self.out
             if not data.strip():
-                # Collapse inter-tag whitespace to a single separator. The buffer
-                # tested has to be the one being written to, or the space between
-                # two inline elements inside a link is dropped and the words fuse.
-                buf = self._link_cur if self._href is not None else self.out
                 if buf and not buf[-1].endswith((" ", "\n")):
                     self._emit(" ")
                 return
+            # A link's text is never at the start of a line: its own `[` is
+            # written in front of it, so a marker there opens nothing. Only the
+            # page buffer can say whether a line has begun.
+            at_line_start = self._href is None and (
+                not self.out or self.out[-1].endswith("\n"))
+            data = _escape_prose(data, at_line_start)
         self._emit(data)
 
     @staticmethod
@@ -740,6 +746,32 @@ _POP = "\x03"
 _STACK_RE = re.compile(r"\x02(\d+)\x02|\x03")
 
 
+# A run of backticks, or of tildes long enough to open a fence or strike text
+# through. Neither is ever written into prose by this converter: a code span
+# comes from <code> and a fence from <pre>, both emitted straight into the
+# buffer, so a run reaching the prose path is text the page escaped.
+_PROSE_SPAN_RE = re.compile(r"`+|~{2,}")
+# The block openers, which only matter at the start of a line. The marker the
+# converter emits for a heading, an item or a quote is in the buffer before the
+# text arrives, so at that point the line is no longer at its start.
+_PROSE_BLOCK_RE = re.compile(r"^([ \t]*)([#>]|[-+*](?=[ \t])|\d+[.)](?=[ \t]))")
+
+
+def _escape_prose(data, at_line_start):
+    """Escape the Markdown a page wrote as literal text.
+
+    The built page carries what the source escaped: ``\\`\\`\\`sh`` renders as a
+    paragraph saying ```sh``, not as a fence. Writing that back unescaped makes
+    it syntax again, and a fence reopened this way runs to the end of the
+    document — it swallows the rest of the page and the next page's sentinel,
+    which is how a corpus loses a page with every check still passing.
+    """
+    data = _PROSE_SPAN_RE.sub(lambda m: "".join("\\" + c for c in m.group(0)), data)
+    if at_line_start:
+        data = _PROSE_BLOCK_RE.sub(lambda m: m.group(1) + "\\" + m.group(2), data)
+    return data
+
+
 def _strip_markers(text):
     """Drop the marker bytes from anything the page supplied.
 
@@ -799,11 +831,25 @@ _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
 # the built page carries `Flow` for a source `## Flow {#custom-flow}`. Matching
 # on the raw source text would miss that heading and append its diagram instead.
 _HEADING_ID_RE = re.compile(r"[ \t]*\{#[^}\s]*\}[ \t]*$")
+_HEADING_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_HEADING_MARKUP_RE = re.compile(r"[*_`]")
 
 
 def _heading_text(s):
-    """The text a heading renders as, without its custom id."""
-    return _HEADING_ID_RE.sub("", s).strip()
+    """What a heading says, with no regard for how either side writes it.
+
+    The source and the built page do not spell the same heading the same way:
+    `{#custom-id}` becomes the heading's id and is rendered nowhere, `_Flow_` is
+    written `*Flow*`, and a linked heading carries a resolved absolute target on
+    one side and a site-relative one on the other. Comparing the two as written
+    misses the heading, and the diagram is then appended to the end of the page
+    instead of opening its own section. What survives every one of those
+    rewrites is the text itself.
+    """
+    s = _HEADING_ID_RE.sub("", s)
+    s = _HEADING_LINK_RE.sub(r"\1", s)
+    s = _HEADING_MARKUP_RE.sub("", s)
+    return re.sub(r"\s+", " ", s).strip()
 _ATX_LEVEL_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+\S")
 _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
 # The markers of that prefix one at a time: an item's indent is placed between
