@@ -1035,6 +1035,28 @@ func TestLocalCacheUnwindDoesNotFillSharedStateCache(t *testing.T) {
 	require.False(t, ok, "a speculative session must not seed the shared state cache from a database read")
 }
 
+func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	committed := newSmallStateCache()
+	t.Cleanup(committed.Close)
+	key, _, _, _ := twoStepRows(t, db, committed)
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	sd.Unwind(16, nil)
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a canonical session must keep filling the shared state cache after its own unwind")
+}
+
 func TestValidationParentMergeKeepsSharedCache(t *testing.T) {
 	t.Parallel()
 	db := newTestDb(t, 16)
