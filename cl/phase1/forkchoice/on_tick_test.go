@@ -153,22 +153,14 @@ func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
 	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
 	graph := &blockingStateForkGraph{ForkGraph: f.forkGraph, root: root, release: make(chan struct{})}
 	f.forkGraph = graph
-	released := false
-	defer func() {
-		if !released {
-			close(graph.release)
-		}
-	}()
+	release := sync.OnceFunc(func() { close(graph.release) })
+	defer release()
 	f.unrealizedJustifiedCheckpoint.Store(next)
 
 	slot := f.Slot()
 	var ticks sync.WaitGroup
 	for i := uint64(1); i <= 3; i++ {
-		ticks.Add(1)
-		go func(i uint64) {
-			defer ticks.Done()
-			f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot)
-		}(i)
+		ticks.Go(func() { f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot) })
 	}
 	ticks.Wait()
 	built := make(chan error, 1)
@@ -179,8 +171,7 @@ func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
 
 	require.Eventually(t, func() bool { return graph.calls.Load() >= 1 }, 10*time.Second, time.Millisecond)
 	require.Never(t, func() bool { return graph.calls.Load() > 1 }, 300*time.Millisecond, 5*time.Millisecond)
-	close(graph.release)
-	released = true
+	release()
 
 	require.NoError(t, <-built)
 	_, ok := f.checkpointStates.Load(next)
@@ -209,12 +200,8 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 		release:   make(chan struct{}),
 	}
 	f.forkGraph = pruneGraph
-	released := false
-	defer func() {
-		if !released {
-			close(pruneGraph.release)
-		}
-	}()
+	release := sync.OnceFunc(func() { close(pruneGraph.release) })
+	defer release()
 
 	_, root := decodeDiffBlock(t, diffBlockc2Enc)
 	promoted := solid.Checkpoint{Epoch: 4, Root: root}
@@ -247,8 +234,7 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 		t.Fatal("f.mu is held while fork graph prune is blocked")
 	}
 
-	close(pruneGraph.release)
-	released = true
+	release()
 	select {
 	case <-tickDone:
 	case <-time.After(10 * time.Second):
