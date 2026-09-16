@@ -262,15 +262,43 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				in = nil
 				continue
 			}
+			// Drain buffered requests before handling the result: a block's request
+			// is always sent before the exec that produces its result, but a fair
+			// select can pick the result first and let handleBlockRequest drop the
+			// request as stale (blockNum <= lastBlockResultSeen). That drops the
+			// block's compute-ahead, and the contiguity gate then keeps compute-ahead
+			// off for the rest of the batch.
+			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
-			if !ok {
-				reqs = nil
-				continue
-			}
-			cc.handleBlockRequest(ctx, req)
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
 		}
 	}
+}
+
+// acceptBlockRequest handles a request from reqs, returning the channel to keep
+// selecting on — nil once it is closed.
+func (cc *commitmentCalculator) acceptBlockRequest(ctx context.Context, reqs chan *blockRequest, req *blockRequest, ok bool) chan *blockRequest {
+	if !ok {
+		return nil
+	}
+	cc.handleBlockRequest(ctx, req)
+	return reqs
+}
+
+// drainBlockRequests handles every buffered request, returning nil once the
+// channel is closed. Draining before a result keeps the send-before-exec order
+// past select, which would otherwise let the result drop the request as stale.
+func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
+	for reqs != nil {
+		select {
+		case req, ok := <-reqs:
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
+		default:
+			return reqs
+		}
+	}
+	return nil
 }
 
 // perBlockCompute reports whether the given block computes commitment at its
