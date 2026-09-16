@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 // buildBlock reads whatever buildBlockDetailsResponse put under "block", and the
@@ -56,7 +57,7 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
-		"receipts": []map[string]any{},
+		"receipts": []*jsonrpc.GraphQLReceipt{},
 		"withdrawals": []map[string]any{{
 			"index":     withdrawal.Index,
 			"validator": withdrawal.Validator,
@@ -112,7 +113,7 @@ func TestBuildBlockHandlesPendingBlock(t *testing.T) {
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
-		"receipts": []map[string]any{},
+		"receipts": []*jsonrpc.GraphQLReceipt{},
 	})
 	require.NoError(t, err)
 	require.Empty(t, got.Hash)
