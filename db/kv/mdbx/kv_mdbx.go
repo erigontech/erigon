@@ -459,6 +459,8 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 }
 
 // roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
+// Growing it is not free: a pooled txn holds its reader slot, and libmdbx never shrinks
+// the reader-table length, so every later slot scan and oldest-reader walk stays longer.
 var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
