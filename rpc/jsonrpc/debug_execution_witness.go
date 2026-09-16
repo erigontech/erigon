@@ -340,7 +340,6 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	s.ModifiedCode[addr] = bytes.Clone(code)
 	if len(code) > 0 {
 		s.createdCodeHashes[codeHash.Value()] = struct{}{}
-		s.codeHashes[string(code)] = codeHash.Value()
 	}
 	// Keep accountOverlay CodeHash in sync so ReadAccountData returns a
 	// consistent CodeHash even before UpdateAccountData is called.
@@ -542,6 +541,9 @@ type ExecutionWitnessResult struct {
 	// witness cache stores a shell carrying only this, so a hit serves the bytes
 	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
 	cachedJSON []byte
+
+	// codeHashes is keyed by the code itself, so a hit is the hash of exactly these bytes.
+	codeHashes map[string]common.Hash
 }
 
 // MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
@@ -881,6 +883,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		Codes:          accessed.SortedCodes,
 		Keys:           accessed.WitnessKeys,
 		headerByNumber: make(map[uint64]*types.Header),
+		codeHashes:     accessed.codeHashes,
 	}
 
 	// Build merkle proofs for all accessed accounts
@@ -984,6 +987,7 @@ type accessedState struct {
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
 	Deleted     map[common.Address]struct{}
+	codeHashes  map[string]common.Hash
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1057,6 +1061,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		WitnessKeys: []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
 		Deleted:     make(map[common.Address]struct{}),
+		codeHashes:  rs.codeHashes,
 	}
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
@@ -1582,7 +1587,10 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash, ok := result.codeHashes[string(code)]
+		if !ok {
+			codeHash = crypto.Keccak256Hash(code)
+		}
 		codeMap[codeHash] = code
 	}
 
