@@ -411,6 +411,28 @@ func (s *DirtySegment) closeIdx() {
 	s.indexes = nil
 }
 
+// CloseSegmentsNotInList closes and drops every segment whose file is not protected. It calls the
+// full close, which releases the index mmap as well as the decompressor: a segment can hold an open
+// index with no decompressor, and on Windows a mapped .idx cannot be unlinked.
+func CloseSegmentsNotInList(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}) {
+	var toClose []*DirtySegment
+	tree.Walk(func(segs []*DirtySegment) bool {
+		for _, seg := range segs {
+			// FileName, not FilePath: the latter is promoted from the embedded decompressor and
+			// panics on a segment that holds only an index.
+			if _, ok := protectFiles[seg.FileName()]; ok {
+				continue
+			}
+			toClose = append(toClose, seg)
+		}
+		return true
+	})
+	for _, seg := range toClose {
+		seg.close()
+		tree.Delete(seg)
+	}
+}
+
 func (s *DirtySegment) close() {
 	if s != nil {
 		s.closeIdx()

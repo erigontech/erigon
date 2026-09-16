@@ -362,43 +362,8 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 	for _, fName := range l {
 		protectFiles[fName] = struct{}{}
 	}
-	toClose := make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BeaconBlocks.Enum()].Delete(sn)
-	}
-
-	toClose = make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BlobSidecars.Enum()].Delete(sn)
-	}
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BeaconBlocks.Enum()], protectFiles)
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BlobSidecars.Enum()], protectFiles)
 }
 
 type CaplinView struct {
