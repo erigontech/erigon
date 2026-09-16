@@ -1,7 +1,8 @@
 # BSC (Chapel) bring-up on Erigon — progress log
 
-Branch: `bsc_support`. Goal: sync BSC testnet (Chapel, chainID 97) over devp2p with
-no CL, no execution yet — just get blocks and print number+hash — then snapshots.
+Branch: `bsc_support`. Goal: sync BSC testnet (Chapel, chainID 97) on Erigon with no CL —
+peer over devp2p, persist via the ExecModule API, and execute (Parlia) matching state roots.
+Now executing under the parallel executor with clean roots through block 2,000,000; see Phase 7.
 
 ## Status
 
@@ -14,7 +15,54 @@ no CL, no execution yet — just get blocks and print number+hash — then snaps
 | 4. Blocks over p2p + logging | ✅ | live Chapel tip streaming from `--chain=chapel` alone, no extra flags |
 | 5. Download + persist via ExecModule API | ✅ | genesis→target forward download, canonical persist, resume-on-restart; retire→.seg + prune, `seg integrity` publishable |
 | 6. Snapshots productionization | ⏳ | retire/read/prune validated on real data; wire + publish for Parlia |
-| 7. Execution | ⏳ | flip `StagesOnlyBlocks` off + real Parlia engine + system txs |
+| 7. Parlia execution | 🚧 | default-on for Parlia; system txs + fee model + precompiles + fork contract-upgrades done; clean state roots through **2,000,000** (past Ramanujan); syncing on to find the next fork divergence |
+| 8. Real Parlia consensus | ⏳ | validator-set snapshot, seal/ecrecover verify, epoch rotation, BEP-126 fast-finality — deferred (permissive stub already yields correct roots) |
+
+## Phase 7 — Parlia execution
+
+Execution is **default-on for Parlia** (no env gate); the block-STM parallel executor
+(`EXEC3_PARALLEL`) runs BSC. Verified: clean state roots on real Chapel data from genesis
+through **block 2,000,000**, across the Ramanujan fork.
+
+### Shipped (stacked draft PRs)
+
+| PR | Branch | What |
+|----|--------|------|
+| #23929 | `moskud/bsc-fork-choice` | system transactions + BSC fee model (user-tx tip → `SystemAddress`, not coinbase; `distributeToSystem`/`distributeToValidator`) |
+| #24015 | `moskud/bsc-precompiles` | cross-chain light-client precompiles `0x64` tmHeaderValidate + `0x65` iavlMerkleProofValidate (vendored tendermint/iavl proof code; later-fork variants trimmed, re-added per-fork) |
+| #24025 | `moskud/bsc-parallel-fee-defer` | defer the Parlia tip through `calcFees` — the inline credit raced the in-block system tx's read of `SystemAddress`, diverging non-deterministically under parallel exec |
+| #24029 | `moskud/bsc-contract-upgrades` | apply system-contract **code upgrades at fork boundaries** (`parlia.blockAlloc` → `Parlia.Initialize` `SetCode`); fixes the Ramanujan (block 1,010,000) divergence |
+
+Stack: #23929 → #24015 → #24025 → #24029.
+
+### Chapel fork schedule (block-activated)
+
+| Block | Fork | Execution impact |
+|-------|------|------------------|
+| 1,010,000 | Ramanujan | system-contract code upgrade — ✅ #24029 |
+| 1,014,369 | Niels | code upgrade — ✅ #24029 |
+| 5,582,500 | MirrorSync | BEP-131 validator-set expansion (mostly consensus) |
+| 13,837,000 | Bruno | BEP-127 gas-fee **burning** — state-affecting, not yet implemented |
+| 19,203,503 | Euler | validator-set size increase (consensus) |
+| 22,800,220 | Gibbs | |
+| 23,482,428 | Nano | disables cross-chain precompiles + address **blacklist** — not yet implemented |
+| 23,603,940 | Moran | re-enables precompiles, fixed proof format — variant not yet wired |
+| 28,196,022 | Planck | precompile proof-format fix (ics23) |
+| 29,295,050 | Luban | |
+| 29,861,024 | Plato | precompile proof-format fix (ics23) |
+| 31,103,030 | Berlin / London / Hertz | EIP-1559 base fee + EIP-2929/2930 — base-fee handling not yet implemented |
+| 35,682,300 | HertzFix | |
+
+Timestamp-activated forks (Shanghai/Kepler/Feynman/Cancun/…, unix ts ≥ ~1.7e9 ≈ block 30M+)
+follow. All 19 `blockAlloc` code-upgrade sets (block- and time-keyed) are present in `chapel.json`
+and applied by #24029.
+
+### Next
+Sync is running past 2M to surface the next **state-root divergence** — i.e. a fork that changes
+behaviour beyond the contract-code upgrades #24029 already applies. Likely first hit: Bruno's fee
+burn, then Nano's precompile-disable + blacklist. Each becomes the next fork-gated fix stacked on
+#24029. Real Parlia consensus (seal/finality verification) is a separate, deferred track — the
+permissive stub already produces correct state roots.
 
 ## Phase 5 — download + persist via the ExecModule API
 
