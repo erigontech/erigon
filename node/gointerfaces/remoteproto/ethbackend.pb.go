@@ -249,8 +249,10 @@ type SyncingReply struct {
 	CurrentBlock     uint64                        `protobuf:"varint,3,opt,name=current_block,json=currentBlock,proto3" json:"current_block,omitempty"`
 	Syncing          bool                          `protobuf:"varint,4,opt,name=syncing,proto3" json:"syncing,omitempty"`
 	Stages           []*SyncingReply_StageProgress `protobuf:"bytes,5,rep,name=stages,proto3" json:"stages,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Block this sync session started from; pinned until the node is synced again.
+	StartingBlock uint64 `protobuf:"varint,6,opt,name=starting_block,json=startingBlock,proto3" json:"starting_block,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SyncingReply) Reset() {
@@ -316,6 +318,13 @@ func (x *SyncingReply) GetStages() []*SyncingReply_StageProgress {
 		return x.Stages
 	}
 	return nil
+}
+
+func (x *SyncingReply) GetStartingBlock() uint64 {
+	if x != nil {
+		return x.StartingBlock
+	}
+	return 0
 }
 
 type NetPeerCountRequest struct {
@@ -2412,13 +2421,14 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\"\x13\n" +
 	"\x11NetVersionRequest\"!\n" +
 	"\x0fNetVersionReply\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x04R\x02id\"\xb0\x02\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\xd7\x02\n" +
 	"\fSyncingReply\x12-\n" +
 	"\x13last_new_block_seen\x18\x01 \x01(\x04R\x10lastNewBlockSeen\x12#\n" +
 	"\rfrozen_blocks\x18\x02 \x01(\x04R\ffrozenBlocks\x12#\n" +
 	"\rcurrent_block\x18\x03 \x01(\x04R\fcurrentBlock\x12\x18\n" +
 	"\asyncing\x18\x04 \x01(\bR\asyncing\x12:\n" +
-	"\x06stages\x18\x05 \x03(\v2\".remote.SyncingReply.StageProgressR\x06stages\x1aQ\n" +
+	"\x06stages\x18\x05 \x03(\v2\".remote.SyncingReply.StageProgressR\x06stages\x12%\n" +
+	"\x0estarting_block\x18\x06 \x01(\x04R\rstartingBlock\x1aQ\n" +
 	"\rStageProgress\x12\x1d\n" +
 	"\n" +
 	"stage_name\x18\x01 \x01(\tR\tstageName\x12!\n" +

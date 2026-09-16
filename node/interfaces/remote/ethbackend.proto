@@ -112,7 +112,9 @@ message SyncingReply {
     uint64 block_number = 2;
   }
   repeated StageProgress stages = 5;
-  
+
+  // Block this sync session started from; pinned until the node is synced again.
+  uint64 starting_block = 6;
 }
 
 message NetPeerCountRequest {}

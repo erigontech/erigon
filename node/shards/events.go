@@ -413,6 +413,7 @@ type Notifications struct {
 
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
+	startingBlock atomic.Uint64
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {

@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestCapabilities(t *testing.T) {
@@ -736,4 +738,31 @@ func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
 		require.Error(t, wantErr)
 		require.EqualError(t, gotErr, wantErr.Error())
 	}
+}
+
+type syncingBackendStub struct {
+	rpchelper.ApiBackend
+	reply *remoteproto.SyncingReply
+}
+
+func (s syncingBackendStub) Syncing(context.Context) (*remoteproto.SyncingReply, error) {
+	return s.reply, nil
+}
+
+// The RPC layer forwards the node's pin instead of computing one of its own.
+func TestSyncingReportsTheStartingBlockOfTheSession(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		StartingBlock:    100,
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(100), status["startingBlock"])
+	require.Equal(t, hexutil.Uint64(150), status["currentBlock"])
+	require.Equal(t, hexutil.Uint64(500), status["highestBlock"])
 }

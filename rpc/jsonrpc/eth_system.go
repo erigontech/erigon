@@ -281,7 +281,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	currentBlock := reply.CurrentBlock
 
 	return map[string]any{
-		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
+		"startingBlock": hexutil.Uint64(reply.StartingBlock),
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesFromReply(reply.Stages),

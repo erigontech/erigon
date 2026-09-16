@@ -48,27 +48,15 @@ func stagesFromReply(reply []*remoteproto.SyncingReply_StageProgress) []stagePro
 	return stages
 }
 
-// syncingPayloadBuilder turns SyncingReply updates into the client-facing
-// payload: a syncingResult while syncing, the boolean false once synced.
-// startingBlock is captured at the transition into Syncing=true and holds for
-// the whole sync session, mirroring the eth_syncing startingBlock field.
-type syncingPayloadBuilder struct {
-	startingBlock hexutil.Uint64
-	lastSyncing   bool
-}
-
-func (b *syncingPayloadBuilder) build(reply *remoteproto.SyncingReply) any {
-	if reply.Syncing && !b.lastSyncing {
-		b.startingBlock = hexutil.Uint64(reply.CurrentBlock)
-	}
-	b.lastSyncing = reply.Syncing
-
+// syncingPayload turns a SyncingReply into the client-facing payload: a
+// syncingResult while syncing, the boolean false once synced.
+func syncingPayload(reply *remoteproto.SyncingReply) any {
 	if !reply.Syncing {
 		return false
 	}
 	return syncingResult{
 		Syncing:       true,
-		StartingBlock: b.startingBlock,
+		StartingBlock: hexutil.Uint64(reply.StartingBlock),
 		CurrentBlock:  hexutil.Uint64(reply.CurrentBlock),
 		HighestBlock:  hexutil.Uint64(reply.LastNewBlockSeen),
 		Stages:        stagesFromReply(reply.Stages),
@@ -108,14 +96,13 @@ func (api *EthSyncingSubscriptionAPI) Syncing(ctx context.Context) (*rpc.Subscri
 		defer dbg.LogPanic()
 		defer api.filters.UnsubscribeSyncing(id)
 
-		var builder syncingPayloadBuilder
 		for {
 			select {
 			case reply, ok := <-ch:
 				if !ok {
 					return
 				}
-				if err := notifier.Notify(rpcSub.ID, builder.build(reply)); err != nil {
+				if err := notifier.Notify(rpcSub.ID, syncingPayload(reply)); err != nil {
 					api.logger.Warn("[rpc] error while notifying syncing subscription", "err", err)
 				}
 			case <-rpcSub.Err():
