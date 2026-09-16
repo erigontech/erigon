@@ -46,6 +46,13 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
+// AppendFastJSON appends b as a JSON string without the escape scan json does: hex never needs escaping.
+func (b Bytes) AppendFastJSON(dst []byte) ([]byte, error) {
+	dst = append(dst, `"`+HexPrefix...)
+	dst = hex.AppendEncode(dst, b)
+	return append(dst, '"'), nil
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Bytes) UnmarshalJSON(input []byte) error {
 	if !isString(input) {

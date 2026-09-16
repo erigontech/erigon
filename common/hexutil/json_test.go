@@ -79,6 +79,16 @@ func TestUnmarshalBytes(t *testing.T) {
 	}
 }
 
+func TestBytesAppendFastJSON(t *testing.T) {
+	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
+		want, err := json.Marshal(b)
+		require.NoError(t, err)
+		got, err := b.AppendFastJSON([]byte("keep"))
+		require.NoError(t, err)
+		require.Equal(t, "keep"+string(want), string(got))
+	}
+}
+
 func TestBytesUnmarshalTextInvalidHex(t *testing.T) {
 	var v Bytes
 	require.ErrorIs(t, v.UnmarshalText([]byte("0x01zz01")), ErrSyntax)
