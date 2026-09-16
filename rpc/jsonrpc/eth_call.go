@@ -530,7 +530,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	if !bytes.Equal(root, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", root, header.Root[:])
+		return nil, fmt.Errorf("witness root %x does not match header root %x", root, header.Root[:])
 	}
 	// set initial response fields
 	proof := &accounts.AccProofResult{
