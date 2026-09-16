@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -574,6 +575,7 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 }
 
 func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
 	chainConfig := new(chain.Config)
 	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
 	historyAddr := params.HistoryStorageAddress.Value()
@@ -607,4 +609,9 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	stored, err := gql.GetAccountStorage(context.Background(), historyAddr, hexutil.EncodeUint64(bn), rpc.BlockNumber(bn))
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, common.HexToHash(stored))
+
+	slot := common.BigToHash(big.NewInt(bn))
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot[:]}, at)
+	require.NoError(t, err)
+	require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
 }
