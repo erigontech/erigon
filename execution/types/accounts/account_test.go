@@ -18,13 +18,16 @@ package accounts
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func TestEmptyAccount(t *testing.T) {
@@ -368,5 +371,32 @@ func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnat
 	t.Helper()
 	if initialIncarnation != decodedIncarnation {
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
+	}
+}
+
+func TestAccProofResultMarshalFastJSON(t *testing.T) {
+	big := hexutil.U256(*uint256.MustFromHex("0x1d6329f1c35ca4bfabb9f5610000000000"))
+	var zero hexutil.U256
+	for _, r := range []*AccProofResult{
+		{},
+		{
+			Address:      common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7"),
+			AccountProof: []hexutil.Bytes{{0xf8, 0x51}, bytes.Repeat([]byte{0xab}, 532)},
+			Balance:      &big,
+			CodeHash:     common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+			Nonce:        7,
+			StorageHash:  common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+			StorageProof: []StorProofResult{
+				{Key: "0x1", Value: &zero, Proof: []hexutil.Bytes{{0x80}}},
+				{Key: "0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563", Proof: []hexutil.Bytes{}},
+			},
+		},
+		{AccountProof: []hexutil.Bytes{}, StorageProof: []StorProofResult{{Key: "<\"&\u2028>"}}},
+	} {
+		want, err := json.Marshal(r)
+		require.NoError(t, err)
+		got, err := r.MarshalFastJSON()
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(got))
 	}
 }
