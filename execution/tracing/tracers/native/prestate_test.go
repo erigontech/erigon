@@ -18,7 +18,6 @@ package native
 
 import (
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -124,7 +123,7 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[deletedAddr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
+	tr.pre[deletedAddr] = &account{Balance: new(hexutil.U256)}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: deletedAddr},
@@ -167,7 +166,7 @@ func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[addr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
+	tr.pre[addr] = &account{Balance: new(hexutil.U256)}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
@@ -189,7 +188,7 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true})
 
 	tr.pre[addr] = &account{
-		Balance: (*hexutil.Big)(big.NewInt(0)),
+		Balance: new(hexutil.U256),
 		Storage: map[common.Hash]common.Hash{
 			common.HexToHash("0x01"): {},
 		},
