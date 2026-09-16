@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/bits"
 	"slices"
 	"sync"
 	"unsafe"
@@ -265,6 +266,23 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	sd.latestStateLocks[domain].RLock()
 	defer sd.latestStateLocks[domain].RUnlock()
 	return sd.getLatest(domain, key)
+}
+
+func (sd *TemporalMemBatch) GetLatestChildren(domain kv.Domain, nodeKey, childKey []byte, wanted uint16,
+	out *[16][]byte, steps *[16]kv.Step) (present uint16) {
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
+	for bitset := wanted; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		if v, step, ok := sd.getLatest(domain, childKey); ok {
+			out[nibble], steps[nibble] = v, step
+			present |= bit
+		}
+		bitset ^= bit
+	}
+	return present
 }
 
 // getLatest is the lock-free implementation of GetLatest.

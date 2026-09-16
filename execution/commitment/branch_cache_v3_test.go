@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"fmt"
+	"math/bits"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,30 @@ import (
 
 func v3RecordKey(path []byte, child byte) []byte {
 	return nibbles.ChildKeyV3(nibbles.EncodeKeyV3(path), child)
+}
+
+func getNode(c *BranchCache, nodeKey []byte, wanted uint16, out *[16][]byte) (present uint16, step uint64, ok bool) {
+	mask, ok := c.NodeMask(nodeKey)
+	if !ok {
+		return 0, 0, false
+	}
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	for bitset := wanted & mask; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		rec, recStep, hit := c.Get(childKey)
+		if !hit {
+			continue
+		}
+		out[nibble] = rec
+		present |= uint16(1) << nibble
+		step = max(step, recStep)
+	}
+	if present == 0 {
+		return 0, 0, false
+	}
+	return present, step, true
 }
 
 // The trunk indexes a legacy compact key, whose first byte is a flags byte. A v3 key carries path
@@ -50,7 +75,7 @@ func TestBranchCacheKeepsV3RecordKeysDistinct(t *testing.T) {
 		nodeKey, nibble, ok := v3NodeKeyOf(tc.key)
 		require.True(t, ok)
 		var records [16][]byte
-		present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
+		present, _, ok := getNode(c, nodeKey, ^uint16(0), &records)
 		require.Truef(t, ok, "record %x was evicted", tc.key)
 		require.NotZerof(t, present&(uint16(1)<<nibble), "record %x was evicted", tc.key)
 		require.Equalf(t, []byte(tc.want), records[nibble], "record %x reads back another node's value", tc.key)
@@ -67,7 +92,7 @@ func TestBranchCacheNodeEntryKeepsChildrenDistinct(t *testing.T) {
 		c.Put(v3RecordKey(path, byte(child)), []byte{byte(child), 0xaa}, uint64(child), uint64(child))
 	}
 	var records [16][]byte
-	present, step, ok := c.GetNode(nibbles.EncodeKeyV3(path), ^uint16(0), &records)
+	present, step, ok := getNode(c, nibbles.EncodeKeyV3(path), ^uint16(0), &records)
 	require.True(t, ok)
 	require.Equal(t, ^uint16(0), present, "every child written must be present")
 	require.Equal(t, uint64(15), step, "the node reports the newest child's step")
@@ -77,7 +102,7 @@ func TestBranchCacheNodeEntryKeepsChildrenDistinct(t *testing.T) {
 
 	// Dropping one child must leave the rest in place.
 	c.Invalidate(v3RecordKey(path, 7))
-	present, _, ok = c.GetNode(nibbles.EncodeKeyV3(path), ^uint16(0), &records)
+	present, _, ok = getNode(c, nibbles.EncodeKeyV3(path), ^uint16(0), &records)
 	require.True(t, ok)
 	require.Zero(t, present&(1<<7), "the invalidated child must be gone")
 	require.Equal(t, ^uint16(0)&^uint16(1<<7), present, "its siblings must survive")
@@ -159,14 +184,14 @@ func TestBranchCacheV3CachesOnlyWrittenChildren(t *testing.T) {
 	c.Put(v3RecordKey(path, 3), []byte("child-3"), 4, 40)
 
 	var records [16][]byte
-	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
+	present, _, ok := getNode(c, nodeKey, ^uint16(0), &records)
 	require.True(t, ok)
 	require.Equal(t, uint16(1)<<3, present,
 		"a node must cache the one child written, not its unwritten siblings")
 
 	c.Put(v3RecordKey(path, 9), []byte("child-9"), 5, 50)
 
-	present, step, ok := c.GetNode(nodeKey, ^uint16(0), &records)
+	present, step, ok := getNode(c, nodeKey, ^uint16(0), &records)
 	require.True(t, ok)
 	require.Equal(t, uint16(1)<<3|uint16(1)<<9, present,
 		"a later write must not drop the sibling written before it")
@@ -175,7 +200,7 @@ func TestBranchCacheV3CachesOnlyWrittenChildren(t *testing.T) {
 	require.Equal(t, uint64(5), step, "the node reports the newest child's step")
 
 	var narrow [16][]byte
-	present, _, ok = c.GetNode(nodeKey, uint16(1)<<9, &narrow)
+	present, _, ok = getNode(c, nodeKey, uint16(1)<<9, &narrow)
 	require.True(t, ok)
 	require.Equal(t, uint16(1)<<9, present, "an unfold must get only the nibble it asked for")
 	require.Nil(t, narrow[3], "a masked-out sibling must not be materialised")

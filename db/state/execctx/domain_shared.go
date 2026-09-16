@@ -1384,26 +1384,41 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 		cacheStart = time.Now()
 	}
 	// Only the wanted nibbles are probed: the node entry carries the mask, each record its own key.
-	var cached [16][]byte
 	var cachedPresent uint16
-	var cachedStep uint64
 	if sd.branchCache != nil {
-		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, wanted, &cached)
+		cachedPresent, _ = sd.branchCache.NodeMask(nodeKey)
 	}
 	// Neither lookup retains the key, so one scratch buffer serves every nibble.
 	childKeyBuf := nodeChildKeyBufs.Get().(*[]byte)
 	childKey := append(append((*childKeyBuf)[:0], nodeKey...), 0)
 	defer func() { *childKeyBuf = childKey[:0]; nodeChildKeyBufs.Put(childKeyBuf) }()
+	var memVals [16][]byte
+	var memSteps [16]kv.Step
+	var memPresent uint16
+	batched := false
+	if sd.parent == nil {
+		if batch, ok := sd.mem.(interface {
+			GetLatestChildren(domain kv.Domain, nodeKey, childKey []byte, wanted uint16, out *[16][]byte, steps *[16]kv.Step) uint16
+		}); ok {
+			memPresent = batch.GetLatestChildren(kv.CommitmentDomain, nodeKey, childKey, wanted, &memVals, &memSteps)
+			batched = true
+		}
+	}
 	for bitset := wanted; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		childKey[len(nodeKey)] = 0x80 | byte(nibble)
-		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, childKey)
+		value, valueStep, ok := memVals[nibble], memSteps[nibble], memPresent&bit != 0
+		if !batched {
+			value, valueStep, _, ok = sd.latestFromMem(kv.CommitmentDomain, childKey)
+		}
 		if !ok && cachedPresent&bit != 0 {
-			value, valueStep, ok = cached[nibble], kv.Step(cachedStep), true
+			var cachedStep uint64
+			value, cachedStep, ok = sd.branchCache.Get(childKey)
+			valueStep = kv.Step(cachedStep)
 		}
 		if ok {
-			records[nibble] = bytes.Clone(value)
+			records[nibble] = value
 			present |= bit
 			if valueStep > step {
 				step = valueStep

@@ -839,41 +839,21 @@ func (c *BranchCache) lookupNode(nodeKey []byte) *branchCacheEntry {
 	return entry
 }
 
-// GetNode serves the wanted edge records of a node. The node entry carries only the child mask;
-// each record is looked up under its own edge key, and only the wanted bits are probed -- an
-// unfold asking for one nibble costs one edge lookup, not a whole node. Returned slices alias
-// the cache's buffers, so a caller keeping them past the read must copy.
-func (c *BranchCache) GetNode(nodeKey []byte, wanted uint16, out *[16][]byte) (present uint16, step uint64, ok bool) {
+func (c *BranchCache) NodeMask(nodeKey []byte) (present uint16, ok bool) {
 	coh := c.coh.Snapshot()
 	entry := c.lookupNode(nodeKey)
 	if entry == nil || !entry.node {
 		if entry == nil {
 			c.fireOnMiss(nodeKey)
 		}
-		return 0, 0, false
+		return 0, false
 	}
 	if coh.IsStale(entry.txN, entry.epoch) {
 		c.InvalidateNode(nodeKey)
 		c.staleEvicted.Add(1)
-		return 0, 0, false
+		return 0, false
 	}
-	childKey := make([]byte, len(nodeKey)+1)
-	copy(childKey, nodeKey)
-	for bitset := wanted & entry.present; bitset != 0; bitset &= bitset - 1 {
-		nibble := bits.TrailingZeros16(bitset & -bitset)
-		childKey[len(nodeKey)] = 0x80 | byte(nibble)
-		rec, recStep, hit := c.Get(childKey)
-		if !hit {
-			continue
-		}
-		out[nibble] = rec
-		present |= uint16(1) << nibble
-		step = max(step, recStep)
-	}
-	if present == 0 {
-		return 0, 0, false
-	}
-	return present, step, true
+	return entry.present, true
 }
 
 // putNodeMask ors bits into a node's mask entry. Callers hold the node's put stripe.
