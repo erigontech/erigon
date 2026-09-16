@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -741,3 +742,20 @@ type jsonBytesWriter []byte
 
 func (w *jsonBytesWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
 func (w *jsonBytesWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
+
+func TestExecutionWitnessResultMarshalFastJSONTo(t *testing.T) {
+	for name, m := range map[string]*ExecutionWitnessResult{
+		"empty":     {},
+		"no keys":   {State: []hexutil.Bytes{}, Codes: []hexutil.Bytes{{0x60}}},
+		"populated": {State: []hexutil.Bytes{{0xf8, 0x51}, make(hexutil.Bytes, 70000)}, Codes: []hexutil.Bytes{{0x60, 0x80}}, Keys: []hexutil.Bytes{{0x01}}, Headers: []hexutil.Bytes{{0xf9}}},
+		"cached":    {cachedJSON: []byte(`{"state":[],"codes":[]}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := m.MarshalFastJSON()
+			require.NoError(t, err)
+			var got jsonBytesWriter
+			require.NoError(t, m.MarshalFastJSONTo(&got))
+			require.Equal(t, string(want), string(got))
+		})
+	}
+}

@@ -139,7 +139,22 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 	return logs.appendFastJSON(make([]byte, 0, logs.fastJSONLen())), nil
 }
 
+// MarshalFastJSONTo writes one log at a time, so a large result never sits in one buffer.
 func (logs RPCLogs) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	w.WriteRawBytes(logs.appendFastJSON(w.AvailableBuffer(logs.fastJSONLen())))
+	if len(logs) == 0 {
+		w.WriteRawBytes(logs.appendFastJSON(w.AvailableBuffer(logs.fastJSONLen())))
+		return nil
+	}
+	for i, l := range logs {
+		sep := byte(',')
+		if i == 0 {
+			sep = '['
+		}
+		enc := l.appendFastJSON(append(w.AvailableBuffer(l.fastJSONLen()+len("[]")), sep))
+		if i == len(logs)-1 {
+			enc = append(enc, ']')
+		}
+		w.WriteRawBytes(enc)
+	}
 	return nil
 }

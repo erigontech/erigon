@@ -84,6 +84,16 @@ type sliceJSONWriter []byte
 func (w *sliceJSONWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
 func (w *sliceJSONWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
 
+func TestMarshalFastJSONArrayTo(t *testing.T) {
+	for _, items := range [][]Bytes{nil, {}, {nil}, {{}, {0x01}}, {make(Bytes, 70000), {0xde, 0xad}}} {
+		want, err := json.Marshal(items)
+		require.NoError(t, err)
+		var w sliceJSONWriter
+		MarshalFastJSONArrayTo(&w, items)
+		require.Equal(t, string(want), string(w))
+	}
+}
+
 func TestBytesMarshalFastJSONTo(t *testing.T) {
 	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
 		want, err := json.Marshal(b)

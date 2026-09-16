@@ -28,8 +28,19 @@ func (b *BlobsBundle) MarshalFastJSON() ([]byte, error) {
 	return b.appendJSON(make([]byte, 0, b.jsonLen())), nil
 }
 
+// MarshalFastJSONTo writes one array element at a time, so the blobs never sit in one buffer.
 func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	w.WriteRawBytes(b.appendJSON(w.AvailableBuffer(b.jsonLen())))
+	if b == nil {
+		hexutil.WriteRawJSON(w, "null")
+		return nil
+	}
+	hexutil.WriteRawJSON(w, `{"commitments":`)
+	hexutil.MarshalFastJSONArrayTo(w, b.Commitments)
+	hexutil.WriteRawJSON(w, `,"proofs":`)
+	hexutil.MarshalFastJSONArrayTo(w, b.Proofs)
+	hexutil.WriteRawJSON(w, `,"blobs":`)
+	hexutil.MarshalFastJSONArrayTo(w, b.Blobs)
+	hexutil.WriteRawJSON(w, "}")
 	return nil
 }
 
@@ -99,14 +110,26 @@ func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
 
 func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if r == nil {
-		w.WriteRawBytes(append(w.AvailableBuffer(len("null")), "null"...))
+		hexutil.WriteRawJSON(w, "null")
 		return nil
 	}
 	f, err := r.marshalFields()
 	if err != nil {
 		return err
 	}
-	w.WriteRawBytes(f.appendJSON(w.AvailableBuffer(f.jsonLen()+r.BlobsBundle.jsonLen()), r.BlobsBundle))
+	enc := append(w.AvailableBuffer(f.jsonLen()), `{"executionPayload":`...)
+	enc = append(enc, f.executionPayload...)
+	enc = append(enc, `,"blockValue":`...)
+	enc = append(enc, f.blockValue...)
+	w.WriteRawBytes(append(enc, `,"blobsBundle":`...))
+	if err := r.BlobsBundle.MarshalFastJSONTo(w); err != nil {
+		return err
+	}
+	enc = append(w.AvailableBuffer(f.jsonLen()), `,"executionRequests":`...)
+	enc = append(enc, f.executionRequests...)
+	enc = append(enc, `,"shouldOverrideBuilder":`...)
+	enc = append(enc, f.shouldOverrideBuilder...)
+	w.WriteRawBytes(append(enc, '}'))
 	return nil
 }
 

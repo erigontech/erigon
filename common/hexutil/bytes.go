@@ -54,6 +54,35 @@ type JSONWriter interface {
 	WriteRawBytes([]byte)
 }
 
+// WriteRawJSON writes already-encoded JSON.
+func WriteRawJSON(w JSONWriter, raw string) {
+	w.WriteRawBytes(append(w.AvailableBuffer(len(raw)), raw...))
+}
+
+// MarshalFastJSONArrayTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
+func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
+	if items == nil {
+		WriteRawJSON(w, "null")
+		return
+	}
+	if len(items) == 0 {
+		WriteRawJSON(w, "[]")
+		return
+	}
+	for i, item := range items {
+		sep := byte(',')
+		if i == 0 {
+			sep = '['
+		}
+		enc := append(w.AvailableBuffer(len(item)*2+len(`["0x"]`)), sep, '"', '0', 'x')
+		enc = append(hex.AppendEncode(enc, item), '"')
+		if i == len(items)-1 {
+			enc = append(enc, ']')
+		}
+		w.WriteRawBytes(enc)
+	}
+}
+
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
 func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
 	enc := append(w.AvailableBuffer(len(b)*2+4), `"`+HexPrefix...)

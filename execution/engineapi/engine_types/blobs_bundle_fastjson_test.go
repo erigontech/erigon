@@ -45,7 +45,7 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 			w := &hintedJSONWriter{}
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
-			require.LessOrEqual(t, len(w.out), w.hint)
+			require.False(t, w.overrun, "a write outgrew its size hint")
 		})
 	}
 }
@@ -95,7 +95,7 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 			w := &hintedJSONWriter{}
 			require.NoError(t, r.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
-			require.LessOrEqual(t, len(w.out), w.hint)
+			require.False(t, w.overrun, "a write outgrew its size hint")
 		})
 	}
 }

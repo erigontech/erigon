@@ -541,12 +541,25 @@ func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// MarshalFastJSONTo writes one node or code at a time, byte-identical to MarshalFastJSON.
 func (m *ExecutionWitnessResult) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	enc, err := m.MarshalFastJSON()
-	if err != nil {
-		return err
+	if m.cachedJSON != nil {
+		w.WriteRawBytes(m.cachedJSON)
+		return nil
 	}
-	w.WriteRawBytes(enc)
+	hexutil.WriteRawJSON(w, `{"state":`)
+	hexutil.MarshalFastJSONArrayTo(w, m.State)
+	hexutil.WriteRawJSON(w, `,"codes":`)
+	hexutil.MarshalFastJSONArrayTo(w, m.Codes)
+	if len(m.Keys) > 0 {
+		hexutil.WriteRawJSON(w, `,"keys":`)
+		hexutil.MarshalFastJSONArrayTo(w, m.Keys)
+	}
+	if len(m.Headers) > 0 {
+		hexutil.WriteRawJSON(w, `,"headers":`)
+		hexutil.MarshalFastJSONArrayTo(w, m.Headers)
+	}
+	hexutil.WriteRawJSON(w, "}")
 	return nil
 }
 
