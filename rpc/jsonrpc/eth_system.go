@@ -757,6 +757,13 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 // round trip each. Callers only ask for unfrozen heights, whose markers are
 // always in the db.
 func (b *GasPriceOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	if from == to { // a point read skips the range cursor setup
+		hash, err := canonicalHashAt(b.tx, from)
+		if err != nil {
+			return nil, err
+		}
+		return []common.Hash{hash}, nil
+	}
 	hashes := make([]common.Hash, to-from+1)
 	it, err := b.tx.Range(kv.HeaderCanonical, hexutil.EncodeTs(from), hexutil.EncodeTs(to+1), order.Asc, kv.Unlim)
 	if err != nil {
