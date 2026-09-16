@@ -52,10 +52,10 @@ func indexedTxNums(t *testing.T, tx kv.TemporalTx, idx kv.InvertedIdx, key []byt
 	return txNums
 }
 
-// A block-end system call emits its logs outside any transaction receipt. They
-// still belong in the log indexes, otherwise eth_getLogs misses them on a chain
-// whose consensus emits logs at block end, such as the Gnosis block-reward
-// contract.
+// A block-end system call emits its logs outside any transaction receipt, at the
+// block's final txNum. Both executors must index them the same way: the log index
+// files they build are compared against the published snapshots, and a chain whose
+// consensus emits logs at block end, such as Gnosis, has one in nearly every block.
 func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	engine := &logEmittingSyscallEngine{
 		Engine:   ethash.NewFaker(),
