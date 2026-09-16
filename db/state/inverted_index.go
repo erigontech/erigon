@@ -264,7 +264,11 @@ func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), ii.Compression)
+	g := f.MakeGetter()
+	if dbg.FilesBlockingAsyncIOMultiPageHistory {
+		g.EnableMultiPageBlockingAsyncIO()
+	}
+	return seg.NewReader(g, ii.Compression)
 }
 func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".ef") {

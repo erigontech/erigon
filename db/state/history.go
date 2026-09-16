@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -899,7 +900,11 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), h.Compression)
+	g := f.MakeGetter()
+	if dbg.FilesBlockingAsyncIOMultiPageHistory {
+		g.EnableMultiPageBlockingAsyncIO()
+	}
+	return seg.NewReader(g, h.Compression)
 }
 func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
