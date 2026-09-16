@@ -705,7 +705,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, nil
 	}
 
-	if !fullBlock && int(txIndex) >= len(block.Transactions()) {
+	if !fullBlock && uint64(txIndex) >= uint64(len(block.Transactions())) {
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 

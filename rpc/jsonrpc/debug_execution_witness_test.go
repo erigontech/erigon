@@ -713,6 +713,13 @@ func TestGetWitness(t *testing.T) {
 		require.ErrorContains(t, err, "transaction index out of bounds")
 		require.Nil(t, got)
 	})
+
+	// An index above math.MaxInt64 decodes fine and must not wrap negative past the bound.
+	t.Run("tx index overflowing int is out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, hexutil.Uint(1)<<63)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
 }
 
 // TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
