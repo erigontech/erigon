@@ -21,13 +21,18 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -72,9 +77,11 @@ func TestCleanupAndPruningLogsPruneErrors(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	blobErr := errors.New("blob prune failed")
 	columnErr := errors.New("column prune failed")
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
 
 	clock.EXPECT().GetCurrentSlot().Return(uint64(200_000))
-	blobStore.EXPECT().PruneBelow(uint64(71_400)).Return(blobErr)
+	blobStore.EXPECT().PruneBelow(uint64(68_928)).Return(blobErr)
 	peerDas.EXPECT().PruneBelow(uint64(199_900)).Return(columnErr)
 
 	handler := &pruningLogHandler{}
@@ -84,7 +91,7 @@ func TestCleanupAndPruningLogsPruneErrors(t *testing.T) {
 	cfg := &Cfg{
 		indiciesDB: db,
 		ethClock:   clock,
-		beaconCfg:  &clparams.MainnetBeaconConfig,
+		beaconCfg:  &beaconCfg,
 		blobStore:  blobStore,
 		peerDas:    peerDas,
 		caplinConfig: clparams.CaplinConfig{
@@ -113,6 +120,8 @@ func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
 			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
 			peerDas := das_mock_services.NewMockPeerDas(ctrl)
 			clock := eth_clock.NewMockEthereumClock(ctrl)
+			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.DenebForkEpoch = 0
 
 			clock.EXPECT().GetCurrentSlot().Return(uint64(200_000))
 			// A zero floor is what makes PruneBelow a no-op; any other value deletes the
@@ -123,7 +132,7 @@ func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
 			cfg := &Cfg{
 				indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 				ethClock:     clock,
-				beaconCfg:    &clparams.MainnetBeaconConfig,
+				beaconCfg:    &beaconCfg,
 				blobStore:    blobStore,
 				peerDas:      peerDas,
 				caplinConfig: test.caplin,
@@ -141,10 +150,12 @@ func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 
 	const head = 200_000
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
 	cfg := &Cfg{
 		indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		ethClock:     clock,
-		beaconCfg:    &clparams.MainnetBeaconConfig,
+		beaconCfg:    &beaconCfg,
 		blobStore:    blobStore,
 		peerDas:      peerDas,
 		caplinConfig: clparams.CaplinConfig{},
@@ -154,10 +165,69 @@ func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.
 	specWindow := cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
 
 	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
-	blobStore.EXPECT().PruneBelow(uint64(head - 128600)).Return(nil)
+	blobStore.EXPECT().PruneBelow(uint64(68_928)).Return(nil)
 	peerDas.EXPECT().PruneBelow(head - specWindow).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}
+
+func TestCleanupAndPruningKeepsConfiguredBlobRequestWindowWritable(t *testing.T) {
+	const (
+		head              = uint64(400_015)
+		firstRetainedSlot = uint64(137_856)
+	)
+
+	ctrl := gomock.NewController(t)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	storage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 16
+	beaconCfg.MinEpochsForBlobSidecarsRequests = 16_384
+	beaconCfg.DenebForkEpoch = 0
+	cfg := &Cfg{
+		indiciesDB: db,
+		ethClock:   clock,
+		beaconCfg:  &beaconCfg,
+		blobStore:  storage,
+		peerDas:    peerDas,
+		caplinConfig: clparams.CaplinConfig{
+			ColumnKeepSlots: 1,
+		},
+	}
+
+	clock.EXPECT().GetCurrentSlot().Return(head)
+	peerDas.EXPECT().PruneBelow(head - 1).Return(nil)
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+
+	root := common.Hash{1}
+	sidecar := cltypes.NewBlobSidecar(
+		0,
+		&cltypes.Blob{},
+		common.Bytes48{},
+		common.Bytes48{},
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: firstRetainedSlot}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	_, found, err := storage.ReadBlobSidecars(t.Context(), firstRetainedSlot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	prunedRoot := common.Hash{2}
+	prunedSidecar := cltypes.NewBlobSidecar(
+		0,
+		&cltypes.Blob{},
+		common.Bytes48{},
+		common.Bytes48{},
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: firstRetainedSlot - 1}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), prunedRoot, []*cltypes.BlobSidecar{prunedSidecar}))
+	_, found, err = storage.ReadBlobSidecars(t.Context(), firstRetainedSlot-1, prunedRoot)
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 // The serving window is epoch-based: the earliest required column starts at the first slot
@@ -172,6 +242,7 @@ func TestCleanupAndPruningColumnFloorLandsOnTheEpochBoundary(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 12
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
+	beaconCfg.DenebForkEpoch = 0
 
 	// 59159 is 11 slots into epoch 4929, so the slot-distance floor overshoots by 11.
 	const head = 59_159
@@ -187,7 +258,7 @@ func TestCleanupAndPruningColumnFloorLandsOnTheEpochBoundary(t *testing.T) {
 	}
 
 	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
-	blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+	blobStore.EXPECT().PruneBelow(uint64(9_996)).Return(nil)
 	peerDas.EXPECT().PruneBelow(uint64(wantFloor)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
@@ -203,6 +274,7 @@ func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
 
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 12
+	beaconCfg.DenebForkEpoch = 0
 
 	const head = 59_159
 	cfg := &Cfg{
@@ -215,7 +287,7 @@ func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
 	}
 
 	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
-	blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+	blobStore.EXPECT().PruneBelow(uint64(9_996)).Return(nil)
 	peerDas.EXPECT().PruneBelow(uint64(head - 1_000)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))

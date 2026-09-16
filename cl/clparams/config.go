@@ -414,9 +414,25 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + b.ChurnLimitQuotient/2
 }
 
-// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+// MinSlotsForBlobsSidecarsRequest returns the configured blob-serving window in slots.
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
+}
+
+// BlobSidecarServeRangeStartSlot returns the first slot in the mandatory blob-serving range.
+func (b *BeaconChainConfig) BlobSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
+	if b.SlotsPerEpoch == 0 {
+		return 0
+	}
+	currentEpoch := currentSlot / b.SlotsPerEpoch
+	if currentEpoch < b.DenebForkEpoch {
+		return 0
+	}
+	startEpoch := b.DenebForkEpoch
+	if currentEpoch <= b.MinEpochsForBlobSidecarsRequests {
+		return startEpoch * b.SlotsPerEpoch
+	}
+	return max(startEpoch, currentEpoch-b.MinEpochsForBlobSidecarsRequests) * b.SlotsPerEpoch
 }
 
 // MaxRequestPayloadsLimit falls back to MAX_REQUEST_BLOCKS_DENEB for configs

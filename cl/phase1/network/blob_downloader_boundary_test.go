@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -529,8 +530,69 @@ func TestBlobHistoryDownloaderRetryRangesRemainFairAcrossSparseFailures(t *testi
 	downloader.addRetrySlot(1)
 	downloader.addRetrySlot(1_000_000)
 
-	require.NoError(t, downloader.retryFailedRecoveries(0))
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	require.Equal(t, []uint64{1, 1_000_000}, reader.slots)
+}
+
+func TestBlobHistoryDownloaderDropsExpiredFuluRetryButKeepsDenebRetry(t *testing.T) {
+	const slot = uint64(100)
+
+	t.Run("Fulu", func(t *testing.T) {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		block.Block.Slot = slot
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+		downloader.archiveBlobs = false
+		downloader.addRetrySlot(slot)
+
+		require.NoError(t, downloader.retryFailedRecoveries(0, slot+1))
+		require.Empty(t, downloader.retryRanges)
+	})
+
+	t.Run("Deneb", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		storage := blobstoragemock.NewMockBlobStorage(ctrl)
+		wantErr := errors.New("storage unavailable")
+		storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), wantErr)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		block.Block.Slot = slot
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+		downloader.blobStorage = storage
+		downloader.archiveBlobs = false
+		downloader.addRetrySlot(slot)
+
+		require.NoError(t, downloader.retryFailedRecoveries(0, slot+1))
+		require.NotEmpty(t, downloader.retryRanges)
+	})
+
+	for _, test := range []struct {
+		name               string
+		archive            bool
+		fuluRetentionFloor uint64
+	}{
+		{name: "exact floor", fuluRetentionFloor: slot},
+		{name: "archive below floor", archive: true, fuluRetentionFloor: slot + 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			storage := blobstoragemock.NewMockBlobStorage(ctrl)
+			storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
+			peerDas := mock_services.NewMockPeerDas(ctrl)
+			peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(errors.New("unavailable"))
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+			block.Block.Slot = slot
+			block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+			downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+			downloader.blobStorage = storage
+			downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+			downloader.archiveBlobs = test.archive
+			downloader.addRetrySlot(slot)
+
+			require.NoError(t, downloader.retryFailedRecoveries(0, test.fuluRetentionFloor))
+			require.NotEmpty(t, downloader.retryRanges)
+		})
+	}
 }
 
 func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T) {
@@ -549,10 +611,10 @@ func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T)
 	downloader.blobStorage = blobStorage
 	downloader.retryRanges = []blobRetryRange{{start: 1, end: blocksBatchSize * 2, cursor: blocksBatchSize * 2}}
 
-	require.NoError(t, downloader.retryFailedRecoveries(0))
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	reader.slots = nil
 	downloader.addRetrySlot(blocksBatchSize*2 + 1)
-	require.NoError(t, downloader.retryFailedRecoveries(0))
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 
 	require.Contains(t, reader.slots, uint64(1))
 }
@@ -578,7 +640,7 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 	require.Len(t, downloader.retryRanges, 1)
 	require.Equal(t, failureCount, downloader.retryRanges[0].intervalCount())
 	for range (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
-		require.NoError(t, downloader.retryFailedRecoveries(0))
+		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}
 	for slot := range blocks {
 		require.Contains(t, reader.slots, slot)
@@ -629,7 +691,7 @@ func TestBlobHistoryDownloaderRetryRangeOverflowVisitsOnlySparseFailures(t *test
 
 	passes := (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize)
 	for range passes {
-		require.NoError(t, downloader.retryFailedRecoveries(0))
+		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}
 	seen := make(map[uint64]struct{}, len(reader.slots))
 	for _, slot := range reader.slots {
@@ -665,7 +727,7 @@ func TestBlobHistoryDownloaderRetryVisitsMixedDenseAndSparseFailuresWithinOneCyc
 	downloader.blobStorage = blobStorage
 
 	for range (len(blocks) + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
-		require.NoError(t, downloader.retryFailedRecoveries(0))
+		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}
 	seen := make(map[uint64]struct{}, len(reader.slots))
 	for _, slot := range reader.slots {
@@ -739,7 +801,7 @@ func TestBlobHistoryDownloaderResolvedRetrySlotsAreRemovedAroundReadFailure(t *t
 	downloader := newBoundaryDownloader(t, 2, 0, 2, reader)
 	downloader.retryRanges = []blobRetryRange{{start: 0, end: 2, cursor: 1}}
 
-	require.NoError(t, downloader.retryFailedRecoveries(0))
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	require.ElementsMatch(t, []uint64{0, 1, 2}, reader.slots)
 	require.Equal(t, []blobRetryRange{{start: 2, end: 2, cursor: 2}}, downloader.retryRanges)
 }
@@ -770,19 +832,45 @@ func TestBlobHistoryDownloaderInteriorResolveKeepsRetryRangeBound(t *testing.T) 
 	}
 }
 
-func TestBlobHistoryDownloaderDropsRetriesBeforeNonArchiveRetentionFloor(t *testing.T) {
-	retention := clparams.MainnetBeaconConfig.MinSlotsForBlobsSidecarsRequest()
-	headSlot := retention + 10
-	expiredSlot := uint64(9)
-	reader := &boundaryBlockReader{}
+func TestBlobHistoryDownloaderUsesWallClockEpochRetentionFloor(t *testing.T) {
+	const (
+		wallClockSlot    = uint64(100)
+		headSlot         = uint64(99)
+		retentionFloor   = uint64(64)
+		expiredRetrySlot = retentionFloor - 1
+	)
+	wantErr := errors.New("retained retry visited")
+	reader := &boundaryBlockReader{errors: map[uint64]error{retentionFloor: wantErr}}
 	downloader := newBoundaryDownloader(t, headSlot, 0, 0, reader)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 16
+	beaconCfg.MinEpochsForBlobSidecarsRequests = 2
+	beaconCfg.DenebForkEpoch = 0
+	downloader.beaconCfg = &beaconCfg
 	downloader.archiveBlobs = false
 	downloader.immediateBlobsBackfilling = true
-	downloader.addRetrySlot(expiredSlot)
+	downloader.addRetrySlot(expiredRetrySlot)
+	downloader.addRetrySlot(retentionFloor)
 
-	require.NoError(t, downloader.downloadOnce(false))
-	require.NotContains(t, reader.slots, expiredSlot)
-	require.Empty(t, downloader.retryRanges)
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(wallClockSlot)
+	downloader.ethClock = clock
+
+	require.ErrorIs(t, downloader.downloadOnce(false), wantErr)
+	require.NotContains(t, reader.slots, expiredRetrySlot)
+	require.Contains(t, reader.slots, retentionFloor)
+}
+
+func TestDataColumnServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 16
+	cfg.FuluForkEpoch = 100
+	cfg.MinEpochsForDataColumnSidecarsRequests = 4_096
+
+	require.Zero(t, dataColumnServeRangeStartSlot(99*cfg.SlotsPerEpoch, &cfg))
+	require.Equal(t, uint64(100*16), dataColumnServeRangeStartSlot(100*cfg.SlotsPerEpoch, &cfg))
+	require.Equal(t, uint64(904*16), dataColumnServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15, &cfg))
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader *boundaryBlockReader) *BlobHistoryDownloader {

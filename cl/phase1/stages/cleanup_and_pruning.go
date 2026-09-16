@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -31,11 +30,11 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	// Sidecar retention cuts against wall-clock, not the stage head, so a stalled
 	// stage does not retain data forever.
 	currentSlot := cfg.ethClock.GetCurrentSlot()
-	pruneBlobDistance := uint64(128600)
+	blobFloor := cfg.beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
 	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {
-		pruneBlobDistance = math.MaxUint64
+		blobFloor = 0
 	}
-	if err := cfg.blobStore.PruneBelow(floorFor(currentSlot, pruneBlobDistance)); err != nil {
+	if err := cfg.blobStore.PruneBelow(blobFloor); err != nil {
 		logger.Warn("failed to prune blob sidecars", "err", err)
 	}
 	columnFloor := specColumnFloor(currentSlot, cfg.beaconCfg)
