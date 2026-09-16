@@ -152,6 +152,7 @@ func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.
 	const head = 200_000
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
 	cfg := &Cfg{
 		indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		ethClock:     clock,
@@ -243,6 +244,7 @@ func TestCleanupAndPruningColumnFloorLandsOnTheEpochBoundary(t *testing.T) {
 	beaconCfg.SlotsPerEpoch = 12
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
 	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
 
 	// 59159 is 11 slots into epoch 4929, so the slot-distance floor overshoots by 11.
 	const head = 59_159

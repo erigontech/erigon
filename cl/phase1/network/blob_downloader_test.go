@@ -75,6 +75,26 @@ func expectSidecarFilesPresent(blobStorage *blobstoragemock.MockBlobStorage) {
 		Return(true, nil).AnyTimes()
 }
 
+func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
+	require.PanicsWithValue(t, "ethClock is required", func() {
+		NewBlobHistoryDownloader(
+			t.Context(),
+			&clparams.MainnetBeaconConfig,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			false,
+			false,
+			log.New(),
+		)
+	})
+}
+
 // A historical fulu block whose PeerDAS data columns are served by no peer (older
 // than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
 // its context is cancelled. Column recovery must be bounded per block so the archive

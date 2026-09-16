@@ -862,17 +862,6 @@ func TestBlobHistoryDownloaderUsesWallClockEpochRetentionFloor(t *testing.T) {
 	require.Contains(t, reader.slots, retentionFloor)
 }
 
-func TestDataColumnServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.SlotsPerEpoch = 16
-	cfg.FuluForkEpoch = 100
-	cfg.MinEpochsForDataColumnSidecarsRequests = 4_096
-
-	require.Zero(t, dataColumnServeRangeStartSlot(99*cfg.SlotsPerEpoch, &cfg))
-	require.Equal(t, uint64(100*16), dataColumnServeRangeStartSlot(100*cfg.SlotsPerEpoch, &cfg))
-	require.Equal(t, uint64(904*16), dataColumnServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15, &cfg))
-}
-
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader *boundaryBlockReader) *BlobHistoryDownloader {
 	t.Helper()
 	downloader := &BlobHistoryDownloader{
@@ -889,6 +878,10 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint6
 		logger:                 log.New(),
 	}
 	downloader.headSlot.Store(headSlot)
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return downloader.headSlot.Load() }).AnyTimes()
+	downloader.ethClock = clock
 	// The downloader resolves each block's root from the canonical index, so a fixture without
 	// one would make every slot look like a gap regardless of what the reader serves.
 	seedCanonicalRoots(t, downloader.indiciesDB.(kv.RwDB), headSlot, reader)

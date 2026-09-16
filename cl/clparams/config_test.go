@@ -115,6 +115,18 @@ func TestBlobSidecarServeRangeStartSlotHandlesShortAndInvalidChains(t *testing.T
 	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(math.MaxUint64))
 }
 
+func TestDataColumnSidecarServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                          16,
+		FuluForkEpoch:                          100,
+		MinEpochsForDataColumnSidecarsRequests: 4_096,
+	}
+
+	require.Zero(t, cfg.DataColumnSidecarServeRangeStartSlot(99*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(100*16), cfg.DataColumnSidecarServeRangeStartSlot(100*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(904*16), cfg.DataColumnSidecarServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15))
+}
+
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {
 	network := NetworkConfigs[chainspec.ChiadoChainID]
 

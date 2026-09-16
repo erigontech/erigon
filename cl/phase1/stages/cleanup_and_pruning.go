@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -37,7 +36,7 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := cfg.blobStore.PruneBelow(blobFloor); err != nil {
 		logger.Warn("failed to prune blob sidecars", "err", err)
 	}
-	columnFloor := specColumnFloor(currentSlot, cfg.beaconCfg)
+	columnFloor := cfg.beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
 	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {
 		columnFloor = floorFor(currentSlot, keep)
 	}
@@ -45,21 +44,6 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		logger.Warn("failed to prune data column sidecars", "err", err)
 	}
 	return nil
-}
-
-// specColumnFloor returns the first slot whose columns a node must still serve: the start of
-// current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS. The window is stated in
-// epochs, so subtracting a slot count from a head sitting inside an epoch would cut above
-// the boundary and delete data that is still required.
-func specColumnFloor(currentSlot uint64, beaconCfg *clparams.BeaconChainConfig) uint64 {
-	if beaconCfg.SlotsPerEpoch == 0 {
-		return 0
-	}
-	epoch := currentSlot / beaconCfg.SlotsPerEpoch
-	if epoch <= beaconCfg.MinEpochsForDataColumnSidecarsRequests {
-		return 0
-	}
-	return (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
 }
 
 func floorFor(head, keep uint64) uint64 {

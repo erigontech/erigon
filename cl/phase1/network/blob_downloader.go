@@ -161,6 +161,9 @@ func NewBlobHistoryDownloader(
 	immediateBlobsBackfilling bool,
 	logger log.Logger,
 ) *BlobHistoryDownloader {
+	if ethClock == nil {
+		panic("ethClock is required")
+	}
 	targetSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
 	return &BlobHistoryDownloader{
 		ctx:                       ctx,
@@ -328,12 +331,9 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	fuluRetentionFloor := uint64(0)
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
-		retentionSlot := currentSlot
-		if b.ethClock != nil {
-			retentionSlot = b.ethClock.GetCurrentSlot()
-		}
+		retentionSlot := b.ethClock.GetCurrentSlot()
 		retentionFloor := b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
-		fuluRetentionFloor = dataColumnServeRangeStartSlot(retentionSlot, b.beaconCfg)
+		fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
 		targetSlot = max(targetSlot, retentionFloor)
 		retryFloor = retentionFloor
 	}
@@ -426,21 +426,6 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	return nil
 }
 
-func dataColumnServeRangeStartSlot(currentSlot uint64, beaconCfg *clparams.BeaconChainConfig) uint64 {
-	if beaconCfg.SlotsPerEpoch == 0 {
-		return 0
-	}
-	currentEpoch := currentSlot / beaconCfg.SlotsPerEpoch
-	if currentEpoch < beaconCfg.FuluForkEpoch {
-		return 0
-	}
-	startEpoch := beaconCfg.FuluForkEpoch
-	if currentEpoch > beaconCfg.MinEpochsForDataColumnSidecarsRequests {
-		startEpoch = max(startEpoch, currentEpoch-beaconCfg.MinEpochsForDataColumnSidecarsRequests)
-	}
-	return startEpoch * beaconCfg.SlotsPerEpoch
-}
-
 func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionFloor uint64) error {
 	if len(b.retryRanges) == 0 {
 		return nil
@@ -482,7 +467,7 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 			b.resolveRetrySlot(slot)
 			continue
 		}
-		if !b.archiveBlobs && block.Version() >= clparams.FuluVersion && slot < fuluRetentionFloor {
+		if b.outsideFuluRetention(block, slot, fuluRetentionFloor) {
 			b.resolveRetrySlot(slot)
 			continue
 		}
@@ -892,7 +877,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 			break
 		}
 		slot := currentSlot - visited
-		if !b.archiveBlobs && block.Version() >= clparams.FuluVersion && slot < fuluRetentionFloor {
+		if b.outsideFuluRetention(block, slot, fuluRetentionFloor) {
 			continue
 		}
 		// The canonical root from the index, never block.Block.HashSSZ():
@@ -932,6 +917,10 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 		batch = append(batch, block)
 	}
 	return batch, visited, nil
+}
+
+func (b *BlobHistoryDownloader) outsideFuluRetention(block *cltypes.SignedBeaconBlock, slot, retentionFloor uint64) bool {
+	return !b.archiveBlobs && block.Version() >= clparams.FuluVersion && slot < retentionFloor
 }
 
 // storedSidecarsAvailable reports whether a count-equal slot is actually backed by files, since
