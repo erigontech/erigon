@@ -458,7 +458,7 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
+const roTxPoolSize = 256
 
 type MdbxKV struct {
 	log          log.Logger
@@ -758,7 +758,7 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 }
 
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
-	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
+	if tx.Reset() == nil {
 		select {
 		case db.roTxPool <- tx:
 			return
@@ -1364,13 +1364,14 @@ func (tx *MdbxTx) Rollback() {
 		return
 	}
 	tx.closeCursors()
+	t := tx.tx
+	tx.tx = nil // before the txn goes back to the pool, so a second Rollback cannot park it twice
 	if tx.readOnly {
-		tx.db.releaseRoTxn(tx.tx)
+		tx.db.releaseRoTxn(t)
 	} else {
-		tx.tx.Abort()
+		t.Abort()
 	}
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
-	tx.tx = nil
 	tx.db.trackTxEnd()
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)
