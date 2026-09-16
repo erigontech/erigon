@@ -1292,9 +1292,10 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
 
-// A zero hash represents absence regardless of account liveness.
-// EmptyCodeHash (keccak256("")) is the cleared-code value of an account
-// that survives or is revived; a destroyed, unrevived account reads NilCodeHash.
+// absentCodeHash reports whether a recorded code hash counts as absence. The
+// nil hash always does. keccak256("") does only while the account is alive: a
+// destroyed, unrevived account reads the nil hash, so an empty hash recorded
+// there is stale and must go through the destruct check.
 func (vm *VersionMap) absentCodeHash(addr accounts.Address, txIndex int, ch accounts.CodeHash) bool {
 	return ch.IsZero() || (ch.IsEmpty() && !vm.destroyedAndUnrevived(addr, txIndex))
 }
@@ -1598,9 +1599,6 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.codeHash {
-		// An empty code hash is an absent value only while the account is alive:
-		// a destroyed, unrevived account reads the nil hash, so an empty one is
-		// stale there and must go through the destruct check.
 		absentCodeHashLive := func(ch accounts.CodeHash) bool {
 			return vm.absentCodeHash(a, txIdx, ch)
 		}
