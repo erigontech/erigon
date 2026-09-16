@@ -1121,8 +1121,8 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 }
 
 // TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
-// with geth: a key shorter than 32 bytes comes back canonicalized, a full 32-byte key
-// comes back verbatim.
+// with geth for keys of at most 32 bytes: a shorter key comes back canonicalized, a
+// full 32-byte key comes back verbatim.
 func TestGetProofStorageKeyEncoding(t *testing.T) {
 	t.Parallel()
 
@@ -1171,12 +1171,16 @@ func TestGetProofRequestShapes(t *testing.T) {
 	headProof, err := api.GetProof(ctx, bankAddr, nil, head)
 	require.NoError(t, err)
 
-	var headHash common.Hash
+	// Block 3, not the head: blocks 4 to 6 are empty, so a by-hash lookup that regressed
+	// to resolving "latest" would still match a head-block proof.
+	var midHash common.Hash
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		var err error
-		headHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 6)
+		midHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
 		return err
 	}))
+	midProof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(3)))
+	require.NoError(t, err)
 
 	// An account with an empty storage trie answers a key request with an empty proof
 	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
@@ -1224,9 +1228,10 @@ func TestGetProofRequestShapes(t *testing.T) {
 	})
 
 	t.Run("by canonical hash", func(t *testing.T) {
-		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(headHash, true)))
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(midHash, true)))
 		require.NoError(t, err)
-		require.Equal(t, headProof.AccountProof, proof.AccountProof)
+		require.Equal(t, midProof.AccountProof, proof.AccountProof)
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof, "a block hash must not resolve to latest")
 	})
 
 	t.Run("earliest tag is genesis", func(t *testing.T) {
