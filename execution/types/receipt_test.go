@@ -26,12 +26,14 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -635,6 +637,22 @@ func TestTypedReceiptDecodersAgree(t *testing.T) {
 	})
 }
 
+func TestReceiptSizeCountsLogs(t *testing.T) {
+	r := &Receipt{Logs: Logs{{Topics: make([]common.Hash, 2), Data: make([]byte, 100)}}}
+	withLog := r.Size()
+	require.Greater(t, withLog, (&Receipt{}).Size())
+
+	r.Logs[0].Data = make([]byte, 1100)
+	r.Logs[0].Topics = append(r.Logs[0].Topics, common.Hash{})
+	require.Equal(t, withLog+1000+length.Hash, r.Size())
+}
+
+func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
+	empty := (&Receipt{}).Size()
+	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
+}
+
 func TestReceiptLogsBloomCachesDerivedBloom(t *testing.T) {
 	t.Parallel()
 	r := &Receipt{Logs: Logs{{Address: common.Address{1}, Topics: []common.Hash{{2}}}}}
@@ -678,4 +696,16 @@ func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
 			require.Equal(t, CreateBloom(Receipts{next}), r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
 		})
 	}
+}
+
+func TestReceiptJSONBlockNumber(t *testing.T) {
+	enc, err := json.Marshal(&Receipt{BlockNumber: uint256.NewInt(0x1234)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x1234"`)
+	enc, err = json.Marshal(&Receipt{BlockNumber: new(uint256.Int)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x0"`)
+	enc, err = json.Marshal(&Receipt{})
+	require.NoError(t, err)
+	require.NotContains(t, string(enc), "blockNumber")
 }

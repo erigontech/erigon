@@ -328,7 +328,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 type Account struct {
 	Nonce            *hexutil.Uint64              `json:"nonce"`
 	Code             *hexutil.Bytes               `json:"code"`
-	Balance          **hexutil.Big                `json:"balance"`
+	Balance          **hexutil.U256               `json:"balance"`
 	State            *map[common.Hash]common.Hash `json:"state"`
 	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
 	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`

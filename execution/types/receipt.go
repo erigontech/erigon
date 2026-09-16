@@ -28,12 +28,14 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -91,7 +93,7 @@ type receiptMarshaling struct {
 	Status            hexutil.Uint64
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64
-	BlockNumber       *hexutil.Big
+	BlockNumber       *hexutil.U256
 	TransactionIndex  hexutil.Uint
 }
 
@@ -353,6 +355,18 @@ func (r *Receipt) statusEncoding() []byte {
 		return receiptStatusSuccessfulRLP
 	}
 	return r.PostState
+}
+
+// Size returns the approximate memory held by the receipt and its logs.
+func (r *Receipt) Size() int {
+	n := int(unsafe.Sizeof(*r)) + len(r.PostState)
+	if r.BlockNumber != nil {
+		n += int(unsafe.Sizeof(*r.BlockNumber))
+	}
+	for _, l := range r.Logs {
+		n += int(unsafe.Sizeof(l)) + int(unsafe.Sizeof(*l)) + len(l.Topics)*length.Hash + len(l.Data)
+	}
+	return n
 }
 
 // LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
