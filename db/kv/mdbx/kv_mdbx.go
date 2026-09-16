@@ -1364,13 +1364,14 @@ func (tx *MdbxTx) Rollback() {
 		return
 	}
 	tx.closeCursors()
+	t := tx.tx
+	tx.tx = nil // before the txn goes back to the pool, so a second Rollback cannot park it twice
 	if tx.readOnly {
-		tx.db.releaseRoTxn(tx.tx)
+		tx.db.releaseRoTxn(t)
 	} else {
-		tx.tx.Abort()
+		t.Abort()
 	}
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
-	tx.tx = nil
 	tx.db.trackTxEnd()
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)
