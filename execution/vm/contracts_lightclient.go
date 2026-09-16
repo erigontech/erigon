@@ -4,14 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net/url"
-	"strings"
-
-	"github.com/tendermint/tendermint/crypto/merkle"
-	cmn "github.com/tendermint/tendermint/libs/common"
 
 	params2 "github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	v1 "github.com/erigontech/erigon/execution/vm/lightclient/v1"
 )
 
@@ -92,14 +86,13 @@ func (c *tmHeaderValidate) Run(input []byte) (result []byte, err error) {
 	// result
 	// | validatorSetChanged | empty      | consensusStateBytesLength |  new consensusState |
 	// | 1 byte              | 23 bytes   | 8 bytes                   |                     |
-	lengthBytes := make([]byte, tmHeaderValidateResultMetaDataLength)
+	result = make([]byte, tmHeaderValidateResultMetaDataLength, tmHeaderValidateResultMetaDataLength+uint64(len(consensusStateBytes)))
 	if validatorSetChanged {
-		copy(lengthBytes[:1], []byte{0x01})
+		result[0] = 0x01
 	}
-	consensusStateBytesLength := uint64(len(consensusStateBytes))
-	binary.BigEndian.PutUint64(lengthBytes[tmHeaderValidateResultMetaDataLength-uint64TypeLength:], consensusStateBytesLength)
+	binary.BigEndian.PutUint64(result[tmHeaderValidateResultMetaDataLength-uint64TypeLength:], uint64(len(consensusStateBytes)))
 
-	result = append(lengthBytes, consensusStateBytes...)
+	result = append(result, consensusStateBytes...)
 
 	return result, nil
 }
@@ -111,9 +104,7 @@ func (c *tmHeaderValidate) Name() string {
 //------------------------------------------------------------------------------------------------------------------------------------------------
 
 // iavlMerkleProofValidate implemented as a native contract.
-type iavlMerkleProofValidate struct {
-	basicIavlMerkleProofValidate
-}
+type iavlMerkleProofValidate struct{}
 
 func (c *iavlMerkleProofValidate) RequiredGas(input []byte) uint64 {
 	return params2.IAVLMerkleProofValidateGas
@@ -123,121 +114,6 @@ func (c *iavlMerkleProofValidate) RequiredGas(input []byte) uint64 {
 // | payload length | payload    |
 // | 32 bytes       |            |
 func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
-	return c.basicIavlMerkleProofValidate.Run(input)
-}
-
-func (c *iavlMerkleProofValidate) Name() string { return "IAVLMerkleProofValidate" }
-
-// tmHeaderValidate implemented as a native contract.
-type tmHeaderValidateNano struct{}
-
-func (c *tmHeaderValidateNano) RequiredGas(input []byte) uint64 {
-	return params2.TendermintHeaderValidateGas
-}
-
-func (c *tmHeaderValidateNano) Run(input []byte) (result []byte, err error) {
-	return nil, errors.New("suspend")
-}
-
-func (c *tmHeaderValidateNano) Name() string {
-	return "TMHeaderValidateNano" // note bn254 is the correct name and is required by eth_config
-}
-
-type iavlMerkleProofValidateNano struct{}
-
-func (c *iavlMerkleProofValidateNano) RequiredGas(_ []byte) uint64 {
-	return params2.IAVLMerkleProofValidateGas
-}
-
-func (c *iavlMerkleProofValidateNano) Run(_ []byte) (result []byte, err error) {
-	return nil, errors.New("suspend")
-}
-
-func (c *iavlMerkleProofValidateNano) Name() string {
-	return "IAVLMerkleProofValidateNano" // note bn254 is the correct name and is required by eth_config
-}
-
-// ------------------------------------------------------------------------------------------------------------------------------------------------
-type iavlMerkleProofValidateMoran struct {
-	basicIavlMerkleProofValidate
-}
-
-func (c *iavlMerkleProofValidateMoran) RequiredGas(_ []byte) uint64 {
-	return params2.IAVLMerkleProofValidateGas
-}
-
-func (c *iavlMerkleProofValidateMoran) Run(input []byte) (result []byte, err error) {
-	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
-		forbiddenAbsenceOpVerifier,
-		singleValueOpVerifier,
-		multiStoreOpVerifier,
-		forbiddenSimpleValueOpVerifier,
-	}
-	return c.basicIavlMerkleProofValidate.Run(input)
-}
-
-func (c *iavlMerkleProofValidateMoran) Name() string { return "IAVLMerkleProofValidateMoran" }
-
-type iavlMerkleProofValidatePlanck struct {
-	basicIavlMerkleProofValidate
-}
-
-func (c *iavlMerkleProofValidatePlanck) RequiredGas(_ []byte) uint64 {
-	return params2.IAVLMerkleProofValidateGas
-}
-
-func (c *iavlMerkleProofValidatePlanck) Run(input []byte) (result []byte, err error) {
-	c.basicIavlMerkleProofValidate.proofRuntime = v1.Ics23CompatibleProofRuntime()
-	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
-		forbiddenAbsenceOpVerifier,
-		singleValueOpVerifier,
-		multiStoreOpVerifier,
-		forbiddenSimpleValueOpVerifier,
-	}
-	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
-	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
-	return c.basicIavlMerkleProofValidate.Run(input)
-}
-
-func (c *iavlMerkleProofValidatePlanck) Name() string { return "IAVLMerkleProofValidatePlanck" }
-
-type iavlMerkleProofValidatePlato struct {
-	basicIavlMerkleProofValidate
-}
-
-func (c *iavlMerkleProofValidatePlato) RequiredGas(_ []byte) uint64 {
-	return params2.IAVLMerkleProofValidateGas
-}
-
-func (c *iavlMerkleProofValidatePlato) Run(input []byte) (result []byte, err error) {
-	c.basicIavlMerkleProofValidate.proofRuntime = v1.Ics23ProofRuntime()
-	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
-		forbiddenAbsenceOpVerifier,
-		singleValueOpVerifier,
-		multiStoreOpVerifier,
-		forbiddenSimpleValueOpVerifier,
-	}
-	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
-	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
-	return c.basicIavlMerkleProofValidate.Run(input)
-}
-
-func (c *iavlMerkleProofValidatePlato) Name() string { return "IAVLMerkleProofValidatePlato" }
-
-func successfulMerkleResult() []byte {
-	result := make([]byte, merkleProofValidateResultLength)
-	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
-	return result
-}
-
-type basicIavlMerkleProofValidate struct {
-	keyVerifier  v1.KeyVerifier
-	opsVerifier  merkle.ProofOpsVerifier
-	verifiers    []merkle.ProofOpVerifier
-	proofRuntime *merkle.ProofRuntime
-}
-
-func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("internal error: %v", r)
@@ -258,116 +134,19 @@ func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err err
 		return nil, err
 	}
 
-	if c.proofRuntime == nil {
-		kvmp.SetProofRuntime(v1.DefaultProofRuntime())
-	} else {
-		kvmp.SetProofRuntime(c.proofRuntime)
-	}
-	kvmp.SetVerifiers(c.verifiers)
-	kvmp.SetOpsVerifier(c.opsVerifier)
-	kvmp.SetKeyVerifier(c.keyVerifier)
+	kvmp.SetProofRuntime(v1.DefaultProofRuntime())
 
-	valid := kvmp.Validate()
-	if !valid {
+	if !kvmp.Validate() {
 		return nil, errors.New("invalid merkle proof")
 	}
 
 	return successfulMerkleResult(), nil
 }
 
-func forbiddenAbsenceOpVerifier(op merkle.ProofOperator) error {
-	if op == nil {
-		return nil
-	}
-	if _, ok := op.(iavl.IAVLAbsenceOp); ok {
-		return cmn.NewError("absence proof suspend")
-	}
-	return nil
-}
+func (c *iavlMerkleProofValidate) Name() string { return "IAVLMerkleProofValidate" }
 
-func forbiddenSimpleValueOpVerifier(op merkle.ProofOperator) error {
-	if op == nil {
-		return nil
-	}
-	if _, ok := op.(merkle.SimpleValueOp); ok {
-		return cmn.NewError("simple value proof suspend")
-	}
-	return nil
-}
-
-func multiStoreOpVerifier(op merkle.ProofOperator) error {
-	if op == nil {
-		return nil
-	}
-	if mop, ok := op.(v1.MultiStoreProofOp); ok {
-		storeNames := make(map[string]bool, len(mop.Proof.StoreInfos))
-		for _, store := range mop.Proof.StoreInfos {
-			if exist := storeNames[store.Name]; exist {
-				return cmn.NewError("duplicated store")
-			} else {
-				storeNames[store.Name] = true
-			}
-		}
-	}
-	return nil
-}
-
-func singleValueOpVerifier(op merkle.ProofOperator) error {
-	if op == nil {
-		return nil
-	}
-	if valueOp, ok := op.(iavl.IAVLValueOp); ok {
-		if len(valueOp.Proof.Leaves) != 1 {
-			return cmn.NewError("range proof suspended")
-		}
-		for _, innerNode := range valueOp.Proof.LeftPath {
-			if len(innerNode.Right) > 0 && len(innerNode.Left) > 0 {
-				return cmn.NewError("both right and left hash exit!")
-			}
-		}
-	}
-	return nil
-}
-
-func proofOpsVerifier(poz merkle.ProofOperators) error {
-	if len(poz) != 2 {
-		return cmn.NewError("proof ops should be 2")
-	}
-
-	// for legacy proof type
-	if _, ok := poz[1].(v1.MultiStoreProofOp); ok {
-		if _, ok := poz[0].(iavl.IAVLValueOp); !ok {
-			return cmn.NewError("invalid proof op")
-		}
-		return nil
-	}
-
-	// for ics23 proof type
-	if op2, ok := poz[1].(v1.CommitmentOp); ok {
-		if op2.Type != v1.ProofOpSimpleMerkleCommitment {
-			return cmn.NewError("invalid proof op")
-		}
-
-		op1, ok := poz[0].(v1.CommitmentOp)
-		if !ok {
-			return cmn.NewError("invalid proof op")
-		}
-
-		if op1.Type != v1.ProofOpIAVLCommitment {
-			return cmn.NewError("invalid proof op")
-		}
-		return nil
-	}
-
-	return cmn.NewError("invalid proof type")
-}
-
-func keyVerifier(key string) error {
-	// https://github.com/bnb-chain/tendermint/blob/72375a6f3d4a72831cc65e73363db89a0073db38/crypto/merkle/proof_key_path.go#L88
-	// since the upper function is ambiguous, `x:00` can be decoded to both kind of key type
-	// we check the key here to make sure the key will not start from `x:`
-	if strings.HasPrefix(url.PathEscape(key), "x:") {
-		return cmn.NewError("key should not start with x:")
-	}
-	return nil
+func successfulMerkleResult() []byte {
+	result := make([]byte, merkleProofValidateResultLength)
+	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
+	return result
 }
