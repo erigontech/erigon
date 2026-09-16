@@ -151,13 +151,18 @@ const (
 
 	// Precompiled contract gas prices
 
-	EcrecoverGas        uint64 = 3000 // Elliptic curve sender recovery gas price
-	Sha256BaseGas       uint64 = 60   // Base price for a SHA256 operation
-	Sha256PerWordGas    uint64 = 12   // Per-word price for a SHA256 operation
-	Ripemd160BaseGas    uint64 = 600  // Base price for a RIPEMD160 operation
-	Ripemd160PerWordGas uint64 = 120  // Per-word price for a RIPEMD160 operation
-	IdentityBaseGas     uint64 = 15   // Base price for a data copy operation
-	IdentityPerWordGas  uint64 = 3    // Per-work price for a data copy operation
+	EcrecoverGas uint64 = 3000 // Elliptic curve sender recovery gas price
+
+	// BSC cross-chain light-client precompiles.
+	TendermintHeaderValidateGas uint64 = 3000
+	IAVLMerkleProofValidateGas  uint64 = 3000
+
+	Sha256BaseGas       uint64 = 60  // Base price for a SHA256 operation
+	Sha256PerWordGas    uint64 = 12  // Per-word price for a SHA256 operation
+	Ripemd160BaseGas    uint64 = 600 // Base price for a RIPEMD160 operation
+	Ripemd160PerWordGas uint64 = 120 // Per-word price for a RIPEMD160 operation
+	IdentityBaseGas     uint64 = 15  // Base price for a data copy operation
+	IdentityPerWordGas  uint64 = 3   // Per-work price for a data copy operation
 
 	Bn254AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
 	Bn254AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition

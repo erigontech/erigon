@@ -231,6 +231,7 @@ linters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
       - builtin$
       - examples$
       - testdata
@@ -246,6 +247,7 @@ formatters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
       - builtin$
       - examples$
       - testdata
