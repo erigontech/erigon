@@ -1314,3 +1314,26 @@ func TestNewDenebRecoveryBatchGroupsOnTheCanonicalRoot(t *testing.T) {
 	require.NotContains(t, batch.groups, common.Hash(selfHash), "never on the payload-stripped hash")
 	require.NotNil(t, batch.groups[canonical].block, "the group must resolve back to its block")
 }
+
+// The retry path re-reads a block by slot, so it has to re-resolve the canonical root too; the
+// block it gets back is payload-stripped like any other and cannot supply it.
+func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, canonical)
+	}))
+
+	got, root, err := downloader.readRetryBlock(slot)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, canonical, root, "the retry must carry the indexed root, not the block's own hash")
+	require.NotEqual(t, common.Hash(selfHash), root)
+}
