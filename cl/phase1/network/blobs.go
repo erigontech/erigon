@@ -41,6 +41,35 @@ const (
 // This is just a bunch of functions to handle blobs
 
 // BlobsIdentifiersFromBlocks returns a list of blob identifiers from a list of blocks, which should then be forwarded to the network.
+// BlobsIdentifiersFromRootedBlocks builds by-root identifiers using the caller's roots. Blocks read
+// back from storage carry no execution payload, so hashing one gives a root that never existed on
+// chain and no peer can answer a request built from it.
+func BlobsIdentifiersFromRootedBlocks(blocks []incompleteBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
+	for _, item := range blocks {
+		block := item.block
+		if block.Version() < clparams.DenebVersion {
+			continue
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			log.Debug("[BlobsIdentifiers] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
+			continue
+		}
+		kzgCommitments := commitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
+		for i := range kzgCommitments {
+			ids.Append(&cltypes.BlobIdentifier{
+				BlockRoot: item.root,
+				Index:     uint64(i),
+			})
+		}
+	}
+	return ids, nil
+}
+
 func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
