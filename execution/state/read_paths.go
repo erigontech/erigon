@@ -1283,14 +1283,14 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 }
 
 // readCodeHash returns the contract code hash.
-func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.CodeHash, ReadSource, Version, error) {
+	if !commited && s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
 		s.recordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err

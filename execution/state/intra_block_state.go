@@ -766,7 +766,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 		return stateObject.data.CodeHash, nil
 	}
 
-	hash, _, _, err := readCodeHash(sdb, addr)
+	hash, _, _, err := readCodeHash(sdb, addr, false)
 	if err != nil {
 		return accounts.NilCodeHash, err
 	}
@@ -793,6 +793,22 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 		}
 	}
 	return hash, err
+}
+
+// GetCommittedCodeHash returns the code hash at tx start (this-tx-exclusive),
+// read through versionedReadCore so a predecessor's in-flight code write is seen
+// as a dependency rather than silently falling back to the pre-block value. It is
+// the code-hash analogue of GetCommittedState; SetCode's net-zero baseline uses
+// it. Absent/code-less accounts normalise to EmptyCodeHash.
+func (sdb *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+	hash, _, _, err := readCodeHash(sdb, addr, true)
+	if err != nil {
+		return accounts.EmptyCodeHash, err
+	}
+	if hash == accounts.NilCodeHash || hash.IsEmpty() {
+		return accounts.EmptyCodeHash, nil
+	}
+	return hash, nil
 }
 
 func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
@@ -1122,7 +1138,7 @@ func (sdb *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 		return nil, err
 	}
 	acc.Nonce = nonce
-	codeHash, _, _, err := readCodeHash(sdb, addr)
+	codeHash, _, _, err := readCodeHash(sdb, addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1379,16 +1395,9 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		if ch, chErr := sdb.GetCodeHash(addr); chErr == nil {
 			baseCodeHash = ch
 		}
-		if ch, res, ok := sdb.versionMap.ReadCodeHash(addr, sdb.txIndex); ok && res.resolved() {
-			origHash = ch
-		} else if sdb.noMaterialize {
-			// With no prior-tx floor entry the cumulative baseline is the
-			// committed hash (the rebuilt transient's original folds this tx's
-			// own code cell, not the tx-start value).
-			origHash, err = sdb.committedCodeHash(addr)
-			if err != nil {
-				return err
-			}
+		origHash, err = sdb.GetCommittedCodeHash(addr)
+		if err != nil {
+			return err
 		}
 	}
 	if sdb.noMaterialize {
