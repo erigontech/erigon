@@ -750,11 +750,20 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 // owns no changeset records into none. It returns the root and the flush of its
 // own deferred updates, which the caller runs only once the root is accepted.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, func() error, error) {
-	cc.doms.LockChangesetAccumulator()
-	defer cc.doms.UnlockChangesetAccumulator()
-	defer cc.doms.DetachChangesetAccumulatorLocked()()
+	// Flush the previous block's own pending update, hash-routed. The commitment
+	// diff is swapped to nil for the flush so that when that block owns no saved
+	// changeset the flush does not leak its branch deltas into the live
+	// accumulator (a later window block's changeset).
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		defer cc.doms.SwapCommitmentDiffLocked(nil)()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
+		return nil, nil, err
+	}
 
-	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -798,7 +807,7 @@ func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.
 	err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		defer cc.doms.DetachChangesetAccumulatorLocked()()
+		defer cc.doms.SwapCommitmentDiffLocked(nil)()
 		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
 	}()
 	if err != nil {
@@ -834,13 +843,14 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	}
 }
 
-// computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by hash, since
-// multiple changesets can exist per block number after a fork-bounce) so its
-// branch writes and [state] write land in N's own CS. If N's CS isn't saved yet
-// it falls through to the live accumulator, which under changesetMu is still N's
-// own. It also stamps the pending deferred update with the block hash so the
-// next call's FlushPendingUpdates uses the same hash-aware routing.
+// computeWithBlockAccumulator runs ComputeCommitment with block N's own writes
+// (branch nodes and the [state] marker) routed into an explicit diff — N's saved
+// changeset when present (looked up by hash, since multiple changesets can exist
+// per block number after a fork-bounce), else the live accumulator's. Routing
+// through the diff needs no changesetMu against a concurrent SetChangesetAccumulator,
+// so the apply loop's DomainPut is never blocked by the fold. It also stamps the
+// pending deferred update with the block hash so the next call's flush uses the
+// same hash-aware routing.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {
@@ -848,18 +858,30 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// Look up cs AND compute under changesetMu: reading cs before the lock races
-	// the apply loop's accumulator rotation, which would route this block's
-	// [state] write into the next block's changeset. The lock is required even on
-	// the cs==nil path — the internal FlushPendingUpdates mutates the same pointer.
-	cc.doms.LockChangesetAccumulator()
-	defer cc.doms.UnlockChangesetAccumulator()
-	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-	if cs == nil {
-		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
+	// independent of N's diff below) — the one remaining changesetMu window, brief
+	// rather than spanning the fold that follows.
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
+		return nil, err
 	}
-	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
-	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+
+	// Read live before the saved lookup: the exec loop saves N strictly before it
+	// rotates away from N, so whichever read lands after a rotation, the other
+	// still identifies N's changeset. A mid-block step-boundary finds no saved cs
+	// (the exec loop saves once the block is done) and falls back to live.
+	live := cc.doms.GetChangesetAccumulator()
+	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+	var diff *kv.DomainDiff
+	if cs != nil {
+		diff = &cs.Diffs[kv.CommitmentDomain]
+	} else if live != nil {
+		diff = &live.Diffs[kv.CommitmentDomain]
+	}
+	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
