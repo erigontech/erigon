@@ -47,9 +47,11 @@ Notes that change how you read a run:
   (`.github/workflows/scripts/compare_state_snapshot_hashes.py`), writing
   `result-state-hashes-<chain>.json` under `--test_name state-snapshot-hash-check`.
   A red run can be either one — check which step failed before reading a report.
-  Between the two, `erigon seg retire` flushes the DB to files and drains the
-  pending merges, so the comparison sees merged files rather than the fragments
-  an interrupted node leaves behind.
+  Between the two, `erigon seg retire --erigondb.domain.steps-in-frozen-file=Inf`
+  flushes the DB to files and drains the pending merges, so the comparison sees
+  merged files rather than the fragments an interrupted node leaves behind. `Inf`
+  matches how the published sets are built: their domain files span more steps
+  than `erigondb.toml` allows, while history and idx stay at the cap.
   Only the data files (`domain/*.kv`, `history/*.v`, `idx/*.ef`) are compared;
   accessors are seeded with the node's `salt-state.txt`, which this flag makes
   Erigon generate locally, so their hashes never match the published ones.
