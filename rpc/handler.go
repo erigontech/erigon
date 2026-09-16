@@ -71,7 +71,6 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
-	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -440,19 +439,13 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
+// startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	if h.inlineCalls {
-		h.runCallProc(fn)
-		return
-	}
-	h.callWG.Go(func() { h.runCallProc(fn) })
-}
-
-func (h *handler) runCallProc(fn func(*callProc)) {
-	ctx, cancel := context.WithCancel(h.rootCtx)
-	defer cancel()
-	fn(&callProc{ctx: ctx})
+	h.callWG.Go(func() {
+		ctx, cancel := context.WithCancel(h.rootCtx)
+		defer cancel()
+		fn(&callProc{ctx: ctx})
+	})
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a

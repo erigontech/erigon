@@ -156,7 +156,6 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
-	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
 
 	reqs, batch, err := codec.ReadBatch()
