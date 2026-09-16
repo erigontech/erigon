@@ -82,6 +82,11 @@ type calcState struct {
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 
+	// dirtyAccounts lists the accounts touched this block, so the per-block flush
+	// and reset iterate only what changed rather than the whole accounts cache
+	// (which grows across the batch). Reset to [:0] by ResetBlockFlags.
+	dirtyAccounts []accounts.Address
+
 	// sdSubtree holds addresses self-destructed in the current block. Their
 	// persisted storage subtree is dropped via the account update's
 	// DeleteStorageSubtree flag and GC'd by the committer — no per-slot enumeration.
@@ -150,6 +155,15 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	return acc
 }
 
+// markDirty flags acc changed this block and records it once in dirtyAccounts.
+func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
+	if acc.dirty {
+		return
+	}
+	acc.dirty = true
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+}
+
 // ApplyWrites folds a tx's typed write collections into the local state.
 //
 // Self-destruct is applied before the field writes: a SELFDESTRUCT marks the
@@ -164,7 +178,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		if vw.Val {
 			acc := cs.ensureAccount(addr)
 			acc.Deleted = true
-			acc.dirty = true
+			cs.markDirty(addr, acc)
 			cs.sdSubtree[addr] = true
 			cs.zeroTouchedStorage(addr)
 		}
@@ -181,7 +195,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr)
 		acc.Balance = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		cs.fieldMask[addr] |= fieldBal
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
@@ -195,7 +209,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr)
 		acc.Nonce = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		cs.fieldMask[addr] |= fieldNonce
 		if !sdThisCall[addr] {
 			acc.Deleted = false
@@ -204,7 +218,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	for addr, vw := range writes.CodeHashes() {
 		acc := cs.ensureAccount(addr)
 		acc.CodeHash = vw.Val.Value()
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		cs.fieldMask[addr] |= fieldCode
 		if !sdThisCall[addr] {
 			acc.Deleted = false
@@ -215,7 +229,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	// composes empty code cannot clobber the authoritative codeHash.
 	for addr := range writes.Codes() {
 		acc := cs.ensureAccount(addr)
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
@@ -223,7 +237,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	for addr, vw := range writes.Incarnations() {
 		acc := cs.ensureAccount(addr)
 		acc.Incarnation = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 	}
 	for addr, inner := range writes.Storages() {
 		// A storage change dirties the account so the commitment refolds its
@@ -231,7 +245,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		// lazy-loads the real fields so a storage-only account (no field write) is
 		// emitted with an otherwise-unchanged account rather than dropped.
 		acc := cs.ensureAccount(addr)
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		// Skip lazy-loading the prior slot value: FlushToUpdates reads exactly the
 		// value set below, so the cold GetAsOf seek would be wasted.
 		slots := cs.storageState[addr]
@@ -358,8 +372,9 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 // emits a leaf-removing DeleteUpdate. Neither the BAL nor the raw-view path
 // carries a deletion marker, so both reconstruct it here.
 func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
-	for addr, acc := range cs.accounts {
-		if !acc.dirty || acc.Deleted {
+	for _, addr := range cs.dirtyAccounts {
+		acc := cs.accounts[addr]
+		if acc.Deleted {
 			continue
 		}
 		// A touched-empty account carries at least one field write. An account
@@ -385,10 +400,8 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 }
 
 func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
-	for addr, acc := range cs.accounts {
-		if !acc.dirty {
-			continue
-		}
+	for _, addr := range cs.dirtyAccounts {
+		acc := cs.accounts[addr]
 		address := addr.Value()
 		key := string(address[:])
 
@@ -460,9 +473,10 @@ func (cs *calcState) SelfDestructedSubtrees() map[accounts.Address]bool {
 // ResetBlockFlags clears the per-block dirty flags while keeping the accumulated
 // state values, preparing for the next block.
 func (cs *calcState) ResetBlockFlags() {
-	for _, acc := range cs.accounts {
-		acc.dirty = false
+	for _, addr := range cs.dirtyAccounts {
+		cs.accounts[addr].dirty = false
 	}
+	cs.dirtyAccounts = cs.dirtyAccounts[:0]
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}

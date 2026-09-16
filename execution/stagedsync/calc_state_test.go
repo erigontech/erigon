@@ -87,6 +87,7 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -155,6 +156,7 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -203,6 +205,7 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -235,6 +238,7 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 		Deleted:  false,
 		dirty:    true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
