@@ -754,7 +754,8 @@ _PROSE_SPAN_RE = re.compile(r"`+|~{2,}")
 # The block openers, which only matter at the start of a line. The marker the
 # converter emits for a heading, an item or a quote is in the buffer before the
 # text arrives, so at that point the line is no longer at its start.
-_PROSE_BLOCK_RE = re.compile(r"^([ \t]*)([#>]|[-+*](?=[ \t])|\d+[.)](?=[ \t]))")
+_PROSE_BLOCK_RE = re.compile(
+    r"^([ \t]*)(?:([#>]|[-+*](?=[ \t]))|(\d+)([.)](?=[ \t])))")
 
 
 def _escape_prose(data, at_line_start):
@@ -768,7 +769,13 @@ def _escape_prose(data, at_line_start):
     """
     data = _PROSE_SPAN_RE.sub(lambda m: "".join("\\" + c for c in m.group(0)), data)
     if at_line_start:
-        data = _PROSE_BLOCK_RE.sub(lambda m: m.group(1) + "\\" + m.group(2), data)
+        # Only ASCII punctuation can be backslash-escaped (CommonMark 2.4), so
+        # an ordered marker is escaped on its delimiter: `\1.` suppresses the
+        # list but renders the backslash as text, while `1\.` renders clean.
+        data = _PROSE_BLOCK_RE.sub(
+            lambda m: m.group(1) + ("\\" + m.group(2) if m.group(2)
+                                    else m.group(3) + "\\" + m.group(4)),
+            data)
     return data
 
 

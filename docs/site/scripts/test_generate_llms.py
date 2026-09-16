@@ -801,6 +801,16 @@ class RenderingFidelityTests(unittest.TestCase):
         self.assertEqual("issue # 1 is not a heading",
                          self.render("<p>issue # 1 is not a heading</p>"))
 
+    def test_an_ordered_marker_is_escaped_on_its_delimiter(self):
+        # Only ASCII punctuation can be escaped: `\\1.` suppresses the list but
+        # leaves the backslash in the rendered text, which the engine confirms.
+        # `1\\.` is the form that reads back as the prose the page wrote.
+        self.assertEqual("1\\. not a list item",
+                         self.render("<p>1. not a list item</p>"))
+        self.assertEqual("- not a bullet", self.render("<p>- not a bullet</p>")
+                         .replace("\\", ""))
+        self.assertEqual("\\- not a bullet", self.render("<p>- not a bullet</p>"))
+
     def test_a_marker_inside_link_text_is_not_escaped(self):
         # `[#1516](…)` writes the `#` one column into the line, behind the
         # link's own bracket, where it opens nothing.
