@@ -489,6 +489,13 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 }
 
+// InvalidateBuildParameters prevents further private-bundle admission for a rejected build context.
+func (e *ExecModule) InvalidateBuildParameters(params *builder.Parameters) {
+	if e != nil && e.invalidateBuildParams != nil {
+		e.invalidateBuildParams(params)
+	}
+}
+
 // blockValue computes the expected value received by the fee recipient in wei.
 func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
@@ -538,6 +545,13 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		e.dropTransientBuilders()
 	}
 	defer e.releaseProduction()
+	if generation := entry.params.PrivateBundleGeneration(); e.payloadTxnBarrier != nil && generation != 0 {
+		if err := e.payloadTxnBarrier(
+			ctx, entry.builder.Done(), *entry.params.SlotNumber, entry.params.ParentHash, generation,
+		); err != nil {
+			return AssembledBlockResult{}, err
+		}
+	}
 	return e.assembledBlockResult(ctx, payloadID, entry)
 }
 

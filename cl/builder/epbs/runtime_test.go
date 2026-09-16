@@ -537,6 +537,9 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		{name: "negative bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.BidDelay = -time.Nanosecond
 		}},
+		{name: "negative private orderflow window", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
+			cfg.PrivateOrderflowWindow = -time.Nanosecond
+		}},
 		{name: "bid delay reaches target slot", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot) * time.Second
 		}},
@@ -545,6 +548,16 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		}},
 		{name: "bid delay exceeds retry cadence boundary", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval + time.Nanosecond
+		}},
+		{name: "private orderflow window exceeds bid budget", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.PrivateOrderflowWindow = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.BidDelay - cfg.RetryInterval + time.Nanosecond
+		}},
+		{name: "bid timing sum overflows", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			copy := *deps.BeaconConfig
+			copy.SecondsPerSlot = uint64(math.MaxInt64 / int64(time.Second))
+			deps.BeaconConfig = &copy
+			cfg.BidDelay = 6_000_000_000_000_000_000
+			cfg.PrivateOrderflowWindow = 6_000_000_000_000_000_000
 		}},
 		{name: "shadow curve without bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.ShadowValueCurve = true
@@ -581,6 +594,21 @@ func TestRuntimeAcceptsBidDelayBeforeRetryCadenceBoundary(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRuntimeAcceptsLongRetryWithoutTimedOffsets(t *testing.T) {
+	beaconCfg := gloasCoordinatorConfig()
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
+	cfg := epbscfg.DefaultConfig()
+	cfg.Enabled = true
+	cfg.KeyPath = keyPath
+	cfg.RetryInterval = time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+
+	_, _, err = prepareRuntimeConfig(cfg, &beaconCfg)
+	require.NoError(t, err)
+}
+
 func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	cfg := gloasCoordinatorConfig()
 	cfg.SlotsPerEpoch = 64
@@ -592,6 +620,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.BidDelay = 1200 * time.Millisecond
+	runtimeCfg.PrivateOrderflowWindow = 350 * time.Millisecond
 	runtimeCfg.ShadowValueCurve = true
 	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
 		BeaconConfig:     &cfg,
@@ -609,6 +638,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
+	require.Equal(t, runtimeCfg.PrivateOrderflowWindow, runtime.coordinator.privateOrderflowWindow)
 	require.NotNil(t, runtime.shadow)
 	require.Equal(t, []time.Duration{3200 * time.Millisecond, 5200 * time.Millisecond}, runtime.shadow.delays)
 }

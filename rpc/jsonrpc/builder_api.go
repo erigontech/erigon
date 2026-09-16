@@ -70,7 +70,7 @@ func (a *activePrivateBundleAdmission) Submit(ctx context.Context, bundle privat
 	bundle.TargetParentHash = simulation.ParentBlockHash
 	bundle.TargetGeneration = simulation.contextGeneration
 	var id common.Hash
-	err := a.contexts.WithActive(bundle.TargetSlot, simulation.contextGeneration, func() error {
+	err := a.contexts.WithCurrent(bundle.TargetSlot, simulation.contextGeneration, func() error {
 		var err error
 		id, err = a.submitter.Submit(bundle)
 		return err

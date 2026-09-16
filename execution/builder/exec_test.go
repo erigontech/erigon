@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"maps"
+	"sync/atomic"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/privatepool"
 )
 
 type filterStateReader map[accounts.Address]accounts.Account
@@ -166,7 +168,7 @@ func TestGetNextTransactionsClearsPoliciesMissingFromNextSnapshot(t *testing.T) 
 		txnProvider: emptyPolicyProvider{},
 	}
 
-	txns, err := getNextTransactions(ctx, cfg, chain.AllProtocolChanges.ChainID, header, protocol.GasUsed{}, 50, 0, mapset.NewSet[[32]byte](), nil, nil, policies, log.Root(), &filtrationStats{})
+	txns, _, err := getNextTransactions(ctx, cfg, chain.AllProtocolChanges.ChainID, header, protocol.GasUsed{}, 50, 0, mapset.NewSet[[32]byte](), nil, nil, policies, log.Root(), &filtrationStats{})
 	require.NoError(t, err)
 	require.Empty(t, txns)
 	require.Empty(t, policies)
@@ -273,4 +275,103 @@ func TestSuccessfulTxnIdsExcludesFailedReceipts(t *testing.T) {
 
 	require.False(t, included.Contains(failed.Hash()))
 	require.True(t, included.Contains(succeeded.Hash()))
+}
+
+func TestProcessedTxnBatchFrontierRequiresDrainOrTerminalStop(t *testing.T) {
+	require.False(t, processedTxnBatchFrontier(false, false))
+	require.True(t, processedTxnBatchFrontier(true, false))
+	require.True(t, processedTxnBatchFrontier(false, true))
+}
+
+func TestTxnBatchWaitDecisionUsesOneInterruptSnapshot(t *testing.T) {
+	interrupt := new(atomic.Bool)
+	waitForMore, terminal := txnBatchWaitDecision(49, 50, interrupt)
+	interrupt.Store(true)
+	require.True(t, waitForMore)
+	require.False(t, terminal)
+
+	waitForMore, terminal = txnBatchWaitDecision(49, 50, interrupt)
+	require.False(t, waitForMore)
+	require.True(t, terminal)
+}
+
+func TestGetNextTransactionsDrainUsesUnfilteredProviderPage(t *testing.T) {
+	header := types.NewEmptyHeaderForAssembling()
+	header.Number.SetUint64(1)
+	header.GasLimit = 1_000_000
+	public := make([]types.Transaction, 50)
+	for i := range public {
+		public[i] = types.NewTransaction(uint64(i), common.Address{byte(i + 1)}, nil, 21_000, nil, nil)
+	}
+	cfg := BuilderExecCfg{
+		builderState: BuilderState{
+			BuilderConfig: &buildercfg.BuilderConfig{},
+			BuiltBlock:    &exec.AssembledBlock{Header: header},
+		},
+		chainConfig: chain.AllProtocolChanges,
+		txnProvider: &fakeTxnProvider{txns: public},
+	}
+
+	txns, providerDrained, err := getNextTransactions(
+		t.Context(), cfg, chain.AllProtocolChanges.ChainID, header, protocol.GasUsed{}, 50, 0,
+		mapset.NewSet[[32]byte](), nil, nil, make(map[common.Hash]txnprovider.TransactionPolicy), log.Root(), &filtrationStats{},
+	)
+	require.NoError(t, err)
+	require.Less(t, len(txns), 50)
+	require.False(t, providerDrained)
+}
+
+func TestProcessedTxnBatchFrontierWaitsForPrivateTargetOnSecondPage(t *testing.T) {
+	public := make([]types.Transaction, 51)
+	for i := range public {
+		public[i] = types.NewTransaction(uint64(i), common.Address{byte(i + 1)}, nil, 21_000, nil, nil)
+	}
+	target := public[len(public)-1]
+	privateTxn := types.NewTransaction(100, common.Address{0xaa}, nil, 21_000, nil, nil)
+	parent := common.Hash{0x44}
+	pool := privatepool.New(&fakeTxnProvider{txns: public}, 16)
+	_, err := pool.Submit(privatepool.Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() { waited <- pool.WaitForProcessing(t.Context(), done, 42, parent, 7) }()
+	provide := func() ([]types.Transaction, bool, uint64) {
+		var revision uint64
+		ctx := txnprovider.WithTxnBatchRevisionObserver(t.Context(), func(observed uint64) { revision = observed })
+		txns, provideErr := pool.ProvideTxns(ctx,
+			txnprovider.WithAmount(50), txnprovider.WithTargetSlot(42),
+			txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(7),
+		)
+		require.NoError(t, provideErr)
+		return txns, len(txns) < 50, revision
+	}
+
+	first, firstDrained, firstRevision := provide()
+	require.Len(t, first, 50)
+	if processedTxnBatchFrontier(firstDrained, false) {
+		pool.ObserveProcessedTxns(42, parent, 7, firstRevision)
+	}
+	select {
+	case err := <-waited:
+		t.Fatalf("first full page released the processing barrier: %v", err)
+	default:
+	}
+
+	second, secondDrained, secondRevision := provide()
+	require.Equal(t, []common.Hash{target.Hash(), privateTxn.Hash()}, txnHashes(second))
+	require.True(t, processedTxnBatchFrontier(secondDrained, false))
+	pool.ObserveProcessedTxns(42, parent, 7, secondRevision)
+	require.NoError(t, <-waited)
+}
+
+func txnHashes(txns []types.Transaction) []common.Hash {
+	hashes := make([]common.Hash, len(txns))
+	for i, txn := range txns {
+		hashes[i] = txn.Hash()
+	}
+	return hashes
 }

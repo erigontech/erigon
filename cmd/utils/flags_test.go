@@ -335,10 +335,11 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	key := EpbsBuilderKeyFlag
 	margin := EpbsBuilderBidMarginFlag
 	delay := EpbsBuilderBidDelayFlag
+	privateOrderflowWindow := EpbsBuilderPrivateOrderflowWindowFlag
 	shadow := EpbsBuilderShadowValueCurveFlag
 	cfg := ethconfig.Config{}
 	app := &cli.Command{
-		Flags: []cli.Flag{&enabled, &key, &margin, &delay, &shadow},
+		Flags: []cli.Flag{&enabled, &key, &margin, &delay, &privateOrderflowWindow, &shadow},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			setCaplin(cmd, &cfg)
 			return nil
@@ -346,12 +347,13 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	}
 	require.NoError(t, app.Run(context.Background(), []string{
 		"erigon", "--builder", "--builder.key=/secure/builder.key", "--builder.bid-margin=0.9", "--builder.bid-delay=1.2s",
-		"--builder.shadow-value-curve",
+		"--builder.private-orderflow-window=350ms", "--builder.shadow-value-curve",
 	}))
 	require.True(t, cfg.CaplinConfig.EpbsBuilder.Enabled)
 	require.Equal(t, "/secure/builder.key", cfg.CaplinConfig.EpbsBuilder.KeyPath)
 	require.Equal(t, 0.9, cfg.CaplinConfig.EpbsBuilder.BidMargin)
 	require.Equal(t, 1200*time.Millisecond, cfg.CaplinConfig.EpbsBuilder.BidDelay)
+	require.Equal(t, 350*time.Millisecond, cfg.CaplinConfig.EpbsBuilder.PrivateOrderflowWindow)
 	require.True(t, cfg.CaplinConfig.EpbsBuilder.ShadowValueCurve)
 	require.Zero(t, cfg.CaplinConfig.EpbsBuilder.MaxPending)
 	require.Positive(t, cfg.CaplinConfig.EpbsBuilder.MaxRetained)

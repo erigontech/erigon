@@ -11,6 +11,7 @@ package builder
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"slices"
 	"sync"
@@ -22,14 +23,20 @@ import (
 )
 
 type BuildContextStore struct {
-	mu             sync.RWMutex
-	next           uint64
-	contexts       map[uint64][]buildContext
-	active         atomic.Pointer[activeBuildSlots]
-	activeContexts atomic.Pointer[activeBuildContexts]
-	retainedSlot   uint64
-	hasRetained    bool
-	now            func() uint64
+	mu                sync.RWMutex
+	next              uint64
+	contexts          map[uint64][]buildContext
+	active            atomic.Pointer[activeBuildSlots]
+	activeContexts    atomic.Pointer[activeBuildContexts]
+	current           atomic.Pointer[activeBuildContexts]
+	selectable        map[uint64]uint64
+	invalidated       map[uint64]struct{}
+	retainedSlot      uint64
+	hasRetained       bool
+	admissionWindow   time.Duration
+	rebindGeneration  func(uint64, common.Hash, uint64, uint64)
+	pinnedGenerations func(uint64) map[uint64]struct{}
+	now               func() uint64
 }
 
 type activeBuildSlots map[uint64]uint64
@@ -47,12 +54,45 @@ type buildContext struct {
 
 const maxRetainedBuildContextsPerSlot = 16
 
-func NewBuildContextStore() *BuildContextStore {
-	store := &BuildContextStore{contexts: make(map[uint64][]buildContext), now: currentUnixTime}
+type BuildContextStoreOption func(*BuildContextStore)
+
+func WithBuildContextAdmissionWindow(window time.Duration) BuildContextStoreOption {
+	return func(store *BuildContextStore) {
+		if window > 0 {
+			store.admissionWindow = window
+		}
+	}
+}
+
+func WithBuildContextGenerationRebinder(rebind func(uint64, common.Hash, uint64, uint64)) BuildContextStoreOption {
+	return func(store *BuildContextStore) {
+		store.rebindGeneration = rebind
+	}
+}
+
+// WithBuildContextPinnedGenerations preserves contexts that still own admitted private bundles.
+func WithBuildContextPinnedGenerations(pinned func(uint64) map[uint64]struct{}) BuildContextStoreOption {
+	return func(store *BuildContextStore) {
+		store.pinnedGenerations = pinned
+	}
+}
+
+func NewBuildContextStore(opts ...BuildContextStoreOption) *BuildContextStore {
+	store := &BuildContextStore{
+		contexts:    make(map[uint64][]buildContext),
+		selectable:  make(map[uint64]uint64),
+		invalidated: make(map[uint64]struct{}),
+		now:         currentUnixTime,
+	}
 	active := make(activeBuildSlots)
 	store.active.Store(&active)
 	activeContexts := make(activeBuildContexts)
 	store.activeContexts.Store(&activeContexts)
+	current := make(activeBuildContexts)
+	store.current.Store(&current)
+	for _, opt := range opts {
+		opt(store)
+	}
 	return store
 }
 
@@ -65,6 +105,7 @@ func (s *BuildContextStore) publish(params *Parameters) (uint64, uint64) {
 	defer s.mu.Unlock()
 	s.next++
 	s.contexts[slot] = append(s.contexts[slot], buildContext{token: s.next, params: params.Copy()})
+	s.selectable[slot] = s.next
 	s.updateActiveSlots()
 	return slot, s.next
 }
@@ -81,6 +122,10 @@ func (s *BuildContextStore) release(slot, token uint64) {
 			continue
 		}
 		contexts = slices.Delete(contexts, i, i+1)
+		delete(s.invalidated, token)
+		if s.selectable[slot] == token {
+			delete(s.selectable, slot)
+		}
 		if len(contexts) > 0 {
 			s.contexts[slot] = contexts
 			s.updateActiveSlots()
@@ -104,28 +149,80 @@ func (s *BuildContextStore) retain(params *Parameters) (uint64, uint64) {
 	}
 	if !s.hasRetained || slot > s.retainedSlot {
 		s.contexts = make(map[uint64][]buildContext)
+		s.selectable = make(map[uint64]uint64)
+		s.invalidated = make(map[uint64]struct{})
 		s.retainedSlot = slot
 		s.hasRetained = true
 	}
 	contexts := s.contexts[slot]
+	var replacedToken uint64
 	for i, context := range slices.Backward(contexts) {
 		if sameRetainedBuildContext(context.params, params) {
+			if _, invalidated := s.invalidated[context.token]; invalidated {
+				replacedToken = context.token
+				break
+			}
 			matched := context
 			if i != len(contexts)-1 {
 				contexts = append(slices.Delete(contexts, i, i+1), matched)
 				s.contexts[slot] = contexts
 			}
+			s.selectable[slot] = matched.token
+			s.updateActiveSlots()
 			return slot, matched.token
 		}
 	}
 	s.next++
-	contexts = append(contexts, buildContext{token: s.next, expiresAt: params.Timestamp, params: params.Copy()})
-	if len(contexts) > maxRetainedBuildContextsPerSlot {
-		contexts = slices.Clone(contexts[len(contexts)-maxRetainedBuildContextsPerSlot:])
+	contexts = append(contexts, buildContext{
+		token: s.next, expiresAt: buildContextExpiry(params.Timestamp, s.currentTime(), s.admissionWindow), params: params.Copy(),
+	})
+	if replacedToken != 0 && s.rebindGeneration != nil {
+		s.rebindGeneration(slot, params.ParentHash, replacedToken, s.next)
 	}
+	contexts = s.trimContexts(slot, s.next, contexts)
 	s.contexts[slot] = contexts
+	s.selectable[slot] = s.next
 	s.updateActiveSlots()
 	return slot, s.next
+}
+
+func (s *BuildContextStore) trimContexts(slot, preserveToken uint64, contexts []buildContext) []buildContext {
+	excess := len(contexts) - maxRetainedBuildContextsPerSlot
+	if excess <= 0 {
+		return contexts
+	}
+	var pinned map[uint64]struct{}
+	if s.pinnedGenerations != nil {
+		pinned = s.pinnedGenerations(slot)
+	}
+	kept := make([]buildContext, 0, len(contexts)-excess)
+	for _, context := range contexts {
+		_, isPinned := pinned[context.token]
+		isPinned = isPinned || context.token == preserveToken
+		if excess > 0 && !isPinned {
+			delete(s.invalidated, context.token)
+			excess--
+			continue
+		}
+		kept = append(kept, context)
+	}
+	return kept
+}
+
+func buildContextExpiry(timestamp, now uint64, window time.Duration) uint64 {
+	if window <= 0 {
+		return timestamp
+	}
+	seconds := uint64(window / time.Second)
+	if window%time.Second != 0 {
+		seconds++
+	}
+	seconds++
+	base := max(timestamp, now)
+	if math.MaxUint64-base < seconds {
+		return math.MaxUint64
+	}
+	return base + seconds
 }
 
 func sameRetainedBuildContext(left, right *Parameters) bool {
@@ -166,9 +263,10 @@ func (s *BuildContextStore) ResolveForParent(slot uint64, parentHash common.Hash
 	}
 	s.mu.RLock()
 	now := s.currentTime()
+	currentToken := s.selectable[slot]
 	contexts := s.contexts[slot]
 	for _, context := range slices.Backward(contexts) {
-		if context.params.ParentHash == parentHash && buildContextActive(context, now) {
+		if context.token == currentToken && context.params.ParentHash == parentHash && buildContextActive(context, now) {
 			s.mu.RUnlock()
 			return context.params.Copy(), context.token, true
 		}
@@ -207,9 +305,23 @@ func (s *BuildContextStore) IsContextActive(slot, token uint64) bool {
 	return expiresAt == 0 || s.currentTime() < expiresAt
 }
 
+// IsContextCurrent reports whether a generation is selectable for new admission.
+func (s *BuildContextStore) IsContextCurrent(slot, token uint64) bool {
+	if s == nil || token == 0 {
+		return false
+	}
+	current := s.current.Load()
+	if current == nil {
+		return false
+	}
+	expiresAt, ok := (*current)[activeBuildContext{slot: slot, token: token}]
+	return ok && (expiresAt == 0 || s.currentTime() < expiresAt)
+}
+
 func (s *BuildContextStore) updateActiveSlots() {
 	active := make(activeBuildSlots, len(s.contexts))
 	activeContexts := make(activeBuildContexts)
+	current := make(activeBuildContexts)
 	for slot, contexts := range s.contexts {
 		for _, context := range contexts {
 			activeContexts[activeBuildContext{slot: slot, token: context.token}] = context.expiresAt
@@ -218,9 +330,18 @@ func (s *BuildContextStore) updateActiveSlots() {
 				active[slot] = context.expiresAt
 			}
 		}
+		if token := s.selectable[slot]; token != 0 {
+			for _, context := range contexts {
+				if context.token == token {
+					current[activeBuildContext{slot: slot, token: token}] = context.expiresAt
+					break
+				}
+			}
+		}
 	}
 	s.active.Store(&active)
 	s.activeContexts.Store(&activeContexts)
+	s.current.Store(&current)
 }
 
 func (s *BuildContextStore) WithActive(slot, token uint64, fn func() error) error {
@@ -236,6 +357,45 @@ func (s *BuildContextStore) WithActive(slot, token uint64, fn func() error) erro
 		}
 	}
 	return errors.New("build context is no longer active")
+}
+
+// WithCurrent runs fn while the selected generation cannot be replaced or invalidated.
+func (s *BuildContextStore) WithCurrent(slot, token uint64, fn func() error) error {
+	if s == nil || token == 0 || fn == nil {
+		return errors.New("build context is unavailable")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.selectable[slot] != token {
+		return errors.New("build context is no longer current")
+	}
+	now := s.currentTime()
+	for _, context := range s.contexts[slot] {
+		if context.token == token && buildContextActive(context, now) {
+			return fn()
+		}
+	}
+	return errors.New("build context is no longer active")
+}
+
+// Invalidate clears new admission for an exact rejected build context.
+func (s *BuildContextStore) Invalidate(params *Parameters) {
+	if s == nil || params == nil || params.SlotNumber == nil {
+		return
+	}
+	slot := *params.SlotNumber
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, context := range slices.Backward(s.contexts[slot]) {
+		if sameRetainedBuildContext(context.params, params) {
+			s.invalidated[context.token] = struct{}{}
+			if s.selectable[slot] == context.token {
+				delete(s.selectable, slot)
+			}
+			s.updateActiveSlots()
+			return
+		}
+	}
 }
 
 func buildContextActive(context buildContext, now uint64) bool {

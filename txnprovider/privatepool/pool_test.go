@@ -21,11 +21,13 @@ import (
 	"math"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -140,6 +142,54 @@ func TestPoolDoesNotLeakPrivateTransactionAcrossBuildContexts(t *testing.T) {
 	exact, err := pool.ProvideTxns(t.Context(), txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(7))
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{target.Hash(), privateTxn.Hash()}, hashes(exact))
+}
+
+func TestPoolCurrentGenerationCanEvictRetainedPreviousGeneration(t *testing.T) {
+	store := builder.NewBuildContextStore()
+	slot := uint64(42)
+	parent := common.Hash{0x11}
+	root1 := common.Hash{0x21}
+	root2 := common.Hash{0x22}
+	params := &builder.Parameters{
+		SlotNumber:               &slot,
+		ParentHash:               parent,
+		ParentBeaconBlockRoot:    &root1,
+		Timestamp:                math.MaxInt64,
+		ValidatedProposerContext: true,
+	}
+	store.Prepare(params)
+	_, generation1, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+
+	target1, private1 := testTxn(1), testTxn(2)
+	target2, private2 := testTxn(3), testTxn(4)
+	pool := New(&testProvider{txns: []types.Transaction{target1, target2}}, 1, WithContextActive(store.IsContextCurrent))
+	_, err := pool.Submit(Bundle{
+		TargetHash:       target1.Hash(),
+		TargetParentHash: parent,
+		TargetGeneration: generation1,
+		Transaction:      private1,
+		TargetSlot:       slot,
+	})
+	require.NoError(t, err)
+
+	params.ParentBeaconBlockRoot = &root2
+	store.Prepare(params)
+	_, generation2, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	require.NotEqual(t, generation1, generation2)
+	_, err = pool.Submit(Bundle{
+		TargetHash:       target2.Hash(),
+		TargetParentHash: parent,
+		TargetGeneration: generation2,
+		Transaction:      private2,
+		TargetSlot:       slot,
+	})
+	require.NoError(t, err)
+
+	provided, err := pool.ProvideTxns(t.Context(), txnprovider.WithTargetSlot(slot), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(generation2))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{target1.Hash(), target2.Hash(), private2.Hash()}, hashes(provided))
 }
 
 func TestPoolRequiresPublicTargetInProvidedBatch(t *testing.T) {
@@ -327,6 +377,141 @@ func TestPoolProvidesLateBundleAfterTargetWasAlreadyIncluded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{privateTxn.Hash()}, hashes(provided))
 	require.Equal(t, target.Hash(), observed[privateTxn.Hash()].Dependency)
+}
+
+func TestPoolWaitForProcessingTracksExactBuildGeneration(t *testing.T) {
+	target, privateTxn := testTxn(1), testTxn(2)
+	parent := common.Hash{0x44}
+	pool := New(&testProvider{txns: []types.Transaction{target}}, 16)
+	_, err := pool.Submit(Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() { waited <- pool.WaitForProcessing(t.Context(), done, 42, parent, 7) }()
+	select {
+	case err := <-waited:
+		t.Fatalf("barrier returned before the bundle was snapshotted: %v", err)
+	default:
+	}
+	_, err = pool.ProvideTxns(t.Context(),
+		txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(8),
+	)
+	require.NoError(t, err)
+	select {
+	case err := <-waited:
+		t.Fatalf("wrong generation released the barrier: %v", err)
+	default:
+	}
+	var revision uint64
+	ctx := txnprovider.WithTxnBatchRevisionObserver(t.Context(), func(observed uint64) { revision = observed })
+	provided, err := pool.ProvideTxns(ctx,
+		txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(7),
+	)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{target.Hash(), privateTxn.Hash()}, hashes(provided))
+	pool.ObserveProcessedTxns(42, parent, 7, revision)
+	require.NoError(t, <-waited)
+}
+
+func TestPoolWaitForProcessingFailsWhenBuilderCompletesFirst(t *testing.T) {
+	target, privateTxn := testTxn(1), testTxn(2)
+	parent := common.Hash{0x44}
+	pool := New(&testProvider{txns: []types.Transaction{target}}, 16)
+	_, err := pool.Submit(Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+	done := make(chan struct{})
+	close(done)
+	require.ErrorContains(t, pool.WaitForProcessing(t.Context(), done, 42, parent, 7), "completed")
+}
+
+func TestPoolWaitForProcessingReleasesWhenTargetDisappears(t *testing.T) {
+	target, privateTxn := testTxn(1), testTxn(2)
+	parent := common.Hash{0x44}
+	pool := New(&testProvider{}, 16)
+	_, err := pool.Submit(Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+	done := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() { waited <- pool.WaitForProcessing(t.Context(), done, 42, parent, 7) }()
+
+	var revision uint64
+	ctx := txnprovider.WithTxnBatchRevisionObserver(t.Context(), func(observed uint64) { revision = observed })
+	provided, err := pool.ProvideTxns(ctx,
+		txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(7),
+	)
+	require.NoError(t, err)
+	require.Empty(t, provided)
+	pool.ObserveProcessedTxns(42, parent, 7, revision)
+	require.NoError(t, <-waited)
+}
+
+func TestPoolRebindGenerationPreservesAdmittedBundleForRetry(t *testing.T) {
+	target, privateTxn := testTxn(1), testTxn(2)
+	parent := common.Hash{0x44}
+	pool := New(&testProvider{txns: []types.Transaction{target}}, 16)
+	_, err := pool.Submit(Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+
+	pool.RebindGeneration(42, parent, 7, 8)
+	provided, err := pool.ProvideTxns(t.Context(),
+		txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(7),
+	)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{target.Hash()}, hashes(provided))
+
+	var revision uint64
+	ctx := txnprovider.WithTxnBatchRevisionObserver(t.Context(), func(observed uint64) { revision = observed })
+	provided, err = pool.ProvideTxns(ctx,
+		txnprovider.WithTargetSlot(42), txnprovider.WithTargetParentHash(parent), txnprovider.WithTargetGeneration(8),
+	)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{target.Hash(), privateTxn.Hash()}, hashes(provided))
+
+	done := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() { waited <- pool.WaitForProcessing(t.Context(), done, 42, parent, 8) }()
+	pool.ObserveProcessedTxns(42, parent, 8, revision)
+	require.NoError(t, <-waited)
+}
+
+func TestPoolReplacementWakesSupersededContextBarrier(t *testing.T) {
+	target, replacementTarget, privateTxn := testTxn(1), testTxn(2), testTxn(3)
+	parent := common.Hash{0x44}
+	pool := New(&testProvider{txns: []types.Transaction{target, replacementTarget}}, 16)
+	_, err := pool.Submit(Bundle{
+		TargetHash: target.Hash(), TargetParentHash: parent, TargetGeneration: 7,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+
+	pool.mu.RLock()
+	contextChanged := pool.snapshots
+	pool.mu.RUnlock()
+	_, err = pool.Submit(Bundle{
+		TargetHash: replacementTarget.Hash(), TargetParentHash: parent, TargetGeneration: 8,
+		Transaction: privateTxn, TargetSlot: 42,
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-contextChanged:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("superseded context barrier was not notified")
+	}
+	require.NoError(t, pool.WaitForProcessing(t.Context(), make(chan struct{}), 42, parent, 7))
 }
 
 func TestPoolRejectsInvalidAndExcessBundles(t *testing.T) {

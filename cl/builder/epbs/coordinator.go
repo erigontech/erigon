@@ -64,6 +64,10 @@ type payloadDiscarder interface {
 	DiscardPayload(context.Context, uint64) error
 }
 
+type payloadContextInvalidator interface {
+	InvalidatePayloadContext(*builder.Parameters)
+}
+
 type GossipPublisher interface {
 	Publish(context.Context, string, []byte) error
 }
@@ -137,13 +141,15 @@ type PayloadMeasurement struct {
 }
 
 type Coordinator struct {
-	beaconCfg         *clparams.BeaconChainConfig
-	signer            Signer
-	strategy          BidStrategy
-	assembler         PayloadAssembler
-	publisher         GossipPublisher
-	maxRetained       int
-	onPayloadMeasured func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
+	beaconCfg               *clparams.BeaconChainConfig
+	signer                  Signer
+	strategy                BidStrategy
+	assembler               PayloadAssembler
+	publisher               GossipPublisher
+	maxRetained             int
+	privateOrderflowWindow  time.Duration
+	waitForPrivateOrderflow func(context.Context, time.Duration) error
+	onPayloadMeasured       func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
 
 	mu        sync.Mutex
 	slotFloor uint64
@@ -189,7 +195,19 @@ func NewCoordinator(
 	return &Coordinator{
 		beaconCfg: beaconCfg, signer: signer, strategy: strategy, assembler: assembler,
 		publisher: publisher, maxRetained: maxRetained,
-		auctions: make(map[auctionKey]*auctionEntry), retained: make(map[PayloadIdentity]*retainedPayloadEntry),
+		waitForPrivateOrderflow: waitForPrivateOrderflow,
+		auctions:                make(map[auctionKey]*auctionEntry), retained: make(map[PayloadIdentity]*retainedPayloadEntry),
+	}
+}
+
+func waitForPrivateOrderflow(ctx context.Context, window time.Duration) error {
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -298,9 +316,26 @@ func (c *Coordinator) runSlotGuarded(
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: assemble payload: %w", err)
 	}
+	buildContextInvalidated := false
+	defer func() {
+		if !buildContextInvalidated {
+			if invalidator, ok := c.assembler.(payloadContextInvalidator); ok {
+				invalidator.InvalidatePayloadContext(parameters)
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if c.privateOrderflowWindow > 0 {
+		if err := c.waitForPrivateOrderflow(ctx, c.privateOrderflowWindow); err != nil {
+			return nil, err
+		}
+	}
+	if invalidator, ok := c.assembler.(payloadContextInvalidator); ok {
+		invalidator.InvalidatePayloadContext(parameters)
+	}
+	buildContextInvalidated = true
 	assembled, err := c.assembler.GetPayload(ctx, payloadID)
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: get payload: %w", err)

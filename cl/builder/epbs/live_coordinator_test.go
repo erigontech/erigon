@@ -57,6 +57,11 @@ type stagedLiveAssembler struct {
 	afterAssemble func()
 	afterGet      func()
 	getCalls      int
+	invalidated   []*builder.Parameters
+}
+
+func (a *stagedLiveAssembler) InvalidatePayloadContext(parameters *builder.Parameters) {
+	a.invalidated = append(a.invalidated, parameters.Copy())
 }
 
 func (a *stagedLiveAssembler) AssemblePayload(ctx context.Context, parameters *builder.Parameters) (uint64, error) {
@@ -155,12 +160,15 @@ func TestLiveCoordinatorReleasesAuctionWhenInputStalesDuringAssembly(t *testing.
 	require.ErrorIs(t, err, stale)
 	require.Zero(t, publisher.calls)
 	require.Equal(t, 1, assembler.getCalls)
+	require.Len(t, assembler.invalidated, 1)
+	require.Equal(t, input.ParentBlockRoot, *assembler.invalidated[0].ParentBeaconBlockRoot)
 
 	freshness.stale = false
 	assembler.afterAssemble = nil
 	_, err = live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
 	require.NoError(t, err)
 	require.Equal(t, 1, publisher.calls)
+	require.Len(t, assembler.invalidated, 2)
 }
 
 func TestLiveCoordinatorReleasesAuctionWhenInputStalesDuringGetPayload(t *testing.T) {
@@ -181,12 +189,15 @@ func TestLiveCoordinatorReleasesAuctionWhenInputStalesDuringGetPayload(t *testin
 	_, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
 	require.ErrorIs(t, err, stale)
 	require.Zero(t, publisher.calls)
+	require.Len(t, assembler.invalidated, 1)
+	require.Equal(t, input.ParentBlockRoot, *assembler.invalidated[0].ParentBeaconBlockRoot)
 
 	freshness.stale = false
 	assembler.afterGet = nil
 	_, err = live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
 	require.NoError(t, err)
 	require.Equal(t, 1, publisher.calls)
+	require.Len(t, assembler.invalidated, 2)
 }
 
 func TestLiveCoordinatorPreservesFreshnessErrorBeforePublish(t *testing.T) {

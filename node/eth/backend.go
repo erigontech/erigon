@@ -789,8 +789,16 @@ func New(
 		if txnProvider == nil {
 			return nil, errors.New("embedded ePBS builder private bundles require the transaction pool")
 		}
-		backend.privateBundleContexts = builder.NewBuildContextStore()
-		backend.privateBundlePool = privatepool.New(txnProvider, 1024, privatepool.WithContextActive(backend.privateBundleContexts.IsContextActive))
+		var privateBundleContexts *builder.BuildContextStore
+		backend.privateBundlePool = privatepool.New(txnProvider, 1024, privatepool.WithContextActive(func(slot, generation uint64) bool {
+			return privateBundleContexts != nil && privateBundleContexts.IsContextCurrent(slot, generation)
+		}))
+		privateBundleContexts = builder.NewBuildContextStore(
+			builder.WithBuildContextAdmissionWindow(config.CaplinConfig.EpbsBuilder.PrivateOrderflowWindow),
+			builder.WithBuildContextGenerationRebinder(backend.privateBundlePool.RebindGeneration),
+			builder.WithBuildContextPinnedGenerations(backend.privateBundlePool.PinnedGenerations),
+		)
+		backend.privateBundleContexts = privateBundleContexts
 		txnProvider = backend.privateBundlePool
 	}
 
@@ -952,7 +960,9 @@ func New(
 			}
 			return revisionProvider.TransactionSetRevision(timestamp, parentBlockNum)
 		}),
+		execmodule.WithPayloadTransactionsBarrier(backend.privateBundlePool.WaitForProcessing),
 		execmodule.WithBuildParametersPreparer(backend.privateBundleContexts.Prepare),
+		execmodule.WithBuildParametersInvalidator(backend.privateBundleContexts.Invalidate),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 

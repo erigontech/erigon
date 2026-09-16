@@ -111,6 +111,83 @@ func TestAssembleBlockPreparesBuildContextBeforeBuilderStarts(t *testing.T) {
 	<-started
 }
 
+func TestAssembleBlockRetryAfterAdmissionCloseStartsFreshBuilder(t *testing.T) {
+	store := builder.NewBuildContextStore()
+	started := make(chan uint64, 2)
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- params.PayloadId
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	WithBuildParametersPreparer(store.Prepare)(module)
+	slot := uint64(42)
+	params := &builder.Parameters{
+		SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: newTestTimestamp(), ValidatedProposerContext: true,
+	}
+	first, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	require.Equal(t, first.PayloadID, <-started)
+	require.Eventually(t, module.builders[first.PayloadID].builder.Completed, time.Second, time.Millisecond)
+	store.Invalidate(params)
+
+	second, err := module.AssembleBlock(t.Context(), params.Copy())
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	require.Equal(t, second.PayloadID, <-started)
+}
+
+func TestInvalidateBuildParametersForwardsExactContext(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, nil
+	})
+	var invalidated *builder.Parameters
+	WithBuildParametersInvalidator(func(parameters *builder.Parameters) { invalidated = parameters })(module)
+	parameters := &builder.Parameters{ParentHash: common.Hash{0x42}}
+
+	module.InvalidateBuildParameters(parameters)
+
+	require.Same(t, parameters, invalidated)
+}
+
+func TestGetAssembledBlockWaitsForPrivateBundleProcessingBeforeStopping(t *testing.T) {
+	store := builder.NewBuildContextStore()
+	started := make(chan *atomic.Bool, 1)
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- interrupt
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	})
+	barrierStarted := make(chan struct{})
+	barrierRelease := make(chan struct{})
+	WithBuildParametersPreparer(store.Prepare)(module)
+	WithPayloadTransactionsBarrier(func(_ context.Context, _ <-chan struct{}, slot uint64, parent common.Hash, generation uint64) error {
+		require.Equal(t, uint64(42), slot)
+		require.Equal(t, common.Hash{0x44}, parent)
+		require.NotZero(t, generation)
+		close(barrierStarted)
+		<-barrierRelease
+		return nil
+	})(module)
+	slot := uint64(42)
+	params := &builder.Parameters{
+		SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: newTestTimestamp(), ValidatedProposerContext: true,
+	}
+	assembled, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	interrupt := <-started
+	collected := make(chan error, 1)
+	go func() {
+		_, collectErr := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+		collected <- collectErr
+	}()
+	<-barrierStarted
+	require.False(t, interrupt.Load())
+	close(barrierRelease)
+	require.NoError(t, <-collected)
+	require.True(t, interrupt.Load())
+}
+
 func TestTransientPayloadDoesNotReplaceNormalTimestampIndex(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan uint64, 3)

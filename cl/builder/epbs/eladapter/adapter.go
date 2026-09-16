@@ -39,6 +39,10 @@ type assembledBlockDiscarder interface {
 	DiscardAssembledBlock(context.Context, uint64) error
 }
 
+type buildParametersInvalidator interface {
+	InvalidateBuildParameters(*builder.Parameters)
+}
+
 func NewAdapter(execution execmodule.ExecutionModule, beaconCfg *clparams.BeaconChainConfig) *Adapter {
 	return &Adapter{execution: execution, beaconCfg: beaconCfg}
 }
@@ -137,6 +141,16 @@ func (a *Adapter) CanDiscardPayload() bool {
 	}
 	_, ok := a.execution.(assembledBlockDiscarder)
 	return ok
+}
+
+// InvalidatePayloadContext forwards rejected build parameters to the execution module.
+func (a *Adapter) InvalidatePayloadContext(parameters *builder.Parameters) {
+	if a == nil || a.execution == nil {
+		return
+	}
+	if invalidator, ok := a.execution.(buildParametersInvalidator); ok {
+		invalidator.InvalidateBuildParameters(parameters)
+	}
 }
 
 func (a *Adapter) convertResult(result *execmodule.AssembledBlockResult) (*AssembledPayload, error) {

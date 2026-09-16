@@ -67,6 +67,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		bidPublisher,
 		cfg.MaxRetained,
 	)
+	coordinator.privateOrderflowWindow = cfg.PrivateOrderflowWindow
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
 	live := NewLiveCoordinator(coordinator, resolver, resolver)
 	runner, err := newValidatedPreferencesRunnerWithTiming(
@@ -161,12 +162,22 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	if cfg.BidDelay < 0 || cfg.BidDelay >= slotDuration {
 		return cfg, nil, errors.New("epbs/runtime: bid delay must be within the preceding slot")
 	}
-	if cfg.BidDelay > 0 && (cfg.RetryInterval >= slotDuration || cfg.BidDelay >= slotDuration-cfg.RetryInterval) {
-		return cfg, nil, errors.New("epbs/runtime: bid delay and retry cadence must fit within the preceding slot")
+	if cfg.PrivateOrderflowWindow < 0 || cfg.PrivateOrderflowWindow >= slotDuration {
+		return cfg, nil, errors.New("epbs/runtime: private orderflow window must be within the preceding slot")
+	}
+	if cfg.BidDelay > 0 || cfg.PrivateOrderflowWindow > 0 {
+		if cfg.RetryInterval >= slotDuration {
+			return cfg, nil, errors.New("epbs/runtime: retry cadence must fit within the preceding slot")
+		}
+		remaining := slotDuration - cfg.RetryInterval
+		if cfg.PrivateOrderflowWindow >= remaining || cfg.BidDelay >= remaining-cfg.PrivateOrderflowWindow {
+			return cfg, nil, errors.New("epbs/runtime: bid delay, private orderflow window, and retry cadence must fit within the preceding slot")
+		}
 	}
 	if cfg.ShadowValueCurve {
-		shadowTail := 4*time.Second + cfg.RetryInterval
-		if cfg.BidDelay <= 0 || shadowTail >= slotDuration || cfg.BidDelay >= slotDuration-shadowTail {
+		const shadowOffset = 4 * time.Second
+		if cfg.BidDelay <= 0 || slotDuration <= shadowOffset || cfg.RetryInterval >= slotDuration-shadowOffset ||
+			cfg.BidDelay >= slotDuration-shadowOffset-cfg.RetryInterval {
 			return cfg, nil, errors.New("epbs/runtime: shadow value curve must fit within the preceding slot")
 		}
 	}

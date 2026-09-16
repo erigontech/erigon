@@ -51,6 +51,19 @@ type Pool struct {
 	order     []common.Hash
 	revision  uint64
 	buildSlot uint64
+	contexts  map[bundleContextKey]bundleContextState
+	snapshots chan struct{}
+}
+
+type bundleContextKey struct {
+	slot       uint64
+	parentHash common.Hash
+	generation uint64
+}
+
+type bundleContextState struct {
+	submitted uint64
+	observed  uint64
 }
 
 type Option func(*Pool)
@@ -68,7 +81,10 @@ func WithContextActive(active func(uint64, uint64) bool) Option {
 }
 
 func New(base txnprovider.TxnProvider, capacity int, opts ...Option) *Pool {
-	pool := &Pool{base: base, capacity: capacity, bundles: make(map[common.Hash]Bundle)}
+	pool := &Pool{
+		base: base, capacity: capacity, bundles: make(map[common.Hash]Bundle),
+		contexts: make(map[bundleContextKey]bundleContextState), snapshots: make(chan struct{}),
+	}
 	for _, opt := range opts {
 		opt(pool)
 	}
@@ -102,6 +118,8 @@ func (p *Pool) Submit(bundle Bundle) (common.Hash, error) {
 		}
 		p.bundles[id] = bundle
 		p.revision++
+		p.markSubmitted(bundle)
+		p.pruneContext(existing)
 		return id, nil
 	}
 	if p.capacity <= 0 {
@@ -113,7 +131,74 @@ func (p *Pool) Submit(bundle Bundle) (common.Hash, error) {
 	p.bundles[id] = bundle
 	p.order = append(p.order, id)
 	p.revision++
+	p.markSubmitted(bundle)
 	return id, nil
+}
+
+func (p *Pool) RebindGeneration(slot uint64, parentHash common.Hash, from, to uint64) {
+	if p == nil || from == 0 || to == 0 || from == to {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	changed := false
+	for id, bundle := range p.bundles {
+		if bundle.TargetSlot != slot || bundle.TargetParentHash != parentHash || bundle.TargetGeneration != from {
+			continue
+		}
+		bundle.TargetGeneration = to
+		p.bundles[id] = bundle
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	p.revision++
+	delete(p.contexts, bundleContextKey{slot: slot, parentHash: parentHash, generation: from})
+	key := bundleContextKey{slot: slot, parentHash: parentHash, generation: to}
+	state := p.contexts[key]
+	state.submitted = p.revision
+	state.observed = 0
+	p.contexts[key] = state
+	p.notifySnapshotChange()
+}
+
+// PinnedGenerations returns build generations that still own private bundles for a slot.
+func (p *Pool) PinnedGenerations(slot uint64) map[uint64]struct{} {
+	result := make(map[uint64]struct{})
+	if p == nil {
+		return result
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, bundle := range p.bundles {
+		if bundle.TargetSlot == slot && bundle.TargetGeneration != 0 {
+			result[bundle.TargetGeneration] = struct{}{}
+		}
+	}
+	return result
+}
+
+func contextKey(bundle Bundle) bundleContextKey {
+	return bundleContextKey{slot: bundle.TargetSlot, parentHash: bundle.TargetParentHash, generation: bundle.TargetGeneration}
+}
+
+func (p *Pool) markSubmitted(bundle Bundle) {
+	key := contextKey(bundle)
+	state := p.contexts[key]
+	state.submitted = p.revision
+	p.contexts[key] = state
+}
+
+func (p *Pool) pruneContext(removed Bundle) {
+	key := contextKey(removed)
+	for _, bundle := range p.bundles {
+		if contextKey(bundle) == key {
+			return
+		}
+	}
+	delete(p.contexts, key)
+	p.notifySnapshotChange()
 }
 
 func (p *Pool) evictBundleFor(incoming Bundle, buildSlot uint64) bool {
@@ -151,8 +236,10 @@ func (p *Pool) evictBundleFor(incoming Bundle, buildSlot uint64) bool {
 	if victimIndex < 0 {
 		return false
 	}
+	removed := p.bundles[p.order[victimIndex]]
 	delete(p.bundles, p.order[victimIndex])
 	p.order = append(p.order[:victimIndex], p.order[victimIndex+1:]...)
+	p.pruneContext(removed)
 	return true
 }
 
@@ -189,6 +276,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	result = capBatch(result, max(provideOpts.Amount, 0), protected, provideOpts.TxnIdsFilter)
 	txnprovider.ObserveTxnPolicies(ctx, selectedPolicies(result, bundles, provideOpts.IncludedTxnIds))
 	txnprovider.ObserveTxnRevision(ctx, combineRevisions(baseRevision, privateRevision))
+	txnprovider.ObserveTxnBatchRevision(ctx, privateRevision)
 	return result, nil
 }
 
@@ -220,6 +308,64 @@ func (p *Pool) snapshot(targetSlot uint64, targetParentHash common.Hash, targetG
 		}
 	}
 	return selected, p.revision
+}
+
+func (p *Pool) ObserveProcessedTxns(
+	targetSlot uint64,
+	targetParentHash common.Hash,
+	targetGeneration uint64,
+	revision uint64,
+) {
+	key := bundleContextKey{slot: targetSlot, parentHash: targetParentHash, generation: targetGeneration}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	state := p.contexts[key]
+	if state.submitted == 0 || revision <= state.observed {
+		return
+	}
+	state.observed = revision
+	p.contexts[key] = state
+	p.notifySnapshotChange()
+}
+
+func (p *Pool) notifySnapshotChange() {
+	close(p.snapshots)
+	p.snapshots = make(chan struct{})
+}
+
+func (p *Pool) WaitForProcessing(
+	ctx context.Context,
+	buildDone <-chan struct{},
+	targetSlot uint64,
+	targetParentHash common.Hash,
+	targetGeneration uint64,
+) error {
+	if p == nil {
+		return nil
+	}
+	key := bundleContextKey{slot: targetSlot, parentHash: targetParentHash, generation: targetGeneration}
+	for {
+		p.mu.RLock()
+		state := p.contexts[key]
+		changed := p.snapshots
+		p.mu.RUnlock()
+		if state.submitted == 0 || state.observed >= state.submitted {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-buildDone:
+			p.mu.RLock()
+			state = p.contexts[key]
+			p.mu.RUnlock()
+			if state.observed >= state.submitted {
+				return nil
+			}
+			return errors.New("private bundle payload builder completed before processing admitted transactions")
+		case <-changed:
+		}
+	}
 }
 
 func selectedPolicies(txns []types.Transaction, bundles []Bundle, includedTargets mapset.Set[[32]byte]) map[common.Hash]txnprovider.TransactionPolicy {

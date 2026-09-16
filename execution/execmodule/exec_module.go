@@ -193,22 +193,24 @@ type ExecModule struct {
 
 	logger log.Logger
 	// Block building
-	nextPayloadId        uint64
-	builderFunc          builder.BlockBuilderFunc
-	builders             map[uint64]*builderEntry
-	buildersByTimestamp  map[uint64]uint64
-	payloadTxnRevision   func(uint64, uint64) uint64
-	prepareBuildParams   func(*builder.Parameters) *builder.Parameters
-	transientBuilders    int
-	transientAdmission   chan struct{}
-	transientAdmissionMu sync.Mutex
-	transientDraining    bool
-	transientWaiters     int
-	transientDiscardMu   sync.Mutex
-	transientDiscards    map[uint64]struct{}
-	transientInFlight    atomic.Int64
-	transientLifecycle   sync.WaitGroup
-	transientPayloads    sync.Map
+	nextPayloadId         uint64
+	builderFunc           builder.BlockBuilderFunc
+	builders              map[uint64]*builderEntry
+	buildersByTimestamp   map[uint64]uint64
+	payloadTxnRevision    func(uint64, uint64) uint64
+	payloadTxnBarrier     func(context.Context, <-chan struct{}, uint64, common.Hash, uint64) error
+	prepareBuildParams    func(*builder.Parameters) *builder.Parameters
+	invalidateBuildParams func(*builder.Parameters)
+	transientBuilders     int
+	transientAdmission    chan struct{}
+	transientAdmissionMu  sync.Mutex
+	transientDraining     bool
+	transientWaiters      int
+	transientDiscardMu    sync.Mutex
+	transientDiscards     map[uint64]struct{}
+	transientInFlight     atomic.Int64
+	transientLifecycle    sync.WaitGroup
+	transientPayloads     sync.Map
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -271,10 +273,26 @@ func WithPayloadTransactionsRevision(revision func(timestamp, parentBlockNum uin
 	}
 }
 
+// WithPayloadTransactionsBarrier delays payload finalization until admitted transactions are processed.
+func WithPayloadTransactionsBarrier(
+	barrier func(context.Context, <-chan struct{}, uint64, common.Hash, uint64) error,
+) ExecModuleOption {
+	return func(e *ExecModule) {
+		e.payloadTxnBarrier = barrier
+	}
+}
+
 // WithBuildParametersPreparer transforms accepted production build parameters before deduplication.
 func WithBuildParametersPreparer(prepare func(*builder.Parameters) *builder.Parameters) ExecModuleOption {
 	return func(e *ExecModule) {
 		e.prepareBuildParams = prepare
+	}
+}
+
+// WithBuildParametersInvalidator clears admission for rejected production build parameters.
+func WithBuildParametersInvalidator(invalidate func(*builder.Parameters)) ExecModuleOption {
+	return func(e *ExecModule) {
+		e.invalidateBuildParams = invalidate
 	}
 }
 

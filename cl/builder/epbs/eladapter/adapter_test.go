@@ -35,6 +35,15 @@ type discardingBlockModule struct {
 	err       error
 }
 
+type invalidatingBlockModule struct {
+	assembledBlockModule
+	invalidated *builder.Parameters
+}
+
+func (m *invalidatingBlockModule) InvalidateBuildParameters(parameters *builder.Parameters) {
+	m.invalidated = parameters
+}
+
 func (m *discardingBlockModule) DiscardAssembledBlock(_ context.Context, payloadID uint64) error {
 	m.discarded = payloadID
 	return m.err
@@ -599,6 +608,13 @@ func TestAdapterDiscardsPayload(t *testing.T) {
 	unsupported := NewAdapter(assembledBlockModule{}, &clparams.MainnetBeaconConfig)
 	require.False(t, unsupported.CanDiscardPayload())
 	require.ErrorContains(t, unsupported.DiscardPayload(t.Context(), 1), "cannot discard")
+}
+
+func TestAdapterInvalidatesPayloadContext(t *testing.T) {
+	module := new(invalidatingBlockModule)
+	parameters := &builder.Parameters{ParentHash: common.Hash{0x42}}
+	NewAdapter(module, &clparams.MainnetBeaconConfig).InvalidatePayloadContext(parameters)
+	require.Same(t, parameters, module.invalidated)
 }
 
 func TestAdapterRejectsMissingDependencies(t *testing.T) {

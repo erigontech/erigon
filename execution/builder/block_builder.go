@@ -156,6 +156,14 @@ func (b *BlockBuilder) readResult() (*types.BlockWithReceipts, error) {
 	return b.result, b.err
 }
 
+// Done is closed when block construction finishes.
+func (b *BlockBuilder) Done() <-chan struct{} {
+	if b == nil {
+		return nil
+	}
+	return b.done
+}
+
 func (b *BlockBuilder) finished() bool {
 	select {
 	case <-b.done:

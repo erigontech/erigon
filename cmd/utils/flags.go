@@ -288,6 +288,11 @@ var (
 		Usage: "Delay after the preceding slot starts before the embedded builder begins its first build attempt",
 		Value: epbscfg.DefaultConfig().BidDelay,
 	}
+	EpbsBuilderPrivateOrderflowWindowFlag = cli.DurationFlag{
+		Name:  "builder.private-orderflow-window",
+		Usage: "Keep payload assembly open briefly for private bundles before finalizing the embedded builder bid",
+		Value: epbscfg.DefaultConfig().PrivateOrderflowWindow,
+	}
 	EpbsBuilderShadowValueCurveFlag = cli.BoolFlag{
 		Name:  "builder.shadow-value-curve",
 		Usage: "Measure non-publishing payloads two and four seconds after the embedded builder's first bid delay",
@@ -1891,6 +1896,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidDelay = ctx.Duration(EpbsBuilderBidDelayFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.PrivateOrderflowWindow = ctx.Duration(EpbsBuilderPrivateOrderflowWindowFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.ShadowValueCurve = ctx.Bool(EpbsBuilderShadowValueCurveFlag.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {

@@ -207,27 +207,37 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, policies, logger, filtration)
+		var batchRevision uint64
+		batchCtx := txnprovider.WithTxnBatchRevisionObserver(ctx, func(revision uint64) { batchRevision = revision })
+		txns, providerDrained, err := getNextTransactions(batchCtx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, policies, logger, filtration)
 		if err != nil {
 			return err
 		}
 
+		stop := false
 		if len(txns) > 0 {
-			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, requiresSuccess, dependency, interrupt, logPrefix, logger)
+			var logs []*types.Log
+			logs, stop, err = ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, requiresSuccess, dependency, interrupt, logPrefix, logger)
 			if err != nil {
 				return err
 			}
 			if !cfg.transientPayload {
 				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 			}
-			if stop {
-				break
+		}
+		waitForMore, interruptBreak := txnBatchWaitDecision(len(txns), amount, interrupt)
+		if cfg.targetSlot != nil && processedTxnBatchFrontier(providerDrained, stop || interruptBreak) {
+			if observer, ok := cfg.txnProvider.(txnprovider.ProcessedTxnObserver); ok {
+				observer.ObserveProcessedTxns(*cfg.targetSlot, cfg.targetParentHash, cfg.targetGeneration, batchRevision)
 			}
+		}
+		if stop {
+			break
 		}
 
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
-			if interrupt != nil && !interrupt.Load() {
+			if waitForMore {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
 				time.Sleep(50 * time.Millisecond)
@@ -299,6 +309,20 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	return nil
 }
 
+func processedTxnBatchFrontier(providerDrained, stop bool) bool {
+	return stop || providerDrained
+}
+
+func txnBatchWaitDecision(batchSize, amount int, interrupt *atomic.Bool) (waitForMore, terminal bool) {
+	if batchSize >= amount {
+		return false, false
+	}
+	if interrupt != nil && !interrupt.Load() {
+		return true, false
+	}
+	return false, true
+}
+
 func getNextTransactions(
 	ctx context0.Context,
 	cfg BuilderExecCfg,
@@ -313,7 +337,7 @@ func getNextTransactions(
 	policies map[common.Hash]txnprovider.TransactionPolicy,
 	logger log.Logger,
 	stats *filtrationStats,
-) ([]types.Transaction, error) {
+) ([]types.Transaction, bool, error) {
 	clear(policies)
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
@@ -351,13 +375,14 @@ func getNextTransactions(
 
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	providerDrained := len(allTxns) < amount
 
 	blockNum := executionAt + 1
 	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, policies, includedTxnIds, logger, stats)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
@@ -391,7 +416,7 @@ func getNextTransactions(
 		}
 	}
 
-	return txns, nil
+	return txns, providerDrained, nil
 }
 
 func successfulTxnIds(block *exec.AssembledBlock) mapset.Set[[32]byte] {

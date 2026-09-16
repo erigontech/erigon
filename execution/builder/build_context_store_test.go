@@ -13,6 +13,7 @@ import (
 	"math"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -130,14 +131,51 @@ func TestBuildContextStoreWrapKeepsChangedParentsAtSameSlot(t *testing.T) {
 	require.Equal(t, common.Hash{0x22}, resolved.ParentHash)
 	require.NotEqual(t, oldGeneration, newGeneration)
 	require.True(t, store.IsContextActive(slot, oldGeneration))
-	resolved, generation, ok := store.ResolveForParent(slot, common.Hash{0x11})
-	require.True(t, ok)
-	require.Equal(t, common.Hash{0x11}, resolved.ParentHash)
-	require.Equal(t, oldGeneration, generation)
-	resolved, generation, ok = store.ResolveForParent(slot, common.Hash{0x22})
+	require.False(t, store.IsContextCurrent(slot, oldGeneration))
+	_, _, ok = store.ResolveForParent(slot, common.Hash{0x11})
+	require.False(t, ok)
+	resolved, generation, ok := store.ResolveForParent(slot, common.Hash{0x22})
 	require.True(t, ok)
 	require.Equal(t, common.Hash{0x22}, resolved.ParentHash)
 	require.Equal(t, newGeneration, generation)
+	require.True(t, store.IsContextCurrent(slot, newGeneration))
+}
+
+func TestBuildContextStoreInvalidationDoesNotFallBackToStaleBeaconContext(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	parent := common.Hash{0x11}
+	root1 := common.Hash{0x21}
+	root2 := common.Hash{0x22}
+	first := &Parameters{
+		SlotNumber:               &slot,
+		ParentHash:               parent,
+		ParentBeaconBlockRoot:    &root1,
+		Timestamp:                math.MaxInt64,
+		ValidatedProposerContext: true,
+	}
+	prepared := store.Prepare(first)
+	_, firstGeneration, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	require.True(t, store.IsContextCurrent(slot, firstGeneration))
+
+	store.Invalidate(first)
+	_, _, ok = store.ResolveForParent(slot, parent)
+	require.False(t, ok)
+	require.True(t, store.IsContextActive(slot, firstGeneration))
+	require.False(t, store.IsContextCurrent(slot, firstGeneration))
+	require.ErrorContains(t, store.WithCurrent(slot, firstGeneration, func() error { return nil }), "no longer current")
+	require.NotZero(t, prepared.privateBundleGeneration)
+
+	second := first.Copy()
+	second.ParentBeaconBlockRoot = &root2
+	store.Prepare(second)
+	resolved, secondGeneration, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	require.Equal(t, root2, *resolved.ParentBeaconBlockRoot)
+	require.NotEqual(t, firstGeneration, secondGeneration)
+	require.True(t, store.IsContextCurrent(slot, secondGeneration))
+	require.False(t, store.IsContextCurrent(slot, firstGeneration))
 }
 
 func TestBuildContextStoreWrapDoesNotReactivateOlderSlot(t *testing.T) {
@@ -223,6 +261,153 @@ func TestBuildContextStoreWrapExpiresWithoutReplacement(t *testing.T) {
 	require.False(t, store.IsActive(slot))
 	require.False(t, store.IsContextActive(slot, retainedGeneration))
 	require.ErrorContains(t, store.WithActive(slot, retainedGeneration, func() error { return nil }), "no longer active")
+}
+
+func TestBuildContextStoreAdmissionWindowExtendsSubsecondTargetExpiry(t *testing.T) {
+	store := NewBuildContextStore(WithBuildContextAdmissionWindow(350 * time.Millisecond))
+	now := uint64(100)
+	store.now = func() uint64 { return now }
+	slot := uint64(42)
+	parent := common.Hash{0x44}
+	prepared := store.Prepare(&Parameters{
+		SlotNumber: &slot, ParentHash: parent, Timestamp: now, ValidatedProposerContext: true,
+	})
+	require.NotZero(t, prepared.privateBundleGeneration)
+	_, _, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+
+	now++
+	_, _, ok = store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+
+	now++
+	_, _, ok = store.ResolveForParent(slot, parent)
+	require.False(t, ok)
+}
+
+func TestBuildContextStoreInvalidatedRetryGetsFreshGeneration(t *testing.T) {
+	var reboundSlot, reboundFrom, reboundTo uint64
+	var reboundParent common.Hash
+	store := NewBuildContextStore(WithBuildContextGenerationRebinder(func(slot uint64, parent common.Hash, from, to uint64) {
+		reboundSlot, reboundParent, reboundFrom, reboundTo = slot, parent, from, to
+	}))
+	slot := uint64(42)
+	params := &Parameters{
+		SlotNumber: &slot, ParentHash: common.Hash{0x44}, Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+	}
+	first := store.Prepare(params)
+	require.NotZero(t, first.privateBundleGeneration)
+	store.Invalidate(first)
+
+	second := store.Prepare(params)
+	require.NotZero(t, second.privateBundleGeneration)
+	require.NotEqual(t, first.privateBundleGeneration, second.privateBundleGeneration)
+	require.Equal(t, slot, reboundSlot)
+	require.Equal(t, params.ParentHash, reboundParent)
+	require.Equal(t, first.privateBundleGeneration, reboundFrom)
+	require.Equal(t, second.privateBundleGeneration, reboundTo)
+}
+
+func TestBuildContextStoreInvalidatesSupersededExactGeneration(t *testing.T) {
+	store := NewBuildContextStore()
+	slot := uint64(42)
+	parent := common.Hash{0x44}
+	root1 := common.Hash{0x11}
+	root2 := common.Hash{0x22}
+	firstParams := &Parameters{
+		SlotNumber: &slot, ParentHash: parent, ParentBeaconBlockRoot: &root1,
+		Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+	}
+	first := store.Prepare(firstParams)
+	secondParams := firstParams.Copy()
+	secondParams.ParentBeaconBlockRoot = &root2
+	second := store.Prepare(secondParams)
+	require.NotEqual(t, first.privateBundleGeneration, second.privateBundleGeneration)
+
+	store.Invalidate(firstParams)
+	current, generation, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	require.Equal(t, root2, *current.ParentBeaconBlockRoot)
+	require.Equal(t, second.privateBundleGeneration, generation)
+
+	retry := store.Prepare(firstParams)
+	require.NotEqual(t, first.privateBundleGeneration, retry.privateBundleGeneration)
+	require.NotEqual(t, second.privateBundleGeneration, retry.privateBundleGeneration)
+}
+
+func TestBuildContextStoreRetainsInvalidatedGenerationWithAdmittedBundle(t *testing.T) {
+	pinned := make(map[uint64]bool)
+	var reboundFrom, reboundTo uint64
+	store := NewBuildContextStore(
+		WithBuildContextPinnedGenerations(func(uint64) map[uint64]struct{} {
+			result := make(map[uint64]struct{})
+			for generation, isPinned := range pinned {
+				if isPinned {
+					result[generation] = struct{}{}
+				}
+			}
+			return result
+		}),
+		WithBuildContextGenerationRebinder(func(_ uint64, _ common.Hash, from, to uint64) {
+			reboundFrom, reboundTo = from, to
+			pinned[from] = false
+			pinned[to] = true
+		}),
+	)
+	slot := uint64(42)
+	parent := common.Hash{0x44}
+	root := common.Hash{0x01}
+	params := &Parameters{
+		SlotNumber: &slot, ParentHash: parent, ParentBeaconBlockRoot: &root,
+		Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+	}
+	first := store.Prepare(params)
+	pinned[first.privateBundleGeneration] = true
+	store.Invalidate(first)
+
+	for i := range maxRetainedBuildContextsPerSlot - 1 {
+		other := params.Copy()
+		otherRoot := common.Hash{byte(i + 2)}
+		other.ParentBeaconBlockRoot = &otherRoot
+		prepared := store.Prepare(other)
+		pinned[prepared.privateBundleGeneration] = true
+	}
+	retry := store.Prepare(params)
+
+	require.Equal(t, first.privateBundleGeneration, reboundFrom)
+	require.Equal(t, retry.privateBundleGeneration, reboundTo)
+	require.NotEqual(t, first.privateBundleGeneration, retry.privateBundleGeneration)
+	require.True(t, store.IsContextCurrent(slot, retry.privateBundleGeneration))
+	_, currentGeneration, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	require.Equal(t, retry.privateBundleGeneration, currentGeneration)
+}
+
+func TestBuildContextStoreKeepsFreshGenerationWhenAllRetainedContextsArePinned(t *testing.T) {
+	pinned := make(map[uint64]struct{})
+	store := NewBuildContextStore(WithBuildContextPinnedGenerations(func(uint64) map[uint64]struct{} {
+		return pinned
+	}))
+	slot := uint64(42)
+	for i := range maxRetainedBuildContextsPerSlot {
+		root := common.Hash{byte(i + 1)}
+		prepared := store.Prepare(&Parameters{
+			SlotNumber: &slot, ParentHash: common.Hash{0x44}, ParentBeaconBlockRoot: &root,
+			Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+		})
+		pinned[prepared.privateBundleGeneration] = struct{}{}
+	}
+
+	freshRoot := common.Hash{0xff}
+	fresh := store.Prepare(&Parameters{
+		SlotNumber: &slot, ParentHash: common.Hash{0x44}, ParentBeaconBlockRoot: &freshRoot,
+		Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+	})
+
+	require.True(t, store.IsContextCurrent(slot, fresh.privateBundleGeneration))
+	_, generation, ok := store.ResolveForParent(slot, common.Hash{0x44})
+	require.True(t, ok)
+	require.Equal(t, fresh.privateBundleGeneration, generation)
 }
 
 func TestBuildContextStoreWrapBoundsSameSlotForks(t *testing.T) {

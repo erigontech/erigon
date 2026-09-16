@@ -89,6 +89,27 @@ type discardCoordinatorPublisher struct{}
 
 func (discardCoordinatorPublisher) Publish(context.Context, string, []byte) error { return nil }
 
+type admissionWindowAssembler struct {
+	payload               *eladapter.AssembledPayload
+	getStarted            chan struct{}
+	invalidated           chan *builder.Parameters
+	getBeforeInvalidation bool
+}
+
+func (a *admissionWindowAssembler) AssemblePayload(context.Context, *builder.Parameters) (uint64, error) {
+	return 1, nil
+}
+
+func (a *admissionWindowAssembler) GetPayload(context.Context, uint64) (*eladapter.AssembledPayload, error) {
+	a.getBeforeInvalidation = len(a.invalidated) == 0
+	close(a.getStarted)
+	return a.payload, nil
+}
+
+func (a *admissionWindowAssembler) InvalidatePayloadContext(parameters *builder.Parameters) {
+	a.invalidated <- parameters
+}
+
 func (p *coordinatorPublisher) Publish(_ context.Context, topic string, data []byte) error {
 	p.calls++
 	p.topic = topic
@@ -275,6 +296,55 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	_, ok, err = coordinator.Payload(identity)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestCoordinatorPrivateOrderflowWindowPrecedesPayloadFinalization(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembler := &admissionWindowAssembler{
+		payload:     validCoordinatorPayload(&config, input, big.NewInt(1_000_000_000)),
+		getStarted:  make(chan struct{}),
+		invalidated: make(chan *builder.Parameters, 1),
+	}
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 1},
+		assembler,
+		new(coordinatorPublisher),
+		1,
+	)
+	coordinator.privateOrderflowWindow = time.Second
+	waitStarted := make(chan struct{})
+	release := make(chan struct{})
+	coordinator.waitForPrivateOrderflow = func(ctx context.Context, _ time.Duration) error {
+		close(waitStarted)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := coordinator.RunSlot(t.Context(), input)
+		done <- err
+	}()
+	<-waitStarted
+	select {
+	case <-assembler.getStarted:
+		t.Fatal("payload finalized before the private-orderflow window closed")
+	default:
+	}
+	close(release)
+	require.NoError(t, <-done)
+	<-assembler.getStarted
+	invalidated := <-assembler.invalidated
+	require.False(t, assembler.getBeforeInvalidation)
+	require.Equal(t, input.Slot, *invalidated.SlotNumber)
+	require.Equal(t, input.ParentBlockHash, invalidated.ParentHash)
 }
 
 func TestCoordinatorReportsMeasuredZeroValuePayload(t *testing.T) {

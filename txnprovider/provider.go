@@ -44,12 +44,18 @@ type RevisionedTxnProvider interface {
 	TransactionSetRevision(blockTime, parentBlockNum uint64) uint64
 }
 
+// ProcessedTxnObserver records a provider snapshot after the builder has handled it.
+type ProcessedTxnObserver interface {
+	ObserveProcessedTxns(uint64, common.Hash, uint64, uint64)
+}
+
 type TransactionPolicy struct {
 	RequiresSuccess bool
 	Dependency      common.Hash
 }
 
 type txnRevisionObserverKey struct{}
+type txnBatchRevisionObserverKey struct{}
 type txnPolicyObserverKey struct{}
 
 // WithTxnRevisionObserver records the provider snapshot used by a block build.
@@ -63,6 +69,22 @@ func WithTxnRevisionObserver(ctx context.Context, observer func(uint64)) context
 // ObserveTxnRevision reports the transaction snapshot returned by a provider.
 func ObserveTxnRevision(ctx context.Context, revision uint64) {
 	observer, ok := ctx.Value(txnRevisionObserverKey{}).(func(uint64))
+	if ok {
+		observer(revision)
+	}
+}
+
+// WithTxnBatchRevisionObserver records the provider-specific snapshot returned for one batch.
+func WithTxnBatchRevisionObserver(ctx context.Context, observer func(uint64)) context.Context {
+	if observer == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, txnBatchRevisionObserverKey{}, observer)
+}
+
+// ObserveTxnBatchRevision reports the provider-specific snapshot returned for one batch.
+func ObserveTxnBatchRevision(ctx context.Context, revision uint64) {
+	observer, ok := ctx.Value(txnBatchRevisionObserverKey{}).(func(uint64))
 	if ok {
 		observer(revision)
 	}

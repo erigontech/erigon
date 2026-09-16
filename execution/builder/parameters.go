@@ -46,6 +46,14 @@ type Parameters struct {
 	ExtraData []byte
 }
 
+// PrivateBundleGeneration identifies the retained private-orderflow context.
+func (p *Parameters) PrivateBundleGeneration() uint64 {
+	if p == nil {
+		return 0
+	}
+	return p.privateBundleGeneration
+}
+
 // Copy returns parameters that share nothing mutable with the receiver, except CustomTxnProvider:
 // a provider is a live object and stays shared by reference. Reference-typed fields added to
 // Parameters have to be handled here; TestParametersCopyCoversEveryField fails if one is not.

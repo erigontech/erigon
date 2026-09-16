@@ -238,7 +238,7 @@ func TestActivePrivateBundleAdmissionChecksContextAndTargetAtSubmit(t *testing.T
 	})(t.Context(), &executionbuilder.Parameters{SlotNumber: &nextSlot, Timestamp: math.MaxInt64, ValidatedProposerContext: true}, nil)
 	require.NoError(t, err)
 	_, err = admission.Submit(t.Context(), bundle, simulation)
-	require.ErrorContains(t, err, "no longer active")
+	require.ErrorContains(t, err, "no longer current")
 	require.Equal(t, uint64(1), submitter.calls.Load())
 }
 
@@ -299,7 +299,34 @@ func TestActivePrivateBundleAdmissionDoesNotHoldStoreLockDuringTargetValidation(
 	}
 
 	close(validationRelease)
-	require.ErrorContains(t, <-admissionDone, "no longer active")
+	require.ErrorContains(t, <-admissionDone, "no longer current")
 	close(buildRelease)
 	<-buildDone
+}
+
+func TestActivePrivateBundleAdmissionRejectsFinalizedPayload(t *testing.T) {
+	store := executionbuilder.NewBuildContextStore()
+	slot := uint64(42)
+	parent := common.Hash{0x44}
+	params := store.Prepare(&executionbuilder.Parameters{
+		ParentHash: parent, SlotNumber: &slot, Timestamp: math.MaxInt64, ValidatedProposerContext: true,
+	})
+	_, generation, ok := store.ResolveForParent(slot, parent)
+	require.True(t, ok)
+	store.Invalidate(params)
+
+	admission := &activePrivateBundleAdmission{
+		submitter: new(recordingPrivateBundleSubmitter),
+		contexts:  store,
+		validator: privateBundleTargetValidatorFunc(func(context.Context, common.Hash, uint64, common.Hash, uint64) error {
+			return nil
+		}),
+	}
+	txn, _ := signedPrivateTransaction(t)
+	_, err := admission.Submit(t.Context(), privatepool.Bundle{
+		TargetHash: common.Hash{0x33}, Transaction: txn, TargetSlot: slot,
+	}, &PrivateBundleSimulationResult{
+		Success: true, ParentBlockHash: parent, contextGeneration: generation,
+	})
+	require.ErrorContains(t, err, "no longer current")
 }
