@@ -142,7 +142,7 @@ type logger struct {
 }
 
 func (l *logger) write(msg string, lvl Lvl, ctx []any) {
-	l.h.Log(&Record{
+	_ = l.h.Log(&Record{
 		Time: time.Now(),
 		Lvl:  lvl,
 		Msg:  msg,

@@ -131,7 +131,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, &parentNrOrHash, header, false, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -212,7 +212,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 			Index:     0,
 			Validator: 42,
 			Address:   withdrawalAddr,
-			Amount:    withdrawalGwei,
+			Amount:    hexutil.Uint64(withdrawalGwei),
 		})
 	})
 	require.NoError(t, err)
@@ -343,8 +343,8 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
-		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: hexutil.Uint64(wd1Gwei)})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: hexutil.Uint64(wd2Gwei)})
 	})
 	require.NoError(t, err)
 	err = m.InsertChain(generated)
@@ -390,7 +390,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: hexutil.Uint64(withdrawalGwei)})
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
@@ -408,8 +408,8 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 
-	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
-	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.U256)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.U256, got %T", wdDiff.Balance)
 	finalBal := balMap["+"]
 	require.NotNil(t, finalBal, "balance missing \"+\" key")
 
@@ -434,8 +434,8 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
-		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: hexutil.Uint64(wd1Gwei)})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: hexutil.Uint64(wd2Gwei)})
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
@@ -454,8 +454,8 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 
-	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
-	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.U256)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.U256, got %T", wdDiff.Balance)
 	finalBal := balMap["+"]
 	require.NotNil(t, finalBal, "balance missing \"+\" key")
 

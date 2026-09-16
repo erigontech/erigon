@@ -95,9 +95,9 @@ func (tt *TestCmd) Run(name string, args ...string) {
 // This method can also be called from an expect template, e.g.:
 //
 //	geth.expect(`Passphrase: {{.InputLine "password"}}`)
-func (tt *TestCmd) InputLine(s string) string {
-	io.WriteString(tt.stdin, s+"\n")
-	return ""
+func (tt *TestCmd) InputLine(s string) (string, error) {
+	_, err := io.WriteString(tt.stdin, s+"\n")
+	return "", err
 }
 
 func (tt *TestCmd) SetTemplateFunc(name string, fn any) {
@@ -144,7 +144,9 @@ func (tt *TestCmd) matchExactOutput(want []byte) error {
 		// Grab any additional buffered output in case of mismatch
 		// because it might help with debugging.
 		buf = append(buf, make([]byte, tt.stdout.Buffered())...) //nolint:makezero
-		tt.stdout.Read(buf[n:])
+		// Best-effort: this is only for the mismatch message below, so a read
+		// failure here shouldn't hide the actual assertion failure.
+		_, _ = tt.stdout.Read(buf[n:])
 		// Find the mismatch position.
 		for i := 0; i < n; i++ {
 			if want[i] != buf[i] {
@@ -253,7 +255,8 @@ func (tt *TestCmd) CloseStdin() {
 }
 
 func (tt *TestCmd) Kill() {
-	tt.cmd.Process.Kill()
+	// Best-effort: the process may have already exited on its own.
+	_ = tt.cmd.Process.Kill()
 	if tt.Cleanup != nil {
 		tt.Cleanup()
 	}

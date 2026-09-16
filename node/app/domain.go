@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding"
+	"encoding/binary"
 	"errors"
 	"maps"
+	"math/bits"
 	"reflect"
 	"strconv"
 	"strings"
@@ -29,7 +31,6 @@ import (
 	"unique"
 	"unsafe"
 
-	"github.com/erigontech/erigon/common/hton"
 	"github.com/erigontech/erigon/common/ntoh"
 )
 
@@ -181,10 +182,10 @@ func NewDomain[T comparable](features ...domainFeature) (Domain, error) {
 
 	// keep the underlying numeric value so that ids sort
 	// in numeric rather than alphabetic order
-	len := hton.UIntLen(nextDomainId)
-	idbuf := make([]byte, len+1)
-	hton.UInt(idbuf[1:], 0, nextDomainId)
-	idbuf[0] = byte(len)
+	var be [8]byte
+	binary.BigEndian.PutUint64(be[:], nextDomainId)
+	n := max(1, (bits.Len64(nextDomainId)+7)/8)
+	idbuf := append([]byte{byte(n)}, be[8-n:]...)
 	d, err := newDomain[T](asIdent(idbuf), nil, features...)
 
 	if err != nil {

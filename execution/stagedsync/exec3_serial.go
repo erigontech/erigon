@@ -18,6 +18,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -39,6 +41,10 @@ type serialExecutor struct {
 	blobGasUsed       uint64
 	worker            *exec.Worker
 
+	// commitProgress holds the most recent CommitProgress the trie reported,
+	// so the caller can log real commitment counters instead of a zero value.
+	commitProgress atomic.Pointer[commitment.CommitProgress]
+
 	// accumulator for the current block; set at StartChange and used by the
 	// block-end stateWriter so that AuRa system-call nonce changes are
 	// included in the txpool state-diff batch.
@@ -57,7 +63,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
-	se.resetWorkers(ctx, se.rs, se.applyTx)
+	if err := se.resetWorkers(ctx, se.rs, se.applyTx); err != nil {
+		return nil, rwTx, err
+	}
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -186,7 +194,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
-			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
+			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, se.onCommitProgress)
 			if traceBlk {
 				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
 			}
@@ -245,7 +253,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if !ok {
 				return b.HeaderNoCopy(), rwTx, nil
 			}
-			resetCommitmentGauges(ctx)
 			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
 			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(
@@ -279,6 +286,22 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
+}
+
+// onCommitProgress records the trie's counters for the round just finished.
+func (se *serialExecutor) onCommitProgress(p *commitment.CommitProgress) {
+	if p != nil {
+		se.commitProgress.Store(p)
+	}
+}
+
+// LastCommitProgress returns the most recent round's counters, or the zero
+// value if no round has completed.
+func (se *serialExecutor) LastCommitProgress() commitment.CommitProgress {
+	if p := se.commitProgress.Load(); p != nil {
+		return *p
+	}
+	return commitment.CommitProgress{}
 }
 
 func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
@@ -315,9 +338,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		}
 	}
 
-	se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
-
-	return nil
+	return se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
@@ -353,12 +374,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 		txTask.Engine = se.cfg.engine
 
 		result := se.worker.RunTxTask(txTask)
+		se.worker.PublishReadMetrics()
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
 				return result.Err
 			}
 			if result.Err != nil {
+				if result.Operational {
+					return fmt.Errorf("txnIdx=%d: %w", txTask.TxIndex, result.Err)
+				}
 				return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
@@ -406,6 +431,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return fmt.Errorf("can't finalize block %d: state read: %w", txTask.BlockNumber(), stateErr)
+				}
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
@@ -472,7 +500,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				se.onBlockStart(ctx, block)
 			}
 
-			if se.cfg.syncCfg.ChaosMonkey && se.enableChaosMonkey {
+			if se.randomConsensusChaosEnabled() {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")

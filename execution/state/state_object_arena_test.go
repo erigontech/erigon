@@ -288,32 +288,6 @@ func TestStateObjectArenaReleaseKeepsSlotOutOfPool(t *testing.T) {
 	require.Same(t, so, &a.slabs[0][0], "the slot stays owned by the arena")
 }
 
-// BenchmarkNoMaterializeTx models a parallel-exec transaction: reset, then read
-// the account fields of a set of distinct accounts.
-func BenchmarkNoMaterializeTx(b *testing.B) {
-	acc := accounts.NewAccount()
-	acc.Nonce = 3
-	acc.Balance.SetUint64(77)
-
-	addrs := make([]accounts.Address, 64)
-	for i := range addrs {
-		addrs[i] = accounts.InternAddress([20]byte{0xAB, byte(i), byte(i >> 8)})
-	}
-
-	ibs, vm := newNoMaterializeIBS(&anyAccountReader{acc: &acc})
-	defer ibs.Close()
-
-	b.ReportAllocs()
-	for b.Loop() {
-		startNoMaterializeTx(ibs, vm, 0)
-		for _, a := range addrs {
-			_, _ = ibs.GetBalance(a)
-			_, _ = ibs.GetNonce(a)
-			_, _ = ibs.GetCodeHash(a)
-		}
-	}
-}
-
 // TestStateObjectArenaResetCoversVaryingHighWater pins that a slot is clean on
 // hand-out even when transactions consume different numbers of slots: a slot is
 // reset by every generation that handed it out.

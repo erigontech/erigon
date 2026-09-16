@@ -33,11 +33,15 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -118,7 +122,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -218,7 +222,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -244,10 +248,10 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	db := mdbxtest.InMem(f, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context(), db)
+	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context())
 	require.NoError(err)
 	f.Cleanup(agg.Close)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(db)
 	require.NoError(err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(err)

@@ -245,7 +245,7 @@ func TestVerifyDelegationChain(t *testing.T) {
 	}
 
 	store := NewMemoryStore()
-	store.PutToken(context.Background(), aliceToBobCID, aliceToBob)
+	require.NoError(t, store.PutToken(context.Background(), aliceToBobCID, aliceToBob))
 
 	verifier := NewVerifier(NewStoreResolver(store), store, &mockSigner{})
 

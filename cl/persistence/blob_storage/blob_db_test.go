@@ -18,22 +18,130 @@ package blob_storage
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestVerifyBlobSidecarsGloasDoesNotRequireInclusionProof(t *testing.T) {
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	sidecar := cltypes.NewBlobSidecar(
+		0,
+		(*cltypes.Blob)(&blob),
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+
+	require.NoError(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.GloasVersion, nil))
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.FuluVersion, nil))
+
+	// Not checking the proof's contents does not make its shape optional: the reader always decodes
+	// a fixed-length vector, so a short one is unreadable once stored.
+	short := cltypes.NewBlobSidecar(
+		0,
+		(*cltypes.Blob)(&blob),
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		solid.NewHashVector(0),
+	)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil))
+}
+
+// Skipping the inclusion-proof check for Gloas must not also skip checking that the sidecar can be
+// encoded in the shape the reader expects: a short proof vector round-trips through the writer but
+// not the reader, so accepting one replaces readable data with a file nothing can decode.
+func TestVerifyAgainstIdentifiersRejectsAShortProofWithoutLosingStoredData(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}
+	blockRoot, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+
+	stored := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{stored}))
+	_, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "the fixture must start from readable data")
+
+	// What an explicit "kzg_commitment_inclusion_proof": [] decodes to.
+	short := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(0))
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: blockRoot, Index: 0})
+
+	_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a sidecar the reader cannot decode must be rejected before it is written")
+	require.Zero(t, inserted)
+
+	// A JSON null proof decodes to a nil interface rather than a short vector, so the shape check
+	// has to answer that without dereferencing it.
+	nilProof := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	nilProof.CommitmentInclusionProof = nil
+	_, inserted, err = VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a nil proof must be an error, not a panic")
+	require.Zero(t, inserted)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil))
+
+	sidecars, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "a rejected write must leave the existing sidecar readable")
+	require.Len(t, sidecars, 1)
+	require.Equal(t, stored.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
+}
+
+// A remote response can decode with the nested header absent, and the insert path reads through it
+// before validating anything, so the structural check has to come first.
+func TestVerifyAgainstIdentifiersRejectsAnIncompleteHeader(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
+
+	for _, tc := range []struct {
+		name    string
+		sidecar *cltypes.BlobSidecar
+	}{
+		{"nil signed block header", &cltypes.BlobSidecar{}},
+		{"nil header", &cltypes.BlobSidecar{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{tc.sidecar}, clparams.DenebVersion, nil)
+			require.Error(t, err)
+			require.Zero(t, inserted)
+		})
+	}
+}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -70,6 +178,161 @@ func TestBlobDB(t *testing.T) {
 	require.Equal(t, s2.KzgProof, sidecars[1].KzgProof)
 	require.Equal(t, s1.SignedBlockHeader, sidecars[0].SignedBlockHeader)
 	require.Equal(t, s2.SignedBlockHeader, sidecars[1].SignedBlockHeader)
+}
+
+func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	existingRoot := common.Hash{1}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), existingRoot, []*cltypes.BlobSidecar{testSidecar(100, 0, 1)}))
+
+	require.NoError(t, bs.PruneBelow(500))
+	require.NoError(t, bs.RemoveBlobSidecars(t.Context(), 100, existingRoot))
+	_, found, err := bs.ReadBlobSidecars(t.Context(), 100, existingRoot)
+	require.NoError(t, err)
+	require.False(t, found, "cleanup removes must still clear the stale commitment row below the write floor")
+
+	lateRoot := common.Hash{2}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), lateRoot, []*cltypes.BlobSidecar{testSidecar(499, 0, 2)}))
+	count, err := bs.KzgCommitmentsCount(t.Context(), lateRoot)
+	require.NoError(t, err)
+	require.Zero(t, count, "a rejected write must not publish a count without files")
+	_, found, err = bs.ReadBlobSidecars(t.Context(), 499, lateRoot)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	boundaryRoot := common.Hash{3}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), boundaryRoot, []*cltypes.BlobSidecar{testSidecar(500, 0, 3)}))
+	_, found, err = bs.ReadBlobSidecars(t.Context(), 500, boundaryRoot)
+	require.NoError(t, err)
+	require.True(t, found, "the floor itself remains writable")
+}
+
+type blockingBlobRemoveFs struct {
+	afero.Fs
+	path    string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *blockingBlobRemoveFs) Remove(path string) error {
+	if path == f.path {
+		f.once.Do(func() { close(f.entered) })
+		<-f.release
+	}
+	return f.Fs.Remove(path)
+}
+
+func TestBlobStoreWriterWaitingForSlotDoesNotBlockPrune(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	db := setupTestDB(t)
+	defer db.Close()
+	fs := &blockingBlobRemoveFs{
+		Fs:      afero.NewMemMapFs(),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	storage := NewBlobStore(db, fs)
+	bs := storage.(*BlobStore)
+	const slot = 2*subdivisionSlot + 1
+	oldRoot, lateRoot := common.Hash{1}, common.Hash{2}
+	releaseRemove := sync.OnceFunc(func() { close(fs.release) })
+	defer releaseRemove()
+
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), oldRoot, []*cltypes.BlobSidecar{testSidecar(slot, 0, 1)}))
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	_, fs.path = bs.path(slot, oldRoot, 0)
+
+	removeDone := make(chan error, 1)
+	go func() { removeDone <- storage.RemoveBlobSidecars(context.Background(), slot, oldRoot) }()
+	<-fs.entered
+
+	writerCtx, cancelWriter := context.WithCancel(t.Context())
+	t.Cleanup(cancelWriter)
+	writerStarted := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		close(writerStarted)
+		writerDone <- storage.WriteBlobSidecars(writerCtx, lateRoot, []*cltypes.BlobSidecar{testSidecar(slot, 0, 2)})
+	}()
+	<-writerStarted
+	runtime.Gosched()
+	select {
+	case err := <-writerDone:
+		t.Fatalf("writer completed instead of waiting for the remove-held slot lock: %v", err)
+	default:
+	}
+	cancelWriter()
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- storage.PruneBelow(slot + 1) }()
+	select {
+	case err := <-pruneDone:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("a writer waiting for a slot lock blocked prune-floor advancement")
+	}
+	select {
+	case err := <-removeDone:
+		t.Fatalf("remove completed before its filesystem gate was released: %v", err)
+	default:
+	}
+
+	releaseRemove()
+	require.NoError(t, <-removeDone)
+	require.NoError(t, <-writerDone)
+	count, err := storage.KzgCommitmentsCount(t.Context(), lateRoot)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	exists, err := storage.BlobSidecarExists(t.Context(), slot, lateRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestBlobStoreRejectsMixedSlotBatchAcrossPruneFloor(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	require.NoError(t, bs.PruneBelow(500))
+	root := common.Hash{1}
+
+	err := bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{
+		testSidecar(500, 0, 1),
+		testSidecar(499, 1, 2),
+	})
+	require.Error(t, err)
+	count, err := bs.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	for _, slot := range []uint64{499, 500} {
+		for index := range uint64(2) {
+			exists, err := bs.BlobSidecarExists(t.Context(), slot, root, index)
+			require.NoError(t, err)
+			require.False(t, exists)
+		}
+	}
+}
+
+func TestBlobStoreRejectsMissingHeadersBeforeMutation(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	root := common.Hash{1}
+
+	for _, sidecar := range []*cltypes.BlobSidecar{
+		nil,
+		{},
+		{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}},
+	} {
+		require.Error(t, bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	}
+	count, err := bs.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 type createOrderFs struct {
@@ -248,4 +511,16 @@ func TestBlobStoreEmptyBatchRecordsItsZeroRowWithoutLocking(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Empty(t, sidecars)
+}
+
+func TestKzgCommitmentsCountHonorsCanceledContext(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := bs.KzgCommitmentsCount(ctx, common.Hash{})
+	require.ErrorIs(t, err, context.Canceled)
 }

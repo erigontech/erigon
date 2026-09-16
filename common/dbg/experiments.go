@@ -38,7 +38,7 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
@@ -57,7 +57,7 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-	//state v3
+	// state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
@@ -70,7 +70,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
-	// allows to collect reading metrics for kv by file level
+	// allows to collect reading metrics for kv by file level. Read
+	// unsynchronised on every domain read, so it may only be written before any
+	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// allow simultaneous build of multiple snapshot types.
@@ -130,11 +132,17 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
+	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
+	// CommitmentAfterExec makes the exec loop wait for the commitment
+	// calculator to handle block N's result before starting N+1. Diagnostic:
+	// it trades the block-level exec/commitment overlap for most of the
+	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
+	// checkpoints) still run alongside exec.
+	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore                  = EnvBool("USE_CODE_STORE", true)
+	UseCodeStore                  = EnvBool("USE_CODE_STORE", false)
 	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead                     = EnvBool("READ_AHEAD", true)
@@ -149,9 +157,28 @@ var (
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
+	return max(gomaxprocs, 1)
+}
+
+func BALCommitmentWarmupReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(TrieBALWarmupers, 0)
+}
+
+func ReadAheadWorkerReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ReadAheadWorkers, 1)
+}
 
 func init() {
 	if PerfProfiles {
@@ -385,12 +412,14 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 	}
 }
 
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[unique.Handle[common.Address]]struct{}
-var traceAllDomains bool
-var tracedDomains map[uint16]struct{}
+var (
+	tracedBlocks    map[uint64]struct{}
+	traceAllBlocks  bool
+	tracedTxIndexes map[int64]struct{}
+	tracedAccounts  map[unique.Handle[common.Address]]struct{}
+	traceAllDomains bool
+	tracedDomains   map[uint16]struct{}
+)
 
 var traceInit sync.Once
 

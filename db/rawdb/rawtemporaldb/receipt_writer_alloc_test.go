@@ -122,25 +122,6 @@ func TestReceiptWriterAppendIsAllocationFree(t *testing.T) {
 	}
 }
 
-// BenchmarkPerTxReceiptWrite is what one applied transaction pays on the receipt
-// path: the storage encoding into RCacheDomain plus the three ReceiptDomain
-// counters.
-func BenchmarkPerTxReceiptWrite(b *testing.B) {
-	var w rawtemporaldb.ReceiptWriter
-	receipt := receiptFixture()
-	putter := &countingPutDel{}
-
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := w.Append(putter, receipt, 42); err != nil {
-			b.Fatal(err)
-		}
-		if err := w.AppendMetadata(putter, 7, receipt.CumulativeGasUsed, 131072, 42); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // receiptValueForTest is the value encoding, for assertions in tests.
 func receiptValueForTest(v uint64) []byte {
 	var buf [binary.MaxVarintLen64]byte

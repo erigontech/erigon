@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
@@ -38,15 +39,22 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -185,6 +193,355 @@ func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
 }
 
+// gasGuardCode succeeds only while more than 10000 gas remains, so its minimum
+// viable gas limit is far above the gas a single unconstrained trial reports.
+//
+//	GAS; PUSH2 10000; LT; PUSH1 9; JUMPI; INVALID; JUMPDEST; STOP
+var gasGuardCode = hexutil.Bytes(hexutil.MustDecode("0x5a61271010600957fe5b00"))
+
+// TestEstimateGasStateOverrideFundsSender verifies the balance recap reads the
+// overridden balance: a sender funded only by an override must not be rejected
+// nor capped to an unusable allowance.
+func TestEstimateGasStateOverrideFundsSender(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	balance := (*hexutil.U256)(uint256.NewInt(1e18))
+	args := &ethapi.CallArgs{
+		From:         &poor,
+		To:           &receiverAddr,
+		Value:        (*hexutil.U256)(uint256.NewInt(1)),
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}
+	overrides := &ethapi.StateOverrides{
+		accounts.InternAddress(poor): {Balance: &balance},
+	}
+
+	historical := rpc.BlockNumberOrHashWithNumber(4)
+	for _, at := range []*rpc.BlockNumberOrHash{nil, &historical} {
+		gas, err := api.EstimateGas(context.Background(), args, at, overrides, nil)
+		require.NoError(t, err)
+		require.Equal(t, hexutil.Uint64(params.TxGas), gas)
+	}
+}
+
+// TestEstimateGasStateOverrideCodeSkipsTransferShortcut verifies recipient code
+// supplied by an override keeps the estimate out of the codeless-transfer
+// shortcut, whose single trial at the ceiling would under-report the minimum.
+func TestEstimateGasStateOverrideCodeSkipsTransferShortcut(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	target := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	overrides := &ethapi.StateOverrides{
+		accounts.InternAddress(target): {Code: &gasGuardCode},
+	}
+
+	args := &ethapi.CallArgs{From: &bankAddr, To: &target}
+	historical := rpc.BlockNumberOrHashWithNumber(4)
+	for _, at := range []*rpc.BlockNumberOrHash{nil, &historical} {
+		gas, err := api.EstimateGas(context.Background(), args, at, overrides, nil)
+		require.NoError(t, err)
+		require.Greater(t, uint64(gas), params.TxGas+10_000)
+
+		// The estimate has to be usable: below the guard's threshold the code hits
+		// INVALID.
+		_, err = api.Call(context.Background(), ethapi.CallArgs{
+			From: &bankAddr,
+			To:   &target,
+			Gas:  &gas,
+		}, at, overrides, nil)
+		require.NoError(t, err)
+	}
+}
+
+func TestEstimateGasStateOverrideClearedCodeKeepsTransferShortcut(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	noCode := hexutil.Bytes{}
+	gas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(contractAddr): {Code: &noCode},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(params.TxGas), gas)
+}
+
+// TestEstimateGasStateOverrideAppliedToEveryTrial verifies every binary-search
+// trial starts from the same overridden state: writing a fresh slot costs 20000
+// only on clean state, so a write leaking from an earlier trial would let the
+// search settle below the true minimum.
+func TestEstimateGasStateOverrideAppliedToEveryTrial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	// PUSH1 1; PUSH1 0; SSTORE; STOP
+	sstoreCode := hexutil.Bytes(hexutil.MustDecode("0x600160005500"))
+	target := common.HexToAddress("0x00000000000000000000000000000000000000dd")
+
+	gas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &target,
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(target): {Code: &sstoreCode},
+	}, nil)
+	require.NoError(t, err)
+	require.Greater(t, uint64(gas), params.TxGas+20_000)
+}
+
+// TestEstimateGasStateOverrideLowersSenderBalance verifies the balance recap
+// also honours an override that takes funds away: the fundable allowance has to
+// cap the ceiling even when the committed balance would cover the call.
+func TestEstimateGasStateOverrideLowersSenderBalance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	const feePerGas = 1e9
+	const allowance = 25_000 // below what the contract call needs
+	callData := hexutil.Bytes(contractInvocationData(1))
+	args := &ethapi.CallArgs{
+		From:         &bankAddr,
+		To:           &contractAddr,
+		Data:         &callData,
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(feePerGas)),
+	}
+
+	// Sanity check: the committed balance funds the call.
+	_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+	require.NoError(t, err)
+
+	poorBalance := (*hexutil.U256)(uint256.NewInt(feePerGas * allowance))
+	_, err = api.EstimateGas(context.Background(), args, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(bankAddr): {Balance: &poorBalance},
+	}, nil)
+	require.EqualError(t, err, fmt.Sprintf("gas required exceeds allowance (%d)", allowance))
+}
+
+// TestEstimateGasStateOverrideErrorPrecedesFundsCheck verifies a rejected
+// override is reported as such instead of surfacing as a funds error from a
+// precheck that ran on the unmodified state.
+func TestEstimateGasStateOverrideErrorPrecedesFundsCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	notAPrecompile := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:         &poor,
+		To:           &receiverAddr,
+		Value:        (*hexutil.U256)(uint256.NewInt(1)),
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(notAPrecompile): {MovePrecompileTo: &moveTo},
+	}, nil)
+	require.ErrorContains(t, err, "is not a precompile")
+}
+
+// TestEstimateGasStateOverrideMovedPrecompile verifies the prechecks read a
+// state built with the precompile moves applied, without disturbing the
+// precompiles the trials execute against.
+func TestEstimateGasStateOverrideMovedPrecompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	ecrecover := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	input := hexutil.Bytes(make([]byte, 128))
+
+	gas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &moveTo,
+		Data: &input,
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(ecrecover): {MovePrecompileTo: &moveTo},
+	}, nil)
+	require.NoError(t, err)
+	require.Greater(t, uint64(gas), params.TxGas+params.EcrecoverGas)
+}
+
+// TestEstimateGasCallDataFieldDoesNotChangeEstimate verifies that the same
+// calldata estimates the same whether it arrives as "input" or as "data".
+// Input wins in ToMessage, so keying the plain-transfer shortcut on args.Data
+// alone lets the field the caller picked decide which estimation path runs.
+func TestEstimateGasCallDataFieldDoesNotChangeEstimate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	codeless := common.HexToAddress("0x00000000000000000000000000000000000000f1")
+	payload := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef, 0x00, 0x00}
+
+	viaInput, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr, To: &codeless, Input: &payload,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+
+	viaData, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr, To: &codeless, Data: &payload,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, viaData, viaInput)
+}
+
+// TestEstimateGasZeroFundableAllowance verifies that a sender whose funds cover
+// the transfer but not a single unit of gas is told so, instead of being
+// estimated at the gas cap: the balance recap caps the ceiling to zero, and the
+// trial has to honour it.
+func TestEstimateGasZeroFundableAllowance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	dust := (*hexutil.U256)(uint256.NewInt(1000))
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:         &poor,
+		To:           &receiverAddr,
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(poor): {Balance: &dust},
+	}, nil)
+	require.EqualError(t, err, "gas required exceeds allowance (0)")
+}
+
+// TestEstimateGasMissingValueCountsAsZero verifies that a request without a
+// "value" field is checked against the sender's funds all the same: ToMessage
+// resolves a missing value to zero, and the recap has to see the resolved one.
+func TestEstimateGasMissingValueCountsAsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	broke := common.HexToAddress("0x00000000000000000000000000000000000000ac")
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:         &broke,
+		To:           &receiverAddr,
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}, nil, nil, nil)
+	require.EqualError(t, err, "insufficient funds for transfer")
+}
+
+// TestEstimateGasBlobFeeChargedBeforeAllowance verifies the balance recap pays
+// for the blobs before dividing what is left by the gas fee cap.
+func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.TestChainOsakaConfig)
+	api := newTestEthAPIWithFilters(t, m)
+
+	const feePerGas = 1e9
+	const allowance = 25_000 // below what the contract call needs
+	blobFee := new(uint256.Int).Mul(uint256.NewInt(feePerGas), uint256.NewInt(params.GasPerBlob))
+
+	for _, tc := range []struct {
+		name    string
+		balance *uint256.Int
+		wantErr string
+	}{
+		{
+			name:    "funds left over cap the allowance",
+			balance: new(uint256.Int).Add(blobFee, uint256.NewInt(feePerGas*allowance)),
+			wantErr: fmt.Sprintf("gas required exceeds allowance (%d)", allowance),
+		},
+		{
+			name:    "funds swallowed by the blobs leave nothing",
+			balance: blobFee,
+			wantErr: protocol.ErrInsufficientFunds.Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			callData := hexutil.Bytes(contractInvocationData(1))
+			balance := (*hexutil.U256)(tc.balance)
+			_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+				From:                &bankAddr,
+				To:                  &contractAddr,
+				Data:                &callData,
+				MaxFeePerGas:        (*hexutil.U256)(uint256.NewInt(feePerGas)),
+				MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(feePerGas)),
+				BlobVersionedHashes: []common.Hash{{1}},
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(bankAddr): {Balance: &balance},
+			}, nil)
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
+}
+
+// TestCallBlobBaseFee verifies BLOBBASEFEE is zeroed exactly when the caller
+// named blob fields without pricing them, the way BASEFEE is zeroed for a call
+// with no gas price. The test chain sits at the 1 wei minimum blob gas price.
+func TestCallBlobBaseFee(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.TestChainOsakaConfig)
+	api := newTestEthAPIWithFilters(t, m)
+
+	const zeroWord = "0x0000000000000000000000000000000000000000000000000000000000000000"
+	const oneWord = "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+	for _, tc := range []struct {
+		name   string
+		feeCap *hexutil.U256
+		hashes []common.Hash
+		want   string
+	}{
+		{"blob hashes, no fee cap", nil, []common.Hash{{1}}, zeroWord},
+		{"blob hashes, priced", (*hexutil.U256)(uint256.NewInt(1e9)), []common.Hash{{1}}, oneWord},
+		{"zero fee cap, no hashes", (*hexutil.U256)(new(uint256.Int)), nil, zeroWord},
+		{"no blob fields", nil, nil, oneWord},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(runtimeReturningOpcode(opBlobbasefee))
+			result, err := api.Call(context.Background(), ethapi.CallArgs{
+				From:                &bankAddr,
+				To:                  &contractAddr,
+				MaxFeePerBlobGas:    tc.feeCap,
+				BlobVersionedHashes: tc.hashes,
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &code},
+			}, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, result.String())
+		})
+	}
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -240,6 +597,30 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
+}
+
+func TestStateCallMethodsRejectPendingTag(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	api := newEthApiForTest(base, m.DB, stubTxPoolClient{}, nil)
+	graphqlAPI := NewGraphQLAPI(base, m.DB, api, stubTxPoolClient{}, &rpccfg.GraphQLApiConfig{})
+	ctx := context.Background()
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	t.Run("eth_call", func(t *testing.T) {
+		_, err := api.Call(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("eth_createAccessList", func(t *testing.T) {
+		_, err := api.CreateAccessList(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("graphql_call", func(t *testing.T) {
+		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
 }
 
 // TestCreateAccessListTracesStorage covers a target that touches storage, which is
@@ -592,6 +973,123 @@ func TestGetProof(t *testing.T) {
 	}
 }
 
+type missingHeaderBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return nil, nil
+}
+
+func TestGetProofMissingHeader(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	base._blockReader = missingHeaderBlockReader{FullBlockReader: base._blockReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	proof, err := api.GetProof(
+		context.Background(),
+		bankAddr,
+		nil,
+		bnhPtr(rpc.BlockNumberOrHashWithNumber(6)),
+	)
+	require.EqualError(t, err, "header not found for block 6")
+	require.Nil(t, proof)
+}
+
+func TestGetProofPinsReadSnapshot(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	publishedDomains, err := execctx.NewSharedDomains(m.Ctx, roTx, m.Log)
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+
+	storageKey := common.Hash{}
+	compositeKey := make([]byte, 0, len(contractAddress)+len(storageKey))
+	compositeKey = append(compositeKey, contractAddress[:]...)
+	compositeKey = append(compositeKey, storageKey[:]...)
+	require.NoError(t, publishedDomains.DomainPut(kv.StorageDomain, roTx, compositeKey, []byte{3}, 1, nil))
+
+	stateCache := &execmodule.Cache{}
+	stateCache.SetPublishedSD(func() *execctx.SharedDomains { return publishedDomains })
+	base := newBaseApiForTest(m)
+	base.stateCache = stateCache
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
+		6,
+		true,
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
+}
+
+func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	branchCache := provider.BranchCache()
+	require.NotNil(t, branchCache)
+	branchCache.Clear()
+	t.Cleanup(branchCache.Clear)
+
+	rootKey := nibbles.HexToCompact(nil)
+	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
+	require.NoError(t, err)
+	newerRootBranch := make(commitment.BranchData, 4)
+	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
+	cachedRootBranch, _, ok := branchCache.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte(newerRootBranch), cachedRootBranch)
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	storageKey := common.Hash{}
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
+		6,
+		true,
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
+}
+
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
@@ -622,6 +1120,199 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	require.Nil(t, proof)
 }
 
+// TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
+// with geth for keys of at most 32 bytes: a shorter key comes back canonicalized, a
+// full 32-byte key comes back verbatim.
+func TestGetProofStorageKeyEncoding(t *testing.T) {
+	t.Parallel()
+
+	hashSizedKey := "0x00000000000000000000000000000000000000000000000000000000deadbeef"
+	tests := []struct {
+		name string
+		key  []byte
+		want string
+	}{
+		{"single byte", []byte{0x0a}, "0xa"},
+		{"leading zero byte dropped", []byte{0x00, 0xde, 0xad}, "0xdead"},
+		{"no leading zeros", []byte{0xde, 0xad, 0xbe, 0xef}, "0xdeadbeef"},
+		{"zero", []byte{0x00}, "0x0"},
+		{"hash sized key kept verbatim", hexutil.FromHex(hashSizedKey), hashSizedKey},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			info := StorageKeysInfo{KeyLength: len(tt.key)}
+			info.Hash.SetBytes(tt.key)
+			require.Equal(t, tt.want, info.EncodeKey())
+		})
+	}
+}
+
+// TestGetProofRequestShapes covers the shapes eth_getProof must honour: the account
+// fields for each account shape, the block parameter forms execution-apis allows, and
+// the storage-key list rules.
+func TestGetProofRequestShapes(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
+
+	key := func(b byte) hexutil.Bytes {
+		k := common.Hash{}
+		k[31] = b
+		return k[:]
+	}
+
+	headProof, err := api.GetProof(ctx, bankAddr, nil, head)
+	require.NoError(t, err)
+
+	// Block 3, not the head: blocks 4 to 6 are empty, so a by-hash lookup that regressed
+	// to resolving "latest" would still match a head-block proof.
+	var midHash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		midHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
+		return err
+	}))
+	midProof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(3)))
+	require.NoError(t, err)
+
+	// An account with an empty storage trie answers a key request with an empty proof
+	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
+	t.Run("eoa", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{key(0)}, head)
+		require.NoError(t, err)
+		require.Equal(t, bankAddr, proof.Address)
+		require.Equal(t, empty.CodeHash, proof.CodeHash)
+		require.Equal(t, empty.RootHash, proof.StorageHash)
+		require.False(t, (*uint256.Int)(proof.Balance).IsZero())
+		require.NotEmpty(t, proof.AccountProof)
+		require.Len(t, proof.StorageProof, 1)
+		require.Empty(t, proof.StorageProof[0].Proof)
+		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+	})
+
+	t.Run("contract", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, contractAddr, nil, head)
+		require.NoError(t, err)
+		require.Equal(t, contractAddr, proof.Address)
+		require.NotEqual(t, empty.CodeHash, proof.CodeHash)
+		require.NotEqual(t, empty.RootHash, proof.StorageHash)
+		require.Equal(t, hexutil.Uint64(1), proof.Nonce)
+	})
+
+	t.Run("no account", func(t *testing.T) {
+		missing := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		proof, err := api.GetProof(ctx, missing, []hexutil.Bytes{key(0)}, head)
+		require.NoError(t, err)
+		require.Equal(t, missing, proof.Address)
+		require.Equal(t, hexutil.Uint64(0), proof.Nonce)
+		require.True(t, (*uint256.Int)(proof.Balance).IsZero())
+		require.Equal(t, common.Hash{}, proof.CodeHash)
+		require.Equal(t, common.Hash{}, proof.StorageHash)
+		require.NotEmpty(t, proof.AccountProof, "a missing account still needs an exclusion proof")
+		require.Len(t, proof.StorageProof, 1)
+		require.Empty(t, proof.StorageProof[0].Proof)
+		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+	})
+
+	t.Run("omitted block defaults to latest", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, headProof.AccountProof, proof.AccountProof)
+	})
+
+	t.Run("by canonical hash", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(midHash, true)))
+		require.NoError(t, err)
+		require.Equal(t, midProof.AccountProof, proof.AccountProof)
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof, "a block hash must not resolve to latest")
+	})
+
+	t.Run("earliest tag is genesis", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)))
+		require.NoError(t, err)
+		require.Equal(t, hexutil.Uint64(0), proof.Nonce, "the bank has sent no transaction at genesis")
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof)
+	})
+
+	t.Run("pending is rejected", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)))
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+		require.Nil(t, proof)
+	})
+
+	t.Run("unknown block", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(999_999)))
+		var notFound rpc.BlockNotFoundErr
+		require.ErrorAs(t, err, &notFound)
+		require.Nil(t, proof)
+	})
+
+	t.Run("too many keys", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, contractAddr, make([]hexutil.Bytes, maxGetProofKeys+1), head)
+		require.Nil(t, proof)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
+	})
+
+	t.Run("key longer than 32 bytes is rejected", func(t *testing.T) {
+		// Not first: a guard that only checked storageKeys[0] would pass this request.
+		proof, err := api.GetProof(ctx, contractAddr, []hexutil.Bytes{key(4), make(hexutil.Bytes, 33)}, head)
+		require.Nil(t, proof)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
+	})
+
+	t.Run("duplicate keys each get a proof, in request order", func(t *testing.T) {
+		keys := []hexutil.Bytes{key(4), key(0), key(4)}
+		proof, err := api.GetProof(ctx, contractAddr, keys, head)
+		require.NoError(t, err)
+		require.Len(t, proof.StorageProof, len(keys))
+		for i, k := range keys {
+			require.Equal(t, hexutil.Encode(k), proof.StorageProof[i].Key)
+		}
+		require.Equal(t, proof.StorageProof[0], proof.StorageProof[2])
+	})
+}
+
+// TestGetProofJSONShape pins the wire format the execution-apis fixtures require: an
+// empty storage-key list serializes as an array rather than null, and a short key is
+// echoed minimized next to a zero value.
+func TestGetProofJSONShape(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
+
+	t.Run("no keys serializes as an empty array", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[]`)
+	})
+
+	t.Run("short key echoes minimized", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{{0x00}}, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[{"key":"0x0","value":"0x0","proof":[]}]`)
+	})
+}
+
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -632,21 +1323,16 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
@@ -660,21 +1346,16 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+	if rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
@@ -688,21 +1369,16 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()+999999999999), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimeMiddle(t *testing.T) {
@@ -722,20 +1398,15 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	middleBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(middleBlock, true, false)
+	if rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Time()), false)
 	require.NoError(t, err)
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 func TestGetBlockByTimestamp(t *testing.T) {
@@ -750,21 +1421,16 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	require.NoError(t, err)
 	require.NotNil(t, pickedBlock)
-	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
-	require.NoError(t, err)
-
-	if err == nil && rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(pickedBlock, true, false)
+	if rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Time()), false)
 	require.NoError(t, err)
 
-	require.Equal(t, response["timestamp"], block["timestamp"])
-	require.Equal(t, response["hash"], block["hash"])
+	require.Equal(t, response.Timestamp, block.Timestamp)
+	require.Equal(t, response.Hash, block.Hash)
 }
 
 // contractHexString is the output of compiling the following solidity contract:
@@ -1127,5 +1793,243 @@ func TestOptimizeWarmAddrAndAdjustGas(t *testing.T) {
 		optimizeWarmAddrAndAdjustGas(res, addr)
 		require.Empty(t, *res.Accesslist)
 		require.Equal(t, hexutil.Uint64(100), res.GasUsed) // 100 < 2400, no underflow
+	})
+}
+
+func TestBlockOrLatest(t *testing.T) {
+	number := rpc.BlockNumberOrHashWithNumber(5)
+	hash := rpc.BlockNumberOrHashWithHash(common.Hash{0x01}, true)
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	for _, tc := range []struct {
+		name string
+		arg  *rpc.BlockNumberOrHash
+		want rpc.BlockNumberOrHash
+	}{
+		{name: "omitted defaults to latest", arg: nil, want: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)},
+		{name: "number is kept", arg: &number, want: number},
+		{name: "hash keeps requireCanonical", arg: &hash, want: hash},
+		{name: "pending is left to the caller to reject", arg: &pending, want: pending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, blockOrLatest(tc.arg))
+		})
+	}
+}
+
+// TestCallRejectsMalformedBlobArgs pins that eth_call applies the EIP-4844
+// structural rules to caller-supplied blobVersionedHashes. Typed transactions
+// are checked when decoded; a Message built from CallArgs never is.
+func TestCallRejectsMalformedBlobArgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	callData := hexutil.Bytes(contractInvocationData(1))
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{validHash},
+		}, nil, nil, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("wrong version byte is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{{0x02}},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnInvalidVersionedHash)
+	})
+
+	t.Run("empty blob hash list is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+	})
+
+	t.Run("blob contract creation is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{validHash},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrNilToFieldTx)
+	})
+}
+
+// TestCallRejectsAccessListBeforeBerlin covers the JSON-RPC conversion path:
+// CallArgs.ToMessage builds a Message without the per-type AsMessage gate, so
+// an EIP-2930 access list would otherwise be accepted before Berlin.
+func TestCallRejectsAccessListBeforeBerlin(t *testing.T) {
+	preBerlin := chain.TestChainBerlinConfig.Copy()
+	preBerlin.BerlinBlock = nil
+
+	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	accessList := types.AccessList{{
+		Address:     common.HexToAddress("0x4444444444444444444444444444444444444444"),
+		StorageKeys: []common.Hash{{0x01}},
+	}}
+
+	call := func(t *testing.T, cfg *chain.Config, al *types.AccessList) error {
+		t.Helper()
+		m, _, bankAddr := fundedBankGenesis(t, cfg)
+		api := newTestEthAPIWithFilters(t, m)
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:       &bankAddr,
+			To:         &recipient,
+			AccessList: al,
+		}, nil, nil, nil)
+		return err
+	}
+
+	t.Run("access list before Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preBerlin, &accessList), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("empty but present access list before Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preBerlin, &types.AccessList{}), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("absent access list before Berlin is accepted", func(t *testing.T) {
+		require.NoError(t, call(t, preBerlin, nil))
+	})
+
+	t.Run("access list from Berlin on is accepted", func(t *testing.T) {
+		require.NoError(t, call(t, chain.TestChainBerlinConfig, &accessList))
+	})
+}
+
+// TestCallRejectsBlobHashesBeforeCancun is the blob counterpart: blobVersionedHashes
+// supplied through CallArgs never reach BlobTx.AsMessage, which is what normally
+// gates EIP-4844 on Cancun.
+func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
+	preCancun := chain.TestChainOsakaConfig.Copy()
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+
+	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash) error {
+		t.Helper()
+		m, _, bankAddr := fundedBankGenesis(t, cfg)
+		api := newTestEthAPIWithFilters(t, m)
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &recipient,
+			BlobVersionedHashes: hashes,
+		}, nil, nil, nil)
+		return err
+	}
+
+	t.Run("blob hashes before Cancun are rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("empty but present blob hash list before Cancun is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{}), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("absent blob hashes before Cancun are accepted", func(t *testing.T) {
+		require.NoError(t, call(t, preCancun, nil))
+	})
+
+	t.Run("blob hashes from Cancun on are accepted", func(t *testing.T) {
+		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}))
+	})
+}
+
+// TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
+// pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
+// meaningful concept there, regardless of whether the caller supplied one or
+// the call would otherwise touch storage.
+func TestCreateAccessListPreBerlin(t *testing.T) {
+	preBerlin := chain.TestChainBerlinConfig.Copy()
+	preBerlin.BerlinBlock = nil
+
+	t.Run("plain transfer rejects pre-Berlin", func(t *testing.T) {
+		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
+		_ = bankKey
+		api := newTestEthAPIWithFilters(t, m)
+		recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddr,
+			To:   &recipient,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("contract call rejects pre-Berlin", func(t *testing.T) {
+		m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, preBerlin)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+		data := hexutil.Bytes(contractInvocationData(42))
+
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddress,
+			To:   &contractAddress,
+			Data: &data,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("caller-supplied seed access list rejects pre-Berlin", func(t *testing.T) {
+		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
+		_ = bankKey
+		api := newTestEthAPIWithFilters(t, m)
+		recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+		seed := types.AccessList{{Address: common.HexToAddress("0x4444444444444444444444444444444444444444")}}
+
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:       &bankAddr,
+			To:         &recipient,
+			AccessList: &seed,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("eth_call with an explicit access list rejects pre-Berlin", func(t *testing.T) {
+		m, bankKey, bankAddr := fundedBankGenesis(t, preBerlin)
+		_ = bankKey
+		api := newTestEthAPIWithFilters(t, m)
+		recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+		al := types.AccessList{{Address: common.HexToAddress("0x4444444444444444444444444444444444444444")}}
+
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:       &bankAddr,
+			To:         &recipient,
+			AccessList: &al,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("access list from Berlin on still converges", func(t *testing.T) {
+		m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.TestChainBerlinConfig)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+		data := hexutil.Bytes(contractInvocationData(42))
+
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddress,
+			To:   &contractAddress,
+			Data: &data,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
 }

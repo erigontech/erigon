@@ -1612,7 +1612,7 @@ func TestTxLookupUnwind(t *testing.T) {
 func newTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, 16)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(16))
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)

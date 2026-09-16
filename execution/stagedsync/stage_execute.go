@@ -301,7 +301,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				switch {
-				case entry.Value != nil && len(entry.Value) > 0:
+				case len(entry.Value) > 0:
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
@@ -457,10 +457,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
 
-	// Stage progress: target the SharedDomains overlay (not replaced during exec)
-	// when present, else the live post-exec applyTx (parallel exec may have rolled
-	// the passed-in rwTx via Flush/CommitAndBegin).
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
+	// Write stage progress to the SharedDomains overlay when present; otherwise
+	// use the caller-owned stage transaction, which parallel execution preserves.
+	if execErr == nil && out.verdict == nil && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -470,40 +469,34 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+	return renderExecOutcome(execErr, out, cfg, s, u, logger)
 }
 
-// unwindOnExecError decides the unwind after parallel exec reports an invalid
-// block. A non-initial-cycle wrong trie root routes to handleIncorrectRootHashError,
-// which schedules the unwind on u (binary-search from out.failedBlock/Hash). An
-// initial-cycle wrong root is fatal (no fork to recover from) and returns execErr.
-// Any other invalid block also returns execErr WITHOUT setting a stage unwind
-// point — the staged-sync loop that detects ErrInvalidBlock owns that unwind;
-// setting one here would leave a stale bad-block verdict that blocks a fresh
-// canonical block at the same height on the next fork-choice. Under badBlockHalt
-// (in-memory fork validation) or a non-invalid error it unwinds nothing and
-// returns execErr for the caller to propagate.
-func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
-	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
+// renderExecOutcome maps executor outcomes to the stage's error and unwind contract.
+func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if execErr != nil {
 		return execErr
 	}
 
-	if errors.Is(execErr, ErrWrongTrieRoot) {
-		// Initial sync has no competing fork to recover from, so a wrong trie root
-		// is fatal — the recovery handler would schedule an unwind (or none, when
-		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the
-		// state-root mismatch. Only a non-initial-cycle reorg routes to recovery.
-		if s.CurrentSyncCycle.IsInitialCycle {
-			return execErr
+	if v := out.verdict; v != nil {
+		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			// Initial sync has no competing fork to recover from, so a wrong root
+			// must propagate as a fatal error. The recovery handler can return nil
+			// even without scheduling an unwind, which would hide the mismatch.
+			if !s.CurrentSyncCycle.IsInitialCycle {
+				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+			}
 		}
-		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
+		// The caller owns recovery for invalid-block verdicts other than wrong roots.
+		// Setting a stage unwind point here could leave a stale bad-block reason
+		// that is reported again during a later sync cycle.
+		return v.err
 	}
 
-	// A plain invalid block propagates the error without setting a stage unwind
-	// point — the caller owns the unwind. Setting one here would leave a stale
-	// bad-block verdict that blocks a fresh canonical block at the same height
-	// from being re-executed on the next fork-choice.
-	return execErr
+	if out.exhausted != nil {
+		return out.exhausted
+	}
+	return nil
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and
@@ -606,14 +599,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
-	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
-		}
-	}
+	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+	stagePruneTimeout := min(baseTimeout+extra, maxTimeout)
 	if timeout > 0 && timeout > stagePruneTimeout {
 		stagePruneTimeout = timeout
 	}
@@ -642,12 +629,13 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
+	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag).
 	// Without the guard, the flag still controls *generation* but every
 	// generated changeset is pruned 96 blocks later, defeating the point.
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
@@ -655,7 +643,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 			if err := rawdb.PruneTable(
 				tx,
 				kv.ChangeSets3,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				blockPruneTo,
 				ctx,
 				pruneDiffsLimit,
 				pruneChangeSetsTimeout,
@@ -675,20 +663,18 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		}
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			if err := rawdb.PruneTable(
-				tx,
-				kv.BlockAccessList,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-				ctx,
-				pruneBalLimit,
-				pruneTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			blockPruneTo,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 

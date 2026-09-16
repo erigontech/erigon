@@ -63,7 +63,11 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
-	created, err := s.write(slot, blockRoot, uint64(columnIndex), columnData)
+	if !s.startWrite(slot) {
+		return nil
+	}
+	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
+	s.finishWrite()
 	if err != nil {
 		return err
 	}

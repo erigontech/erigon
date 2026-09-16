@@ -70,15 +70,38 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 	// An empty batch writes no file, so it has no slot to lock on; it still records a
 	// zero count row, which is what tells "this block has no blobs" from "unknown".
 	if len(blobSidecars) > 0 {
-		lock := bs.forSlot(blobSidecars[0].SignedBlockHeader.Header.Slot)
-		lock.Lock()
-		for _, blobSidecar := range blobSidecars {
-			if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
-				lock.Unlock()
-				return err
+		var slot uint64
+		for index, sidecar := range blobSidecars {
+			if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+				return errors.New("blob sidecar is missing its signed block header")
+			}
+			if index == 0 {
+				slot = sidecar.SignedBlockHeader.Header.Slot
+				continue
+			}
+			if sidecar.SignedBlockHeader.Header.Slot != slot {
+				return errors.New("blob sidecars span multiple slots")
 			}
 		}
-		lock.Unlock()
+		lock := bs.forSlot(slot)
+		lock.Lock()
+		if !bs.startWrite(slot) {
+			lock.Unlock()
+			return nil
+		}
+		defer bs.finishWrite()
+		err := func() error {
+			defer lock.Unlock()
+			for _, blobSidecar := range blobSidecars {
+				if _, err := bs.writeAdmitted(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
 	}
 	val := make([]byte, 4)
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
@@ -143,7 +166,7 @@ func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
-	tx, err := bs.db.BeginRo(context.Background())
+	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -203,8 +226,47 @@ type sidecarsPayload struct {
 
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
 
-// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
-func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
+// VerifyBlobSidecars validates sidecar proofs and optionally their signed headers.
+func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	blobs := make([]*goethkzg.Blob, len(sidecars))
+	commitments := make([]goethkzg.KZGCommitment, len(sidecars))
+	proofs := make([]goethkzg.KZGProof, len(sidecars))
+	for i, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+			return errors.New("blob sidecar commitment inclusion proof has the wrong length")
+		}
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return errors.New("could not verify blob's inclusion proof")
+		}
+		if verifySignatureFn != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return err
+			}
+		}
+		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+		commitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+	}
+	if err := kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
+		return errors.New("sidecar is wrong")
+	}
+	return nil
+}
+
+// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion.
+// Returns the slot of the last sidecar it processed and how many it stored.
+//
+// It stops at the first identifier a response does not match and returns a nil error, so a
+// nil error does not mean every sidecar landed — callers must read the store back to confirm.
+//
+// version is the block's, and gates the commitment inclusion proof: Gloas sidecars carry none.
+func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
 	kzgCtx := kzg.Ctx()
 	inserted := atomic.Uint64{}
 	if identifiers.Len() == 0 || len(sidecars) == 0 {
@@ -218,6 +280,13 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 
 	storableSidecars := []*sidecarsPayload{}
 	currentSidecarsPayload := &sidecarsPayload{blockRoot: identifiers.Get(0).BlockRoot}
+	// Structure first: the slot read below and the loop's hashing both go through the nested header,
+	// which a decoded response can leave absent.
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return 0, 0, errors.New("blob response contains incomplete sidecar")
+		}
+	}
 	lastProcessed := sidecars[0].SignedBlockHeader.Header.Slot
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
@@ -235,7 +304,13 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			break
 		}
 
-		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+		// The reader always decodes a fixed-length proof, so a shorter one would replace a readable
+		// file with an undecodable one. Checked for every version, including those that skip the
+		// proof's contents.
+		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
+			return 0, 0, errors.New("blob sidecar commitment inclusion proof has the wrong length")
+		}
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, 0, errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {

@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -105,10 +106,10 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
-	expected := map[common.Address]*hexutil.Big{
-		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
-		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
-		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
+	expected := map[common.Address]*hexutil.U256{
+		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.U256)(uint256.NewInt(200000000000000000)),
+		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.U256)(uint256.NewInt(300000000000000000)),
+		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.U256)(uint256.NewInt(9000000000000000000)),
 	}
 	assert.Len(balances, len(expected))
 	for i := range balances {
@@ -485,7 +486,7 @@ func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
 // TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
 // block selector is treated identically to an explicit "latest" selector for each
 // state method (per execution-apis: the Block parameter is optional, default
-// 'latest'). This exercises the orLatest(nil) path directly.
+// 'latest'). This exercises the blockOrLatest(nil) path directly.
 func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	a := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -530,4 +531,40 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
 	a.NoError(err)
 	a.Equal(svLatest, svNil)
+}
+
+func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	want, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestForksServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	want, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }

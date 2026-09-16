@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/fromdb"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -105,6 +106,7 @@ var (
 	targetFile           string
 	disableIPV6          bool
 	disableIPV4          bool
+	disableTCP           bool
 	seedbox              bool
 	dbWritemap           bool
 	all                  bool
@@ -140,6 +142,7 @@ func init() {
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV4.Usage)
+	rootCmd.Flags().BoolVar(&disableTCP, utils.DisableTCP.Name, utils.DisableTCP.Value, utils.DisableTCP.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
 	rootCmd.Flags().BoolVar(&dbWritemap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
@@ -226,7 +229,7 @@ var rootCmd = &cobra.Command{
 func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	ctx := cmd.Context()
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 	if err := checkChainName(ctx, dirs, chain); err != nil {
@@ -293,6 +296,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		downloadercfg.NewCfgOpts{
 			DownloadRateLimit: downloadRate.TorrentRateLimit(),
 			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+			DisableTCP:        g.Some(disableTCP),
 		},
 	)
 	if err != nil {
@@ -404,10 +408,7 @@ var printTorrentHashes = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
-		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
-			log.Error(err.Error())
-		}
-		return nil
+		return doPrintTorrentHashes(cmd.Context(), logger)
 	},
 }
 
@@ -635,7 +636,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 

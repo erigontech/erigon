@@ -43,7 +43,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	reader := tests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	sn.OnHeadState(postState)
+	require.NoError(t, sn.OnHeadState(postState))
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)

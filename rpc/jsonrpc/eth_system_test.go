@@ -137,6 +137,9 @@ func TestCapabilities(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
+		// The prune mode alone no longer declares chain history expiry: the boundary is
+		// resolved from the block data on disk, so the fixture has to have its shape.
+		dropTransactions(t, m.DB, 1, mergeAt)
 		ctx := t.Context()
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -222,11 +225,13 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --prune.include-receipts: receipts and logs available from genesis, not limited by state prune window.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// --prune.include-receipts without a window of its own: the cache is retired
+		// alongside state history, so receipts and logs follow that window instead of
+		// reaching genesis, and they advertise it.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		// state still respects history prune distance
 		require.Equal(t, pruned, oldest(t, result.State))
 	})
@@ -369,9 +374,11 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// The merge point and the history window bound the same block here, but only
+		// the window moves with the head, so it is the one that describes the retention.
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	t.Run("wire_format", func(t *testing.T) {
@@ -680,4 +687,17 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	}
 
 	return m
+}
+
+// feeHistoryResult must keep the hexutil.Big wire format: 0x-prefixed hex without leading zeros.
+func TestFeeHistoryResultJSON(t *testing.T) {
+	res := feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(big.NewInt(16)),
+		Reward:       [][]hexutil.U256{{hexutil.U256(*uint256.NewInt(0)), hexutil.U256(*uint256.NewInt(1_000_000_000))}},
+		BaseFee:      []hexutil.U256{hexutil.U256(*uint256.NewInt(1)), hexutil.U256(*new(uint256.Int).Lsh(uint256.NewInt(1), 255))},
+		GasUsedRatio: []float64{0.5},
+	}
+	got, err := json.Marshal(res)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"oldestBlock":"0x10","reward":[["0x0","0x3b9aca00"]],"baseFeePerGas":["0x1","0x8000000000000000000000000000000000000000000000000000000000000000"],"gasUsedRatio":[0.5]}`, string(got))
 }

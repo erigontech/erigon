@@ -684,9 +684,10 @@ func (c *Client) drainRead() {
 func (c *Client) read(codec ServerCodec) {
 	for {
 		msgs, batch, err := codec.ReadBatch()
-		var syntaxErr *json.SyntaxError
-		if errors.As(err, &syntaxErr) {
-			codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
+		if _, ok := errors.AsType[*json.SyntaxError](err); ok {
+			if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
+				c.logger.Trace("RPC client failed to write parse error response", "err", writeErr)
+			}
 		}
 		if err != nil {
 			c.readErr <- err

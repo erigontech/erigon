@@ -159,3 +159,64 @@ func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
 }
+
+// The serving window is epoch-based: the earliest required column starts at the first slot
+// of current_epoch - MIN_EPOCHS, so subtracting a slot count from a head that sits inside
+// an epoch cuts above the boundary and deletes data the node must still serve.
+func TestCleanupAndPruningColumnFloorLandsOnTheEpochBoundary(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 12
+	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
+
+	// 59159 is 11 slots into epoch 4929, so the slot-distance floor overshoots by 11.
+	const head = 59_159
+	const wantFloor = 9_996 // (4929 - 4096) * 12
+
+	cfg := &Cfg{
+		indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+		ethClock:     clock,
+		beaconCfg:    &beaconCfg,
+		blobStore:    blobStore,
+		peerDas:      peerDas,
+		caplinConfig: clparams.CaplinConfig{},
+	}
+
+	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
+	blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+	peerDas.EXPECT().PruneBelow(uint64(wantFloor)).Return(nil)
+
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}
+
+// An explicit --caplin.columns-keep-slots is a slot count, not an epoch window, so it must
+// keep cutting at that exact distance from the head.
+func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 12
+
+	const head = 59_159
+	cfg := &Cfg{
+		indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+		ethClock:     clock,
+		beaconCfg:    &beaconCfg,
+		blobStore:    blobStore,
+		peerDas:      peerDas,
+		caplinConfig: clparams.CaplinConfig{ColumnKeepSlots: 1_000},
+	}
+
+	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
+	blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+	peerDas.EXPECT().PruneBelow(uint64(head - 1_000)).Return(nil)
+
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}

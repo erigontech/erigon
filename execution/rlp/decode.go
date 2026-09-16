@@ -173,8 +173,7 @@ func WrapStreamError(err error, typ reflect.Type) error {
 }
 
 func addErrorContext(err error, ctx string) error {
-	var decErr *decodeError
-	if errors.As(err, &decErr) {
+	if decErr, ok := errors.AsType[*decodeError](err); ok {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
@@ -334,10 +333,33 @@ func decodeListSlice(s *Stream, val reflect.Value, elemdec decoder) error {
 		val.Set(reflect.MakeSlice(val.Type(), 0, 0))
 		return s.ListEnd()
 	}
+	// A slice that already has capacity may not grow at all, making the walk cost.
+	if val.Cap() == 0 {
+		if n := sliceHint(s, val.Type().Elem(), size); n > 0 {
+			val.Set(reflect.MakeSlice(val.Type(), 0, n))
+		}
+	}
 	if err := decodeSliceElems(s, val, elemdec); err != nil {
 		return err
 	}
 	return s.ListEnd()
+}
+
+// maxSliceHintBytes bounds one pre-allocation: an item can encode far smaller
+// than the value it decodes into, so a count alone is not a byte bound.
+const maxSliceHintBytes = 1 << 20
+
+// sliceHint sizes a slice from the items ahead. Zero means grow instead.
+func sliceHint(s *Stream, elem reflect.Type, size uint64) int {
+	raw := s.Peek()
+	if uint64(len(raw)) < size {
+		return 0
+	}
+	n := countItems(raw[:size])
+	if elemSize := elem.Size(); elemSize > 0 {
+		n = min(n, maxSliceHintBytes/int(elemSize))
+	}
+	return n
 }
 
 func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
@@ -677,6 +699,10 @@ func NewBytesStream(b []byte) *Stream {
 	return stream
 }
 
+// Peek returns the unread bytes of a slice-backed stream without consuming them,
+// nil for any other reader. The result aliases the input: read only.
+func (s *Stream) Peek() []byte { return s.sliceRdr }
+
 // PutStream returns a Stream to the pool.
 func PutStream(stream *Stream) {
 	stream.sliceRdr = nil // release caller's backing array
@@ -789,14 +815,7 @@ func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
 		return append(dst, s.byteval), nil
 	case String:
 		cur := len(dst)
-		need := cur + int(size)
-		if cap(dst) < need {
-			grown := make([]byte, need)
-			copy(grown, dst)
-			dst = grown
-		} else {
-			dst = dst[:need]
-		}
+		dst = slices.Grow(dst, int(size))[:cur+int(size)]
 		if err := s.readFull(dst[cur:]); err != nil {
 			return dst, err
 		}

@@ -197,6 +197,16 @@ func TestRetirementTickWaitsForBackfill(t *testing.T) {
 	require.Zero(t, h.blobsRuns)
 }
 
+func TestRetirementTickStopsBlobsWhenCompletionIsRevoked(t *testing.T) {
+	h := newTickHarness(t)
+	h.a.NotifyBlobBackfilled(false)
+
+	h.tick(3)
+
+	require.Equal(t, 3, h.blocksRuns)
+	require.Zero(t, h.blobsRuns)
+}
+
 // A failure during shutdown is not the step's fault, so it must not be counted.
 func TestRetirementTickDoesNotBackOffOnShutdown(t *testing.T) {
 	h := newTickHarness(t)

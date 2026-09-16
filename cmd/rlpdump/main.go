@@ -124,7 +124,7 @@ func rlpToText(in *inStream, out io.Writer) error {
 	return nil
 }
 
-func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
+func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) (err error) {
 	if *showpos {
 		fmt.Fprintf(out, "%s: ", in.posLabel())
 	}
@@ -144,8 +144,15 @@ func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
 			fmt.Fprintf(out, "%s%x", ws(depth), str)
 		}
 	case rlp.List:
-		s.List()
-		defer s.ListEnd()
+		// Kind() above already confirmed this element is a list, so List() cannot fail here.
+		if _, err := s.List(); err != nil {
+			return err
+		}
+		defer func() {
+			if listErr := s.ListEnd(); err == nil {
+				err = listErr
+			}
+		}()
 		if size == 0 {
 			fmt.Fprint(out, ws(depth)+"[]")
 		} else {

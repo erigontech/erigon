@@ -19,12 +19,16 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -260,6 +264,7 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 		balRoots:      map[uint64][]byte{},
 		hasFirstBlock: true,
 		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+		perBlockFrom:  100,
 	}
 
 	// Coalesce block M=4: block 5 is past M and must not compute ahead.
@@ -267,6 +272,65 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func TestComputeAheadCap_StopsOperationalWindDown(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cause := errors.New("commitment lazy-load failed")
+	pe := &parallelExecutor{cancelExecLoop: cancel}
+	pe.cancelOperational(4, cause)
+
+	sc, ok := stopCauseOf(signalCtx)
+	require.True(t, ok, "operational cancellation must publish its block boundary")
+	require.Equal(t, uint64(4), sc.block)
+	require.Equal(t, stopOperational, sc.kind)
+	require.Same(t, cause, sc.err)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	cc.maybeComputeAhead(context.Background(), 5)
+	assert.False(t, cc.computedAhead[5], "failure wind-down must not compute ahead past its block")
+}
+
+func TestComputeAheadCap_StopsUnboundedCancellation(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	cancel(errors.New("apply loop panicked"))
+	_, bounded := stopCauseOf(signalCtx)
+	require.False(t, bounded, "a raw cancellation has no safe compute-ahead boundary")
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	require.NotPanics(t, func() { cc.maybeComputeAhead(context.Background(), 5) },
+		"an unbounded cancellation must stop new speculative commitment work")
+	assert.False(t, cc.computedAhead[5])
 }
 
 // TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
@@ -329,4 +393,63 @@ func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
 	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
 	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
 	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
+}
+
+// TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the
+// COMMITMENT_AFTER_EXEC barrier, which markProcessed-driven tests cannot see.
+// The *blockResult arm is the sole production caller: without it the exec loop
+// parks on the first block with no escape — processedWake never closes, done
+// needs a Stop() deferred behind the parked loop, and the ctx needs a decideStop
+// downstream of it. The dbg guard on the call is what keeps the default path off
+// the mutex and the per-block channel allocation.
+func TestHandleMessage_MarksProcessedUnderFlag(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	defer func(p bool) { dbg.CommitmentAfterExec = p }(dbg.CommitmentAfterExec)
+	// Batch mode with the changeset window out of reach keeps the arm on its
+	// accumulate-only path, so nothing computes against the nil domains.
+	dbg.BatchCommitments = true
+
+	const blockNum = 7
+	for _, tc := range []struct {
+		name string
+		flag bool
+	}{
+		{name: "flag on releases the barrier", flag: true},
+		{name: "flag off leaves the barrier alone", flag: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbg.CommitmentAfterExec = tc.flag
+			cc := &commitmentCalculator{
+				in:            make(chan applyResult),
+				done:          make(chan struct{}),
+				pending:       map[uint64]*pendingBlock{},
+				computedAhead: map[uint64]bool{},
+				balRoots:      map[uint64][]byte{},
+				perBlockFrom:  math.MaxUint64,
+				processedWake: make(chan struct{}),
+			}
+
+			waiting := make(chan error, 1)
+			go func() { waiting <- cc.WaitProcessed(context.Background(), blockNum) }()
+
+			cc.handleMessage(context.Background(), newTestBlockResult(blockNum, common.Hash{0x01}, blockNum, false))
+
+			if tc.flag {
+				select {
+				case err := <-waiting:
+					require.NoError(t, err)
+				case <-time.After(2 * time.Second):
+					t.Fatal("handleMessage never marked the block processed: the exec loop parks here with no escape")
+				}
+				return
+			}
+			select {
+			case <-waiting:
+				t.Fatal("markProcessed ran with COMMITMENT_AFTER_EXEC off: the default path pays a lock and a channel per block")
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(cc.done)
+			require.NoError(t, <-waiting)
+		})
+	}
 }

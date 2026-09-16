@@ -60,6 +60,8 @@ const (
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
 )
 
+const logPollEvery = 1024
+
 func HashSeekingPrune(
 	ctx context.Context,
 	name, filenameBase, tmp string,
@@ -69,8 +71,8 @@ func HashSeekingPrune(
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
 	mode StorageMode,
-) (stat *Stat, err error) {
-	stat = &Stat{MinTxNum: math.MaxUint64}
+) (*Stat, error) {
+	stat := &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 
 	if limit == 0 { // limits amount of txn to be pruned
@@ -117,7 +119,7 @@ func HashSeekingPrune(
 		}
 	}
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	loadErr := collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
 			//seek := make([]byte, 8, 256)
@@ -140,20 +142,21 @@ func HashSeekingPrune(
 				return err
 			}
 		case DefaultStorageMode:
-			err = valDelCursor.DeleteExact(key, txnm)
-			if err != nil {
+			if err := valDelCursor.DeleteExact(key, txnm); err != nil {
 				return err
 			}
 		}
 		stat.PruneCountValues++
 
-		select {
-		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
-			logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
-				"prunedValues", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
-		default:
+		if stat.PruneCountValues%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				txNum := binary.BigEndian.Uint64(txnm)
+				logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
+					"prunedValues", stat.PruneCountValues,
+					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
+			default:
+			}
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
@@ -177,7 +180,7 @@ func HashSeekingPrune(
 
 	logger.Debug("hash prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "spent ms", time.Since(start).Milliseconds())
 
-	return stat, err
+	return stat, loadErr
 }
 
 type StartPos struct {
@@ -326,6 +329,7 @@ func tableScanningPrune(
 	if err != nil {
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
+	var polls int
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -434,15 +438,18 @@ func tableScanningPrune(
 		}
 	nextKey:
 
-		select {
-		case <-logEvery.C:
-			args := []any{"name", filenameBase, "scanned keys", stat.ScanCountKeys, "pruned values", stat.PruneCountValues}
-			if keysCursor != nil {
-				args = append(args, "pruned tx", stat.PruneCountTx)
+		polls++
+		if polls%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				args := []any{"name", filenameBase, "scanned keys", stat.ScanCountKeys, "pruned values", stat.PruneCountValues}
+				if keysCursor != nil {
+					args = append(args, "pruned tx", stat.PruneCountTx)
+				}
+				args = append(args, "val status", stat.ValueProgress.String())
+				logger.Info("[snapshots] prune index", args...)
+			default:
 			}
-			args = append(args, "val status", stat.ValueProgress.String())
-			logger.Info("[snapshots] prune index", args...)
-		default:
 		}
 	}
 

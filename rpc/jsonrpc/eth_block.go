@@ -204,8 +204,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 }
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
-func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (*ethapi.RPCBlock, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -239,21 +239,60 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	additionalFields := make(map[string]any)
-
-	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, additionalFields)
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(b, true, fullTx)
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
-	return response, err
+	return response, nil
+}
+
+// GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
+// number. Per ethereum/execution-apis#877, the result is null for an unknown block, for the
+// pending tag, and for a safe or finalized tag that cannot be resolved to a block.
+func (api *APIImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*ethapi.RPCHeader, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByNumber(ctx, blockNumber, tx)
+	if err != nil {
+		var unresolvedTag *rpc.CustomError
+		if errors.As(err, &rpc.BlockNotFoundErr{}) ||
+			(errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header, header.Hash()), nil
+}
+
+// GetHeaderByHash implements eth_getHeaderByHash. Returns a block's header given a block's hash,
+// or null if the block is unknown.
+func (api *APIImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*ethapi.RPCHeader, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByHash(ctx, hash, tx)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header, header.Hash()), nil
 }
 
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
-func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]any, error) {
+func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (*ethapi.RPCBlock, error) {
 	if numberOrHash.BlockHash == nil {
 		// some web3.js based apps (like ethstats client) for some reason call
 		// eth_getBlockByHash with a block number as a parameter
@@ -265,13 +304,11 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	hash := *numberOrHash.BlockHash
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	additionalFields := make(map[string]any)
 
 	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
@@ -292,15 +329,12 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
-	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	if int64(number) == rpc.PendingBlockNumber.Int64() {
+		response.MarkPending()
 	}
 
-	return response, err
+	return response, nil
 }
 
 // GetBlockAccessList returns the block access list for a given block (EIP-7928).
@@ -380,7 +414,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +434,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -437,7 +471,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -455,9 +489,12 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		return nil, nil
 	}
 
 	numOfTx := hexutil.Uint(txCount)
@@ -467,7 +504,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if blockNumber != rpc.PendingBlockNumber {
-		return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+		return api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNumber.Uint64())
 	}
 
 	if block := api.pendingBlock(); block != nil {

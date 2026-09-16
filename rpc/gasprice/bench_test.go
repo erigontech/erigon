@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 const txsPerBlock = 100
@@ -128,7 +129,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 				// Fresh cache every iteration → cold path, no cache hits.
 				cache := jsonrpc.NewGasPriceCache()
 				oracle := gasprice.NewOracle(
-					jsonrpc.NewGasPriceOracleBackend(dbArg, tx, baseApi),
+					jsonrpc.NewGasPriceOracleBackend(dbArg, rpchelper.PinToOverlay(tx, nil), baseApi),
 					cfg,
 					cache,
 					nil,
@@ -187,7 +188,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 				// starts cold every time (nil historyCache).  This ensures we
 				// measure DB round-trips, not cache hits.
 				oracle := gasprice.NewOracle(
-					jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi),
+					jsonrpc.NewGasPriceOracleBackend(m.DB, rpchelper.PinToOverlay(tx, nil), baseApi),
 					gaspricecfg.Config{MaxHeaderHistory: 0, MaxBlockHistory: 0},
 					gasCache,
 					nil, // cold: no history cache

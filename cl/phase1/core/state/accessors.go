@@ -148,7 +148,9 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	wp.Execute()
+	// Every job above returns nil unconditionally (the only fallible op inside
+	// panics instead), so Execute can never return a non-nil error here.
+	_ = wp.Execute()
 	// Merge the results from all threads.
 	total := 0
 	for i := range eligibleValidatorsShards {
