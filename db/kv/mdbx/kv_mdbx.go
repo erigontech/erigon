@@ -397,6 +397,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
+	// Open can fail after a read txn has already been pooled; drain before the env.Close defer.
+	defer func() {
+		if err != nil {
+			db.drainRoTxPool()
+		}
+	}()
+
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	// copy map to avoid changing global variable
 	maps.Copy(db.buckets, customBuckets)
@@ -684,9 +691,7 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	for len(db.roTxPool) > 0 {
-		(<-db.roTxPool).Abort()
-	}
+	db.drainRoTxPool()
 
 	db.env.Close()
 	db.env = nil
@@ -757,6 +762,12 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 	default:
 	}
 	return db.env.BeginTxn(nil, mdbx.Readonly)
+}
+
+func (db *MdbxKV) drainRoTxPool() {
+	for len(db.roTxPool) > 0 {
+		(<-db.roTxPool).Abort()
+	}
 }
 
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
