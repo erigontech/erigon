@@ -1228,9 +1228,6 @@ func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key 
 		}
 		p = historyPage{d: d, offset: offset, data: data}
 		ht.h.pages.Add(k, p)
-		hits, misses, evicted := ht.h.pages.Stats()
-		mxHistoryPageHitRatio.Set(float64(hits) / float64(max(hits+misses, 1)))
-		mxHistoryPageEvicted.SetUint64(evicted)
 	}
 	v, _ := seg.GetFromPage(key, p.data, nil, false)
 	return v, true, nil

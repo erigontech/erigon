@@ -24,7 +24,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
-	"github.com/maypok86/otter/v2/stats"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
@@ -42,7 +41,6 @@ import (
 // drain. Eviction is W-TinyLFU, so a newcomer can be rejected outright.
 type ByteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
-	stats    *stats.Counter
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
@@ -99,7 +97,6 @@ func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) 
 }
 
 func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
-	b.stats = stats.NewCounter()
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
@@ -109,16 +106,8 @@ func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *ott
 				(*fn)(e.Key, e.Value)
 			}
 		},
-		Executor:      func(fn func()) { fn() },
-		StatsRecorder: b.stats,
+		Executor: func(fn func()) { fn() },
 	})
-}
-
-// Stats reports lookups served, lookups missed, and entries the cache did not keep. A W-TinyLFU
-// rejection is counted as an eviction, so a cache that keeps nothing shows evicted close to misses.
-func (b *ByteLRU[V]) Stats() (hits, misses, evicted uint64) {
-	s := b.stats.Snapshot()
-	return s.Hits, s.Misses, s.Evictions
 }
 
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }

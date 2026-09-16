@@ -61,15 +61,3 @@ func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int32(1), calls.Load())
 }
-
-func TestByteLRUStatsCountRejectedInserts(t *testing.T) {
-	b := NewByteLRU(4*datasize.KB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
-	for i := range uint64(64) {
-		b.Add(i, make([]byte, 512))
-	}
-	_, _ = b.Get(0)
-	_, _ = b.Get(1 << 40)
-	hits, misses, evicted := b.Stats()
-	require.Equal(t, uint64(2), hits+misses)
-	require.Positive(t, evicted, "inserts past the limit are not kept")
-}
