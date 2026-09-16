@@ -458,13 +458,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
 
-	// If InsertBlocks wrote block data, flush it into the block overlay
-	// so the pipeline can see it. The InsertBlocks overlay retains its data.
-	if hasOverlay {
-		e.currentContext.BlockOverlay().UpdateTxn(roTx)
-		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: flush block overlay: %w", err), false)
-		}
+	headPath, err := e.copyPendingChain(roTx, tx, originalBlockHash)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: copy pending blocks: %w", err), false)
 	}
 
 	blockHash := originalBlockHash
@@ -626,13 +622,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
 			}
 			newTx := freshSD.BlockOverlay()
-			// Re-flush InsertBlocks data into the fresh overlay.
-			if hasOverlay {
-				e.currentContext.BlockOverlay().UpdateTxn(roTx)
-				if err := e.currentContext.BlockOverlay().Flush(ctx, newTx); err != nil {
-					freshSD.Close()
-					return nil, nil, fmt.Errorf("updateForkChoice: re-flush overlay after hasMore: %w", err)
-				}
+			if _, err := e.copyPendingChain(roTx, newTx, originalBlockHash); err != nil {
+				freshSD.Close()
+				return nil, nil, fmt.Errorf("updateForkChoice: re-copy pending blocks after hasMore: %w", err)
 			}
 			return newTx, freshSD, nil
 		},
@@ -709,9 +701,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
-		// Close the persistent SD (overlay was already flushed into rwTx at
-		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
-		// creates a fresh overlay for the next block cycle.
+		finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		if err := e.retainSideBlocks(roTx, headPath, common.Deref(finalizedNumber)); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
 		if hasOverlay {
 			e.closeModuleContext()
 		}

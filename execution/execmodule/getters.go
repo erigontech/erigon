@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -64,20 +65,29 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	if sd == nil && e.publishedSD != nil {
 		sd = e.publishedSD()
 	}
+	var overlay *membatchwithdb.MemoryMutation
 	if sd != nil {
-		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
-			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
-			if err != nil {
-				e.lock.RUnlock()
-				return nil, nil, err
-			}
-			view := overlay.NewReadView(roTx)
+		overlay = sd.BlockOverlay()
+	}
+	retained := e.retainedBlocks
+	if overlay != nil || retained != nil {
+		// Open a fresh RO tx while still holding the read lock so that
+		// the overlay cannot be closed between our check and the
+		// NewReadView call (TOCTOU avoidance).
+		roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
 			e.lock.RUnlock()
-			return view, func() { roTx.Rollback() }, nil
+			return nil, nil, err
 		}
+		var view kv.TemporalTx = roTx
+		if retained != nil {
+			view = retained.NewReadView(view)
+		}
+		if overlay != nil {
+			view = overlay.NewReadView(view)
+		}
+		e.lock.RUnlock()
+		return view, func() { roTx.Rollback() }, nil
 	}
 	e.lock.RUnlock()
 
