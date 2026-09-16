@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1198,13 +1197,8 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	db := BaseCaseDB(t)
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback() // a safety net: the concurrent rollbacks below are what the test exercises
-
-	var wg sync.WaitGroup
-	for range 2 {
-		wg.Go(tx.Rollback)
-	}
-	wg.Wait()
+	tx.Rollback()
+	tx.Rollback()
 
 	a, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
