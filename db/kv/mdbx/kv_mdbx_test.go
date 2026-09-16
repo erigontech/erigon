@@ -1191,8 +1191,6 @@ func TestCursorOnPooledTxn(t *testing.T) {
 	require.Equal(t, u64tob(1), v, "a cursor opened on a renewed txn must read through it")
 }
 
-// TestRollbackTwiceParksTxnOnce pins that a concurrent second Rollback cannot park the
-// same read txn twice, which would hand one txn to two readers sharing a snapshot.
 func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	db := BaseCaseDB(t)
 	tx, err := db.BeginRo(t.Context())
