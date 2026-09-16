@@ -225,21 +225,16 @@ func unpreparedGrabOffset(due time.Duration) time.Duration {
 	return due - payloadPublicationMargin(due)
 }
 
-// preparedGrabOffset anchors the earliest collection window for a builder warmed before the slot.
-// Polling starts minPayloadPollingWindow before this offset to tolerate a brief unavailable result.
-func preparedGrabOffset(due time.Duration) time.Duration {
-	return payloadPublicationMargin(due)
-}
-
 func payloadPublicationMargin(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
-// maximumPreparedAdvance caps how much payload preparation may advance collection. Even a builder
-// started far ahead is left running into the slot so it can include recent transactions.
+// maximumPreparedAdvance caps collection advance so a warm builder can still include recent
+// transactions. The earliest collection window is one publication margin into the slot,
+// with its first poll minPayloadPollingWindow earlier to allow a brief retry.
 func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
+	return max(unpreparedGrabOffset(due)-payloadPublicationMargin(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
@@ -1544,26 +1539,20 @@ func (a *ApiHandler) produceBeaconBody(
 	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		switch payloadSource.gloasPath {
-		case gloasPayloadPathPending:
+		case gloasPayloadPathPending, gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
 			fields := []any{
 				"slot", targetSlot,
 				"head", baseBlockRoot,
 				"path", payloadSource.gloasPath.String(),
 			}
-			if payloadSource.fallbackCause != nil {
-				fields = append(fields, "err", payloadSource.fallbackCause)
+			logFallback := a.logger.Info
+			if payloadSource.gloasPath == gloasPayloadPathPending {
+				logFallback = a.logger.Warn
+				if payloadSource.fallbackCause != nil {
+					fields = append(fields, "err", payloadSource.fallbackCause)
+				}
 			}
-			a.logger.Warn(
-				"BlockProduction: building on EMPTY Gloas parent",
-				fields...,
-			)
-		case gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
-			a.logger.Info(
-				"BlockProduction: building on EMPTY Gloas parent",
-				"slot", targetSlot,
-				"head", baseBlockRoot,
-				"path", payloadSource.gloasPath.String(),
-			)
+			logFallback("BlockProduction: building on EMPTY Gloas parent", fields...)
 		}
 		pendingBid := beaconBody.SignedExecutionPayloadBid
 		if pendingBid == nil || pendingBid.Message == nil {

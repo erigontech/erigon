@@ -777,7 +777,7 @@ func withdrawalsStateForExecutionPayloadSource(
 	if err != nil {
 		return nil, fmt.Errorf("copy state for FULL parent payload: %w", err)
 	}
-	if err := applyParentExecutionPayload(withdrawalsState, payloadSource.parentExecutionRequests); err != nil {
+	if err := transition.DefaultMachine.ApplyParentExecutionPayload(withdrawalsState, payloadSource.parentExecutionRequests); err != nil {
 		return nil, fmt.Errorf("apply FULL parent payload: %w", err)
 	}
 	return withdrawalsState, nil
@@ -858,10 +858,6 @@ func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSl
 	default:
 		return gloasPayloadPathPending
 	}
-}
-
-func applyParentExecutionPayload(beaconState *state.CachingBeaconState, requests *cltypes.ExecutionRequests) error {
-	return transition.DefaultMachine.ApplyParentExecutionPayload(beaconState, requests)
 }
 
 // targetGasLimitForProposal returns the effective limit and the preference generation observed

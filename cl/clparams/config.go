@@ -850,9 +850,6 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
-	if b == nil || b.SecondsPerSlot == 0 {
-		return 0
-	}
 	return b.SecondsPerSlot * PayloadAttestationDueBps / (BpsFactor / 1000)
 }
 

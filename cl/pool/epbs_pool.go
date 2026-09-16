@@ -44,9 +44,6 @@ func (m *slotMap[K, V]) advanceGeneration(slot uint64) {
 		return
 	}
 	m.nextGeneration++
-	if m.nextGeneration == 0 {
-		m.nextGeneration++
-	}
 	m.generations[slot] = m.nextGeneration
 }
 

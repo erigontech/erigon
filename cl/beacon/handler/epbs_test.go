@@ -2861,21 +2861,67 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
 }
 
-func TestPostProposerPreferencesAcceptsDuplicatePreference(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	preference := &cltypes.SignedProposerPreferences{
-		Message: &cltypes.ProposerPreferences{ProposalSlot: 32},
+func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		change     func(*cltypes.SignedProposerPreferences)
+		wantStatus int
+	}{
+		{name: "identical retry", wantStatus: http.StatusOK},
+		{name: "different fee recipient", change: func(p *cltypes.SignedProposerPreferences) { p.Message.FeeRecipient[0]++ }, wantStatus: http.StatusBadRequest},
+		{name: "different gas limit", change: func(p *cltypes.SignedProposerPreferences) { p.Message.TargetGasLimit++ }, wantStatus: http.StatusBadRequest},
+		{name: "different validator", change: func(p *cltypes.SignedProposerPreferences) { p.Message.ValidatorIndex++ }, wantStatus: http.StatusBadRequest},
+		{name: "different signature", change: func(p *cltypes.SignedProposerPreferences) { p.Signature[0]++ }, wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			config := clparams.MainnetBeaconConfig
+			// Keep the request well inside the valid time window without sleeping.
+			config.SecondsPerSlot = uint64(time.Hour / time.Second)
+			stored := &cltypes.SignedProposerPreferences{
+				Message: &cltypes.ProposerPreferences{
+					ProposalSlot: 96, ValidatorIndex: 42, DependentRoot: common.Hash{0x11},
+					FeeRecipient: common.Address{0x22}, TargetGasLimit: 30_000_000,
+				},
+				Signature: common.Bytes96{0x33},
+			}
+			epbsPool := pool.NewEpbsPool()
+			epbsPool.AddProposerPreference(stored)
+			generation := epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
+			clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
+			service := services.NewProposerPreferencesService(nil, nil, clock, &config, epbsPool, nil)
+			handler := &ApiHandler{
+				epbsPool:                   epbsPool,
+				proposerPreferencesService: service,
+				gossipManager:              gossip_mock.NewMockGossip(ctrl),
+				sentinel:                   &nonNilSentinelClient{},
+			}
+			retry := stored.Clone().(*cltypes.SignedProposerPreferences)
+			submitted := stored.Clone().(*cltypes.SignedProposerPreferences)
+			if test.change != nil {
+				test.change(submitted)
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+			handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{retry, submitted})
+
+			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
+			if test.wantStatus != http.StatusOK {
+				var response poolingError
+				require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+				require.Len(t, response.Failures, 1)
+				require.Equal(t, 1, response.Failures[0].Index)
+			}
+			retained, ok := epbsPool.GetPreference(stored.Message.ProposalSlot, stored.Message.DependentRoot)
+			require.True(t, ok)
+			require.Same(t, stored, retained)
+			require.Equal(t, retry, retained)
+			require.Equal(t, generation, epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot))
+		})
 	}
-	service := mock_services.NewMockProposerPreferencesService(ctrl)
-	service.EXPECT().ProcessMessage(gomock.Any(), nil, preference).
-		Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrProposerPreferenceAlreadySeen))
-	handler := &ApiHandler{proposerPreferencesService: service}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
-
-	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {

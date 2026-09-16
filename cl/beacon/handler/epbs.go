@@ -731,9 +731,14 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				// Only duplicates can be acknowledged without storing or gossiping again.
-				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) {
-					continue
+				// Gossip deduplicates by slot and dependent root before checking the signature.
+				// Only the identical signed preference is a successful REST retry.
+				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) && a.epbsPool != nil {
+					stored, ok := a.epbsPool.GetPreference(req.Message.ProposalSlot, req.Message.DependentRoot)
+					if ok && stored != nil && stored.Message != nil &&
+						*stored.Message == *req.Message && stored.Signature == req.Signature {
+						continue
+					}
 				}
 				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
 				continue
