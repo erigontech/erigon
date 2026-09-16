@@ -666,8 +666,8 @@ func TestGetWitness(t *testing.T) {
 	}))
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	emptyWitness, err := emptyWitnessBytes()
-	require.NoError(t, err)
+	// An empty witness is the one-byte version header, not zero bytes.
+	emptyWitness := hexutil.Bytes{0x00}
 
 	var block1Hash common.Hash
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
@@ -686,7 +686,7 @@ func TestGetWitness(t *testing.T) {
 	bn := rpc.BlockNumber(1)
 	byNumber, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.NoError(t, err)
-	require.NotEmpty(t, byNumber)
+	require.NotEqual(t, emptyWitness, byNumber, "block 1 must carry a real witness, not the empty one")
 
 	t.Run("by hash matches by number", func(t *testing.T) {
 		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHashWithHash(block1Hash, true))
@@ -705,7 +705,7 @@ func TestGetWitness(t *testing.T) {
 	t.Run("tx witness for the first transaction", func(t *testing.T) {
 		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
 		require.NoError(t, err)
-		require.NotEmpty(t, got)
+		require.Equal(t, byNumber, got, "a tx witness carries the whole block's witness")
 	})
 
 	t.Run("tx index out of bounds", func(t *testing.T) {
