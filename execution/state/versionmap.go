@@ -1280,17 +1280,24 @@ func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 
 // Typed absence predicates (threaded like eq, so validateRead never boxes the
 // recorded value): a zero/absent value means the read concluded absence.
-func absentAccount(a *accounts.Account) bool   { return a == nil }
-func absentBytes(b []byte) bool                { return len(b) == 0 }
-func absentUint256(v uint256.Int) bool         { return v.IsZero() }
-func absentUint64(v uint64) bool               { return v == 0 }
-func absentInt(v int) bool                     { return v == 0 }
-func absentCodeHash(ch accounts.CodeHash) bool { return ch.IsEmpty() || ch.IsZero() }
-func eqUint64(a, b uint64) bool                { return a == b }
-func eqInt(a, b int) bool                      { return a == b }
-func eqCode(a, b []byte) bool                  { return bytes.Equal(a, b) }
+func absentAccount(a *accounts.Account) bool { return a == nil }
+func absentBytes(b []byte) bool              { return len(b) == 0 }
+func absentUint256(v uint256.Int) bool       { return v.IsZero() }
+func absentUint64(v uint64) bool             { return v == 0 }
+func absentInt(v int) bool                   { return v == 0 }
+func eqUint64(a, b uint64) bool              { return a == b }
+func eqInt(a, b int) bool                    { return a == b }
+func eqCode(a, b []byte) bool                { return bytes.Equal(a, b) }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
+}
+
+// absentCodeHash reports whether a recorded code hash counts as absence. The
+// nil hash always does. keccak256("") does only while the account is alive: a
+// destroyed, unrevived account reads the nil hash, so an empty hash recorded
+// there is stale and must go through the destruct check.
+func (vm *VersionMap) absentCodeHash(addr accounts.Address, txIndex int, ch accounts.CodeHash) bool {
+	return ch.IsZero() || (ch.IsEmpty() && !vm.destroyedAndUnrevived(addr, txIndex))
 }
 
 // Record-field extractors for the fold tiebreaker: a sub-field read with no
@@ -1592,7 +1599,10 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		absentCodeHashLive := func(ch accounts.CodeHash) bool {
+			return vm.absentCodeHash(a, txIdx, ch)
+		}
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHashLive, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
