@@ -352,16 +352,22 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
+			var admissionErr error
 			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				f.mu.RLock()
 				defer f.mu.RUnlock()
-				_, _, admissionErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
+				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 				return admissionErr
 			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 			f.invalidateCachedHead()
-			if errors.Is(err, errBlockAtFinalizedHorizon) {
-				return nil
+			// Report a stale block exactly as the post-EL recheck below does, so the same
+			// admission verdict does not answer gossip differently depending on timing.
+			if admissionErr != nil {
+				if errors.Is(admissionErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return admissionErr
 			}
 			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
 				return validationErr
