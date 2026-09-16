@@ -26,15 +26,33 @@ import (
 
 func TestSideBlocksToRetain(t *testing.T) {
 	hash := func(i int) common.Hash { return common.Hash{byte(i)} }
-	pending := make(map[common.Hash]pendingBlock, retainedBlockLimit+4)
-	for i := range retainedBlockLimit + 4 {
+	pending := make(map[common.Hash]pendingBlock, 20)
+	for i := range 20 {
 		pending[hash(i)] = pendingBlock{number: uint64(i)}
 	}
 
-	side := sideBlocksToRetain(pending, []common.Hash{hash(retainedBlockLimit + 3)})
+	side := sideBlocksToRetain(pending, []common.Hash{hash(19)}, 10)
 
-	require.Len(t, side, retainedBlockLimit)
-	for i := 3; i < retainedBlockLimit+3; i++ {
+	require.Len(t, side, 8)
+	for i := 11; i < 19; i++ {
+		require.Contains(t, side, hash(i))
+	}
+	for i := range 11 {
+		require.NotContains(t, side, hash(i))
+	}
+}
+
+func TestSideBlocksToRetainKeepsEveryBlockWithoutFinality(t *testing.T) {
+	hash := func(i int) common.Hash { return common.Hash{byte(i)} }
+	pending := make(map[common.Hash]pendingBlock, 20)
+	for i := range 20 {
+		pending[hash(i)] = pendingBlock{number: uint64(i)}
+	}
+
+	side := sideBlocksToRetain(pending, nil, 0)
+
+	require.Len(t, side, 19)
+	for i := 1; i < 20; i++ {
 		require.Contains(t, side, hash(i))
 	}
 }

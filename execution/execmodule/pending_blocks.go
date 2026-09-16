@@ -17,13 +17,11 @@
 package execmodule
 
 import (
-	"cmp"
-	"encoding/binary"
 	"fmt"
 	"maps"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -31,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
-
-const retainedBlockLimit = 16
 
 type pendingBlock struct {
 	number uint64
@@ -70,8 +66,8 @@ func (e *ExecModule) copyPendingChain(tx kv.Tx, dst kv.RwTx, head common.Hash) (
 	return chain, raiseTxSequence(src, dst)
 }
 
-func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash) error {
-	side := sideBlocksToRetain(e.pendingBlocks, committed)
+func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash, finalized uint64) error {
+	side := sideBlocksToRetain(e.pendingBlocks, committed, finalized)
 	src := e.pendingBlocksView(tx)
 	if len(side) == 0 || src == nil {
 		e.dropPendingBlocks()
@@ -97,20 +93,15 @@ func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash)
 	return nil
 }
 
-func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash) map[common.Hash]pendingBlock {
+func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash, finalized uint64) map[common.Hash]pendingBlock {
 	side := maps.Clone(pending)
 	for _, hash := range committed {
 		delete(side, hash)
 	}
-	drop := len(side) - retainedBlockLimit
-	if drop <= 0 {
-		return side
-	}
-	byHeight := slices.SortedFunc(maps.Keys(side), func(a, b common.Hash) int {
-		return cmp.Compare(side[a].number, side[b].number)
-	})
-	for _, hash := range byHeight[:drop] {
-		delete(side, hash)
+	for hash, block := range side {
+		if block.number <= finalized {
+			delete(side, hash)
+		}
 	}
 	return side
 }
@@ -210,7 +201,7 @@ func copyBlockRows(src kv.Tx, dst kv.RwTx, hash common.Hash, number uint64) erro
 		return err
 	}
 	first := uint64(body.BaseTxnID)
-	txns, err := src.Range(kv.EthTx, txnIDKey(first), txnIDKey(first+uint64(body.TxCount)), order.Asc, kv.Unlim)
+	txns, err := src.Range(kv.EthTx, hexutil.EncodeTs(first), hexutil.EncodeTs(first+uint64(body.TxCount)), order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
@@ -225,10 +216,6 @@ func copyBlockRows(src kv.Tx, dst kv.RwTx, hash common.Hash, number uint64) erro
 		}
 	}
 	return nil
-}
-
-func txnIDKey(id uint64) []byte {
-	return binary.BigEndian.AppendUint64(nil, id)
 }
 
 func copyRow(src kv.Tx, dst kv.RwTx, table string, key []byte) error {

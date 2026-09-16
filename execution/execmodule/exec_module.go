@@ -595,13 +595,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
-	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
-	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
-	// and the parallel exec goroutine via NewReadView — see this block data.
-	// The InsertBlocks overlay on e.currentContext retains its data unchanged.
-	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
-	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
-	// e.currentContext in an inconsistent state for UpdateForkChoice.
 	if _, err := e.copyPendingChain(roTx, tx, blockHash); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: copy pending blocks to validation tx: %w", err)

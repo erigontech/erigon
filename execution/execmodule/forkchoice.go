@@ -701,10 +701,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
-		// Close the persistent SD (overlay was already flushed into rwTx at
-		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
-		// creates a fresh overlay for the next block cycle.
-		if err := e.retainSideBlocks(roTx, headPath); err != nil {
+		finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		if err := e.retainSideBlocks(roTx, headPath, common.Deref(finalizedNumber)); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasOverlay {

@@ -195,6 +195,19 @@ func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
 	require.Zero(t, misses.Load())
 }
 
+func TestDeepSideChainSurvivesForkChoice(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	side := generateTransferBlocks(t, m, key, 20, 0x0b)
+	canonical := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
+	insertAndValidateBlocks(t, m, canonical)
+	insertAndValidateBlocks(t, m, side...)
+	updateForkChoiceTo(t, m, canonical)
+
+	updateForkChoiceTo(t, m, side[len(side)-1])
+	requireCanonicalWithTransactions(t, m, side[0])
+	requireCanonicalWithTransactions(t, m, side[len(side)-1])
+}
+
 func generateTransferBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, key *ecdsa.PrivateKey, n int, to byte) []*types.Block {
 	t.Helper()
 	chain, err := m.GenerateChain(n, sendTo(t, m, key, common.Address{to}, 1))
