@@ -55,8 +55,8 @@ var (
 // priming the next slot cannot evict the record for a proposal that is still being produced.
 const preparedPayloadRetainSlots = 2
 
-// Leave enough time for the state copy and one builder-start attempt. Starting later is likely to
-// overlap production without giving the builder useful warmup.
+// minimumPreparationLead leaves a best-effort margin for useful warmup before the proposal slot.
+// State copying and slot processing cannot be cancelled mid-call and may still overlap production.
 const minimumPreparationLead = 500 * time.Millisecond
 
 const (
@@ -467,8 +467,8 @@ func (p gloasPayloadPath) String() string {
 	}
 }
 
-// An older selected head becomes usable only after the attestation deadline when no current-slot
-// block is still being processed. A future head is invalid.
+// An older selected head becomes usable after the attestation deadline only when no OnBlock call
+// is active or waiting for the store lock, regardless of its slot. A future head is not usable.
 func shouldWaitForCurrentSlotHead(
 	currentSlot, selectedSlot uint64,
 	blockProcessing bool,
@@ -668,8 +668,9 @@ func (a *ApiHandler) precheckRegisteredProposer(headRoot common.Hash, targetSlot
 	})
 }
 
-// startPayloadBuildForPreparation retries only when the execution head is still catching up or the
-// in-process execution module is busy. Each attempt is non-blocking and separately gated.
+// startPayloadBuildForPreparation retries only execution-head mismatches and a busy execution module.
+// Each attempt uses non-blocking gate acquisition, but the builder-start call is synchronous.
+// The gate is released before retry sleeps.
 func (a *ApiHandler) startPayloadBuildForPreparation(
 	ctx context.Context,
 	targetSlot uint64,
@@ -864,7 +865,8 @@ func applyParentExecutionPayload(beaconState *state.CachingBeaconState, requests
 }
 
 // targetGasLimitForProposal returns the effective limit and the preference generation observed
-// with it. Preparation memoizes both so a concurrent preference update invalidates its result.
+// with it. Preparation includes the generation in its memo key so a preference update invalidates
+// its settled result.
 func (a *ApiHandler) targetGasLimitForProposal(
 	baseState *state.CachingBeaconState,
 	targetSlot, proposerIndex uint64,

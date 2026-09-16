@@ -336,10 +336,10 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 	return f.isParentNodeFull(proposerBlock.Block)
 }
 
-// ShouldBuildOnFull returns whether the proposer should build on the full payload
-// for the given head node. Returns false for EMPTY heads. For FULL heads, returns
-// true unless the PTC voted the payload as late or blob data as unavailable. The
-// proposal slot is explicit because preparation can run before the store advances.
+// ShouldBuildOnFull requires a known FULL head. Only a head from the slot immediately before the
+// proposal is rechecked for payload timeliness and blob availability; older FULL heads keep their
+// resolved status. The proposal slot is explicit because preparation can run before the store
+// advances.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool {
 	header, has := f.forkGraph.GetHeader(head.Root)
