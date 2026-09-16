@@ -2455,8 +2455,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
-// WitnessNodesByHash folds like Witnesses, but read-only, and returns the captured nodes keyed by their hash. The set
-// holds the proven paths only: nodes off them are referenced by their stored hashes.
+// WitnessNodesByHash folds read-only: the set holds only the proven paths, off-path nodes are referenced by hash.
 func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
 	hph.readOnlyWitness = true
 	defer func() { hph.readOnlyWitness = false }()

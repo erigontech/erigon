@@ -669,8 +669,7 @@ func PrintProof(proof []hexutil.Bytes) error {
 	return nil
 }
 
-// ProofFromNodes returns the nodes on the path to key (keybytes) from the node with hash root, and the leaf value when
-// key is present. byHash holds nodes keyed by their hash; a node embedded in its parent is taken from the parent.
+// ProofFromNodes returns the proof for key (keybytes) and its leaf value, which is nil when key is absent.
 func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte, value []byte, err error) {
 	enc, ok := byHash[string(root)]
 	if !ok {
@@ -717,7 +716,7 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 			}
 		case 17:
 			rest := elems
-			if len(path) == 0 { // the key ends here, so its value is the branch's 17th element
+			if len(path) == 0 {
 				for range 16 {
 					if _, _, rest, err = rlp.Split(rest); err != nil {
 						return nil, nil, err
@@ -742,7 +741,6 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 	return proof, nil, nil
 }
 
-// childNode resolves the child reference at the start of buf: an embedded node, a node looked up by hash, or nil.
 func childNode(byHash map[string][]byte, buf []byte) ([]byte, error) {
 	kind, val, rest, err := rlp.Split(buf)
 	switch {

@@ -339,7 +339,6 @@ func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, p
 	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
 }
 
-// WitnessNodesByHash returns the witness nodes of the touched keys keyed by their hash, and the root hash.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if !ok {
