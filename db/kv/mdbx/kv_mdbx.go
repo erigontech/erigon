@@ -397,10 +397,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	// Open can fail after a read txn has already been pooled; drain before the env.Close defer.
+	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
+	// defer then no-ops, because mdbx Env.Close is idempotent.
 	defer func() {
 		if err != nil {
-			db.drainRoTxPool()
+			db.Close()
 		}
 	}()
 
@@ -693,8 +694,10 @@ func (db *MdbxKV) Close() {
 	db.waitTxsAllDoneOnClose()
 	db.drainRoTxPool()
 
-	db.env.Close()
-	db.env = nil
+	if db.env != nil {
+		db.env.Close()
+		db.env = nil
+	}
 
 	if db.opts.autoRemove {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
