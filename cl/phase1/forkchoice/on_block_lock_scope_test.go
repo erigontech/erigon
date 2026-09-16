@@ -373,6 +373,33 @@ func TestNewPayloadSkipsELWhenBlockWentStaleWhileQueued(t *testing.T) {
 	require.EqualValues(t, execution_client.PayloadStatusNone, status)
 }
 
+// Invalid is terminal. A root invalidated while the EL call was in flight must not be
+// reported as validated to a queued caller, nor have its validated marker revived.
+func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	// Both markers set for the same root, as they would be if an invalidation landed
+	// after the payload had once been validated.
+	store.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+	store.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+
+	store.mu.Lock()
+	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		blockRoot, nil, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+	store.mu.Unlock()
+
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status,
+		"the invalid marker must outrank the validated one")
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) {

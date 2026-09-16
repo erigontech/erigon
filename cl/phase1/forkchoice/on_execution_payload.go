@@ -411,6 +411,15 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	})
 }
 
+// rootMarkedInvalid reports whether the payload for this beacon root is already known bad.
+func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
+	if f.payloadStatusByRoot == nil {
+		return false
+	}
+	status, ok := f.payloadStatusByRoot.Get(blockRoot)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
 // the EL without holding f.mu. Admission is re-checked and the verdict recorded while the
 // admission token is still held, so queued callers neither resend nor run stale work.
@@ -432,19 +441,19 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 				return execution_client.PayloadStatusNone, err
 			}
 		}
+		// Invalid is terminal and outranks a validated marker, matching markPayloadStatus.
+		if f.rootMarkedInvalid(blockRoot) {
+			return execution_client.PayloadStatusInvalidated, nil
+		}
 		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
 			return execution_client.PayloadStatusValidated, nil
-		}
-		if f.payloadStatusByRoot != nil {
-			if known, ok := f.payloadStatusByRoot.Get(blockRoot); ok && known == execution_client.PayloadStatusInvalidated {
-				return execution_client.PayloadStatusInvalidated, nil
-			}
 		}
 		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 		switch status {
 		case execution_client.PayloadStatusValidated:
 			// A VALID status alongside an error is contradictory; the caller rejects it.
-			if err == nil && f.verifiedExecutionPayload != nil {
+			// A root invalidated during the call stays invalid, so do not revive it.
+			if err == nil && f.verifiedExecutionPayload != nil && !f.rootMarkedInvalid(blockRoot) {
 				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 		case execution_client.PayloadStatusInvalidated:
