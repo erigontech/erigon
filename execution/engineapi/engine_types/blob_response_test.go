@@ -25,6 +25,15 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
+// hintedJSONWriter records the size hint, so a test can check the value fit the buffer it asked for.
+type hintedJSONWriter struct {
+	out  []byte
+	hint int
+}
+
+func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
+func (w *hintedJSONWriter) WriteRawBytes(v []byte)       { w.out = append(w.out, v...) }
+
 func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 	full := worstCaseBundleV2()
 	cases := map[string]BlobsBundleV2{
@@ -44,6 +53,10 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 			got, err := bundle.MarshalFastJSON()
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+			w := &hintedJSONWriter{}
+			require.NoError(t, bundle.MarshalFastJSONTo(w))
+			require.Equal(t, string(want), string(w.out))
+			require.LessOrEqual(t, len(w.out), w.hint)
 		})
 	}
 }
@@ -63,6 +76,10 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 			got, err := bundle.MarshalFastJSON()
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+			w := &hintedJSONWriter{}
+			require.NoError(t, bundle.MarshalFastJSONTo(w))
+			require.Equal(t, string(want), string(w.out))
+			require.LessOrEqual(t, len(w.out), w.hint)
 		})
 	}
 }

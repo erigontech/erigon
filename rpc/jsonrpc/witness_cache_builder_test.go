@@ -429,6 +429,9 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
+	var streamed jsonBytesWriter
+	require.NoError(t, cached.MarshalFastJSONTo(&streamed))
+	require.Equal(t, wantBytes, []byte(streamed))
 }
 
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
@@ -733,3 +736,8 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 		panic("simulated build pipeline panic")
 	})
 }
+
+type jsonBytesWriter []byte
+
+func (w *jsonBytesWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
+func (w *jsonBytesWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }

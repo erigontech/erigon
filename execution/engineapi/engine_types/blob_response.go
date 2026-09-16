@@ -16,7 +16,11 @@
 
 package engine_types
 
-import "encoding/hex"
+import (
+	"encoding/hex"
+
+	"github.com/erigontech/erigon/common/hexutil"
+)
 
 // BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSON
 // serializes the whole response into one pre-sized buffer (direct hex encoding) instead of reflection,
@@ -27,8 +31,17 @@ type (
 )
 
 func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
+	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
+}
+
+func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRawBytes(bundle.appendJSON(w.AvailableBuffer(bundle.jsonLen())))
+	return nil
+}
+
+func (bundle BlobsBundleV1) jsonLen() int {
 	if bundle == nil {
-		return jsonNull(), nil
+		return len("null")
 	}
 	size := len("[]")
 	for i, b := range bundle {
@@ -37,20 +50,35 @@ func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
 		}
 		size += blobV1JSONLen(b)
 	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
+	return size
+}
+
+func (bundle BlobsBundleV1) appendJSON(dst []byte) []byte {
+	if bundle == nil {
+		return append(dst, "null"...)
+	}
+	dst = append(dst, '[')
 	for i, b := range bundle {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		out = appendBlobV1JSON(out, b)
+		dst = appendBlobV1JSON(dst, b)
 	}
-	return append(out, ']'), nil
+	return append(dst, ']')
 }
 
 func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
+	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
+}
+
+func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRawBytes(bundle.appendJSON(w.AvailableBuffer(bundle.jsonLen())))
+	return nil
+}
+
+func (bundle BlobsBundleV2) jsonLen() int {
 	if bundle == nil {
-		return jsonNull(), nil
+		return len("null")
 	}
 	size := len("[]")
 	for i, b := range bundle {
@@ -59,15 +87,21 @@ func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
 		}
 		size += blobV2JSONLen(b)
 	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
+	return size
+}
+
+func (bundle BlobsBundleV2) appendJSON(dst []byte) []byte {
+	if bundle == nil {
+		return append(dst, "null"...)
+	}
+	dst = append(dst, '[')
 	for i, b := range bundle {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		out = appendBlobV2JSON(out, b)
+		dst = appendBlobV2JSON(dst, b)
 	}
-	return append(out, ']'), nil
+	return append(dst, ']')
 }
 
 func appendBlobV1JSON(dst []byte, b *BlobAndProofV1) []byte {

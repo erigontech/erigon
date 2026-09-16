@@ -25,20 +25,34 @@ import (
 // MarshalFastJSON serializes the getPayload blobs bundle into one pre-sized buffer (direct hex
 // encoding) instead of reflection, byte-identical to json.Marshal of the bundle.
 func (b *BlobsBundle) MarshalFastJSON() ([]byte, error) {
+	return b.appendJSON(make([]byte, 0, b.jsonLen())), nil
+}
+
+func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRawBytes(b.appendJSON(w.AvailableBuffer(b.jsonLen())))
+	return nil
+}
+
+func (b *BlobsBundle) jsonLen() int {
 	if b == nil {
-		return jsonNull(), nil
+		return len("null")
 	}
-	size := len(`{"commitments":`) + hexArrayLen(b.Commitments) +
+	return len(`{"commitments":`) + hexArrayLen(b.Commitments) +
 		len(`,"proofs":`) + hexArrayLen(b.Proofs) +
 		len(`,"blobs":`) + hexArrayLen(b.Blobs) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"commitments":`...)
-	out = appendHexArray(out, b.Commitments)
-	out = append(out, `,"proofs":`...)
-	out = appendHexArray(out, b.Proofs)
-	out = append(out, `,"blobs":`...)
-	out = appendHexArray(out, b.Blobs)
-	return append(out, '}'), nil
+}
+
+func (b *BlobsBundle) appendJSON(dst []byte) []byte {
+	if b == nil {
+		return append(dst, "null"...)
+	}
+	dst = append(dst, `{"commitments":`...)
+	dst = appendHexArray(dst, b.Commitments)
+	dst = append(dst, `,"proofs":`...)
+	dst = appendHexArray(dst, b.Proofs)
+	dst = append(dst, `,"blobs":`...)
+	dst = appendHexArray(dst, b.Blobs)
+	return append(dst, '}')
 }
 
 func appendHexArray(dst []byte, arr []hexutil.Bytes) []byte {
@@ -76,41 +90,65 @@ func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
 	if r == nil {
 		return jsonNull(), nil
 	}
-	executionPayload, err := json.Marshal(r.ExecutionPayload)
+	f, err := r.marshalFields()
 	if err != nil {
 		return nil, err
 	}
-	blockValue, err := json.Marshal(r.BlockValue)
-	if err != nil {
-		return nil, err
+	return f.appendJSON(make([]byte, 0, f.jsonLen()+r.BlobsBundle.jsonLen()), r.BlobsBundle), nil
+}
+
+func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	if r == nil {
+		w.WriteRawBytes(append(w.AvailableBuffer(len("null")), "null"...))
+		return nil
 	}
-	blobsBundle, err := r.BlobsBundle.MarshalFastJSON()
+	f, err := r.marshalFields()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	executionRequests, err := json.Marshal(r.ExecutionRequests)
-	if err != nil {
-		return nil, err
+	w.WriteRawBytes(f.appendJSON(w.AvailableBuffer(f.jsonLen()+r.BlobsBundle.jsonLen()), r.BlobsBundle))
+	return nil
+}
+
+// getPayloadFields holds the fields json.Marshal encodes; the bundle is appended directly.
+type getPayloadFields struct {
+	executionPayload, blockValue, executionRequests, shouldOverrideBuilder []byte
+}
+
+func (r *GetPayloadResponse) marshalFields() (f getPayloadFields, err error) {
+	if f.executionPayload, err = json.Marshal(r.ExecutionPayload); err != nil {
+		return f, err
 	}
-	shouldOverrideBuilder, err := json.Marshal(r.ShouldOverrideBuilder)
-	if err != nil {
-		return nil, err
+	if f.blockValue, err = json.Marshal(r.BlockValue); err != nil {
+		return f, err
 	}
-	size := len(`{"executionPayload":`) + len(executionPayload) +
-		len(`,"blockValue":`) + len(blockValue) +
-		len(`,"blobsBundle":`) + len(blobsBundle) +
-		len(`,"executionRequests":`) + len(executionRequests) +
-		len(`,"shouldOverrideBuilder":`) + len(shouldOverrideBuilder) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"executionPayload":`...)
-	out = append(out, executionPayload...)
-	out = append(out, `,"blockValue":`...)
-	out = append(out, blockValue...)
-	out = append(out, `,"blobsBundle":`...)
-	out = append(out, blobsBundle...)
-	out = append(out, `,"executionRequests":`...)
-	out = append(out, executionRequests...)
-	out = append(out, `,"shouldOverrideBuilder":`...)
-	out = append(out, shouldOverrideBuilder...)
-	return append(out, '}'), nil
+	if f.executionRequests, err = json.Marshal(r.ExecutionRequests); err != nil {
+		return f, err
+	}
+	if f.shouldOverrideBuilder, err = json.Marshal(r.ShouldOverrideBuilder); err != nil {
+		return f, err
+	}
+	return f, nil
+}
+
+func (f *getPayloadFields) jsonLen() int {
+	return len(`{"executionPayload":`) + len(f.executionPayload) +
+		len(`,"blockValue":`) + len(f.blockValue) +
+		len(`,"blobsBundle":`) +
+		len(`,"executionRequests":`) + len(f.executionRequests) +
+		len(`,"shouldOverrideBuilder":`) + len(f.shouldOverrideBuilder) + len("}")
+}
+
+func (f *getPayloadFields) appendJSON(dst []byte, bundle *BlobsBundle) []byte {
+	dst = append(dst, `{"executionPayload":`...)
+	dst = append(dst, f.executionPayload...)
+	dst = append(dst, `,"blockValue":`...)
+	dst = append(dst, f.blockValue...)
+	dst = append(dst, `,"blobsBundle":`...)
+	dst = bundle.appendJSON(dst)
+	dst = append(dst, `,"executionRequests":`...)
+	dst = append(dst, f.executionRequests...)
+	dst = append(dst, `,"shouldOverrideBuilder":`...)
+	dst = append(dst, f.shouldOverrideBuilder...)
+	return append(dst, '}')
 }

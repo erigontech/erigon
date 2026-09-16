@@ -70,7 +70,7 @@ func Get(out io.Writer) Stream {
 // afterwards, and must not write to the stream again.
 func Put(s Stream) {
 	ss, ok := s.(*StackStream)
-	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
+	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize || cap(ss.large) > maxPooledBufferSize {
 		return
 	}
 	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection

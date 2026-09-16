@@ -541,6 +541,15 @@ func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	enc, err := m.MarshalFastJSON()
+	if err != nil {
+		return err
+	}
+	w.WriteRawBytes(enc)
+	return nil
+}
+
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {
 		return header.Hash(), nil

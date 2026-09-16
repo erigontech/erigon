@@ -81,14 +81,15 @@ func TestUnmarshalBytes(t *testing.T) {
 
 type sliceJSONWriter []byte
 
-func (w *sliceJSONWriter) WriteRawBytes(v []byte) { *w = append(*w, v...) }
+func (w *sliceJSONWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
+func (w *sliceJSONWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
 
-func TestBytesWriteJSONTo(t *testing.T) {
+func TestBytesMarshalFastJSONTo(t *testing.T) {
 	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
 		want, err := json.Marshal(b)
 		require.NoError(t, err)
 		w := sliceJSONWriter("keep")
-		b.WriteJSONTo(&w)
+		require.NoError(t, b.MarshalFastJSONTo(&w))
 		require.Equal(t, "keep"+string(want), string(w))
 	}
 }

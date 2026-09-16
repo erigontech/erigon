@@ -20,8 +20,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
-
-	"github.com/erigontech/erigon/common/pool"
 )
 
 var bytesT = reflect.TypeFor[Bytes]()
@@ -48,19 +46,20 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
-// JSONWriter is what a value needs from a JSON stream to write itself, like json/v2's MarshalJSONTo does with a jsontext.Encoder.
+// JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
 type JSONWriter interface {
+	// AvailableBuffer returns an empty buffer with at least sizeHint spare capacity. The stream owns it:
+	// append one value and pass it to WriteRawBytes.
+	AvailableBuffer(sizeHint int) []byte
 	WriteRawBytes([]byte)
 }
 
-// WriteJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
-func (b Bytes) WriteJSONTo(w JSONWriter) {
-	buf := pool.GetBuffer()
-	defer pool.PutBuffer(buf)
-	buf.Grow(len(b)*2 + 4)
-	enc := append(buf.AvailableBuffer(), `"`+HexPrefix...)
+// MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
+func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
+	enc := append(w.AvailableBuffer(len(b)*2+4), `"`+HexPrefix...)
 	enc = hex.AppendEncode(enc, b)
 	w.WriteRawBytes(append(enc, '"'))
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

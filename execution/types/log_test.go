@@ -516,6 +516,15 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
+// hintedJSONWriter records the size hint, so a test can check the value fit the buffer it asked for.
+type hintedJSONWriter struct {
+	out  []byte
+	hint int
+}
+
+func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
+func (w *hintedJSONWriter) WriteRawBytes(v []byte)       { w.out = append(w.out, v...) }
+
 // MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
 // allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
 // so the bound is checked directly as well.
@@ -555,6 +564,10 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 			got, err := logs.MarshalFastJSON()
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+			w := &hintedJSONWriter{}
+			require.NoError(t, logs.MarshalFastJSONTo(w))
+			require.Equal(t, string(want), string(w.out))
+			require.LessOrEqual(t, len(w.out), w.hint)
 			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
 				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
 			}
@@ -566,6 +579,9 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, string(want), string(got))
 				require.LessOrEqual(t, len(got), l.fastJSONLen())
+				w := &hintedJSONWriter{}
+				require.NoError(t, l.MarshalFastJSONTo(w))
+				require.Equal(t, string(want), string(w.out))
 			}
 		})
 	}

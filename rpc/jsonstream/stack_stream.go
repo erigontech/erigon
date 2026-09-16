@@ -46,6 +46,8 @@ type StackStream struct {
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
+	// large holds a value too big for the buffer while it is written through to out.
+	large []byte
 }
 
 // newStackStream creates a new StackStream writing to out. Building the
@@ -64,6 +66,17 @@ func (s *StackStream) Buffer() []byte {
 	return s.stream.Buffer()
 }
 
+func (s *StackStream) AvailableBuffer(sizeHint int) []byte {
+	buf := s.stream.Buffer()
+	if s.out == nil || sizeHint < FlushThreshold {
+		buf = slices.Grow(buf, sizeHint)
+		s.stream.SetBuffer(buf)
+		return buf[len(buf):]
+	}
+	s.large = slices.Grow(s.large[:0], sizeHint)
+	return s.large
+}
+
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
@@ -78,6 +91,11 @@ func (s *StackStream) Reset(out io.Writer) {
 // FlushThreshold goes straight to the writer. Such a response commits the HTTP
 // status either way, since flushIfFull drains the buffer the moment this returns.
 func (s *StackStream) WriteRawBytes(content []byte) {
+	if buf := s.stream.Buffer(); len(content) > 0 && cap(buf)-len(buf) >= len(content) && &buf[:len(buf)+1][len(buf)] == &content[0] {
+		s.stream.SetBuffer(buf[:len(buf)+len(content)])
+		s.popCommaOrField()
+		return
+	}
 	if s.out != nil && len(content) >= FlushThreshold {
 		s.writeThrough(content)
 		s.popCommaOrField()

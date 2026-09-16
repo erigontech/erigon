@@ -68,6 +68,10 @@ type Stream interface {
 	WriteMore()
 	WriteObjectField(fieldName string)
 
+	// AvailableBuffer returns an empty buffer with at least sizeHint spare capacity for one value,
+	// which is then passed to WriteRawBytes. A value that fits the stream's buffer is not copied.
+	AvailableBuffer(sizeHint int) []byte
+
 	// Utility methods
 
 	WriteEmptyArray()

@@ -104,21 +104,42 @@ func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
 	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
 }
 
-// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
-func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
+func (l *RPCLog) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRawBytes(l.appendFastJSON(w.AvailableBuffer(l.fastJSONLen())))
+	return nil
+}
+
+func (logs RPCLogs) fastJSONLen() int {
 	if logs == nil {
-		return []byte("null"), nil
+		return len("null")
 	}
 	size := len("[]") + len(logs)
 	for _, l := range logs {
 		size += l.fastJSONLen()
 	}
-	out := append(make([]byte, 0, size), '[')
+	return size
+}
+
+func (logs RPCLogs) appendFastJSON(dst []byte) []byte {
+	if logs == nil {
+		return append(dst, "null"...)
+	}
+	dst = append(dst, '[')
 	for i, l := range logs {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		out = l.appendFastJSON(out)
+		dst = l.appendFastJSON(dst)
 	}
-	return append(out, ']'), nil
+	return append(dst, ']')
+}
+
+// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
+func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
+	return logs.appendFastJSON(make([]byte, 0, logs.fastJSONLen())), nil
+}
+
+func (logs RPCLogs) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRawBytes(logs.appendFastJSON(w.AvailableBuffer(logs.fastJSONLen())))
+	return nil
 }
