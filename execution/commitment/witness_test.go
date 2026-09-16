@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -351,12 +350,18 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 	require.NoError(t, err)
 	fullTrie, err := trie.RLPDecode(full)
 	require.NoError(t, err)
-	branches := maps.Clone(ms.cm)
+	writes := ms.putBranches
+	_, _, err = hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	require.Error(t, err, "pending deferred updates would be flushed by the fold")
+	require.Equal(t, writes, ms.putBranches)
 
+	require.NoError(t, hph.branchEncoder.ApplyDeferredUpdates(16, ms.PutBranch))
+	hph.branchEncoder.ClearDeferred()
+	writes = ms.putBranches
 	byHash, rootRO, err := hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
 	require.NoError(t, err)
 	require.Equal(t, root, rootRO)
-	require.Equal(t, branches, ms.cm, "a read-only fold writes no branch back")
+	require.Equal(t, writes, ms.putBranches, "a read-only fold writes no branch")
 	require.Less(t, len(byHash), len(full), "nodes off the proven paths are referenced by hash")
 
 	for _, a := range proven {

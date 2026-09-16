@@ -2455,6 +2455,9 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 
 // WitnessNodesByHash folds read-only: the set holds only the proven paths, off-path nodes are referenced by hash.
 func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+	if len(hph.branchEncoder.deferred) > 0 {
+		return nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
+	}
 	hph.readOnlyWitness = true
 	defer func() { hph.readOnlyWitness = false }()
 	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
