@@ -44,7 +44,7 @@ type Page struct {
 	kLens, vLens, data []byte
 	kOffset, vOffset   uint32
 
-	compressionBuf []byte
+	decoded, compressionBuf []byte
 }
 
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
@@ -54,6 +54,7 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
 
+	r.decoded = v
 	r.i, r.kOffset, r.vOffset = 0, 0, 0
 	r.limit = int(v[0])
 	meta, data := v[1:1+r.limit*4*2], v[1+r.limit*4*2:]
@@ -70,7 +71,7 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 func (r *Page) clear() {
 	r.i, r.limit = 0, 0
 	r.kOffset, r.vOffset = 0, 0
-	r.kLens, r.vLens, r.data = nil, nil, nil
+	r.kLens, r.vLens, r.data, r.decoded = nil, nil, nil, nil
 }
 
 // Get returns the value stored under k on this page. It scans from the start of the page and leaves the
@@ -193,6 +194,9 @@ func (g *PagedReader) Count() int          { return g.file.Count() }
 func (g *PagedReader) Size() int           { return g.file.Size() }
 func (g *PagedReader) PageSize() int       { return g.pageSize }
 func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
+
+// DecodedPage returns the page the reader was last Reset to; the next page read overwrites it.
+func (g *PagedReader) DecodedPage() []byte { return g.page.decoded }
 
 // GetFromPage returns the value for k at the offset the reader was last Reset to. A file written without
 // pages holds one value per offset, so k is not used there. A missing value is nil; an error means the offset
