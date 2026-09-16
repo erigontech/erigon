@@ -19,6 +19,7 @@ package snapshot_format
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 
@@ -241,13 +242,22 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 //     Callers that need full EL data should use ReadBlockFromSnapshot instead.
 //   - GLOAS: stored as full SignedBeaconBlock (no payload to blind); decoded directly.
 func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
+	return readBeaconBlockBodyFromSnapshot(r, cfg, false)
+}
+
+// ReadBeaconBlockBodyFromSnapshotForIntegrity verifies the stored body root while decoding.
+func ReadBeaconBlockBodyFromSnapshotForIntegrity(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
+	return readBeaconBlockBodyFromSnapshot(r, cfg, true)
+}
+
+func readBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig, verifyBodyRoot bool) (*cltypes.SignedBeaconBlock, error) {
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
-	v, _, err := readMetadataForBlock(r, metadataSlab)
+	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +277,15 @@ func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfi
 		if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 			return nil, err
 		}
+		if verifyBodyRoot {
+			decodedBodyRoot, err := block.Block.Body.HashSSZ()
+			if err != nil {
+				return nil, err
+			}
+			if decodedBodyRoot != bodyRoot {
+				return nil, errors.New("beacon snapshot body root does not match decoded body")
+			}
+		}
 		return block, nil
 	}
 
@@ -274,6 +293,15 @@ func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfi
 	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, err
+	}
+	if verifyBodyRoot {
+		decodedBodyRoot, err := blindedBlock.Block.Body.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		if decodedBodyRoot != bodyRoot {
+			return nil, errors.New("beacon snapshot body root does not match decoded body")
+		}
 	}
 	txs := &solid.TransactionsSSZ{}
 	var ws *solid.ListSSZ[*cltypes.Withdrawal]
