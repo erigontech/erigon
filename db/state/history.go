@@ -951,6 +951,7 @@ type HistoryRoTx struct {
 
 	_bufTs              []byte
 	blockCompressionBuf []byte
+	lastPage            historyPage // the decompressed page this tx read last
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -1213,9 +1214,14 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 }
 
 // valueFromCachedPage looks key up in the decompressed page at offset, decompressing and caching the page on a miss.
-// The returned value points into the shared page, so callers must not modify it.
+// The page this tx read last is checked first, so reading several values of one page - a scan - never reaches the
+// shared cache. The returned value points into a shared page, so callers must not modify it.
 func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key []byte) ([]byte, bool, error) {
 	d := item.src.decompressor
+	if ht.lastPage.data != nil && ht.lastPage.d == d && ht.lastPage.offset == offset {
+		v, _ := seg.GetFromPage(key, ht.lastPage.data, nil, false)
+		return v, true, nil
+	}
 	k := offset*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(d)))
 	p, ok := ht.h.pages.Get(k)
 	if !ok || p.d != d || p.offset != offset {
@@ -1229,6 +1235,7 @@ func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key 
 		p = historyPage{d: d, offset: offset, data: data}
 		ht.h.pages.Add(k, p)
 	}
+	ht.lastPage = p
 	v, _ := seg.GetFromPage(key, p.data, nil, false)
 	return v, true, nil
 }
