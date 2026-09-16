@@ -958,6 +958,40 @@ func TestValidationUnwindBoundsCodeSizeRead(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
+func TestValidationUnwindBoundsAddrCodeHashShortcut(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(sc)
+	view := sc.View(frontierAtStateVersion(t, tx, frontierAt(32)))
+	child.Unwind(16, nil)
+	addr := make([]byte, 20)
+	addr[0] = 0xc8
+	code := []byte{0x60, 0x01, 0x60, 0x00, 0x55}
+	codeHash := crypto.Keccak256Hash(code)
+	view.SeedAddrCodeHash(addr, codeHash, 20)
+	view.FillCodeSize(codeHash[:], len(code), 20)
+	seeded, ok := view.GetAddrCodeHash(addr)
+	require.True(t, ok, "the fixture needs an addr binding above the unwind bound")
+	require.Equal(t, codeHash, common.Hash(seeded))
+
+	size, ok, err := child.GetCodeSize(tx, addr, 40)
+	require.NoError(t, err)
+	require.False(t, ok, "the candidate must not resolve code through an addr binding above its unwind bound")
+	require.Zero(t, size)
+
+	seeded, ok = view.GetAddrCodeHash(addr)
+	require.True(t, ok, "the read bound must reject without evicting the canonical binding")
+	require.Equal(t, codeHash, common.Hash(seeded))
+}
+
 func TestValidationCommitReleasesBranchReadBound(t *testing.T) {
 	t.Parallel()
 	db := newTestDb(t, 16)
