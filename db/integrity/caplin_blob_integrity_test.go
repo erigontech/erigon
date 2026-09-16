@@ -171,7 +171,27 @@ func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotRange(t *testing.T) {
 
 	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
 	require.ErrorContains(t, err, "missing blob snapshot coverage")
-	require.ErrorContains(t, err, "0-10000")
+	require.ErrorContains(t, err, "0-20000")
+}
+
+func TestCheckCaplinBlobSidecarsRejectsMissingTerminalBlobSnapshotRange(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 0, limit, func(uint64) []byte { return nil })
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	require.ErrorContains(t, err, "missing blob snapshot coverage")
+	require.ErrorContains(t, err, "10000-20000")
 }
 
 func TestCheckCaplinBlobSidecarsRejectsBeaconGapBeforeTail(t *testing.T) {
