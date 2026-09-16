@@ -149,6 +149,25 @@ func (s *CaplinSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+// WalkDirtySegments calls f for each dirty segment of the requested type until it returns false.
+func (s *CaplinSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*snapshotsync.DirtySegment) bool) {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+
+	dirty := s.dirty[segtype]
+	if dirty == nil {
+		return
+	}
+	dirty.Walk(func(segments []*snapshotsync.DirtySegment) bool {
+		for _, segment := range segments {
+			if !f(segment) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func (s *CaplinSnapshots) Close() {
 	if s == nil {
 		return
@@ -264,6 +283,29 @@ func (s *CaplinSnapshots) OpenFolder() error {
 		list = append(list, fName)
 	}
 	return s.OpenList(list, false)
+}
+
+// MissingBeaconSnapshotRanges returns beacon gaps and the overlap-normalized raw horizon.
+func (s *CaplinSnapshots) MissingBeaconSnapshotRanges() ([]snapshotsync.Range, uint64, error) {
+	_, missing, err := snapshotsync.SegmentsCaplin(s.dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	files, err := snaptype.Segments(s.dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	beaconFiles := make([]snaptype.FileInfo, 0, len(files))
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			beaconFiles = append(beaconFiles, file)
+		}
+	}
+	var beaconTo uint64
+	for _, file := range snapshotsync.NoOverlaps(beaconFiles) {
+		beaconTo = max(beaconTo, file.To)
+	}
+	return missing, beaconTo, nil
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
@@ -573,6 +615,35 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	}
 
 	return s.OpenFolder()
+}
+
+// ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
+func (s *CaplinSnapshots) ReadFrozenBeaconBlockBodyForIntegrity(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	view := s.View()
+	defer view.Close()
+
+	seg, ok := view.BeaconBlocksSegment(slot)
+	if !ok {
+		return nil, nil
+	}
+
+	idx := seg.Src().Index()
+	if idx == nil {
+		return nil, nil
+	}
+	getter := seg.Src().MakeGetter()
+	getter.Reset(idx.OrdinalLookup(slot - idx.BaseDataID()))
+	if !getter.HasNext() {
+		return nil, nil
+	}
+	buf, _ := getter.Next(nil)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	reader := decompressorPool.Get().(*zstd.Decoder)
+	defer putDecoder(reader)
+	reader.Reset(bytes.NewReader(buf))
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshotForIntegrity(reader, s.beaconCfg)
 }
 
 func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {

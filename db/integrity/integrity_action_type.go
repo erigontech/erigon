@@ -132,6 +132,9 @@ const (
 	// a range frozen before it was reconstructed; such a blank segment shadows the DB and
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
+
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
@@ -142,7 +145,7 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
+var SlowChecks = []Check{CaplinBlobSidecars, StateVerify}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
