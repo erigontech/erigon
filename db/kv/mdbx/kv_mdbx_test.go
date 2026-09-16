@@ -1147,6 +1147,23 @@ func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
 	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
 }
 
+func TestBeginRoRenewsPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	pool := func() int { return mdbx.RoTxPoolLen(db.(*mdbx.MdbxKV)) }
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	parked := pool()
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+
+	tx, err = db.BeginRo(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, parked, pool())
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+}
+
 // TestCursorOnPooledTxn pins that a cursor opened on a read txn that came back from the
 // pool reads through the renewal. Reuse itself is not asserted: mdbx hands a freed txn
 // back at the same address, so CHandle equality holds whether or not pooling ran.
