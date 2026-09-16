@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -81,10 +82,6 @@ const (
 
 	// maxGetProofKeys is the maximum number of storage keys allowed in a single eth_getProof request.
 	maxGetProofKeys = 1024
-
-	// maxGetProofKeyLen is the longest storage key eth_getProof accepts, matching the
-	// execution-apis bytesMax32 schema.
-	maxGetProofKeyLen = 32
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -445,9 +442,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	// Hash.SetBytes keeps only the trailing 32 bytes, so an over-long key would silently
 	// be answered with a valid proof for a different slot.
 	for _, storageKey := range storageKeys {
-		if len(storageKey) > maxGetProofKeyLen {
+		if len(storageKey) > length.Hash {
 			return nil, &rpc.CustomError{
-				Message: fmt.Sprintf("storage key too long (max %d bytes, got %d)", maxGetProofKeyLen, len(storageKey)),
+				Message: fmt.Sprintf("storage key too long (max %d bytes, got %d)", length.Hash, len(storageKey)),
 				Code:    rpc.ErrCodeInvalidParams,
 			}
 		}
