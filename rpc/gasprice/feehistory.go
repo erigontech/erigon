@@ -76,6 +76,7 @@ type processedFees struct {
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
 	gasUsed                      uint64
+	parentHash                   common.Hash
 	// tips serves the rewards of any percentile set, so one entry per block covers every request;
 	// nil when the block's transactions were not loaded.
 	tips []txGasAndReward
@@ -168,6 +169,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 	}
 
 	bf.results.gasUsed = bf.header.GasUsed
+	bf.results.parentHash = bf.header.ParentHash
 	if bf.block == nil {
 		return // header-only: rewards were not requested
 	}
@@ -363,18 +365,26 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 
 	// Unfrozen heights are cached by hash, so a reorged-out block can no longer
-	// be found under its number. The hashes come from one range scan per request
-	// — resolving them per block costs a remote round trip each in rpcdaemon
-	// mode, which the cache-hit path used to be free of. Heights left unresolved
-	// (scan error, beyond the head) are simply not cached.
+	// be found under its number. A cached block names its parent, so the hit loop
+	// walks down from the canonical hash of the top height and scans the rest
+	// once, from the first height it cannot name — resolving them per block costs
+	// a remote round trip each in rpcdaemon mode. Heights left unresolved (scan
+	// error, beyond the head) are simply not cached.
 	var hotFrom uint64
 	var hotHashes []common.Hash
+	resolveHot := func(from, to uint64) {
+		hashes, err := oracle.backend.CanonicalHashes(ctx, from, to)
+		if err != nil {
+			oracle.log.Debug("fee history: canonical range unresolved, serving uncached", "from", from, "to", to, "err", err)
+			return
+		}
+		copy(hotHashes[from-hotFrom:], hashes)
+	}
 	if oracle.historyCache != nil && lastBlock > frozenBound {
 		hotFrom = max(oldestBlock, frozenBound+1)
-		hotHashes, err = oracle.backend.CanonicalHashes(ctx, hotFrom, lastBlock)
-		if err != nil {
-			oracle.log.Debug("fee history: canonical range unresolved, serving uncached", "from", hotFrom, "to", lastBlock, "err", err)
-			hotHashes = nil
+		hotHashes = make([]common.Hash, lastBlock-hotFrom+1)
+		if pendingBlock == nil { // a pending top is never cached
+			resolveHot(lastBlock, lastBlock)
 		}
 	}
 
@@ -393,16 +403,17 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		return key, byHash, cacheable
 	}
 
-	// cached serves a block from the cache; an entry without tips does not serve rewards.
-	cached := func(key cacheKey) (processedFees, bool) {
-		v, ok := oracle.historyCache.get(key)
-		return v, ok && (v.tips != nil || len(rewardPercentiles) == 0)
+	// An entry without tips does not serve rewards.
+	servesRequest := func(v processedFees) bool {
+		return v.tips != nil || len(rewardPercentiles) == 0
 	}
 
 	// Cache hits are served here: every fetcher forks a read transaction, and a fork
 	// takes the database's reader-slot lock.
 	misses := 0
-	for blockNumber := oldestBlock; blockNumber <= lastBlock; blockNumber++ {
+	scanned := false
+	for i := blocks - 1; i >= 0; i-- {
+		blockNumber := oldestBlock + uint64(i)
 		// The pending block comes from the mining cache and is rebuilt
 		// continuously, so its results are never memoized.
 		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
@@ -417,10 +428,19 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			blockResults[blockNumber-oldestBlock] = blockResult{processed: fees.results, hasResult: true}
 			continue
 		}
-		if key, _, cacheable := cacheKeyOf(blockNumber); cacheable {
-			if v, ok := cached(key); ok {
-				blockResults[blockNumber-oldestBlock] = blockResult{processed: v, hasResult: true}
-				continue
+		if blockNumber >= hotFrom && hotHashes != nil && hotHashes[blockNumber-hotFrom] == (common.Hash{}) && !scanned {
+			scanned = true
+			resolveHot(hotFrom, blockNumber)
+		}
+		if key, byHash, cacheable := cacheKeyOf(blockNumber); cacheable {
+			if v, ok := oracle.historyCache.get(key); ok {
+				if byHash && blockNumber > hotFrom && hotHashes[blockNumber-1-hotFrom] == (common.Hash{}) {
+					hotHashes[blockNumber-1-hotFrom] = v.parentHash
+				}
+				if servesRequest(v) {
+					blockResults[blockNumber-oldestBlock] = blockResult{processed: v, hasResult: true}
+					continue
+				}
 			}
 		}
 		misses++
@@ -475,7 +495,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				key, byHash, cacheable := cacheKeyOf(blockNumber)
 				if cacheable {
 					// Another request may have cached the block since the scan.
-					if v, ok := cached(key); ok {
+					if v, ok := oracle.historyCache.get(key); ok && servesRequest(v) {
 						blockResults[idx] = blockResult{processed: v, hasResult: true}
 						continue
 					}

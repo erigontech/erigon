@@ -261,6 +261,10 @@ func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNu
 		header.Number.SetUint64(m.safeBlock)
 	case rpc.FinalizedBlockNumber:
 		header.Number.SetUint64(m.finalizedBlock)
+	default:
+		if number > 0 {
+			header.ParentHash = mockHeightHash(uint64(number) - 1)
+		}
 	}
 	return header, nil
 }
@@ -499,7 +503,7 @@ func TestFeeHistory_WindowStraddlingFrozenBoundary(t *testing.T) {
 	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
 	require.Len(t, baseFee, 9)
-	require.Equal(t, [][2]uint64{{6, 10}}, backend.resolvedRanges(),
+	require.Equal(t, [][2]uint64{{10, 10}, {6, 9}}, backend.resolvedRanges(),
 		"only the part of the window above the frozen boundary must be resolved to hashes")
 	fetchesAfterFirst := backend.headerCalls.Load()
 
@@ -510,11 +514,12 @@ func TestFeeHistory_WindowStraddlingFrozenBoundary(t *testing.T) {
 		"the second request must be served from the cache in both regimes")
 }
 
-// TestFeeHistory_HotRangeResolvedInOneScan pins the cost of the cache-key
-// resolution above the frozen boundary: one range resolution per request,
-// whatever the window size. Per-block resolution would turn a memoized
+// TestFeeHistory_WarmHotRangeResolvesOnlyItsTop pins the cost of the cache-key
+// resolution above the frozen boundary: a cached block names its parent, so a
+// warm request reads the canonical hash of its top height only, and a cold one
+// adds a single scan below it. Per-block resolution would turn a memoized
 // eth_feeHistory into one remote round trip per block in rpcdaemon mode.
-func TestFeeHistory_HotRangeResolvedInOneScan(t *testing.T) {
+func TestFeeHistory_WarmHotRangeResolvesOnlyItsTop(t *testing.T) {
 	head := types.NewEmptyHeaderForAssembling()
 	head.Number.SetUint64(20)
 	head.GasLimit = 30_000_000
@@ -525,14 +530,14 @@ func TestFeeHistory_HotRangeResolvedInOneScan(t *testing.T) {
 
 	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
-	require.Equal(t, [][2]uint64{{13, 20}}, backend.resolvedRanges(),
-		"the whole hot window must be resolved by a single scan")
+	require.Equal(t, [][2]uint64{{20, 20}, {13, 19}}, backend.resolvedRanges(),
+		"a cold window must be resolved by its top and one scan below it")
 	fetchesAfterFirst := backend.headerCalls.Load()
 
 	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
-	require.Equal(t, [][2]uint64{{13, 20}, {13, 20}}, backend.resolvedRanges(),
-		"a warm request must not cost more than its one scan")
+	require.Equal(t, [][2]uint64{{20, 20}, {13, 19}, {20, 20}}, backend.resolvedRanges(),
+		"a warm request must resolve only its top height")
 	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
 		"the second request must be served from hash-keyed cache entries")
 }
