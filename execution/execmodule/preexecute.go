@@ -106,9 +106,17 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 		defer doms.ClearPreExecStart()
 	}
 	doms.SetStateCache(e.stateCache)
-	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
-		return ValidationResult{}, err
-	}
+	// NO unwind here. "Is this block where the stages are?" is a CANONICAL question, and the close is not a
+	// canonical step: it runs only on the block's own maintained SD (CheckUpdate above refuses anything else),
+	// which this node's own rounds put where it is — every round re-establishes canonical[N], the head header,
+	// the txNum index and the stage progress at the header's current hash, inside the generation's overlay.
+	// The round path already draws this line: it unwinds only for a FRESH SD that is not extending a live
+	// frontier (`!reuse && !frontierExtension`), and the close is `reuse` by construction, so the same rule
+	// says never. The call was inherited when the pre-exec close was split out of validateChainLocked
+	// (db733f4565), not chosen.
+	// It also cannot be harmless: with anything stale in that bookkeeping the walk fails to recognise the
+	// block, settles on its parent, and unwinds the block's own accumulated state away — the block-end then
+	// runs on the parent's state and the block seals a body its state transition never applied.
 
 	status, _, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
 	if criticalError != nil {
