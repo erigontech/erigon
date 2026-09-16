@@ -487,6 +487,7 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, false /* disableStreaming */, logger, 100)
 	defer srv.Stop()
 	require.NoError(t, srv.RegisterName("test", new(testService)))
+	require.NoError(t, srv.RegisterName("mid", largeRespService{8 * 1024}))
 	require.NoError(t, srv.RegisterName("big", largeRespService{4 * jsonstream.FlushThreshold}))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -503,8 +504,10 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 		return resp.ContentLength, resp.TransferEncoding, string(raw)
 	}
 
-	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1,{"S":"y"}]}`)
-	require.Positive(t, length)
+	// Past net/http's own 2KB buffer, so only this change can size it, and below the stream's flush
+	// threshold, so the whole answer is still in the buffer when the header is set.
+	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"mid_largeResp"}`)
+	require.Greater(t, length, int64(8*1024))
 	require.Empty(t, encoding)
 	require.Equal(t, int(length), len(answer))
 
