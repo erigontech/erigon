@@ -310,11 +310,11 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(blockReward.ToBig())
-	ret.UncleReward = hexutil.EncodeBig(uncleReward.ToBig())
+	ret.BlockReward = blockReward.Hex()
+	ret.UncleReward = uncleReward.Hex()
 
 	blockReward.Add(blockReward, uncleReward)
-	ret.Issuance = hexutil.EncodeBig(blockReward.ToBig())
+	ret.Issuance = blockReward.Hex()
 	return ret, nil
 }
 

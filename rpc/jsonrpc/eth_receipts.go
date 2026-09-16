@@ -394,17 +394,21 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		r, ok, err := api.receiptsGenerator.PersistedReceipt(ctx, tx, header, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			continue
-		}
-
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
-		if err != nil {
-			return nil, err
+			var txn types.Transaction
+			if txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex); err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
+				return nil, err
+			}
 		}
 		if r == nil {
 			return nil, err

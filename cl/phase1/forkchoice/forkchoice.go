@@ -98,20 +98,22 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot              atomic.Value
-	headHash                       common.Hash
-	headSlot                       uint64
-	headPayloadStatus              cltypes.PayloadStatus
-	headPayloadStatusLogAt         atomic.Int64
-	genesisTime                    uint64
-	genesisValidatorsRoot          common.Hash
-	weights                        map[common.Hash]uint64
-	headSet                        map[common.Hash]struct{}
-	hotSidecars                    map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
-	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
-	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads   *sync.Map
+	proposerBoostRoot                  atomic.Value
+	headHash                           common.Hash
+	headSlot                           uint64
+	headPayloadStatus                  cltypes.PayloadStatus
+	headPayloadStatusLogAt             atomic.Int64
+	genesisTime                        uint64
+	genesisValidatorsRoot              common.Hash
+	anchorExecutionPayloadBuilderIndex uint64
+	anchorHasExecutionPayloadBid       bool
+	weights                            map[common.Hash]uint64
+	headSet                            map[common.Hash]struct{}
+	hotSidecars                        map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload           *lru.Cache[common.Hash, struct{}]
+	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
+	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
+	invalidatedExecutionPayloads       *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -454,6 +456,12 @@ func NewForkChoiceStore(
 		payloadAttestationContexts:     payloadAttestationContexts,
 		db:                             db,
 	}
+	if anchorState.Version() >= clparams.GloasVersion {
+		if bid := anchorState.GetLatestExecutionPayloadBid(); bid != nil {
+			f.anchorExecutionPayloadBuilderIndex = bid.BuilderIndex
+			f.anchorHasExecutionPayloadBid = true
+		}
+	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
 	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint)
@@ -676,6 +684,10 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.AnchorRoot()
+}
+
+func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
+	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {

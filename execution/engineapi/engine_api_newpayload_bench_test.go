@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,7 +77,7 @@ func makeBenchNewPayloadRequest(b *testing.B, numTx int) []byte {
 		GasUsed:       30_000_000,
 		Timestamp:     1700000000,
 		ExtraData:     []byte("benchmark"),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 		BlockHash:     common.Hash{0x05},
 		Transactions:  txs,
 		Withdrawals:   withdrawals,
