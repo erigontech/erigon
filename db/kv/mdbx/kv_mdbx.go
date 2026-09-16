@@ -458,7 +458,8 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-const roTxPoolSize = 256
+// roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
+var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
 	log          log.Logger
@@ -681,9 +682,8 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	close(db.roTxPool)
-	for tx := range db.roTxPool {
-		tx.Abort()
+	for len(db.roTxPool) > 0 {
+		(<-db.roTxPool).Abort()
 	}
 
 	db.env.Close()
@@ -758,7 +758,7 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 }
 
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
-	if tx.Reset() == nil {
+	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
 		select {
 		case db.roTxPool <- tx:
 			return
@@ -820,6 +820,7 @@ type MdbxTx struct {
 
 	toCloseMap map[uint64]kv.Closer
 	cursorID   uint64
+	rolledBack atomic.Bool
 }
 
 type MdbxCursor struct {
@@ -1360,12 +1361,18 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
+	// Two concurrent rollbacks would park one read txn twice, giving two readers one snapshot.
+	if tx.rolledBack.Swap(true) {
+		return
+	}
 	if tx.tx == nil {
 		return
 	}
 	tx.closeCursors()
 	t := tx.tx
-	tx.tx = nil // before the txn goes back to the pool, so a second Rollback cannot park it twice
+	tx.tx = nil
+	// The pool send stays ahead of trackTxEnd: Close waits on that count before closing
+	// the env, and mdbx Reset has no close guard of its own.
 	if tx.readOnly {
 		tx.db.releaseRoTxn(t)
 	} else {
