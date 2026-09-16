@@ -18,13 +18,16 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -131,6 +134,47 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	}
 	if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body); err != nil {
 		return fmt.Errorf("write body: %w", err)
+	}
+	if err := clearSystemSlotRows(tx, header.Hash(), number); err != nil {
+		return fmt.Errorf("clear system slots: %w", err)
+	}
+	return nil
+}
+
+// clearSystemSlotRows removes any transaction row sitting in this block's two SYSTEM-transaction slots.
+//
+// A body owns the txn-id range [BaseTxnID, LastSystemTx], and WriteRawTransactions only ever writes real
+// transactions at At(i) = BaseTxnID+1+i, so both ends of that range must hold nothing. Canonical reads honour
+// that — ReadBodyWithTransactions walks from First() — so a row left in a system slot is invisible to
+// eth_getBlockByNumber, to receipts and to re-execution. The chain looks perfect with one there.
+//
+// Exactly one consumer reads those slots: the snapshot dumper, whose DumpTxs calls addSystemTx(body.BaseTxnID)
+// and emits whatever it finds. The transactions index then keys every emitted record on txn.Hash(), so a
+// leftover real transaction is emitted TWICE — once from the slot, once from its own position — and recsplit
+// cannot build an index over a duplicated key. It retries with another salt, forever.
+//
+// The rows get there because a block's body is written more than once. WriteRawBodyIfNotExists keys its
+// existence check on (number, hash), so every accumulation round that re-hashes the header, and every
+// withdrawals re-stamp, misses and takes a FRESH id range; rawdb.DeleteBody then frees kv.BlockBody and
+// kv.BlockAccessList but never the kv.EthTx rows. A superseded range that overlaps the surviving one leaves
+// its first transaction sitting exactly on the survivor's BaseTxnID.
+//
+// Measured across four segments on two machines, the violation is always the FIRST system slot and never the
+// last: 20 blocks per 1000 before the duplicate-transaction fix and 3 per 1000 after it — and a single one
+// wedges its whole 1000-block segment permanently.
+//
+// Deleting these two ids is safe by construction: no live transaction can occupy them.
+func clearSystemSlotRows(tx kv.RwTx, hash common.Hash, number uint64) error {
+	bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(number, hash))
+	if err != nil || bfs == nil {
+		return err
+	}
+	var id [8]byte
+	for _, txnID := range [...]uint64{bfs.BaseTxnID.U64(), bfs.BaseTxnID.LastSystemTx(bfs.TxCount)} {
+		binary.BigEndian.PutUint64(id[:], txnID)
+		if derr := tx.Delete(kv.EthTx, id[:]); derr != nil {
+			return fmt.Errorf("delete system-slot row %d: %w", txnID, derr)
+		}
 	}
 	return nil
 }

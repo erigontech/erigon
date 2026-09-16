@@ -949,6 +949,15 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
 	}
+	// The sealed body is the one that becomes canonical, so this is the last moment a row stranded in its
+	// system slots by a SUPERSEDED id allocation can still be removed. Such a row is invisible to every
+	// canonical read and damages exactly one thing — the snapshot transactions index, where the dumper emits
+	// it as a duplicate key that no salt can resolve. See clearSystemSlotRows.
+	for _, t := range targets {
+		if err := clearSystemSlotRows(t, newHash, number); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: %w", err)
+		}
+	}
 	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a
 	// normal newPayload: exactly ONE block at this height (the sealed H1). The deferred ibHash is a scratch
 	// artifact of the flashblock accumulation — leaving it would strand an orphan header/body/TD at height N.
