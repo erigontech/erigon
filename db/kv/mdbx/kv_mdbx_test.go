@@ -1153,12 +1153,14 @@ func TestBeginRoRenewsPooledTxn(t *testing.T) {
 
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback() // a safety net: the explicit rollbacks below are what the test exercises
 	parked := pool()
 	tx.Rollback()
 	require.Equal(t, parked+1, pool())
 
 	tx, err = db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	require.Equal(t, parked, pool())
 	tx.Rollback()
 	require.Equal(t, parked+1, pool())
