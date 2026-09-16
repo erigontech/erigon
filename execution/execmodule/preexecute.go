@@ -85,17 +85,25 @@ func (e *ExecModule) traceCanonicalStatus(ctx context.Context, tx kv.TemporalRwT
 			break
 		}
 	}
-	agrees := readErr == nil && canonical == hash &&
-		headersAt == blockNumber && sendersAt == blockNumber && execAt == blockNumber
+	// WARN ONLY ON THE CANONICAL ROW. The stage figures are reported, not judged: Execution legitimately
+	// trails Headers/Senders here, because execStage.Update advances to lastCommittedBlockNum and pre-exec
+	// does not commit mid-block. Measured on live49: 131 of 591 closes showed it, while the one consumer that
+	// would be harmed — ValidateBlock's `progress < lastNum` guard — never fired once in 3,489 blocks, and
+	// nothing acts on it at all now that neither pre-exec path calls unwindToCommonCanonical.
+	//
+	// Warning on a benign condition is not free. BODY-AUDIT was dismissed as a false alarm for days while it
+	// was reporting this defect accurately; a diagnostic that cries wolf gets ignored exactly when it matters.
+	rowMatches := readErr == nil && canonical == hash
 
 	record := e.logger.Debug
-	if !agrees {
+	if !rowMatches {
 		record = e.logger.Warn
 	}
 	record("[CANON-TRACE] pre-exec bookkeeping", "when", when, "block", blockNumber,
 		"header", hash, "canonical", canonical, "canonicalMatches", canonical == hash,
 		"headers", headersAt, "senders", sendersAt, "execution", execAt,
-		"agrees", agrees, "err", readErr)
+		"stagesLevel", headersAt == blockNumber && sendersAt == blockNumber && execAt == blockNumber,
+		"err", readErr)
 }
 
 func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
