@@ -152,6 +152,10 @@ func (c *corkConn) Write(p []byte) (int, error) {
 		return c.Conn.Write(p)
 	}
 	c.mu.Lock()
+	if c.uncorked.Load() { // hijacked while this write waited for the lock: the buffer is no longer drained
+		c.mu.Unlock()
+		return c.Conn.Write(p)
+	}
 	defer c.mu.Unlock()
 	if c.failed != nil {
 		return 0, c.failed
@@ -234,7 +238,11 @@ func (c *corkConn) flush() error {
 func (c *corkConn) uncork() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.bound()
 	_ = c.flushLocked() // the handler owns the connection; a failed flush surfaces on its next write
+	if c.writeTimeout > 0 {
+		_ = c.Conn.SetWriteDeadline(time.Time{}) // the handler sets its own deadlines from here on
+	}
 	c.uncorked.Store(true)
 }
 
