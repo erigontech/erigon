@@ -79,13 +79,13 @@ func TestUnmarshalBytes(t *testing.T) {
 	}
 }
 
-func TestBytesMarshalFastJSON(t *testing.T) {
+func TestBytesAppendFastJSON(t *testing.T) {
 	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
 		want, err := json.Marshal(b)
 		require.NoError(t, err)
-		got, err := b.MarshalFastJSON()
+		got, err := b.AppendFastJSON([]byte("keep"))
 		require.NoError(t, err)
-		require.Equal(t, string(want), string(got))
+		require.Equal(t, "keep"+string(want), string(got))
 	}
 }
 

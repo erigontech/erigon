@@ -31,6 +31,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -110,12 +112,39 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
+// fastJSONAppender is a fastJSONResult that encodes into a buffer reused across responses.
+type fastJSONAppender interface {
+	AppendFastJSON(dst []byte) ([]byte, error)
+}
+
+const maxPooledFastJSON = int(1 * datasize.MB)
+
+var fastJSONBufs = sync.Pool{New: func() any { return new([]byte) }}
+
+func appendFastJSON(w *responseWriter, r fastJSONAppender) error {
+	buf := fastJSONBufs.Get().(*[]byte)
+	defer fastJSONBufs.Put(buf)
+	enc, err := r.AppendFastJSON((*buf)[:0])
+	if cap(enc) <= maxPooledFastJSON {
+		*buf = enc[:0]
+	}
+	if err != nil {
+		return err
+	}
+	w.writeResult(enc)
+	return nil
+}
+
 // writeResponse encodes result straight into stream as the success response and returns nil.
 // If result does not encode, nothing is written and the error response is returned instead.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
 	w := &responseWriter{stream: stream, id: msg.ID}
-	if fm, ok := result.(fastJSONResult); ok {
+	if fa, ok := result.(fastJSONAppender); ok {
+		if err := appendFastJSON(w, fa); err != nil {
+			return msg.errorResponse(err)
+		}
+	} else if fm, ok := result.(fastJSONResult); ok {
 		enc, err := fm.MarshalFastJSON()
 		if err != nil {
 			return msg.errorResponse(err)
