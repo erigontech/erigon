@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/fromdb"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -226,7 +227,7 @@ var rootCmd = &cobra.Command{
 func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	ctx := cmd.Context()
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 	if err := checkChainName(ctx, dirs, chain); err != nil {
@@ -636,7 +637,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 

@@ -46,9 +46,15 @@ const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
 	Txs       []*ethapi.RPCTransaction `json:"txs"`
-	Receipts  []map[string]any         `json:"receipts"`
+	Receipts  []ReceiptWithTimestamp   `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
+}
+
+// ReceiptWithTimestamp is a receipt with the timestamp of its block.
+type ReceiptWithTimestamp struct {
+	*ethutils.RPCReceipt
+	Timestamp uint64 `json:"timestamp"`
 }
 
 type OtterscanAPI interface {
@@ -260,23 +266,20 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil)
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
+		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = b.Transactions().Len()
+	response.TransactionCount = b.Transactions().Len()
 
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	// Explicitly drop unwanted fields
-	response["logsBloom"] = nil
-	return response, err
+	response.LogsBloom = nil
+	return response, nil
 }
 
 // TODO: temporary workaround due to API breakage from watch_the_burn
@@ -412,17 +415,17 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	result := make([]map[string]any, 0, len(receipts))
+	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
 		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
-		marshalledRcpt["logs"] = nil
-		marshalledRcpt["logsBloom"] = nil
+		marshalledRcpt.Logs = nil
+		marshalledRcpt.LogsBloom = nil
 		result = append(result, marshalledRcpt)
 	}
 
 	// Crop txn input to 4bytes
-	var txs = getBlockRes["transactions"].([]any)
+	txs := getBlockRes.Transactions.([]any)
 	for _, rawTx := range txs {
 		rpcTx := rawTx.(*ethapi.RPCTransaction)
 		if len(rpcTx.Input) >= 4 {
@@ -444,7 +447,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(result), pageEnd)
 	}
 	response := map[string]any{}
-	getBlockRes["transactions"] = getBlockRes["transactions"].([]any)[pageStart:pageEnd]
+	getBlockRes.Transactions = txs[pageStart:pageEnd]
 	response["fullblock"] = getBlockRes
 	response["receipts"] = result[pageStart:pageEnd]
 	return response, nil
