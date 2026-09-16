@@ -39,13 +39,15 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. Message handling never blocks indefinitely
-// because RPCs are processed on background goroutines launched by handler.
+// handler is not safe for concurrent use. handleMsg and handleBatch never block
+// indefinitely because RPCs are processed on background goroutines launched by handler;
+// serveMsg runs the RPC on its caller.
 //
 // The entry points for incoming messages are:
 //
 //	h.handleMsg(message)
 //	h.handleBatch(message)
+//	h.serveMsg(message)
 //
 // Outgoing calls use the requestOp struct. Register the request before sending it
 // on the connection:
