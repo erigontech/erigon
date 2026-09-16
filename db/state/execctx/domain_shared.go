@@ -1182,6 +1182,8 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 // with a new one on a fresh transaction. The domain flush advances
 // PlainStateVersion exactly once; Commit verifies both its starting version and
 // the version it will publish.
+// Validation callbacks run after the domain flush and before the MDBX commit.
+// A callback error leaves the transaction uncommitted for the caller to roll back.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
@@ -1285,16 +1287,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// the preload sees the just-flushed bytes.
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
-				if err != nil {
-					return nil, 0, false, err
-				}
-				return v, uint64(step), len(v) > 0, nil
-			}
-			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				return pinBranchResolver(ttx), nil, nil
-			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}
 				c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
@@ -1330,7 +1322,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				scan(oddFrom, oddTo)
 				return m
 			}
-			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, factory, provider)
+			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, pinBranchResolver(ttx), provider)
 		}
 	}
 	if err := requireStateVersion(tx, committedStateVersion); err != nil {

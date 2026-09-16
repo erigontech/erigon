@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -251,6 +252,12 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		if isDefaultChaindata(chaindata, datadirCli) {
+			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
+				logger.Error("Apply migrations", "error", err)
+				return
+			}
+		}
 		migrateDB := func(label kv.Label, path string) {
 			if err := runMigrationsForDB(label, path, logger); err != nil {
 				logger.Error("Opening DB", "error", err)
@@ -409,10 +416,6 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, bw := blocksIO(db, logger)
 
 	if integritySlow {
@@ -698,10 +701,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	dirs := datadir.New(datadirCli)
 	defer startExecProfiling(dirs, logger)()
 
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
@@ -921,7 +920,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	}
 
 	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
-		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+		if !stagedsync.IsOnlyLoopExhausted(err) {
 			return 0, err
 		}
 	}
@@ -977,10 +976,6 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 // it only replays execution for measurement, testing, or side-effect generation.
 func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	must(sync.SetCurrentStage(stages.Execution))
@@ -1049,10 +1044,6 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
