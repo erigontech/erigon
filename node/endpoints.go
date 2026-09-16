@@ -73,7 +73,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	// enable h2c support
 	handler = h2c.NewHandler(handler, h2)
 	if !cfg.HTTPS { // an ALPN-negotiated h2 connection is handed to the HTTP/2 server with the state hooks skipped, so it would never be uncorked
-		listener = corkListener{listener}
+		listener = corkListener{Listener: listener, writeTimeout: cfg.Timeouts.WriteTimeout}
 	}
 	// Bundle the http server
 	httpSrv := &http.Server{
@@ -89,7 +89,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 			}
 			switch state {
 			case http.StateIdle, http.StateClosed:
-				c.flush()
+				c.flushIdle()
 			case http.StateHijacked: // the handler owns the connection now and expects its writes to reach the wire
 				c.uncork()
 			}
@@ -121,21 +121,25 @@ const corkBufferBytes = int(64 * datasize.KB)
 // corkListener holds a response in one buffer so it leaves as one write syscall. net/http writes the
 // headers, the body and the chunk terminator separately, and only marks the connection idle once the
 // whole response is written, which is where the buffer is flushed.
-type corkListener struct{ net.Listener }
+type corkListener struct {
+	net.Listener
+	writeTimeout time.Duration
+}
 
 func (l corkListener) Accept() (net.Conn, error) {
 	conn, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	return &corkConn{Conn: conn}, nil
+	return &corkConn{Conn: conn, writeTimeout: l.writeTimeout}, nil
 }
 
 type corkConn struct {
 	net.Conn
-	mu       sync.Mutex
-	buf      []byte
-	uncorked bool
+	mu           sync.Mutex
+	buf          []byte
+	uncorked     bool
+	writeTimeout time.Duration
 	// failed records a flush that never reached the socket. net/http has already counted those bytes as
 	// written, so the response cannot be completed: the connection must not serve anything else.
 	failed error
@@ -172,9 +176,34 @@ func (c *corkConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
+// Close does not wait for the buffer: a write blocked on a dead peer holds the lock, and shutdown must still
+// close the connection to interrupt it.
 func (c *corkConn) Close() error {
-	c.flush()
+	if c.mu.TryLock() {
+		_ = c.flushLocked()
+		c.mu.Unlock()
+	}
 	return c.Conn.Close()
+}
+
+// CloseWrite keeps the half-close net/http uses for "Connection: close" reachable through the wrapper, so the
+// peer reads the last response instead of an RST.
+func (c *corkConn) CloseWrite() error {
+	closer, ok := c.Conn.(interface{ CloseWrite() error })
+	if !ok {
+		return fmt.Errorf("%T has no CloseWrite", c.Conn)
+	}
+	_ = c.flush()
+	return closer.CloseWrite()
+}
+
+// flushIdle sends what the finished response left buffered. net/http has cleared the request's write deadline
+// by now, so the endpoint's own timeout bounds this write.
+func (c *corkConn) flushIdle() {
+	if c.writeTimeout > 0 {
+		_ = c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+	}
+	_ = c.flush()
 }
 
 func (c *corkConn) flush() error {

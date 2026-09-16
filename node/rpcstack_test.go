@@ -656,3 +656,21 @@ func TestCorkConnFailsAfterFlushError(t *testing.T) {
 	_, err = c.Write([]byte("more"))
 	require.Error(t, err)
 }
+
+type halfCloseConn struct {
+	writeCountingConn
+	closedWrite bool
+}
+
+func (c *halfCloseConn) CloseWrite() error { c.closedWrite = true; return nil }
+
+// net/http half-closes the write side for "Connection: close"; the wrapper must forward that, after flushing.
+func TestCorkConnForwardsCloseWrite(t *testing.T) {
+	half := &halfCloseConn{}
+	c := &corkConn{Conn: half}
+	_, err := c.Write([]byte("last response"))
+	require.NoError(t, err)
+	require.NoError(t, c.CloseWrite())
+	require.True(t, half.closedWrite)
+	require.Equal(t, 1, half.writes, "the buffer reaches the peer before the half-close")
+}
