@@ -50,6 +50,63 @@ func runInlineOracle(t *testing.T, self accounts.Address, code []byte, noInline 
 	return ret, remaining.Execution, err
 }
 
+// runInlineOracleWithTarget is runInlineOracle with a second contract deployed at
+// target, so a program can make a sub-call before faulting.
+func runInlineOracleWithTarget(t *testing.T, self accounts.Address, code []byte, target accounts.Address, targetCode []byte, noInline bool) ([]byte, uint64, error) {
+	t.Helper()
+	tx, sd := testTemporalTxSD(t)
+	_, _, err := sd.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s.SetVersion(0)
+	defer s.Release(false)
+	require.NoError(t, s.CreateAccount(self, true))
+	require.NoError(t, s.SetCode(self, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, s.CreateAccount(target, true))
+	require.NoError(t, s.SetCode(target, targetCode, tracing.CodeChangeUnspecified))
+
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+	}
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{NoInlineDispatch: noInline})
+	pool := mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}
+	ret, remaining, _, err := vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
+	return ret, remaining.Execution, err
+}
+
+// TestInlineDispatch_NoStaleReturnDataAfterInlineFault pins that a fault on an
+// inlined op does not leak the return data of an earlier sub-call in the same
+// frame. self CALLs target (which RETURNs 32 bytes) and then underflows on POP;
+// the frame's output must be empty, matching the jump-table path.
+func TestInlineDispatch_NoStaleReturnDataAfterInlineFault(t *testing.T) {
+	t.Parallel()
+	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
+	target := accounts.InternAddress(common.BytesToAddress([]byte("target")))
+	// target: PUSH1 0x20; PUSH1 0x00; RETURN -> returns 32 bytes.
+	targetCode := hexcode(t, "60206000f3")
+	// self: CALL target with all-zero args, then POP the success flag and POP
+	// again to underflow on an inlined op. addr pushed via PUSH20.
+	addr := target.Value()
+	selfHex := "6000600060006000600073" + common.Bytes2Hex(addr[:]) + "5af1" + "5050"
+	code := hexcode(t, selfHex)
+
+	retOn, _, errOn := runInlineOracleWithTarget(t, self, code, target, targetCode, false)
+	retOff, _, errOff := runInlineOracleWithTarget(t, self, code, target, targetCode, true)
+
+	require.Empty(t, retOff, "jump-table: a faulted frame returns no data")
+	require.Empty(t, retOn, "inline: a faulted frame must not leak the earlier sub-call's return data")
+	require.Equal(t, retOff, retOn, "return data must match jump-table dispatch")
+	if errOff == nil {
+		require.NoError(t, errOn)
+	} else {
+		require.EqualError(t, errOn, errOff.Error())
+	}
+}
+
 // TestInlineDispatch_EquivalenceOracle pins the inline fast loop to the
 // jump-table dispatch (the root of trust): for every program the two paths must
 // return identical return data, remaining gas, and error. The corpus mixes the

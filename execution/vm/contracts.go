@@ -285,7 +285,7 @@ type ecrecover struct{}
 // tx repeats the same recovery) and repeated signatures, skipping the secp256k1 +
 // keccak compute on a hit. Gas is charged by RequiredGas regardless, so the cache
 // is consensus-neutral.
-var ecrecoverCache, _ = lru.New[[128]byte, []byte](100_000)
+var ecrecoverCache, _ = lru.New[[128]byte, [32]byte](100_000)
 
 func (c *ecrecover) RequiredGas(input []byte) uint64 {
 	return params.EcrecoverGas
@@ -300,7 +300,9 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 	var key [ecRecoverInputLength]byte
 	copy(key[:], input)
-	if out, ok := ecrecoverCache.Get(key); ok {
+	if cached, ok := ecrecoverCache.Get(key); ok {
+		out := make([]byte, 32)
+		copy(out, cached[:])
 		return out, nil
 	}
 
@@ -326,7 +328,9 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 	// the first byte of pubkey is bitcoin heritage
 	out := common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32)
-	ecrecoverCache.Add(key, out)
+	var cached [32]byte
+	copy(cached[:], out)
+	ecrecoverCache.Add(key, cached)
 	return out, nil
 }
 

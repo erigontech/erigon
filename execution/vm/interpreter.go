@@ -669,6 +669,9 @@ func (evm *EVM) runOptimized(callContext *CallContext, contract *Contract) (res 
 			var halt bool
 			pc, halt, err = evm.runGoInline(callContext, contract, pc)
 			if err != nil {
+				// An inlined-op fault ends the frame with no output; do not leak
+				// the return data of an earlier sub-call in this frame.
+				res = nil
 				break
 			}
 			if halt {
