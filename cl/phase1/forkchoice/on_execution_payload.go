@@ -412,9 +412,8 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 }
 
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
-// the EL, releasing the caller-held f.mu for the call. It records the verdict before
-// releasing the admission token, because a caller that published after releasing it would
-// still be waiting for f.mu while the queue drained.
+// the EL without holding f.mu. Admission is re-checked and the verdict recorded while the
+// admission token is still held, so queued callers neither resend nor run stale work.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
@@ -427,8 +426,7 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	f.mu.Unlock()
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		// Admission was checked before queueing for the token. The wait can be long, so
-		// re-check it here rather than spend an EL call on a block that is already stale.
+		// The wait for the token can be long enough for the block to go stale.
 		if stillAdmissible != nil {
 			if err := stillAdmissible(); err != nil {
 				return execution_client.PayloadStatusNone, err
@@ -445,15 +443,14 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 		switch status {
 		case execution_client.PayloadStatusValidated:
-			// A VALID status reported alongside an error is contradictory and is rejected
-			// by the caller, so it must not be published.
+			// A VALID status alongside an error is contradictory; the caller rejects it.
 			if err == nil && f.verifiedExecutionPayload != nil {
 				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 		case execution_client.PayloadStatusInvalidated:
-			// Both clients report INVALID together with the reason, so this must not be
-			// gated on err. Keyed by the beacon root, which is derived from the block
-			// itself; the execution hash is still unauthenticated at this point.
+			// Both clients report INVALID with the reason attached, so this cannot be
+			// gated on err. The execution hash is unauthenticated until the caller
+			// derives it, so key by the beacon root instead.
 			if f.payloadStatusByRoot != nil {
 				f.payloadStatusByRoot.Add(blockRoot, status)
 			}
