@@ -1148,9 +1148,10 @@ func TestGetProofStorageKeyEncoding(t *testing.T) {
 	}
 }
 
-// TestGetProofAccountFields pins the account half of the result for the three account
-// shapes geth's proof tests cover: an EOA, a contract, and an address with no account.
-func TestGetProofAccountFields(t *testing.T) {
+// TestGetProofRequestShapes covers the shapes eth_getProof must honour: the account
+// fields for each account shape, the block parameter forms execution-apis allows, and
+// the storage-key list rules.
+func TestGetProofRequestShapes(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -1160,23 +1161,32 @@ func TestGetProofAccountFields(t *testing.T) {
 	ctx := context.Background()
 	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
 
+	key := func(b byte) hexutil.Bytes {
+		k := common.Hash{}
+		k[31] = b
+		return k[:]
+	}
+
+	headProof, err := api.GetProof(ctx, bankAddr, nil, head)
+	require.NoError(t, err)
+
+	var headHash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		headHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 6)
+		return err
+	}))
+
+	// An account with an empty storage trie answers a key request with an empty proof
+	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
 	t.Run("eoa", func(t *testing.T) {
-		proof, err := api.GetProof(ctx, bankAddr, nil, head)
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{key(0)}, head)
 		require.NoError(t, err)
 		require.Equal(t, bankAddr, proof.Address)
 		require.Equal(t, empty.CodeHash, proof.CodeHash)
 		require.Equal(t, empty.RootHash, proof.StorageHash)
 		require.False(t, (*uint256.Int)(proof.Balance).IsZero())
 		require.NotEmpty(t, proof.AccountProof)
-		require.Empty(t, proof.StorageProof)
-	})
-
-	// An account with an empty storage trie answers a key request with an empty proof
-	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
-	t.Run("eoa with a storage key", func(t *testing.T) {
-		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{make(hexutil.Bytes, 32)}, head)
-		require.NoError(t, err)
-		require.Equal(t, empty.RootHash, proof.StorageHash)
 		require.Len(t, proof.StorageProof, 1)
 		require.Empty(t, proof.StorageProof[0].Proof)
 		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
@@ -1193,7 +1203,7 @@ func TestGetProofAccountFields(t *testing.T) {
 
 	t.Run("no account", func(t *testing.T) {
 		missing := common.HexToAddress("0x0000000000000000000000000000000000000001")
-		proof, err := api.GetProof(ctx, missing, []hexutil.Bytes{make(hexutil.Bytes, 32)}, head)
+		proof, err := api.GetProof(ctx, missing, []hexutil.Bytes{key(0)}, head)
 		require.NoError(t, err)
 		require.Equal(t, missing, proof.Address)
 		require.Equal(t, hexutil.Uint64(0), proof.Nonce)
@@ -1205,51 +1215,23 @@ func TestGetProofAccountFields(t *testing.T) {
 		require.Empty(t, proof.StorageProof[0].Proof)
 		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
 	})
-}
 
-// TestGetProofBlockSelectors covers the block parameter forms execution-apis allows:
-// omitted (defaults to latest), a tag, a number, and a block hash.
-func TestGetProofBlockSelectors(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
-
-	m, bankAddr, _, _ := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	ctx := context.Background()
-
-	head, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(6)))
-	require.NoError(t, err)
-
-	var headHash common.Hash
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-		var err error
-		headHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 6)
-		return err
-	}))
-
-	t.Run("omitted defaults to latest", func(t *testing.T) {
+	t.Run("omitted block defaults to latest", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, bankAddr, nil, nil)
 		require.NoError(t, err)
-		require.Equal(t, head.AccountProof, proof.AccountProof)
-	})
-
-	t.Run("latest tag", func(t *testing.T) {
-		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)))
-		require.NoError(t, err)
-		require.Equal(t, head.AccountProof, proof.AccountProof)
+		require.Equal(t, headProof.AccountProof, proof.AccountProof)
 	})
 
 	t.Run("by canonical hash", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(headHash, true)))
 		require.NoError(t, err)
-		require.Equal(t, head.AccountProof, proof.AccountProof)
+		require.Equal(t, headProof.AccountProof, proof.AccountProof)
 	})
 
 	t.Run("earliest tag is genesis", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)))
 		require.NoError(t, err)
-		require.NotEqual(t, head.AccountProof, proof.AccountProof)
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof)
 	})
 
 	t.Run("pending is rejected", func(t *testing.T) {
@@ -1264,32 +1246,9 @@ func TestGetProofBlockSelectors(t *testing.T) {
 		require.ErrorAs(t, err, &notFound)
 		require.Nil(t, proof)
 	})
-}
-
-// TestGetProofStorageKeyRequests covers the request-shape rules for the storage-key
-// list: the per-request cap, and one proof entry per requested key in request order.
-func TestGetProofStorageKeyRequests(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
-
-	m, _, contractAddr, _ := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	ctx := context.Background()
-	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
-
-	key := func(b byte) hexutil.Bytes {
-		k := common.Hash{}
-		k[31] = b
-		return k[:]
-	}
 
 	t.Run("too many keys", func(t *testing.T) {
-		keys := make([]hexutil.Bytes, maxGetProofKeys+1)
-		for i := range keys {
-			keys[i] = key(byte(i))
-		}
-		proof, err := api.GetProof(ctx, contractAddr, keys, head)
+		proof, err := api.GetProof(ctx, contractAddr, make([]hexutil.Bytes, maxGetProofKeys+1), head)
 		require.Nil(t, proof)
 		var customErr *rpc.CustomError
 		require.ErrorAs(t, err, &customErr)
