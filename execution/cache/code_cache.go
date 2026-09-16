@@ -75,14 +75,10 @@ const (
 	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
 )
 
-// otterEntryOverheadBytes is the cache's own per-entry cost beyond the key and
-// the codeEntry struct. Omitting it undercounts a layer of small entries ~1.6x.
-const otterEntryOverheadBytes = 64
-
 // codeEntryBytes is one slot's resident cost excluding the code bytes. It is
 // both the weigher's fixed term and the key cost the counters use, so counter
 // and bound agree.
-const codeEntryBytes = 8 + int64(unsafe.Sizeof(codeEntry{})) + otterEntryOverheadBytes
+const codeEntryBytes = ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(codeEntry{}))
 
 type codeEntry struct {
 	code []byte
@@ -126,7 +122,7 @@ type CodeCache struct {
 	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set.
 	addrToHash *lru.Cache[common.Address, versionedAddressID]
-	hashToCode *byteLRU[codeEntry] // codeID(maphash(code)) → code, byte-bounded
+	hashToCode *ByteLRU[codeEntry] // codeID(maphash(code)) → code, byte-bounded
 	codeSize   atomic.Int64        // resident bytes
 
 	// addrToCodeHash maps a 20-byte address to its 32-byte Ethereum codeHash
@@ -141,7 +137,7 @@ type CodeCache struct {
 	// of L1 — Get-by-codeHash bypasses addr lookup entirely. Memory cost:
 	// duplicates code bytes vs L2 (worst case 2x byte storage); accepted
 	// for the per-key fast-path on many-addrs-one-code workloads.
-	codeHashToCode   *byteLRU[codeEntry] // keccak(code) → code, byte-bounded
+	codeHashToCode   *ByteLRU[codeEntry] // keccak(code) → code, byte-bounded
 	codeHashCodeSize atomic.Int64        // resident bytes
 
 	// Size-only layer: ethCodeHash → int (length in bytes). Answers
@@ -191,7 +187,7 @@ type CodeCache struct {
 	closed atomic.Bool
 }
 
-// contentLRU is the byteLRU/growLRU surface the content-addressed insert path
+// contentLRU is the ByteLRU/growLRU surface the content-addressed insert path
 // uses. A type parameter, not an interface, so the call stays direct.
 type contentLRU[T any] interface {
 	Get(uint64) (T, bool)

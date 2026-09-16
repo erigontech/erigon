@@ -688,3 +688,16 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 
 	return m
 }
+
+// feeHistoryResult must keep the hexutil.Big wire format: 0x-prefixed hex without leading zeros.
+func TestFeeHistoryResultJSON(t *testing.T) {
+	res := feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(big.NewInt(16)),
+		Reward:       [][]hexutil.U256{{hexutil.U256(*uint256.NewInt(0)), hexutil.U256(*uint256.NewInt(1_000_000_000))}},
+		BaseFee:      []hexutil.U256{hexutil.U256(*uint256.NewInt(1)), hexutil.U256(*new(uint256.Int).Lsh(uint256.NewInt(1), 255))},
+		GasUsedRatio: []float64{0.5},
+	}
+	got, err := json.Marshal(res)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"oldestBlock":"0x10","reward":[["0x0","0x3b9aca00"]],"baseFeePerGas":["0x1","0x8000000000000000000000000000000000000000000000000000000000000000"],"gasUsedRatio":[0.5]}`, string(got))
+}
