@@ -602,4 +602,9 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, common.BytesToHash(values[historyAddr][0]))
+
+	gql := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	stored, err := gql.GetAccountStorage(context.Background(), historyAddr, hexutil.EncodeUint64(bn), rpc.BlockNumber(bn))
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.HexToHash(stored))
 }
