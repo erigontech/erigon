@@ -522,11 +522,16 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if !bytes.Equal(root, header.Root[:]) {
 		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", root, header.Root[:])
 	}
+	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
 		Balance:      new(hexutil.U256),
+		Nonce:        hexutil.Uint64(0),
+		CodeHash:     common.Hash{},
+		StorageHash:  common.Hash{},
 		StorageProof: make([]accounts.StorProofResult, len(storageKeys)),
 	}
+
 	accountProof, accountRLP, err := trie.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
 	if err != nil {
 		return nil, err
@@ -534,10 +539,15 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.AccountProof = toHexBytes(accountProof)
 	if accountRLP == nil {
 		for i, storageKey := range storageKeys {
-			proof.StorageProof[i] = accounts.StorProofResult{Key: storageKey.EncodeKey(), Value: new(hexutil.U256), Proof: []hexutil.Bytes{}}
+			proof.StorageProof[i] = accounts.StorProofResult{
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
+				Proof: []hexutil.Bytes{},
+			}
 		}
 		return proof, assertProofVerifies(header.Root, proof)
 	}
+
 	var acc accounts.Account
 	if err := acc.DecodeForHashing(accountRLP); err != nil {
 		return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
@@ -546,17 +556,25 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
+	// nothing to prove for an account without storage
 	if len(storageKeys) == 0 || acc.Root == common.BytesToHash(empty.RootHash[:]) {
 		for i, storageKey := range storageKeys {
-			proof.StorageProof[i] = accounts.StorProofResult{Key: storageKey.EncodeKey(), Value: new(hexutil.U256), Proof: []hexutil.Bytes{}}
+			proof.StorageProof[i] = accounts.StorProofResult{
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
+				Proof: []hexutil.Bytes{},
+			}
 		}
 		return proof, assertProofVerifies(header.Root, proof)
 	}
+
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
+	// get storage key proofs
 	for i, storageKey := range storageKeys {
+		// Stop early if the RPC request was canceled while proofs are being built.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -570,6 +588,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, fmt.Errorf("read storage %x of %x: %w", storageKey.Hash, address, err)
 		}
 		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
+
+		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = toHexBytes(storageProof)
