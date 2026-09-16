@@ -43,14 +43,15 @@ func nodeSet(nodes [][]byte) map[string]struct{} {
 func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
-		name                  string
-		accts, slots, touch   int
-		touchStorage, exclude bool
+		name                            string
+		accts, slots, touch             int
+		touchStorage, exclude, prefixes bool
 	}{
-		{"acct-only-legacy", 128, 4, 16, false, true},
-		{"acct+storage-legacy", 128, 4, 16, true, true},
-		{"acct+storage-canonical", 256, 8, 24, true, false},
-		{"single-touch-legacy", 64, 4, 1, true, true},
+		{"acct-only-legacy", 128, 4, 16, false, true, false},
+		{"acct+storage-legacy", 128, 4, 16, true, true, false},
+		{"acct+storage-canonical", 256, 8, 24, true, false, false},
+		{"single-touch-legacy", 64, 4, 1, true, true, false},
+		{"partial-prefixes-legacy", 128, 4, 16, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,10 +67,22 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 				touchSlots = tc.slots
 			}
 			touchAccountsSlots(toWitness, addrs[:tc.touch], touchSlots)
+			// collapse siblings reach the fold as hashed-key prefixes: one inside the account trie, one a nibble into storage
+			touchPrefixes := func(u *Updates) {
+				if !tc.prefixes {
+					return
+				}
+				for _, a := range addrs[tc.touch : tc.touch+4] {
+					u.TouchHashedKey(KeyToHexNibbleHash(a)[:3])
+					u.TouchHashedKey(KeyToHexNibbleHash(storageKey(a, slotHashBytes(0)))[:65])
+				}
+			}
+			touchPrefixes(toWitness)
 			// the read-only fold runs first: the full fold leaves deferred branch updates behind
 			indexedUpdates := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 			defer indexedUpdates.Close()
 			touchAccountsSlots(indexedUpdates, addrs[:tc.touch], touchSlots)
+			touchPrefixes(indexedUpdates)
 			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, indexedUpdates, tc.exclude)
 			require.NoError(t, err)
 			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
