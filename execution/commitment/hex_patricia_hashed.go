@@ -157,10 +157,8 @@ type HexPatriciaHashed struct {
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
-	memoizationOff bool // if true, do not rely on memoized hashes
-	// readOnlyWitness marks a witness fold that serves proofs only: cells off the proven paths keep their stored hashes,
-	// since a proof needs just their hashes, and no branch is written back.
-	readOnlyWitness bool
+	memoizationOff  bool // if true, do not rely on memoized hashes
+	readOnlyWitness bool // proofs only: off-path cells keep their stored hashes and no branch is written
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
