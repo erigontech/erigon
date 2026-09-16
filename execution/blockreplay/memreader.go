@@ -187,6 +187,13 @@ func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	}
 	return nil, false, nil
 }
+func (r *memBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
+	if err != nil || !ok {
+		return common.Hash{}, false, err
+	}
+	return txn.Hash(), true, nil
+}
 func (r *memBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) ([][]byte, error) {
 	return nil, nil
 }
