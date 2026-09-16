@@ -442,16 +442,17 @@ func (h *handler) cancelServerSubscriptions(err error) {
 
 // startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	run := func() {
-		ctx, cancel := context.WithCancel(h.rootCtx)
-		defer cancel()
-		fn(&callProc{ctx: ctx})
-	}
 	if h.inlineCalls {
-		run()
+		h.runCallProc(fn)
 		return
 	}
-	h.callWG.Go(run)
+	h.callWG.Go(func() { h.runCallProc(fn) })
+}
+
+func (h *handler) runCallProc(fn func(*callProc)) {
+	ctx, cancel := context.WithCancel(h.rootCtx)
+	defer cancel()
+	fn(&callProc{ctx: ctx})
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
