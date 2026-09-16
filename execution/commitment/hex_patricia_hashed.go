@@ -2448,7 +2448,6 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
-// WitnessNodesByHash folds like Witnesses, but returns the captured nodes keyed by their hash.
 func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
 	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
 	if err != nil {
