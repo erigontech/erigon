@@ -1171,6 +1171,17 @@ func TestGetProofAccountFields(t *testing.T) {
 		require.Empty(t, proof.StorageProof)
 	})
 
+	// An account with an empty storage trie answers a key request with an empty proof
+	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
+	t.Run("eoa with a storage key", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{make(hexutil.Bytes, 32)}, head)
+		require.NoError(t, err)
+		require.Equal(t, empty.RootHash, proof.StorageHash)
+		require.Len(t, proof.StorageProof, 1)
+		require.Empty(t, proof.StorageProof[0].Proof)
+		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+	})
+
 	t.Run("contract", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, contractAddr, nil, head)
 		require.NoError(t, err)
