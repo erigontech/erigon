@@ -396,6 +396,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				// Surface the panic as the loop's error; otherwise execImpl returns
+				// nil with sd.mem partly folded and the caller mistakes an internal
+				// invariant failure for success.
+				if err == nil {
+					err = fmt.Errorf("apply loop panic: %v", rec)
+				}
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
@@ -462,7 +468,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
+				pe.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 			}
