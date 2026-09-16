@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
@@ -2302,8 +2303,8 @@ func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
 }
 
-func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testing.T) {
-	ctrl := gomock.NewController(t)
+func setupExecutionPayloadBidTest(t *testing.T, ctrl *gomock.Controller) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, *cltypes.Eth1Block) {
+	t.Helper()
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.FuluForkEpoch = 0
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -2339,7 +2340,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	require.NoError(t, handler.syncedData.OnHeadState(postState))
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
-	clock.EXPECT().GetSlotTime(slot).Return(time.Now()).AnyTimes()
+	clock.EXPECT().GetSlotTime(slot).Return(time.Now().Add(-time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second)).AnyTimes()
 	handler.ethClock = clock
 
 	baseRoot, err := postState.BlockRoot()
@@ -2355,6 +2356,13 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	payload.Extra = solid.NewExtraData()
 	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	return handler, forkchoiceStore, payload
+}
+
+func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+	slot := payload.SlotNumber
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	var gotFeeRecipient common.Address
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
@@ -2380,7 +2388,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	handler.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	require.Equal(t, feeRecipient, gotFeeRecipient)
+	require.Equal(t, payload.FeeRecipient, gotFeeRecipient)
 	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
 	require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
 	require.Contains(t, recorder.Body.String(), `"value":"0"`)
@@ -2395,7 +2403,12 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
 	}
 
-	forkchoiceStore.Envelopes[baseRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	baseRoot := forkchoiceStore.HeadVal
+	forkchoiceStore.SetEnvelope(baseRoot, &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		},
+	})
 	var headSnapshots atomic.Int32
 	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
 		status := cltypes.PayloadStatusEmpty
@@ -2407,6 +2420,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "execution parent changed")
 
 	for _, path := range []string{
 		"/eth/v1/validator/execution_payload_bid/0/3",
@@ -2416,6 +2430,69 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		recorder = httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		recoverEnvelope bool
+		changeHead      bool
+		wantStatus      int
+		wantError       string
+	}{
+		{name: "unreadable FULL envelope", wantStatus: http.StatusOK},
+		{name: "FULL envelope becomes readable", recoverEnvelope: true, wantStatus: http.StatusNotFound, wantError: "execution parent changed"},
+		{name: "beacon head changes", changeHead: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+			baseRoot := forkchoiceStore.HeadVal
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+			forkchoiceStore.SetEnvelope(baseRoot, &cltypes.SignedExecutionPayloadEnvelope{
+				Message: &cltypes.ExecutionPayloadEnvelope{
+					ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+				},
+			})
+			// A transient read error keeps HasEnvelope true. Production must still
+			// be allowed to return its EMPTY-parent fallback while that error persists.
+			forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				return nil, errors.New("envelope storage unavailable")
+			}
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
+				Return([]byte{1}, nil)
+			engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+				DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					if test.recoverEnvelope {
+						forkchoiceStore.ReadEnvelopeFromDiskFunc = nil
+					}
+					if test.changeHead {
+						forkchoiceStore.HeadVal = common.Hash{0x99}
+					}
+					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
+				})
+			handler.engine = engine
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", payload.SlotNumber), http.NoBody)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
+			if test.wantError != "" {
+				require.Contains(t, recorder.Body.String(), test.wantError)
+				return
+			}
+			var response struct {
+				Data *cltypes.ExecutionPayloadBid `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.NotNil(t, response.Data)
+			require.Equal(t, payload.ParentHash, response.Data.ParentBlockHash)
+			require.Equal(t, payload.BlockHash, response.Data.BlockHash)
+		})
 	}
 }
 

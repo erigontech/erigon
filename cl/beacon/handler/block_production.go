@@ -1934,13 +1934,6 @@ func (a *ApiHandler) produceBeaconBody(
 	return beaconBody, executionValue, nil
 }
 
-func gloasProposalExecutionHead(baseBlockSlot uint64, cfg *clparams.BeaconChainConfig, parentBid *cltypes.ExecutionPayloadBid, buildOnFull bool) common.Hash {
-	if baseBlockSlot/cfg.SlotsPerEpoch < cfg.GloasForkEpoch || buildOnFull {
-		return parentBid.BlockHash
-	}
-	return parentBid.ParentBlockHash
-}
-
 func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot uint64) (
 	*solid.ListSSZ[*cltypes.AttesterSlashing],
 	*solid.ListSSZ[*cltypes.ProposerSlashing],

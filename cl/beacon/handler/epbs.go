@@ -1553,16 +1553,10 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 			fmt.Errorf("execution payload bid is unavailable because the head changed"))
 	}
 	bid := beaconBody.SignedExecutionPayloadBid.Message
-	expectedExecutionParent := baseState.LatestExecutionPayloadHeader().BlockHash
-	if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
-		isPreGloasParent := baseBlockSlot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch
-		buildOnFull := !isPreGloasParent &&
-			latestHeadNode.PayloadStatus == cltypes.PayloadStatusFull &&
-			a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-			a.forkchoiceStore.ShouldBuildOnFull(latestHeadNode, slot)
-		expectedExecutionParent = gloasProposalExecutionHead(baseBlockSlot, a.beaconChainCfg, parentBid, buildOnFull)
-	}
-	if bid.ParentBlockHash != expectedExecutionParent {
+	// HasEnvelope can stay true after a transient read error. Revalidate with the
+	// same resolver as production so an unreadable FULL parent still permits EMPTY.
+	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, slot, clparams.GloasVersion)
+	if bid.ParentBlockHash != payloadSource.head {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			errors.New("execution payload bid is unavailable because the execution parent changed"))
 	}

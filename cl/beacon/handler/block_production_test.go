@@ -357,20 +357,6 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
 }
 
-func TestGloasProposalExecutionHeadAtForkBoundary(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.SlotsPerEpoch = 32
-	cfg.GloasForkEpoch = 3
-	parentBid := &cltypes.ExecutionPayloadBid{
-		ParentBlockHash: common.HexToHash("0xaaaa"),
-		BlockHash:       common.HexToHash("0xbbbb"),
-	}
-
-	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(95, &cfg, parentBid, false))
-	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(90, &cfg, parentBid, false))
-	require.Equal(t, parentBid.ParentBlockHash, gloasProposalExecutionHead(96, &cfg, parentBid, false))
-}
-
 func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
 	localWei := big.NewInt(1_500_000_000)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}

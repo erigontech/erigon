@@ -899,36 +899,55 @@ func setupFirstGloasPayloadStates(
 	return headState, targetState, currentSlot, targetSlot, expectedWithdrawals.Withdrawals
 }
 
-func TestExecutionPayloadSourceUsesPreForkParentForFirstGloasSlot(t *testing.T) {
+func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
 	config.FuluForkEpoch = 1
-	config.GloasForkEpoch = 2
+	config.GloasForkEpoch = 3
 	config.InitializeForkSchedule()
-	baseState := state.New(&config)
-	preForkSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	require.NoError(t, baseState.SetSlot(preForkSlot+2))
-	latestHeader := baseState.LatestBlockHeader()
-	latestHeader.Slot = preForkSlot
-	baseState.SetLatestBlockHeader(&latestHeader)
+	firstGloasSlot := config.GloasForkEpoch * config.SlotsPerEpoch
+	targetSlot := firstGloasSlot + 1
 	preForkHead := common.Hash{0xa1}
-	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
-		ParentBlockHash: common.Hash{0x91},
-		ParentBlockRoot: common.Hash{0x92},
-		BlockHash:       preForkHead,
-		Slot:            preForkSlot,
-	})
-	baseBlockRoot := common.Hash{0x41}
-	forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
-	forkchoiceStore.HeadVal = baseBlockRoot
-	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
-	handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
+	emptyParent := common.Hash{0x91}
+	for _, test := range []struct {
+		name       string
+		parentSlot uint64
+		wantHead   common.Hash
+		wantPath   gloasPayloadPath
+	}{
+		{name: "last pre-Gloas parent", parentSlot: firstGloasSlot - 1, wantHead: preForkHead, wantPath: gloasPayloadPathPreFork},
+		{name: "older pre-Gloas parent", parentSlot: firstGloasSlot - 6, wantHead: preForkHead, wantPath: gloasPayloadPathPreFork},
+		{name: "first Gloas EMPTY parent", parentSlot: firstGloasSlot, wantHead: emptyParent, wantPath: gloasPayloadPathEmpty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseState := state.New(&config)
+			// Slot processing can cross the fork while the latest block remains pre-fork.
+			require.NoError(t, baseState.SetSlot(targetSlot))
+			latestHeader := baseState.LatestBlockHeader()
+			latestHeader.Slot = test.parentSlot
+			baseState.SetLatestBlockHeader(&latestHeader)
+			baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				ParentBlockHash: emptyParent,
+				ParentBlockRoot: common.Hash{0x92},
+				BlockHash:       preForkHead,
+				Slot:            test.parentSlot,
+			})
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
 
-	source := handler.resolveExecutionPayloadSource(
-		baseState, baseBlockRoot, preForkSlot+2, clparams.GloasVersion,
-	)
+			source := handler.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.Equal(t, preForkHead, source.head)
-	require.Equal(t, gloasPayloadPathPreFork, source.gloasPath)
+			require.Equal(t, test.wantHead, source.head)
+			require.Equal(t, test.wantPath, source.gloasPath)
+		})
+	}
 }
 
 func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
