@@ -308,7 +308,8 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			blockRoot, nil, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			blockRoot, func() error { return nil },
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -392,7 +393,8 @@ func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
 
 	store.mu.Lock()
 	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, nil, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		blockRoot, func() error { return nil },
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	store.mu.Unlock()
 
 	require.NoError(t, err)
@@ -412,7 +414,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 
 	f.mu.Lock()
 	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, nil, nil, nil, nil, nil)
+		blockRoot, func() error { return nil }, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 

@@ -436,10 +436,8 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// The wait for the token can be long enough for the block to go stale.
-		if stillAdmissible != nil {
-			if err := stillAdmissible(); err != nil {
-				return execution_client.PayloadStatusNone, err
-			}
+		if err := stillAdmissible(); err != nil {
+			return execution_client.PayloadStatusNone, err
 		}
 		// Invalid is terminal and outranks a validated marker, matching markPayloadStatus.
 		if f.rootMarkedInvalid(blockRoot) {
