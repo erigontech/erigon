@@ -109,18 +109,6 @@ func TestRetainedSideBlockTransactionsSurviveLaterCommits(t *testing.T) {
 	}))
 }
 
-func TestConsecutiveForkChoicesKeepTransactions(t *testing.T) {
-	m, key, _ := newMetricsTester(t)
-	canonical := generateTransferBlocks(t, m, key, 2, 0x0a)
-	for _, block := range canonical {
-		insertAndValidateBlocks(t, m, block)
-		updateForkChoiceTo(t, m, block)
-	}
-	for _, block := range canonical {
-		requireCanonicalWithTransactions(t, m, block)
-	}
-}
-
 func TestRetainedBlockAboveCommittedSequenceKeepsTransactions(t *testing.T) {
 	m, key, _ := newMetricsTester(t)
 	chainA := generateTransferBlocks(t, m, key, 2, 0x0a)

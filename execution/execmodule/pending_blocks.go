@@ -17,16 +17,17 @@
 package execmodule
 
 import (
-	"bytes"
 	"cmp"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
@@ -97,19 +98,19 @@ func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash)
 }
 
 func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash) map[common.Hash]pendingBlock {
-	hashes := make([]common.Hash, 0, len(pending))
-	for hash := range pending {
-		if !slices.Contains(committed, hash) {
-			hashes = append(hashes, hash)
-		}
+	side := maps.Clone(pending)
+	for _, hash := range committed {
+		delete(side, hash)
 	}
-	slices.SortFunc(hashes, func(a, b common.Hash) int {
-		return cmp.Compare(pending[b].number, pending[a].number)
+	drop := len(side) - retainedBlockLimit
+	if drop <= 0 {
+		return side
+	}
+	byHeight := slices.SortedFunc(maps.Keys(side), func(a, b common.Hash) int {
+		return cmp.Compare(side[a].number, side[b].number)
 	})
-	hashes = hashes[:min(len(hashes), retainedBlockLimit)]
-	side := make(map[common.Hash]pendingBlock, len(hashes))
-	for _, hash := range hashes {
-		side[hash] = pending[hash]
+	for _, hash := range byHeight[:drop] {
+		delete(side, hash)
 	}
 	return side
 }
@@ -198,12 +199,25 @@ func copyBlockRows(src kv.Tx, dst kv.RwTx, hash common.Hash, number uint64) erro
 		return err
 	}
 	first := uint64(body.BaseTxnID)
-	for id := first; id < first+uint64(body.TxCount); id++ {
-		if err := copyRow(src, dst, kv.EthTx, binary.BigEndian.AppendUint64(nil, id)); err != nil {
+	txns, err := src.Range(kv.EthTx, txnIDKey(first), txnIDKey(first+uint64(body.TxCount)), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer txns.Close()
+	for txns.HasNext() {
+		id, txn, err := txns.Next()
+		if err != nil {
+			return err
+		}
+		if err := dst.Put(kv.EthTx, id, txn); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func txnIDKey(id uint64) []byte {
+	return binary.BigEndian.AppendUint64(nil, id)
 }
 
 func copyRow(src kv.Tx, dst kv.RwTx, table string, key []byte) error {
@@ -211,7 +225,7 @@ func copyRow(src kv.Tx, dst kv.RwTx, table string, key []byte) error {
 	if err != nil || v == nil {
 		return err
 	}
-	return dst.Put(table, bytes.Clone(key), bytes.Clone(v))
+	return dst.Put(table, key, v)
 }
 
 func raiseTxSequence(src kv.Tx, dst kv.RwTx) error {
