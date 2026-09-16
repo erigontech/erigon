@@ -59,21 +59,20 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 				tr.Update(keys[i], values[i])
 			}
 		}
-		byHash := map[string][]byte{}
-		for _, key := range keys {
+		byHash, want := map[string][]byte{}, make([][][]byte, len(keys))
+		for i, key := range keys {
 			nodes, err := tr.Prove(key, 0, false)
 			require.NoError(t, err)
+			want[i] = nodes
 			for _, n := range nodes {
 				byHash[string(crypto.Keccak256(n))] = n
 			}
 		}
 		root := tr.Hash()
 		for i, key := range keys {
-			want, err := tr.Prove(key, 0, false)
-			require.NoError(t, err)
 			got, value, err := ProofFromNodes(byHash, root[:], key)
 			require.NoError(t, err)
-			require.Equal(t, want, got, "key %d", i)
+			require.Equal(t, want[i], got, "key %d", i)
 			var wantValue []byte
 			if values[i] != nil { // a leaf holds its value as an RLP string, which is what an account proof decodes
 				wantValue = make([]byte, rlp.StringLen(values[i]))

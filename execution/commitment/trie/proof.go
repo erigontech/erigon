@@ -676,8 +676,7 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 	if !ok {
 		return nil, nil, fmt.Errorf("proof node %x absent", root)
 	}
-	path := nibbles.KeybytesToHex(key)
-	path = path[:len(path)-1]
+	path := nibbles.KeybytesToHex(key)[:2*len(key)] // without the terminator nibble
 	for enc != nil {
 		proof = append(proof, enc)
 		elems, _, err := rlp.SplitList(enc)
