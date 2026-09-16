@@ -19,6 +19,7 @@ package accounts
 import (
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -40,16 +41,17 @@ type StorProofResult struct {
 	Proof []hexutil.Bytes `json:"proof"`
 }
 
-// MarshalFastJSON produces json.Marshal's output without reflection and without the escape scan: all values are hex.
-func (r *AccProofResult) MarshalFastJSON() ([]byte, error) {
+// AppendFastJSON appends json.Marshal's output without reflection and without the escape scan: all values are hex.
+func (r *AccProofResult) AppendFastJSON(b []byte) ([]byte, error) {
 	size := 256 + hexArraySize(r.AccountProof)
 	for i := range r.StorageProof {
 		if !isAlphanumeric(r.StorageProof[i].Key) {
-			return json.Marshal(r)
+			enc, err := json.Marshal(r)
+			return append(b, enc...), err
 		}
 		size += 128 + len(r.StorageProof[i].Key) + hexArraySize(r.StorageProof[i].Proof)
 	}
-	b := make([]byte, 0, size)
+	b = slices.Grow(b, size)
 	b = append(b, `{"address":"`...)
 	b, _ = r.Address.AppendText(b)
 	b = append(b, `","accountProof":`...)

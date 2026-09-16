@@ -374,7 +374,7 @@ func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnat
 	}
 }
 
-func TestAccProofResultMarshalFastJSON(t *testing.T) {
+func TestAccProofResultAppendFastJSON(t *testing.T) {
 	big := hexutil.U256(*uint256.MustFromHex("0x1d6329f1c35ca4bfabb9f5610000000000"))
 	var zero hexutil.U256
 	for _, r := range []*AccProofResult{
@@ -395,8 +395,8 @@ func TestAccProofResultMarshalFastJSON(t *testing.T) {
 	} {
 		want, err := json.Marshal(r)
 		require.NoError(t, err)
-		got, err := r.MarshalFastJSON()
+		got, err := r.AppendFastJSON([]byte("keep"))
 		require.NoError(t, err)
-		require.Equal(t, string(want), string(got))
+		require.Equal(t, "keep"+string(want), string(got))
 	}
 }
