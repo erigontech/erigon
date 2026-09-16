@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,9 +162,15 @@ func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
 	f.unrealizedJustifiedCheckpoint.Store(next)
 
 	slot := f.Slot()
+	var ticks sync.WaitGroup
 	for i := uint64(1); i <= 3; i++ {
-		f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot)
+		ticks.Add(1)
+		go func(i uint64) {
+			defer ticks.Done()
+			f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot)
+		}(i)
 	}
+	ticks.Wait()
 	built := make(chan error, 1)
 	go func() {
 		_, err := f.getCheckpointState(next)
