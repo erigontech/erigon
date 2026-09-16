@@ -873,12 +873,21 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 
 // computeWithBlockAccumulator runs ComputeCommitment with block N's own writes
 // (branch nodes and the [state] marker) routed into an explicit diff — N's saved
-// changeset when present (looked up by hash, since multiple changesets can exist
-// per block number after a fork-bounce), else the live accumulator's. Routing
-// through the diff needs no changesetMu against a concurrent SetChangesetAccumulator,
-// so the apply loop's DomainPut is never blocked by the fold. It also stamps the
-// pending deferred update with the block hash so the next call's flush uses the
-// same hash-aware routing.
+// changeset when present, else the live accumulator's. Routing through the diff
+// needs no changesetMu against a concurrent SetChangesetAccumulator, so the apply
+// loop's DomainPut is never blocked by the fold.
+//
+// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator can hold
+// multiple changesets per block number after a fork-bounce (canonical block 1 +
+// forks[i] block 1 with different hashes), and a number-only lookup returns the
+// first match in non-deterministic map iteration order. That non-determinism
+// caused the calculator's [state] write for canonical block 1 to land in the
+// fork's block 1 CS during the TestBlockchainHeaderchainReorgConsistency
+// reproducer, leaving canonical block 1's CS without [state] and producing
+// off-by-one wrong-trie-root chains on the next iteration's re-execution.
+//
+// It also stamps the pending deferred update with the block's hash so the next
+// call's FlushPendingUpdates uses the same hash-aware routing.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {

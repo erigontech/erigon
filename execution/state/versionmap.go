@@ -1206,6 +1206,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 							break
 						}
 					}
+					// EIP-8246: a self-destruct that preserves a non-zero balance writes it
+					// at the SD tx itself (index == destructTxIndex, which the strict > scan
+					// above misses), leaving the account alive. A pre-EIP-8246 burn or an
+					// Amsterdam move-out writes zero there, so a resolved non-zero balance at
+					// or after the destruct is the signal the account survived.
+					if !revived {
+						if bal, balRR, ok := vm.ReadBalance(addr, txIndex); ok && balRR.resolved() &&
+							balRR.DepIdx() >= destructTxIndex && !bal.IsZero() {
+							revived = true
+						}
+					}
 					if !revived {
 						valid = VersionInvalid
 					}
