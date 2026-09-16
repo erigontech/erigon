@@ -674,6 +674,9 @@ func PrintProof(proof []hexutil.Bytes) error {
 func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte, value []byte, err error) {
 	enc, ok := byHash[string(root)]
 	if !ok {
+		if common.BytesToHash(root) == EmptyRoot { // an empty trie proves absence with no nodes at all
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("proof node %x absent", root)
 	}
 	path := nibbles.KeybytesToHex(key)[:2*len(key)] // without the terminator nibble
@@ -713,10 +716,16 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 				return nil, nil, err
 			}
 		case 17:
-			if len(path) == 0 {
-				return proof, nil, nil
-			}
 			rest := elems
+			if len(path) == 0 { // the key ends here, so its value is the branch's 17th element
+				for range 16 {
+					if _, _, rest, err = rlp.Split(rest); err != nil {
+						return nil, nil, err
+					}
+				}
+				value, _, err = rlp.SplitString(rest)
+				return proof, value, err
+			}
 			for range path[0] {
 				if _, _, rest, err = rlp.Split(rest); err != nil {
 					return nil, nil, err
