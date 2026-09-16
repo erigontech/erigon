@@ -778,6 +778,39 @@ class RenderingFidelityTests(unittest.TestCase):
         out = g.mermaid_blocks("```mermaid\ngraph TD\n> a label\n```\n")
         self.assertIn("> a label", out[0][2])
 
+    def test_a_custom_heading_id_is_not_part_of_the_heading_text(self):
+        # Docusaurus renders `## Flow {#custom-flow}` as `Flow` and uses the
+        # rest as the id, so recording the source text finds no such heading in
+        # the built page and the diagram is appended to the end of it.
+        src = "## Flow {#custom-flow}\n\n```mermaid\ngraph TD\n```\n"
+        self.assertEqual([("Flow", 0, "```mermaid\ngraph TD\n```")],
+                         g.mermaid_blocks(src))
+
+    def test_a_custom_id_heading_still_counts_toward_the_occurrence(self):
+        # Both headings render as `Flow`, so the built page carries two of them
+        # and the diagram belongs under the second.
+        src = ("## Flow {#first}\n\ntext\n\n## Flow\n\n"
+               "```mermaid\ngraph TD\n```\n")
+        self.assertEqual([("Flow", 1, "```mermaid\ngraph TD\n```")],
+                         g.mermaid_blocks(src))
+
+    def test_a_diagram_under_a_custom_id_heading_is_spliced_not_appended(self):
+        body = "## Flow\n\nEvery box above is a Go package.\n\n## Later\n\nx"
+        out = g.splice_diagram(body, "Flow", "```mermaid\ngraph TD\n```")
+        self.assertLess(out.index("graph TD"), out.index("Every box above"))
+
+    def test_a_listed_diagram_keeps_its_own_angle_brackets(self):
+        # Peeling the list marker changes the opener, which must not be read as
+        # the fence having been quoted: `>` is legal inside a diagram label.
+        src = ('- ```mermaid\n'
+               '  flowchart TD\n'
+               '  A["first line\n'
+               '  > second line"]\n'
+               '  ```\n')
+        out = g.mermaid_blocks(src)
+        self.assertEqual(1, len(out))
+        self.assertIn("> second line", out[0][2])
+
     def test_diagram_inside_a_blockquote_is_still_found(self):
         out = g.mermaid_blocks("> ```mermaid\n> graph TD\n>   A-->B\n> ```\n")
         self.assertEqual(1, len(out))
@@ -1158,6 +1191,15 @@ class ReleaseDriftTests(unittest.TestCase):
         b = g._mask_versions("erigon:v3.6.1 image erigon-v3.6.1 (e.g., v3.6.1)")
         self.assertEqual(a, b, "an unanchored v-prefixed mention broke drift")
 
+    def test_the_version_prefix_is_not_masked_away(self):
+        # The `v` is source text, not part of the release token. Masking it too
+        # makes an edit that adds or drops the prefix compare equal, so a stale
+        # artifact passes `--check` as release drift and is never regenerated.
+        self.assertNotEqual(g._mask_versions("erigon:v3.6.0 image"),
+                            g._mask_versions("erigon:3.6.0 image"))
+        self.assertIn("erigon:v<release>", g._mask_versions("erigon:v3.6.0 image"))
+        self.assertIn("erigon:<release>", g._mask_versions("erigon:3.6.0 image"))
+
     def test_a_bump_of_the_real_corpus_is_drift_not_staleness(self):
         # The token also expands where nothing marks the version as Erigon's —
         # `(e.g., v3.6.0)` and `git checkout v3.6.0` on the installation page —
@@ -1396,6 +1438,42 @@ class QuotedListIndentTests(unittest.TestCase):
         for line in out.split("\n"):
             self.assertFalse(line.startswith(" ") and ">" in line,
                              f"indent placed before the quote marker: {line!r}")
+
+    def test_a_quote_inside_a_list_item_keeps_the_item_indent(self):
+        # The other nesting order: here the item opened first, so its indent
+        # belongs in front of the `>`. Putting the indent after the marker
+        # instead strands the quote at column zero, which closes the item and
+        # splits the ordered list in two.
+        html = ('<ol>'
+                '<li><p>Run this:</p>'
+                '<blockquote><p>Quote inside step.</p></blockquote>'
+                '<pre><code class="language-bash">ls</code></pre></li>'
+                '<li><p>Verify the result.</p></li>'
+                '</ol>')
+        p = g._ArticleText()
+        p.feed(html)
+        p.close()
+        out = p.text()
+        self.assertIn("1. Run this:", out)
+        self.assertIn("   > Quote inside step.", out)
+        self.assertIn("   ```", out)
+        self.assertIn("   ls", out)
+        self.assertIn("\n2. Verify the result.", out)
+        self.assertNotIn(">    Quote inside step.", out)
+
+    def test_both_nesting_orders_at_once_keep_their_containers(self):
+        # A quote inside an item inside a quote: the outer quote wraps the item,
+        # the item indents the inner quote, and each marker keeps its column.
+        html = ('<blockquote><ol>'
+                '<li><p>Step one.</p>'
+                '<blockquote><p>Inner note.</p></blockquote></li>'
+                '</ol></blockquote>')
+        p = g._ArticleText()
+        p.feed(html)
+        p.close()
+        out = p.text()
+        self.assertIn("> 1. Step one.", out)
+        self.assertIn(">    > Inner note.", out)
 
 
 if __name__ == "__main__":

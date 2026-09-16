@@ -580,8 +580,7 @@ class _ArticleText(HTMLParser):
         """
         stack, out = [], []
         for ln in s.split("\n"):
-            prefix = " " * sum(stack)
-            events = _STACK_RE.findall(ln)
+            events = [(m.group(1), m.start()) for m in _STACK_RE.finditer(ln)]
             clean = _STACK_RE.sub("", ln)
             # A line with no content is emitted empty, inside a fence as well as
             # outside it. Keeping its spaces would be more faithful to the code's
@@ -592,21 +591,44 @@ class _ArticleText(HTMLParser):
             else:
                 quote = _QUOTE_PREFIX_RE.match(clean)
                 if quote:
-                    # A list inside a blockquote nests the other way round: the
-                    # quote marker stays outermost and the item's indent goes
-                    # after it. Prefixing the whole line puts the indent in
-                    # front of the `>`, which ends the quote and the list.
-                    marker, rest = quote.group(0), clean[quote.end():]
-                    out.append(marker + prefix + rest if rest.strip()
-                               else marker.rstrip())
+                    # Each item's indent goes back where the item opened: after
+                    # the quote markers that were already around it, in front of
+                    # the ones opened inside it. A list inside a quote therefore
+                    # keeps the `>` outermost, while a quote inside a list item
+                    # is pushed out to the item's own column — and prefixing the
+                    # whole line would there put the indent in front of the `>`,
+                    # which ends both the quote and the list.
+                    marks = _QUOTE_MARK_RE.findall(quote.group(0))
+                    rest = clean[quote.end():]
+                    parts = []
+                    for d in range(len(marks)):
+                        parts.append(" " * sum(w for w, at in stack if at == d))
+                        parts.append(marks[d])
+                    # A level deeper than this line quotes cannot be placed
+                    # between markers that are not there; its indent trails.
+                    parts.append(" " * sum(w for w, at in stack
+                                           if at >= len(marks)))
+                    line = "".join(parts)
+                    out.append(line + rest if rest.strip() else line.rstrip())
                 else:
-                    out.append(prefix + clean)
-            for width in events:
-                if width == "":
+                    out.append(" " * sum(w for w, _ in stack) + clean)
+            # An item opens at the quote depth its marker was written under: the
+            # markers standing in front of it on its own line are the quotes it
+            # sits inside, and the ones after it are the quotes it contains.
+            q = _QUOTE_PREFIX_RE.match(ln)
+            marks = _QUOTE_MARK_RE.findall(q.group(0)) if q else []
+            for width, at in events:
+                if width is None:
                     if stack:
                         stack.pop()
                 else:
-                    stack.append(int(width))
+                    depth, reach = 0, q.start() if q else 0
+                    for mk in marks:
+                        reach += len(mk)
+                        if at < reach:
+                            break
+                        depth += 1
+                    stack.append((int(width), depth))
         return "\n".join(out)
 
     def text(self):
@@ -772,8 +794,21 @@ def _dedent_to(line, base):
 
 _JSX_COMMENT_RE = re.compile(r"\{/\*.*?\*/\}", re.DOTALL)
 _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
+
+# Docusaurus reads `{#custom-id}` as the heading's id and renders it nowhere, so
+# the built page carries `Flow` for a source `## Flow {#custom-flow}`. Matching
+# on the raw source text would miss that heading and append its diagram instead.
+_HEADING_ID_RE = re.compile(r"[ \t]*\{#[^}\s]*\}[ \t]*$")
+
+
+def _heading_text(s):
+    """The text a heading renders as, without its custom id."""
+    return _HEADING_ID_RE.sub("", s).strip()
 _ATX_LEVEL_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+\S")
 _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
+# The markers of that prefix one at a time: an item's indent is placed between
+# two of them, so the prefix cannot be carried around as one string.
+_QUOTE_MARK_RE = re.compile(r">[ \t]?")
 
 
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -960,14 +995,15 @@ def mermaid_blocks(source):
         h = _ATX_HEADING_RE.match(lines[i])
         opener = _peel_container(lines[i])
         # Only a fence that was itself quoted has its body peeled: `>` is legal
-        # inside a diagram, and stripping it from a top-level fence would edit
-        # the diagram's own source.
-        see = _peel_quote if opener != lines[i] else (lambda ln: ln)
+        # inside a diagram, and stripping it from an unquoted fence would edit
+        # the diagram's own source. `opener` also differs when nothing but a
+        # list marker was peeled, so the quote has to be tested for directly.
+        see = _peel_quote if _QUOTE_PREFIX_RE.match(lines[i]) else (lambda ln: ln)
 
         m = _fence_at(opener)
         if not m:
             if h:
-                heading = h.group(1).strip()
+                heading = _heading_text(h.group(1))
                 seen[heading] = seen.get(heading, 0) + 1
                 occurrence = seen[heading] - 1
             i += 1
@@ -1031,7 +1067,7 @@ def splice_diagram(body, heading, block, occurrence=0):
         if fence is not None:
             continue
         h = _ATX_HEADING_RE.match(ln)
-        if h and h.group(1).strip() == heading:
+        if h and _heading_text(h.group(1)) == heading:
             if hits == occurrence:
                 idx = i
                 break
@@ -1498,8 +1534,12 @@ def _mask_versions(text):
     # Bounded on both sides, matching the hazard scan. An unbounded pattern
     # also masks the release where it is the tail of a longer version, and an
     # unrelated pin like `13.6.0` is neither maskable nor reported by the scan.
-    return re.sub(rf"(?<![.\d])v?{re.escape(release)}(?!\.?\d)",
-                  "<release>", text)
+    # The `v` is source text, not part of the release token: masking it too
+    # makes `erigon:v3.6.1` and `erigon:3.6.1` compare equal, so an edit that
+    # adds or drops the prefix would pass as release drift and never be
+    # regenerated. Only the digits are masked; the prefix is carried through.
+    return re.sub(rf"(?<![.\d])(v?){re.escape(release)}(?!\.?\d)",
+                  r"\1<release>", text)
 
 
 def _literal_release_uses(release):
