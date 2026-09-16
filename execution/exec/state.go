@@ -115,7 +115,11 @@ type WorkerContext struct {
 	stateWriter state.StateWriter
 	stateReader state.StateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
-	chainConfig *chain.Config
+	// prevBlockReg, when non-nil, keeps the IBS reading its committed base through a
+	// per-task PrevBlockReader; SetReader re-wraps so switching reader (e.g. into
+	// history mode and back) does not drop the prior-blocks overlay.
+	prevBlockReg *state.PrevBlockList
+	chainConfig  *chain.Config
 
 	ctx     context.Context
 	engine  rules.Engine
@@ -339,7 +343,11 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
-	rw.ibs = state.New(rw.stateReader)
+	if rw.prevBlockReg != nil {
+		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
+	} else {
+		rw.ibs = state.New(rw.stateReader)
+	}
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -355,6 +363,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 // per-task reader wraps it by reference. Call once after ResetState; per task the
 // block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
+	rw.prevBlockReg = reg
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
