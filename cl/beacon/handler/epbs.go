@@ -876,6 +876,16 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+	} else if signedEnvelope.Message.BeaconBlockRoot == a.forkchoiceStore.AnchorRoot() {
+		if builderIndex, ok := a.forkchoiceStore.AnchorExecutionPayloadBuilderIndex(); ok &&
+			builderIndex != signedEnvelope.Message.BuilderIndex {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf(
+				"envelope builder index %d does not match anchor builder index %d",
+				signedEnvelope.Message.BuilderIndex,
+				builderIndex,
+			)).WriteTo(w)
+			return
+		}
 	}
 	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(
 		r.Context(),

@@ -39,6 +39,7 @@ type ForkChoiceStorageReader interface {
 	Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
+	AnchorExecutionPayloadBuilderIndex() (uint64, bool)
 	Engine() execution_client.ExecutionEngine
 	FinalizedCheckpoint() solid.Checkpoint
 	FinalizedSlot() uint64

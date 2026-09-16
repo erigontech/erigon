@@ -610,13 +610,16 @@ func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T
 	require.Contains(t, second.Body.String(), "already seen")
 }
 
-func TestPostExecutionPayloadEnvelopeRejectsEnvelopeAlreadyStoredByP2P(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeRejectsMatchingAnchorEnvelopeAlreadyStoredByP2P(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	fcu.AnchorRootVal = envelope.Message.BeaconBlockRoot
+	fcu.AnchorExecutionPayloadBuilderIndexVal = envelope.Message.BuilderIndex
+	fcu.AnchorExecutionPayloadBuilderIndexOK = true
 	fcu.SetEnvelope(envelope.Message.BeaconBlockRoot, envelope)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
@@ -664,6 +667,50 @@ func TestPostExecutionPayloadEnvelopeRejectsMismatchedBuilderBeforePersistedRead
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "does not match bid builder index")
 	require.Zero(t, reads.Load())
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsAnchorBuilderMismatchBeforeAdmission(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.HexToHash("0x1234")
+	fcu.AnchorRootVal = root
+	fcu.AnchorExecutionPayloadBuilderIndexVal = 1
+	fcu.AnchorExecutionPayloadBuilderIndexOK = true
+	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	persisted.Message.BeaconBlockRoot = root
+	persisted.Message.BuilderIndex = 1
+	fcu.SetEnvelope(root, persisted)
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return persisted, nil
+	}
+	var claims atomic.Int32
+	fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+		claims.Add(1)
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("unexpected admission")
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.BuilderIndex = 2
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	for range 3 {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		require.Contains(t, recorder.Body.String(), "builder index")
+	}
+	require.Zero(t, reads.Load())
+	require.Zero(t, claims.Load())
+	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(root, envelope.Message.BuilderIndex)
+	require.NoError(t, err)
+	fcu.EnvelopeGossipAdmissions.Finish(token, false)
 }
 
 func TestPostExecutionPayloadEnvelopePreservesConcurrentStoredDuplicateResponses(t *testing.T) {

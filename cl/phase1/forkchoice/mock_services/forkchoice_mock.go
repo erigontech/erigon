@@ -44,24 +44,26 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]forkchoice.ForkChoiceNode
-	AnchorSlotVal          uint64
-	AnchorRootVal          common.Hash
-	FinalizedCheckpointVal solid.Checkpoint
-	FinalizedSlotVal       uint64
-	LowestAvailableSlotVal *uint64
-	HeadVal                common.Hash
-	HeadSlotVal            uint64
-	HeadPayloadStatusVal   cltypes.PayloadStatus
-	GetHeadNodeFn          func() (forkchoice.ForkChoiceNode, error)
-	GetStateAtBlockRootFn  func(common.Hash, bool) (*state.CachingBeaconState, error)
-	ViewStateAtBlockRootFn func(common.Hash, func(*state.CachingBeaconState) error) error
-	HighestSeenVal         uint64
-	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
-	ProposerBoostRootVal   common.Hash
-	SlotVal                uint64
-	TimeVal                uint64
+	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AnchorSlotVal                         uint64
+	AnchorRootVal                         common.Hash
+	AnchorExecutionPayloadBuilderIndexVal uint64
+	AnchorExecutionPayloadBuilderIndexOK  bool
+	FinalizedCheckpointVal                solid.Checkpoint
+	FinalizedSlotVal                      uint64
+	LowestAvailableSlotVal                *uint64
+	HeadVal                               common.Hash
+	HeadSlotVal                           uint64
+	HeadPayloadStatusVal                  cltypes.PayloadStatus
+	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, error)
+	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
+	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
+	HighestSeenVal                        uint64
+	JustifiedCheckpointVal                solid.Checkpoint
+	JustifiedSlotVal                      uint64
+	ProposerBoostRootVal                  common.Hash
+	SlotVal                               uint64
+	TimeVal                               uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -270,6 +272,10 @@ func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
 
 func (f *ForkChoiceStorageMock) AnchorRoot() common.Hash {
 	return f.AnchorRootVal
+}
+
+func (f *ForkChoiceStorageMock) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
+	return f.AnchorExecutionPayloadBuilderIndexVal, f.AnchorExecutionPayloadBuilderIndexOK
 }
 
 func (f *ForkChoiceStorageMock) Engine() execution_client.ExecutionEngine {
