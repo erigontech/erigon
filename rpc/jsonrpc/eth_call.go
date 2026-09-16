@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -514,12 +513,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
 	}
 
-	return api.proofFromWitnessNodes(ctx, roTx, sdCtx, header, address, storageKeys, blockNumber, isLatest, logger)
-}
-
-// proofFromWitnessNodes serves getProof from the captured witness nodes without decoding them into a trie: a proof is
-// the captured bytes on the key's path, whose hashes the fold already computed, so nothing is encoded or hashed again.
-func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalTx, sdCtx *commitmentdb.SharedDomainsCommitmentContext, header *types.Header, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
+	// the proof is the captured node bytes on each key's path, whose hashes the fold already computed, so nothing is
+	// decoded into a trie, encoded again, or hashed again
 	nodes, root, err := sdCtx.WitnessNodesByHash(ctx)
 	if err != nil {
 		return nil, err
@@ -551,8 +546,11 @@ func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalT
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
-	if len(storageKeys) == 0 {
-		return proof, nil
+	if len(storageKeys) == 0 || acc.Root == common.BytesToHash(empty.RootHash[:]) {
+		for i, storageKey := range storageKeys {
+			proof.StorageProof[i] = accounts.StorProofResult{Key: storageKey.EncodeKey(), Value: new(hexutil.U256), Proof: []hexutil.Bytes{}}
+		}
+		return proof, assertProofVerifies(header.Root, proof)
 	}
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
@@ -563,11 +561,6 @@ func (api *APIImpl) proofFromWitnessNodes(ctx context.Context, roTx kv.TemporalT
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		if acc.Root == common.BytesToHash(empty.RootHash[:]) {
-			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.U256)
-			continue
-		}
 		storageProof, _, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
 			return nil, err
