@@ -478,8 +478,11 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 		return err
 	}
 	if other.cacheUnwind.pending {
-		if !sd.localCacheUnwind && (other.localCacheUnwind || sd.stateCache != other.stateCache) {
+		if other.localCacheUnwind || sd.stateCache != other.stateCache {
 			sd.invalidateCaches(other.cacheUnwind.toTxNum)
+		}
+		if other.localCacheUnwind && sd.stateCache != other.stateCache {
+			other.cacheApplier.Unwind(other.cacheUnwind.toTxNum)
 		}
 		sd.stageCacheUnwind(other.cacheUnwind.toTxNum)
 	}
