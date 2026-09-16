@@ -1251,7 +1251,7 @@ func TestBlobsIdentifiersUseTheSuppliedRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
 
-	ids, err := BlobsIdentifiersFromRootedBlocks([]incompleteBlock{{block: block, root: canonical}}, &clparams.MainnetBeaconConfig)
+	ids, err := blobsIdentifiersFromRootedBlocks([]incompleteBlock{{block: block, root: canonical}}, &clparams.MainnetBeaconConfig)
 	require.NoError(t, err)
 	require.Positive(t, ids.Len(), "no identifiers were produced")
 	require.Equal(t, canonical, ids.Get(0).BlockRoot,
@@ -1269,4 +1269,48 @@ func rootedBlocks(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) []incomple
 		out = append(out, incompleteBlock{block: b, root: root})
 	}
 	return out
+}
+
+// PeerDAS reads the proposer signature off the block to reject columns whose header signature does
+// not match. It used to do that with a type switch on the concrete block types, so a wrapper
+// silently disabled the check; the signature is part of the interface now, and the wrapper must
+// carry the wrapped block's own.
+func TestRootedColumnBlockPreservesTheSignature(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.Signature = common.Bytes96{0xaa, 0xbb, 0xcc}
+
+	var wrapped cltypes.ColumnSyncableSignedBlock = rootedColumnBlock{
+		SignedBeaconBlock: block,
+		root:              common.HexToHash("0xc0ffee"),
+	}
+
+	require.Equal(t, block.Signature, wrapped.BlockSignature(),
+		"the wrapper must expose the wrapped block's signature, or PeerDAS cannot reject a mismatched column")
+
+	root, err := wrapped.BlockHashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0xc0ffee"), common.Hash(root), "and still override the root")
+}
+
+// Response grouping is keyed on the canonical root, so a fixture whose two roots are equal would
+// keep passing if the map were rebuilt from the block's own hash. This one separates them.
+func TestNewDenebRecoveryBatchGroupsOnTheCanonicalRoot(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	items := []incompleteBlock{{block: block, root: canonical}}
+	req, err := blobsIdentifiersFromRootedBlocks(items, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+
+	batch, err := newDenebRecoveryBatch(items, req)
+	require.NoError(t, err)
+	require.Contains(t, batch.groups, canonical, "the group must be keyed on the canonical root")
+	require.NotContains(t, batch.groups, common.Hash(selfHash), "never on the payload-stripped hash")
+	require.NotNil(t, batch.groups[canonical].block, "the group must resolve back to its block")
 }

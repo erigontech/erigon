@@ -477,7 +477,9 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
 		}
 		if blockRoot == (common.Hash{}) {
 			// Without a canonical root the request would carry the payload-stripped hash, which no
-			// peer can answer; leave the slot queued until the index catches up.
+			// peer can answer. The slot stays queued and is never trimmed, so log it: otherwise the
+			// backfill reports incomplete forever with no output naming the cause.
+			b.logger.Warn("[BlobHistoryDownloader] Retry slot has no canonical root", "slot", slot)
 			continue
 		}
 		complete, err := b.retryBlock(incompleteBlock{block: block, root: blockRoot})
@@ -977,7 +979,7 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []incompleteBlock) bool
 	if len(requestedBlocks) == 0 {
 		return true
 	}
-	req, err := BlobsIdentifiersFromRootedBlocks(requestedBlocks, b.beaconCfg)
+	req, err := blobsIdentifiersFromRootedBlocks(requestedBlocks, b.beaconCfg)
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
 		b.addRetryBlocks(requestedBlocks)

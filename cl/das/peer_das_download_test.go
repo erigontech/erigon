@@ -761,7 +761,10 @@ func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
 	metadata, err := newBlobRecoveryMetadata(&blockHashCountingBlock{ColumnSyncableSignedBlock: block}, root)
 	require.NoError(t, err)
-	require.False(t, metadata.hasSignature)
+	// The signature is read through the interface, so a wrapper carries it too and the
+	// column-sidecar signature check stays armed.
+	require.True(t, metadata.hasSignature)
+	require.Equal(t, block.BlockSignature(), metadata.signature)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[2], columns[0]}, nil)
 
 	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())

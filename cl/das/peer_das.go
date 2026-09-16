@@ -297,14 +297,10 @@ func newBlobRecoveryMetadata(block cltypes.ColumnSyncableSignedBlock, blockRoot 
 		version:     block.Version(),
 		commitments: make([]common.Bytes48, commitments.Len()),
 	}
-	switch block := block.(type) {
-	case *cltypes.SignedBeaconBlock:
-		metadata.signature = block.Signature
-		metadata.hasSignature = true
-	case *cltypes.SignedBlindedBeaconBlock:
-		metadata.signature = block.Signature
-		metadata.hasSignature = true
-	}
+	// Read through the interface, not a concrete type switch: a wrapper that overrides the root
+	// would otherwise leave hasSignature false and silently disable the mismatch rejection below.
+	metadata.signature = block.BlockSignature()
+	metadata.hasSignature = true
 	for i := range commitments.Len() {
 		commitment := commitments.Get(i)
 		if commitment == nil {
