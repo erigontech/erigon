@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -314,7 +315,7 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 		defer func() {
 			require.Equal(t, "injected account panic", recover(), "the child must panic inside the walk")
 		}()
-		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &[16]bool{}, &[16]bool{})
+		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, new(atomic.Uint32), new(atomic.Uint32))
 	}()
 
 	require.Nil(t, held.trie, "checkin must return the child trie even when the walk panics")

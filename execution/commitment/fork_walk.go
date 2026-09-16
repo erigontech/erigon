@@ -215,7 +215,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	fw.forks.Add(1)
 
 	cells := &w.stitchScratch
-	var touched, present [16]bool
+	var touched, present atomic.Uint32
 	var nibs [16]byte
 	n := 0
 	for bm := node.bitmap; bm != 0; {
@@ -306,15 +306,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 			w.ResetContext(fw.leases.context(wk.lease))
 		}
 	}
-	var touchedBits, presentBits uint16
-	for nib := range 16 {
-		if touched[nib] {
-			touchedBits |= uint16(1) << nib
-		}
-		if present[nib] {
-			presentBits |= uint16(1) << nib
-		}
-	}
+	touchedBits, presentBits := uint16(touched.Load()), uint16(present.Load())
 	stitchSplitCells(w, cells, touchedBits, presentBits)
 	if passNib >= 0 && int(nibs[0]) == passNib {
 		bit := uint16(1) << passNib
@@ -329,7 +321,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 }
 
 func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
-	idx, nib int, path []byte, cells *[16]cell, touched, present *[16]bool) error {
+	idx, nib int, path []byte, cells *[16]cell, touched, present *atomic.Uint32) error {
 	child := node.children[idx]
 	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
 	childPath = append(childPath, path...)
@@ -346,9 +338,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
-	bit := uint16(1) << nib
-	touched[nib] = cw.trie.touchMap[0]&bit != 0
-	present[nib] = cw.trie.afterMap[0]&bit != 0
+	bit := uint32(1) << nib
+	touched.Or(uint32(cw.trie.touchMap[0]) & bit)
+	present.Or(uint32(cw.trie.afterMap[0]) & bit)
 	cells[nib] = c
 	return nil
 }
