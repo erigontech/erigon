@@ -48,6 +48,21 @@ function pages(text) {
   })
 }
 
+// Only a URL the index lists is a page sentinel. A documentation paragraph that
+// happens to start "URL: https://" — a configuration example written as prose,
+// outside any fence — is page content, and counting it as a boundary fails a
+// corpus in which nothing was lost.
+function topLevelSentinels(tree, sentinel) {
+  // GFM autolinks the bare URL, so the paragraph is text("URL: ") + link(...)
+  // rather than one text node.
+  const flat = (n) =>
+    (n.children ?? []).map((c) => c.value ?? c.url ?? flat(c)).join('')
+  return tree.children
+    .filter((n) => n.type === 'paragraph')
+    .map((n) => flat(n).trim())
+    .filter((v) => sentinel.has(v))
+}
+
 function nodesOfType(tree, type) {
   const found = []
   const walk = n => {
@@ -83,14 +98,7 @@ test('every page sentinel survives as prose, none captured by a fence', () => {
   }
   assert.deepEqual(captured, [], 'a fence absorbed a page sentinel')
 
-  // GFM autolinks the bare URL, so the paragraph is text("URL: ") + link(...)
-  // rather than one text node.
-  const flat = (n) =>
-    (n.children ?? []).map((c) => c.value ?? c.url ?? flat(c)).join('')
-  const urlParagraphs = tree.children
-    .filter((n) => n.type === 'paragraph')
-    .map(flat)
-    .filter((v) => v.startsWith('URL: https://'))
+  const urlParagraphs = topLevelSentinels(tree, sentinel)
   const h1s = tree.children.filter((n) => n.type === 'heading' && n.depth === 1)
   assert.equal(urlParagraphs.length, h1s.length,
     'a page lost its title or its URL line')
@@ -99,6 +107,22 @@ test('every page sentinel survives as prose, none captured by a fence', () => {
   const present = new Set(urlParagraphs.map((v) => v.slice('URL: '.length)))
   assert.deepEqual(listed.filter((u) => !present.has(u)), [],
     'a page listed in llms.txt is missing from llms-full.txt')
+})
+
+test('a documented URL line is not counted as a page sentinel', () => {
+  const listed = ['https://docs.erigon.tech/getting-started']
+  const sentinel = new Set(listed.map((u) => `URL: ${u}`))
+  const text = ['# Getting started',
+                '',
+                'URL: https://docs.erigon.tech/getting-started',
+                '',
+                'Point a client at your own node:',
+                '',
+                'URL: https://rpc.example',
+                ''].join('\n')
+  assert.deepEqual(topLevelSentinels(parse(text), sentinel),
+                   ['URL: https://docs.erigon.tech/getting-started'],
+                   'a documentation URL was counted as a page boundary')
 })
 
 test('every fenced block in the corpus closes', () => {
