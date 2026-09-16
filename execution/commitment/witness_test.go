@@ -91,6 +91,15 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 			t.Logf("want=%d got=%d missing(in want not got)=%d extra(in got not want)=%d", len(want), len(got), missing, extra)
 			require.Zero(t, missing, "byHash prune missing nodes present in RLPDecode prune")
 			require.Zero(t, extra, "byHash prune has extra nodes")
+
+			again := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+			defer again.Close()
+			touchAccountsSlots(again, addrs[:tc.touch], touchSlots)
+			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, again, tc.exclude)
+			require.NoError(t, err)
+			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
+			require.NoError(t, err)
+			require.Equal(t, ws, nodeSet(indexed), "the indexed fold and prune must give the RLPDecode prune's nodes")
 		})
 	}
 }
