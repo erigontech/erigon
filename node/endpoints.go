@@ -88,7 +88,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 				return
 			}
 			switch state {
-			case http.StateIdle, http.StateClosed:
+			case http.StateIdle:
 				c.flushIdle()
 			case http.StateHijacked: // the handler owns the connection now and expects its writes to reach the wire
 				c.uncork()
@@ -118,9 +118,8 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 // it would save, and a streamed answer still reaches the client in pieces of this size.
 const corkBufferBytes = int(64 * datasize.KB)
 
-// corkListener holds a response in one buffer so it leaves as one write syscall. net/http writes the
-// headers, the body and the chunk terminator separately, and only marks the connection idle once the
-// whole response is written, which is where the buffer is flushed.
+// corkListener holds a response in one buffer so it leaves as one write syscall: net/http writes the
+// headers, the body and the chunk terminator separately.
 type corkListener struct {
 	net.Listener
 	writeTimeout time.Duration
@@ -191,7 +190,7 @@ func (c *corkConn) Close() error {
 func (c *corkConn) CloseWrite() error {
 	closer, ok := c.Conn.(interface{ CloseWrite() error })
 	if !ok {
-		return fmt.Errorf("%T has no CloseWrite", c.Conn)
+		return errors.ErrUnsupported
 	}
 	_ = c.flush()
 	return closer.CloseWrite()
