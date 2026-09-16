@@ -17,12 +17,15 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/rand"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -514,7 +517,7 @@ func buildRetouchedWhale(seed int64, slots int) (batch1, batch2 engineBatch) {
 	return engineBatch{k1, u1}, engineBatch{k2, u2}
 }
 
-func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, workers int) {
+func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, workers int, newFactory func(*MockState) (TrieContextFactory, func())) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed
@@ -527,11 +530,12 @@ func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, worke
 		b.StopTimer()
 		ms := NewMockState(b)
 		ms.SetConcurrentCommitment(true)
+		factory, drain := newFactory(ms)
 		if pph == nil {
-			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph = NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.SetTrieContextFactory(factory)
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
@@ -541,6 +545,7 @@ func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, worke
 		_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
 		require.NoError(b, err)
 		u1.Close()
+		drain()
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
 		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
@@ -551,18 +556,54 @@ func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, worke
 		b.StopTimer()
 		require.NoError(b, err)
 		u2.Close()
+		drain()
 		b.StartTimer()
 	}
 }
 
 func Benchmark_Commitment_IncrementalWhale(b *testing.B) {
 	batch1, batch2 := buildRetouchedWhale(717, 120_000)
+	mock := func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }
 	workers := []int{4, runtime.NumCPU()}
 	slices.Sort(workers)
 	workers = slices.Compact(workers)
 	for _, w := range workers {
 		b.Run(fmt.Sprintf("incremental-whale120k/ModeParallel-w%d", w), func(b *testing.B) {
-			runIncrementalParallelBench(b, batch1, batch2, w)
+			runIncrementalParallelBench(b, batch1, batch2, w, mock)
 		})
 	}
+	b.Run(fmt.Sprintf("incremental-whale120k/collecting-w%d", runtime.NumCPU()), func(b *testing.B) {
+		runIncrementalParallelBench(b, batch1, batch2, runtime.NumCPU(), collectingTrieCtxFactory)
+	})
+}
+
+type collectingTrieCtx struct {
+	*MockState
+	local map[string]BranchData
+}
+
+func (c *collectingTrieCtx) PutBranch(prefix, data, _ []byte) error {
+	c.local[string(prefix)] = bytes.Clone(data)
+	return nil
+}
+
+func collectingTrieCtxFactory(ms *MockState) (TrieContextFactory, func()) {
+	var mu sync.Mutex
+	var made []*collectingTrieCtx
+	f := func(context.Context) (PatriciaContext, func()) {
+		c := &collectingTrieCtx{MockState: ms, local: make(map[string]BranchData)}
+		mu.Lock()
+		made = append(made, c)
+		mu.Unlock()
+		return c, func() {}
+	}
+	drain := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range made {
+			maps.Copy(ms.cm, c.local)
+		}
+		made = nil
+	}
+	return f, drain
 }

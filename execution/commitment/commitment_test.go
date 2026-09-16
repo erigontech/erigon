@@ -1240,3 +1240,65 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	require.Empty(t, be.deferred[0].prev)
 	be.ClearDeferred()
 }
+
+func premergeTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) BranchData {
+	tb.Helper()
+	cellData := generateCellEncodeDataRow(tb, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(tb, err)
+	return BranchData(bytes.Clone(enc))
+}
+
+func TestPremergeDeferredUpdates_FlushWritesWithoutReMerging(t *testing.T) {
+	row, bm, _ := encodeCellRow(t, 16)
+	be := NewBranchEncoder(1024)
+	raw := premergeTestBranch(t, be, row, bm)
+	prev := premergeTestBranch(t, be, row, bm>>4)
+	same := premergeTestBranch(t, be, row, bm>>8)
+
+	wantMerged, err := NewHexBranchMerger(1024).Merge(prev, raw)
+	require.NoError(t, err)
+	wantMerged = bytes.Clone(wantMerged)
+
+	for _, workers := range []int{1, 2} {
+		t.Run("workers"+strconv.Itoa(workers), func(t *testing.T) {
+			seeded := getDeferredUpdate([]byte{0x01}, raw, prev)
+			fresh := getDeferredUpdate([]byte{0x02}, raw, nil)
+			unchanged := getDeferredUpdate([]byte{0x03}, same, same)
+			deferred := []*DeferredBranchUpdate{seeded, fresh, unchanged}
+			defer func() {
+				for _, upd := range deferred {
+					putDeferredUpdate(upd)
+				}
+			}()
+
+			require.NoError(t, PremergeDeferredUpdates(deferred))
+			for _, upd := range deferred {
+				require.Truef(t, upd.merged, "prefix %x left unmerged by the per-subtree pass", upd.prefix)
+			}
+			require.Equal(t, BranchData(wantMerged), seeded.encoded)
+			require.Equal(t, []byte(prev), seeded.prev, "prev must survive the merge for the changeset undo record")
+			require.Equal(t, BranchData(raw), fresh.encoded, "an empty prev encodes as raw")
+			require.Nil(t, unchanged.encoded, "prev==raw stays a skipped write")
+
+			for i := range seeded.raw {
+				seeded.raw[i] ^= 0xff
+			}
+			require.NoError(t, PremergeDeferredUpdates(deferred), "a second pre-merge must be a no-op")
+
+			written, prevSeen := map[string][]byte{}, map[string][]byte{}
+			n, err := ApplyDeferredBranchUpdates(deferred, workers, func(prefix, data, prevData []byte) error {
+				written[string(prefix)] = bytes.Clone(data)
+				prevSeen[string(prefix)] = bytes.Clone(prevData)
+				return nil
+			}, nil)
+			require.NoError(t, err)
+			require.Equal(t, 2, n)
+			require.Equal(t, []byte(wantMerged), written[string([]byte{0x01})],
+				"flush must write the pre-merged bytes; a re-merge would pick up the corrupted raw")
+			require.Equal(t, []byte(prev), prevSeen[string([]byte{0x01})])
+			require.Equal(t, []byte(raw), written[string([]byte{0x02})])
+			require.NotContains(t, written, string([]byte{0x03}))
+		})
+	}
+}
