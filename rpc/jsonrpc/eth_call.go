@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -436,6 +437,16 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
 			Code:    rpc.ErrCodeInvalidParams,
+		}
+	}
+	// Hash.SetBytes keeps only the trailing 32 bytes, so an over-long key would silently
+	// be answered with a valid proof for a different slot.
+	for _, storageKey := range storageKeys {
+		if len(storageKey) > length.Hash {
+			return nil, &rpc.CustomError{
+				Message: fmt.Sprintf("storage key too long (max %d bytes, got %d)", length.Hash, len(storageKey)),
+				Code:    rpc.ErrCodeInvalidParams,
+			}
 		}
 	}
 	if err := rejectPendingState(blockNrOrHash); err != nil {
