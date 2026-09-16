@@ -1342,3 +1342,35 @@ func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
 	require.Equal(t, canonical, root, "the retry must carry the indexed root, not the block's own hash")
 	require.NotEqual(t, common.Hash(selfHash), root)
 }
+
+// A retry slot whose canonical row is absent cannot be requested: the root would be the
+// payload-stripped hash, which no peer can answer. It stays queued and is never trimmed, so the
+// warning is the only thing that makes a permanently incomplete backfill diagnosable.
+func TestRetryWithoutACanonicalRootStaysQueuedAndWarns(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	block, _ := validDenebRecoverySidecar(t, 100)
+
+	// The collection range is complete, so the pass reaches the retry ledger without queueing work.
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	expectSidecarFilesPresent(blobStorage)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+
+	peer := &countingBlobPeerClient{}
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = blobStorage
+	downloader.rpc = peer
+
+	// A slot above the seeded range: the index has no canonical row for it.
+	const unindexed = uint64(5_000)
+	var logs bytes.Buffer
+	downloader.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	downloader.addRetrySlot(unindexed)
+	require.NotEmpty(t, downloader.retryRanges)
+
+	require.NoError(t, downloader.downloadOnce(false))
+
+	require.Zero(t, peer.requests, "a slot with no canonical root must not be requested")
+	require.NotEmpty(t, downloader.retryRanges, "it must stay queued rather than be silently dropped")
+	require.Contains(t, logs.String(), "Retry slot has no canonical root",
+		"a permanently stuck retry must name itself in the log")
+}
