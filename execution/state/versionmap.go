@@ -1384,6 +1384,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			if valid == VersionInvalid {
 				invReason = "done-vercheck"
 			}
+			if valid == VersionValid && path == BalancePath && matchesLive != nil && !matchesLive() {
+				valid = VersionInvalid
+				invReason = "done-balance"
+			}
 		}
 		// A later destruct invalidates a live-account read even when the record
 		// version is unchanged. A read that already observed absence stays valid.

@@ -2126,9 +2126,10 @@ func (result *execResult) calcFees(
 	// A burnt write can only differ from the pre-state when London adds a
 	// non-zero FeeBurnt, so skip the whole read otherwise.
 	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
+	sharedDestination := hasBurnt && burntAddr == result.Coinbase
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
-	if hasBurnt {
+	if hasBurnt && !sharedDestination {
 		burntAcc, err = vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, feeCreditNone, err
@@ -2164,7 +2165,7 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
-	if hasBurnt {
+	if hasBurnt && !sharedDestination {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 		}
@@ -2179,11 +2180,14 @@ func (result *execResult) calcFees(
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 	}
+	if sharedDestination {
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeBurnt)
+	}
 	oldBurntBalance := newBurntBalance
-	if hasBurnt {
+	if hasBurnt && !sharedDestination {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
-	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance
+	emitBurnt := hasBurnt && !sharedDestination && newBurntBalance != oldBurntBalance
 
 	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
 	// the coinbase must be "touched" so the commitment calculator sees the
@@ -2229,7 +2233,7 @@ func (result *execResult) calcFees(
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
 	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
-		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
+		(sharedDestination || burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr)) {
 		return nil, feeCreditRecorded, nil
 	}
 

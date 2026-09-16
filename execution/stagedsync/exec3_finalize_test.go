@@ -859,6 +859,20 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 	}
 }
 
+func TestFinalizeTxSimple_SharedFeeDestination(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+
+	writes := s.runFinalizeTx(t, nil)
+
+	balance := findBalance(writes, s.coinbase)
+	require.NotNil(t, balance, "a shared tip and burn destination still needs one balance write")
+	var expected uint256.Int
+	expected.Add(&s.feeTipped, &s.feeBurnt)
+	require.Equal(t, expected, balance.Val, "a shared destination must receive both the tip and the burn")
+}
+
 // TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
 // fix for the parallel-exec lost-coinbase-fee race. The apply-loop tip
 // credit (calcFees) writes coinbase BalancePath BEFORE validate runs.
@@ -915,6 +929,9 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	// Validate's value-tiebreaker catches the mismatch.
 	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.StorageRead, uint256.Int{}),
 		"a stale read of pre-tip baseline (via stateReader) must be invalidated by validate's value-tiebreaker")
+
+	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.MapRead, uint256.Int{}),
+		"a pre-credit balance read must become invalid even when its writer version is unchanged")
 
 	// Late timing — the dependent worker read after calcFees, recording the
 	// post-tip value at the worker's version (MapRead). Validate passes.
