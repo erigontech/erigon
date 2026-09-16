@@ -458,8 +458,7 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-// roTxPoolSize bounds the pooled read txns. ERIGON_MDBX_RO_TX_POOL=0 disables pooling,
-// so a misbehaving node can fall back to a fresh txn per BeginRo without a rebuild.
+// roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
 var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
@@ -683,9 +682,8 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	close(db.roTxPool)
-	for tx := range db.roTxPool {
-		tx.Abort()
+	for len(db.roTxPool) > 0 {
+		(<-db.roTxPool).Abort()
 	}
 
 	db.env.Close()
@@ -749,14 +747,11 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 
 func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 	select {
-	case tx, ok := <-db.roTxPool:
-		// A closed pool is always ready and yields nil, so default: does not guard this.
-		if ok {
-			if err := tx.Renew(); err == nil {
-				return tx, nil
-			}
-			tx.Abort()
+	case tx := <-db.roTxPool:
+		if err := tx.Renew(); err == nil {
+			return tx, nil
 		}
+		tx.Abort()
 	default:
 	}
 	return db.env.BeginTxn(nil, mdbx.Readonly)
@@ -1366,8 +1361,7 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
-	// Only one caller may release the txn: two concurrent rollbacks would park the same
-	// read txn twice and hand it to two readers, who would then share one snapshot.
+	// Two concurrent rollbacks would park one read txn twice, giving two readers one snapshot.
 	if tx.rolledBack.Swap(true) {
 		return
 	}
