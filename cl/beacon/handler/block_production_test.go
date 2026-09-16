@@ -371,22 +371,6 @@ func TestGloasProposalExecutionHeadAtForkBoundary(t *testing.T) {
 	require.Equal(t, parentBid.ParentBlockHash, gloasProposalExecutionHead(96, &cfg, parentBid, false))
 }
 
-func TestValidateGloasHeadSnapshotRejectsMismatchedRoot(t *testing.T) {
-	baseRoot := common.HexToHash("0xa1")
-	headNode := forkchoice.ForkChoiceNode{
-		Root:          common.HexToHash("0xb2"),
-		PayloadStatus: cltypes.PayloadStatusFull,
-	}
-
-	err := validateGloasHeadSnapshot(baseRoot, headNode)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "fork choice head changed")
-	require.NoError(t, validateGloasHeadSnapshot(baseRoot, forkchoice.ForkChoiceNode{
-		Root:          baseRoot,
-		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
-}
-
 func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
 	localWei := big.NewInt(1_500_000_000)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}

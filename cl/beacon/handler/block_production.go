@@ -1934,13 +1934,6 @@ func (a *ApiHandler) produceBeaconBody(
 	return beaconBody, executionValue, nil
 }
 
-func validateGloasHeadSnapshot(baseBlockRoot common.Hash, headNode forkchoice.ForkChoiceNode) error {
-	if headNode.Root != baseBlockRoot {
-		return fmt.Errorf("produceBeaconBody: fork choice head changed from %x to %x", baseBlockRoot, headNode.Root)
-	}
-	return nil
-}
-
 func gloasProposalExecutionHead(baseBlockSlot uint64, cfg *clparams.BeaconChainConfig, parentBid *cltypes.ExecutionPayloadBid, buildOnFull bool) common.Hash {
 	if baseBlockSlot/cfg.SlotsPerEpoch < cfg.GloasForkEpoch || buildOnFull {
 		return parentBid.BlockHash
