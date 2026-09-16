@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -782,14 +783,15 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
+	parent := &memoStateReader{StateReader: commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)}
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx, parent,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
 		return nil, err
 	}
 
-	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	sdCtx.SetStateReader(parent)
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for witness: %w", err)
 	}
