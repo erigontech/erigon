@@ -623,3 +623,15 @@ func TestCorkConnFlushesPastLimit(t *testing.T) {
 	require.Equal(t, 1, counting.writes)
 	require.Equal(t, corkFlushBytes+1, counting.bytes)
 }
+
+// A body past the passthrough size goes straight to the socket, after whatever is already buffered.
+func TestCorkConnPassesLargeBodyThrough(t *testing.T) {
+	counting := &writeCountingConn{}
+	c := &corkConn{Conn: counting}
+	_, err := c.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	require.NoError(t, err)
+	_, err = c.Write(bytes.Repeat([]byte("a"), corkPassthroughBytes))
+	require.NoError(t, err)
+	require.Equal(t, 2, counting.writes, "headers flushed, then the body written directly")
+	require.Equal(t, 19+corkPassthroughBytes, counting.bytes)
+}
