@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -823,6 +824,20 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	sd.BlockOverlay().UpdateTxn(roTx)
 	if err := e.writePreExecBlock(sd.BlockOverlay(), roTx, rawBlock); err != nil {
 		return fmt.Errorf("restampWithdrawals: num=%d: %w", num, err)
+	}
+	// The generation's canonical bookkeeping has to move with the hash. isCanonicalHash reads canonical[number]
+	// from this overlay, and the CLOSE's unwindToCommonCanonical uses it to decide whether the block is already
+	// where the stages are. Left pointing at the PRE-re-stamp hash, the walk does not recognise this block,
+	// settles on its parent, finds unwindPoint(0) != stage progress(N) and UNWINDS the block's accumulated state
+	// away. The block-end then runs on the reverted state, so the block seals a body and receipts describing
+	// transactions its own state transition never applied — and those transactions, still unapplied and still
+	// pending, are included AGAIN in a later block. SealActive re-keys both rows for this same reason at the
+	// seal; the re-stamp, which also re-hashes a block whose body has already executed, never did.
+	if err := rawdb.WriteHeadHeaderHash(sd.BlockOverlay(), hash); err != nil {
+		return fmt.Errorf("restampWithdrawals: head header hash num=%d: %w", num, err)
+	}
+	if err := rawdb.WriteCanonicalHash(sd.BlockOverlay(), hash, num); err != nil {
+		return fmt.Errorf("restampWithdrawals: canonical hash num=%d: %w", num, err)
 	}
 	e.preExec.SetActiveHead(hash, num)
 
