@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -1191,7 +1190,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
 	if compressedPageValuesCount > 1 && ht.h.pages != nil {
-		return ht.valueFromCachedPage(historyItem, offset, historyKey)
+		return ht.valueFromCachedPage(historyItem, compressedPageValuesCount, offset, historyKey)
 	}
 	g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
 	g.Reset(offset)
@@ -1225,29 +1224,29 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 	})
 }
 
-// valueFromCachedPage looks key up in the decompressed page at offset, decompressing and caching the page on a miss.
-// The returned value points into a shared page, so callers must not modify it.
-func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, offset uint64, key []byte) ([]byte, bool, error) {
+// valueFromCachedPage looks key up in the decompressed page at offset, caching the page on a miss.
+// A value from a cached page points into a shared page, so callers must not modify it.
+func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, pageSize int, offset uint64, key []byte) ([]byte, bool, error) {
 	d := item.src.decompressor
 	k := offset*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(d)))
-	p, ok := ht.h.pages.Get(k)
-	if !ok || p.d != d || p.offset != offset {
-		g := ht.statelessGetter(item.i)
-		g.Reset(offset)
-		compressed, _ := g.Next(nil)
-		data, _, err := compress.DecodeZstdIfNeed(nil, compressed, true)
-		if err != nil {
-			return nil, false, err
+	if p, ok := ht.h.pages.Get(k); ok && p.d == d && p.offset == offset {
+		if dbg.AssertEnabled && crc32.ChecksumIEEE(p.data) != p.sum {
+			panic(fmt.Sprintf("history page %s:%d was modified after caching", d.FileName(), offset))
 		}
-		p = historyPage{d: d, offset: offset, data: data}
-		if dbg.AssertEnabled {
-			p.sum = crc32.ChecksumIEEE(data)
-		}
-		ht.h.pages.Add(k, p)
-	} else if dbg.AssertEnabled && crc32.ChecksumIEEE(p.data) != p.sum {
-		panic(fmt.Sprintf("history page %s:%d was modified after caching", d.FileName(), offset))
+		v, _ := seg.GetFromPage(key, p.data, nil, false)
+		return v, true, nil
 	}
-	v, _ := seg.GetFromPage(key, p.data, nil, false)
+	g := ht.pagedGetter(item.i, pageSize)
+	g.Reset(offset)
+	v, err := g.GetFromPage(key)
+	if err != nil {
+		return nil, false, err
+	}
+	p := historyPage{d: d, offset: offset, data: bytes.Clone(g.DecodedPage())}
+	if dbg.AssertEnabled {
+		p.sum = crc32.ChecksumIEEE(p.data)
+	}
+	ht.h.pages.Add(k, p)
 	return v, true, nil
 }
 
