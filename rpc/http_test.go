@@ -512,10 +512,18 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
 
-	length, _, answer = post(`[{"jsonrpc":"2.0","id":3,"method":"test_echo","params":["a",1,{"S":"b"}]},` +
-		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["c",2,{"S":"d"}]}]`)
-	require.NotEqual(t, int64(0), length, "a batch answer must not be cut off by a zero length")
+	// A batch answer goes out through the codec, never through the stream, so it has to stay chunked: a
+	// length taken from the empty stream buffer would cut the body off at zero bytes. The batch is built
+	// past net/http's own buffer, which would otherwise size the response itself and hide a regression.
+	const batchSize = 200
+	calls := make([]string, batchSize)
+	for i := range calls {
+		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q,%d,{"S":"y"}]}`, i+3, strings.Repeat("a", 64), i)
+	}
+	length, encoding, answer = post("[" + strings.Join(calls, ",") + "]")
+	require.Equal(t, int64(-1), length)
+	require.Equal(t, []string{"chunked"}, encoding)
 	var batch []json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(answer), &batch))
-	require.Len(t, batch, 2)
+	require.Len(t, batch, batchSize)
 }
