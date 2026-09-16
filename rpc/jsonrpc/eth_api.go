@@ -24,8 +24,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -42,12 +43,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -76,9 +79,9 @@ type EthAPI interface {
 	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 
 	// Receipt related (see ./eth_receipts.go)
-	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]any, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
-	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]any, error)
+	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethutils.RPCReceipt, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
 	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
@@ -124,7 +127,7 @@ type EthAPI interface {
 	// Simulation related (see ./eth_simulation.go)
 	SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
-	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (map[string]any, error)
+	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error)
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
@@ -144,7 +147,7 @@ type EthAPI interface {
 type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
-	blocksLRU  *lru.Cache[common.Hash, *types.Block]
+	blocksLRU  *cache.HashByteLRU[*types.Block]
 
 	filters                   *rpchelper.Filters
 	_chainConfig              atomic.Pointer[chain.Config]
@@ -175,19 +178,22 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
+// blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
+// transaction struct per transaction, which hold inline integers and hash and sender caches.
+func blockHeapSize(b *types.Block) int64 {
+	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRUSize := 128 // ~32Mb
+	blocksLRUBytes := 32 * datasize.MB
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !conf.SingleNodeMode {
-		blocksLRUSize *= 5
+		blocksLRUBytes *= 5
 	}
-	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
-	if err != nil {
-		panic(err)
-	}
+	blocksLRU := cache.NewHashByteLRU(blocksLRUBytes, blockHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
@@ -214,14 +220,24 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	return api
 }
 
+func (api *BaseAPI) tryChainConfig() (*chain.Config, bool) {
+	cc := api._chainConfig.Load()
+	return cc, cc != nil
+}
+
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
 	cfg, _, err := api.chainConfigWithGenesis(ctx, tx)
 	return cfg, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+func (api *BaseAPI) tryChainConfigWithGenesis() (*chain.Config, *types.Block, bool) {
 	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
-	if cc != nil && genesisBlock != nil {
+	return cc, genesisBlock, cc != nil && genesisBlock != nil
+}
+
+func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+	cc, genesisBlock, ok := api.tryChainConfigWithGenesis()
+	if ok {
 		return cc, genesisBlock, nil
 	}
 

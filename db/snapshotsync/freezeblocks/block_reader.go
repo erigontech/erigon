@@ -279,6 +279,14 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 	return b.Transactions[i], true, nil
 }
 
+func (r *RemoteBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
+	if err != nil || !ok {
+		return common.Hash{}, false, err
+	}
+	return txn.Hash(), true, nil
+}
+
 func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
@@ -1238,24 +1246,18 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	return txs, senders, nil
 }
 
-func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (types.Transaction, bool, error) {
+// txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.
+func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (sender, txnRlp []byte) {
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.Src().MakeGetter()
 	gg.Reset(offset)
 	if !gg.HasNext() {
-		return nil, false, nil
+		return nil, nil
 	}
 	buf, _ = gg.Next(buf[:0])
-	sender, txnRlp := buf[1:1+20], buf[1+20:]
-
-	txn, err := types.DecodeTransaction(txnRlp)
-	if err != nil {
-		return nil, false, err
-	}
-	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
-	return txn, true, nil
+	return buf[1 : 1+20], buf[1+20:]
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
@@ -1308,43 +1310,64 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 // system transactions at the block boundaries. ok is false when the block or
 // that transaction does not exist.
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
+	sender, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock)
+	if err != nil || txnRlp == nil {
+		return nil, false, err
+	}
+	txn, err := types.DecodeTransaction(txnRlp)
+	if err != nil {
+		return nil, false, err
+	}
+	if sender != nil {
+		txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+	}
+	return txn, true, nil
+}
+
+// TxnHashByIdxInBlock is TxnByIdxInBlock that hashes the stored encoding instead of decoding it.
+func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
+	_, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock)
+	if err != nil || txnRlp == nil {
+		return common.Hash{}, false, err
+	}
+	hash, err := types.TransactionHashFromEncoding(txnRlp)
+	return hash, err == nil, err
+}
+
+// txnRlpByIdxInBlock returns the sender (frozen blocks only) and the stored encoding of the i-th
+// transaction; the encoding is nil when the block or that transaction does not exist.
+func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) ([]byte, []byte, error) {
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockNum == 0 || maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
-		if err != nil {
-			return nil, false, err
+		if err != nil || !ok {
+			return nil, nil, err
 		}
-		if !ok {
-			return nil, false, nil
-		}
-		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
+		txnRlp, err := rawdb.TxnRlpByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
+		return nil, txnRlp, err
 	}
 
 	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
-		return nil, false, nil
+		return nil, nil, nil
 	}
 
 	b, _, err := BodyForTxnFromSnapshot(blockNum, seg, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	if b == nil {
-		return nil, false, nil
+	if err != nil || b == nil {
+		return nil, nil, err
 	}
 
 	// if block has no transactions, or requested txNum out of non-system transactions length
 	if b.TxCount == 2 || txIdxInBlock == -1 || txIdxInBlock >= int(b.TxCount-2) {
-		return nil, false, nil
+		return nil, nil, nil
 	}
 
 	txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
 	if !ok {
-		return nil, false, nil
+		return nil, nil, nil
 	}
-
-	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	sender, txnRlp := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	return sender, txnRlp, nil
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash

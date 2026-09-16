@@ -8,6 +8,7 @@ GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
+export GOEXPERIMENT ?= jsonv2
 GOARCH ?= $(shell go env GOHOSTARCH)
 GOEXE := $(shell $(GO) env GOEXE 2>/dev/null)
 UNAME := $(shell uname) # Supported: Darwin, Linux
@@ -53,7 +54,7 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 

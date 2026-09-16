@@ -128,8 +128,11 @@ func (s *executionPayloadService) IsMyGossipMessage(name string) bool {
 }
 
 func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(version); err != nil {
+		return nil, err
+	}
 	obj := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(s.beaconCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(s.beaconCfg, version),
 	}
 	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
@@ -147,6 +150,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 	err := s.processMessage(ctx, signedEnvelope, receivedAt)
 	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+		errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) || errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
 	}
@@ -157,20 +161,25 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
-
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
+	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 
 	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
-	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 	if err := validateEnvelopeLimits(s.beaconCfg, envelope); err != nil {
 		if !blockKnown || block == nil {
 			return fmt.Errorf("%w: invalid execution payload envelope for unknown block: %w", ErrIgnore, err)
 		}
 		return err
+	}
+	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
+		if !blockKnown || block == nil {
+			return fmt.Errorf("%w: invalid execution payload envelope for unknown block: %w", ErrIgnore, err)
+		}
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 	if envelope.Payload == nil {
 		return errors.New("nil execution payload")
@@ -209,9 +218,17 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 
+	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
+	}
+	seen := false
+	defer func() {
+		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
+	}()
+
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	var err error
 	if store, ok := s.forkchoiceStore.(interface {
 		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	}); ok {
@@ -223,10 +240,16 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			s.emitExecutionPayloadGossip(block, envelope)
 			s.seenEnvelopesCache.Add(seenKey, struct{}{})
+			seen = true
 			return nil
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
+	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
+	if envelope.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
+	}
+	seen = true
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
