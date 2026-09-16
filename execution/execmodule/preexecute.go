@@ -422,25 +422,17 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		})
 	}
 
-	// On a CARRY-FORWARD (reuse) round we are extending the SAME in-progress block with more txs; the
-	// maintained SD already holds the accumulated state and its commitment trie the progressive fold.
-	// unwindToCommonCanonical unwinds that trie back to the block's PARENT (common canonical ancestor) —
-	// correct when validating a fresh fork, but here it DISCARDS the prior round's fold, so each round
-	// would fold only its own txs onto the parent and the seal would diverge. Skip it on reuse; run it
-	// only on the first (fresh-SD) round to align to the parent before executing the block.
+	// NO canonical unwind here. "Has the chain moved under me?" is newPayload/FCU processing, and by the time
+	// pre-exec opens a block the fork choice has already settled where the chain is; pre-exec then puts the
+	// block where it is itself, round by round, inside the generation's overlay.
 	//
-	// ALSO skip it on a FRONTIER EXTENSION ([[consensus_advance_untested_regression]] merge-vs-parenting):
-	// the block already opened positioned on its live frontier PARENT (WithParent → the constructor's
-	// SeekCommitment restored the parent's commitment). unwindToCommonCanonical would re-align it to the
-	// canonical DB instead — but the frontier parent is NOT yet in the DB (FCU lags), so the unwind reads
-	// the predecessor-of-parent's stale state and OVERWRITES the correct parent position (the bug: block N+1
-	// reset to block N-1). Parenting is the source of truth here, not the lagging DB.
-	if !reuse && !frontierExtension {
-		if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
-			doms.Close()
-			return ValidationResult{}, err
-		}
-	}
+	// This used to run for a fresh SD not extending a live frontier. Its condition had already been narrowed
+	// twice by real bugs — on a carry-forward it DISCARDS the round's accumulated fold, and on a frontier
+	// extension it re-aligns to a canonical DB whose parent is not there yet (FCU lags) and resets block N+1
+	// to N-1 ([[consensus_advance_untested_regression]]). Measured on live48, what survived was reached
+	// exactly once per node, on the first block after a cold start, and declined every time: all 2,582
+	// unwinds came from the CLOSE, which has since been removed for the same reason. A call that is always
+	// reached and never acts reads as load-bearing and gets copied; it is gone instead.
 
 	// CANDIDATE FILTER (start of the pre-exec cycle): the NEW suffix (past the executed prefix) are CANDIDATES
 	// — the DAG can hand us a tx that can't apply against the accumulated state (e.g. a stale/duplicate nonce).

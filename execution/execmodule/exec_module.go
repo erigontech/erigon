@@ -429,6 +429,13 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
+// unwindToCommonCanonical re-aligns the chain to the common canonical ancestor of header. It is
+// newPayload/FCU processing and belongs ONLY to the canonical path (validateChainLocked) — do not call it
+// from pre-exec. Pre-exec runs a private staged-sync instance inside the generation's overlay and puts the
+// block where it is itself: every round re-establishes canonical[N], the head header, the txNum index and
+// the stage progress at the header's current hash. Asking this there discards the block's own accumulated
+// state — measured on live48, where a stale canonical row after a withdrawals re-stamp made the close unwind
+// the block it was about to seal, so it sealed a body its state transition never applied.
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
