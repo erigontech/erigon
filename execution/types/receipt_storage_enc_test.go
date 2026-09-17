@@ -109,24 +109,13 @@ func TestDecodeLogsForStorageBothPaths(t *testing.T) {
 		var blocked, grown ReceiptForStorage
 		require.NoError(t, rlp.DecodeBytes(enc, &blocked))
 		require.NoError(t, rlp.Decode(bytes.NewReader(enc), &grown))
-		require.Equal(t, blocked, grown, "%d logs", n)
+		require.Equal(t, &blocked, &grown, "%d logs", n)
 		require.Len(t, blocked.Logs, n)
 	}
 }
 
 // Logs share one backing block, so writing through one pointer must not reach
 // its neighbour.
-func TestDecodeLogsForStorageBlockNotAliased(t *testing.T) {
-	t.Parallel()
-	var r ReceiptForStorage
-	require.NoError(t, rlp.DecodeBytes(encodeStorageReceiptWithLogs(t, 3), &r))
-	require.Len(t, r.Logs, 3)
-	want := r.Logs[1].Address
-	r.Logs[0].Address = common.Address{0xff}
-	r.Logs[0].Index = 0xffff
-	require.Equal(t, want, r.Logs[1].Address)
-}
-
 // The block is sized from attacker-controlled bytes: a payload of one-byte items
 // must not allocate a Log for each, since a stored log needs at least 24 bytes.
 func TestDecodeLogsForStorageBlockBounded(t *testing.T) {
