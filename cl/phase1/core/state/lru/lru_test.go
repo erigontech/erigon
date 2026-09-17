@@ -18,6 +18,7 @@ package lru
 
 import (
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,15 @@ func deadlineOf[K comparable, V any](t *testing.T, c *CacheWithTTL[K, V], k K) t
 	return e.expiresAt
 }
 
+// held reports whether the cache still holds a key, read under the lock the sweep takes. Going
+// through Get would reclaim an expired entry itself and hide what the sweep did.
+func held[K comparable, V any](c *CacheWithTTL[K, V], k K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.cache.Peek(k)
+	return ok
+}
+
 func TestCacheWithTTLCloseStopsSweep(t *testing.T) {
 	before := surviving(t)
 
@@ -63,6 +73,62 @@ func TestCacheWithTTLCloseIsIdempotent(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("close_idempotent", 16, time.Hour)
 	c.Close()
 	require.NotPanics(t, c.Close)
+}
+
+// TestCacheWithTTLCloseWaitsForRunningSweep pins that no entry is reclaimed after Close returns.
+// A sweep that has already taken its tick and is waiting on the cache lock is still going to
+// remove entries once it gets in, so signalling the goroutine is not enough: Close has to wait for
+// it to finish. The lock is held here for long enough that the sweep can only be waiting on it.
+func TestCacheWithTTLCloseWaitsForRunningSweep(t *testing.T) {
+	// The ttl leaves the entry live while the lock is held and expired by the time the blocked
+	// sweep gets in, so the sweep has work to do and Close cannot be racing an empty walk.
+	c := NewWithTTL[uint64, uint64]("close_waits_for_sweep", 16, 100*time.Millisecond)
+	c.Add(1, 1)
+
+	c.mu.Lock()
+	// The sweep ticks every minSweepInterval and blocks on the lock on its first tick.
+	time.Sleep(200 * time.Millisecond)
+
+	returned := make(chan struct{})
+	go func() {
+		c.Close()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		c.mu.Unlock()
+		t.Fatal("Close returned while a sweep was still waiting to run")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	c.mu.Unlock()
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return once the sweep could finish")
+	}
+
+	require.NotPanics(t, c.Close, "Close must stay safe to call again after it has waited")
+}
+
+// TestCacheWithTTLCloseReturnsWithoutTTL pins that Close does not wait on a sweep that was never
+// started: a cache without a ttl has no goroutine to finish.
+func TestCacheWithTTLCloseReturnsWithoutTTL(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("close_without_ttl", 16, 0)
+
+	returned := make(chan struct{})
+	go func() {
+		c.Close()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close hung on a cache that never started a sweep")
+	}
 }
 
 func TestCacheWithTTLReadsAfterClose(t *testing.T) {
@@ -107,8 +173,6 @@ func TestCacheWithTTLStartsNoSweepWithoutTTL(t *testing.T) {
 	}
 }
 
-// TestCacheWithTTLGetMissesExpiredEntry (control): read semantics do not depend on the sweep and
-// hold both before and after the change.
 func TestCacheWithTTLGetMissesExpiredEntry(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("get_misses_expired", 16, 10*time.Millisecond)
 	t.Cleanup(c.Close)
@@ -124,8 +188,6 @@ func TestCacheWithTTLGetMissesExpiredEntry(t *testing.T) {
 	require.False(t, ok, "an expired entry must read as a miss")
 }
 
-// TestCacheWithTTLEvictsBySize (control): size bounding is unchanged by the switch to an
-// owned expiry sweep.
 func TestCacheWithTTLEvictsBySize(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("evicts_by_size", 2, time.Hour)
 	t.Cleanup(c.Close)
@@ -139,8 +201,6 @@ func TestCacheWithTTLEvictsBySize(t *testing.T) {
 	require.False(t, ok, "the oldest entry must be evicted once the size is exceeded")
 }
 
-// TestCacheWithTTLAddRenewsExpiry (control): re-adding a key resets its deadline, as it did
-// when the dependency owned expiry.
 func TestCacheWithTTLAddRenewsExpiry(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("add_renews_expiry", 16, 60*time.Millisecond)
 	t.Cleanup(c.Close)
@@ -155,7 +215,38 @@ func TestCacheWithTTLAddRenewsExpiry(t *testing.T) {
 	require.Equal(t, uint64(2), v)
 }
 
-// TestCacheWithTTLRemove (control): Remove reports whether the key was held, as before.
+// TestCacheWithTTLAddDeadlineStartsAtInsertion pins that an entry gets its full ttl in the cache.
+// Time spent waiting for the cache lock is not the entry's, and charging it there means a long
+// enough wait stores a value that is already expired and reads back as a miss.
+func TestCacheWithTTLAddDeadlineStartsAtInsertion(t *testing.T) {
+	const ttl = 50 * time.Millisecond
+	c := NewWithTTL[uint64, uint64]("add_deadline_at_insertion", 16, ttl)
+	t.Cleanup(c.Close)
+
+	c.mu.Lock()
+
+	added := make(chan struct{})
+	go func() {
+		c.Add(1, 1)
+		close(added)
+	}()
+
+	// Hold the lock past the ttl, so an Add that took its deadline before waiting would store an
+	// entry whose deadline has already gone by.
+	time.Sleep(4 * ttl)
+	c.mu.Unlock()
+
+	select {
+	case <-added:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Add did not complete once the lock was released")
+	}
+
+	v, ok := c.Get(1)
+	require.True(t, ok, "an entry that waited for the lock must still get its full ttl")
+	require.Equal(t, uint64(1), v)
+}
+
 func TestCacheWithTTLRemove(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("remove", 16, time.Hour)
 	t.Cleanup(c.Close)
@@ -223,10 +314,11 @@ func TestCacheWithTTLSweepReclaimsPromotedEntry(t *testing.T) {
 	require.True(t, ok, "the entry still within its deadline must be kept")
 }
 
-// TestCacheWithTTLSweepKeepsRecency (control): the sweep reads every entry it walks, and reading
-// must not count as use, or a sweep would keep the tail alive and break size eviction.
-func TestCacheWithTTLSweepKeepsRecency(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("sweep_keeps_recency", 2, time.Hour)
+// TestCacheWithTTLSweepLeavesEvictionOrderAlone pins that a sweep which removes nothing leaves the
+// cache's choice of eviction victim where it was: the walk touches every entry it holds, and a
+// walk that counted as use would make the oldest entry look fresh and spare it from size eviction.
+func TestCacheWithTTLSweepLeavesEvictionOrderAlone(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("sweep_leaves_eviction_order", 2, time.Hour)
 	t.Cleanup(c.Close)
 
 	c.Add(1, 1)
@@ -234,8 +326,9 @@ func TestCacheWithTTLSweepKeepsRecency(t *testing.T) {
 	c.removeExpired(time.Now())
 
 	require.True(t, c.Add(3, 3), "adding past the size must still report an eviction after a sweep")
-	_, ok := c.Get(1)
-	require.False(t, ok, "a sweep must not make the oldest entry look recently used")
+	require.False(t, held(c, 1), "the oldest entry must still be the one size eviction takes")
+	require.True(t, held(c, 2))
+	require.True(t, held(c, 3))
 }
 
 func TestCacheWithTTLGetReclaimsExpiredEntry(t *testing.T) {
@@ -284,11 +377,266 @@ func TestCacheWithTTLPointerValueZeroOnMiss(t *testing.T) {
 }
 
 func TestSweepInterval(t *testing.T) {
-	require.Equal(t, 10*time.Millisecond, sweepInterval(time.Second))
-	require.Equal(t, minSweepInterval, sweepInterval(sweepsPerTTL*minSweepInterval),
-		"an interval equal to the floor must not be used")
-	require.Equal(t, 2*minSweepInterval, sweepInterval(2*sweepsPerTTL*minSweepInterval),
-		"an interval one step past the floor must be used")
-	require.Equal(t, minSweepInterval, sweepInterval(time.Nanosecond),
-		"a ttl too short to divide must not produce a non-positive ticker interval")
+	require.Equal(t, 10*time.Millisecond, sweepInterval(time.Second),
+		"a ttl well above the floor must be swept sweepsPerTTL times over its length")
+	require.Equal(t, 2*minSweepInterval, sweepInterval(2*sweepsPerTTL*minSweepInterval))
+
+	// Below the floor the divided interval is shorter than minSweepInterval, and for a short
+	// enough ttl it is zero, which time.NewTicker panics on.
+	require.Equal(t, minSweepInterval, sweepInterval(sweepsPerTTL*minSweepInterval/2),
+		"an interval below the floor must be raised to it")
+	require.Equal(t, minSweepInterval, sweepInterval(time.Nanosecond))
+	require.Positive(t, sweepInterval(0), "the ticker interval must never be non-positive")
+}
+
+// TestCacheWithTTLSweepReclaimsInteriorEntry drives the same walk as the promoted-entry test from
+// the other side: with three entries the sweep has to keep going past a live entry, not just reach
+// the first one. A Get on the middle entry leaves the eviction order oldest-first as 1, 3, 2 while
+// the deadline order is still 1, 2, 3, so a sweep between the second and third deadlines has to
+// remove the oldest entry, step over the live one behind it and still reclaim the promoted one.
+func TestCacheWithTTLSweepReclaimsInteriorEntry(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("sweep_reclaims_interior", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	time.Sleep(time.Millisecond)
+	c.Add(2, 2)
+	time.Sleep(time.Millisecond)
+	c.Add(3, 3)
+
+	second := deadlineOf(t, c, 2)
+	require.True(t, second.After(deadlineOf(t, c, 1)))
+	require.True(t, deadlineOf(t, c, 3).After(second))
+
+	_, ok := c.Get(2)
+	require.True(t, ok)
+
+	c.removeExpired(second.Add(time.Nanosecond))
+
+	require.False(t, held(c, 1), "the oldest expired entry must be reclaimed")
+	require.False(t, held(c, 2), "an expired entry behind a live one must still be reached")
+	require.True(t, held(c, 3), "the entry within its deadline must be kept")
+}
+
+// TestCacheWithTTLSweepReclaimsExpiredTail is the reverse order of the case above: the newest
+// entry is the promoted one and the expired entry is the oldest, so deadline order and eviction
+// order agree. The case has to keep holding whichever way the walk runs.
+func TestCacheWithTTLSweepReclaimsExpiredTail(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("sweep_reclaims_tail", 16, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	first := deadlineOf(t, c, 1)
+	time.Sleep(time.Millisecond)
+	c.Add(2, 2)
+
+	_, ok := c.Get(2)
+	require.True(t, ok)
+
+	c.removeExpired(first.Add(time.Nanosecond))
+
+	require.False(t, held(c, 1))
+	require.True(t, held(c, 2))
+}
+
+// TestCacheWithTTLAddAfterCloseIsNotSwept pins what Close means for writes: it stops the sweep, so
+// an entry added afterwards is still held and still reads as a miss once past its deadline, but
+// nothing reclaims it in the background.
+func TestCacheWithTTLAddAfterCloseIsNotSwept(t *testing.T) {
+	const ttl = 10 * time.Millisecond
+	c := NewWithTTL[uint64, uint64]("add_after_close", 16, ttl)
+	c.Close()
+
+	c.Add(1, 1)
+	time.Sleep(10 * sweepInterval(ttl))
+
+	require.True(t, held(c, 1), "nothing sweeps a closed cache")
+	_, ok := c.Get(1)
+	require.False(t, ok, "an expired entry still reads as a miss")
+	require.Equal(t, 0, c.Len(), "the read is what reclaims it")
+}
+
+// TestCacheWithTTLShortTTLSweeps drives the ticker itself at a ttl far below the sweep cadence:
+// the interval floor has to keep it positive and the sweep has to run and reclaim. On the
+// dependency's own cadence the same ttl divides to a non-positive interval, which panics.
+func TestCacheWithTTLShortTTLSweeps(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("short_ttl", 16, time.Nanosecond)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	require.Eventually(t, func() bool { return c.Len() == 0 }, 5*time.Second, time.Millisecond,
+		"a ttl below the sweep cadence must still be swept")
+}
+
+// TestCacheWithTTLConcurrentUseDuringSweep runs readers and writers against a live sweep. Every
+// exported method takes the lock the sweep takes, so under -race this pins the locking the sweep
+// depends on, including that the key snapshot is not walked while another goroutine mutates it.
+func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("concurrent_use_during_sweep", 128, 5*time.Millisecond)
+	t.Cleanup(c.Close)
+
+	const workers = 4
+	const ops = 200
+
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := range ops {
+				k := uint64(w*ops + i)
+				c.Add(k, k)
+				c.Get(k)
+				c.Len()
+				c.Remove(k)
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// TestCacheWithTTLTickerReclaimsPromotedEntry drives the promoted-entry case through the ticker
+// rather than by calling removeExpired directly, which is the only path production code ever
+// takes: nothing outside this package calls removeExpired, so a sweep that stops at the first live
+// entry has to be caught through the goroutine NewWithTTL starts. The entries are spaced so there
+// is a full second in which the promoted entry is past its deadline and the entry behind it is not.
+func TestCacheWithTTLTickerReclaimsPromotedEntry(t *testing.T) {
+	const ttl = 2 * time.Second
+	c := NewWithTTL[uint64, uint64]("ticker_reclaims_promoted", 16, ttl)
+	t.Cleanup(c.Close)
+
+	c.Add(1, 1)
+	time.Sleep(ttl / 2)
+	c.Add(2, 2)
+
+	// A Get promotes the older entry to the front without renewing it, so the still live entry is
+	// the one the eviction order reaches first.
+	_, ok := c.Get(1)
+	require.True(t, ok)
+
+	// Between the two deadlines the sweep must have reclaimed the promoted entry and nothing else.
+	require.Eventually(t, func() bool { return c.Len() == 1 }, ttl, 5*time.Millisecond,
+		"the background sweep must reclaim a promoted entry it has to walk past a live one to reach")
+
+	require.False(t, held(c, 1), "the promoted entry was past its deadline when the sweep ran")
+	require.True(t, held(c, 2), "the entry still within its deadline must survive the sweep")
+}
+
+// TestCacheWithTTLCloseDuringLiveSweep races Close against the sweep goroutine it stops — the
+// ticker fires on the interval floor here, so the close lands while a walk is running or between
+// two of its ticks. Under -race this pins that the guarded close, the wait for the goroutine and
+// the sweep's own select do not race each other, from several callers at once.
+func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("close_during_sweep", 64, 5*time.Millisecond)
+
+	for i := range 64 {
+		c.Add(uint64(i), uint64(i))
+	}
+
+	const closers = 4
+	var wg sync.WaitGroup
+	for range closers {
+		wg.Go(func() {
+			require.NotPanics(t, c.Close, "closing a cache whose sweep is running must be safe")
+		})
+	}
+	wg.Wait()
+
+	// The cache is still usable once its sweep is stopped, just no longer reclaimed in background.
+	c.Add(1, 1)
+	v, ok := c.Get(1)
+	require.True(t, ok, "a closed cache must still serve reads")
+	require.Equal(t, uint64(1), v)
+}
+
+// TestCacheWithTTLSweepCoversCacheInChunks pins the pacing: one tick inspects at most sweepChunk
+// entries and then drops the lock, and the ticks that follow resume where the last one stopped
+// instead of restarting, so a cache larger than a chunk is still covered in full.
+func TestCacheWithTTLSweepCoversCacheInChunks(t *testing.T) {
+	const entries = 3*sweepChunk - 36
+	c := NewWithTTL[uint64, uint64]("sweep_covers_in_chunks", entries, time.Hour)
+	t.Cleanup(c.Close)
+
+	for i := range entries {
+		c.Add(uint64(i), uint64(i))
+	}
+	require.Equal(t, entries, c.Len())
+
+	past := time.Now().Add(2 * time.Hour)
+
+	c.removeExpired(past)
+	require.Equal(t, entries-sweepChunk, c.Len(), "one tick must inspect no more than a chunk")
+
+	c.removeExpired(past)
+	require.Equal(t, entries-2*sweepChunk, c.Len(), "the next tick must resume, not restart")
+
+	c.removeExpired(past)
+	require.Equal(t, 0, c.Len(), "the walk must reach every entry across consecutive ticks")
+}
+
+// TestCacheWithTTLSweepResumesAfterCursorRemoved pins the boundary the resume point has: the key a
+// walk stopped at can be evicted or removed before the next tick, and the walk then has no cursor
+// to find. Restarting from the oldest entry repeats work already done but must never leave an
+// expired entry behind.
+func TestCacheWithTTLSweepResumesAfterCursorRemoved(t *testing.T) {
+	const entries = 2 * sweepChunk
+	c := NewWithTTL[uint64, uint64]("sweep_resumes_after_cursor_removed", entries, time.Hour)
+	t.Cleanup(c.Close)
+
+	for i := range entries {
+		c.Add(uint64(i), uint64(i))
+	}
+
+	past := time.Now().Add(2 * time.Hour)
+
+	c.removeExpired(past)
+	require.Equal(t, sweepChunk, c.Len())
+
+	// The walk stopped at the oldest surviving entry. Remove exactly that key, so the next tick
+	// cannot find its cursor.
+	c.mu.Lock()
+	cursor := c.sweepCursor
+	require.True(t, c.sweeping, "a walk that stopped short must have left a cursor")
+	c.mu.Unlock()
+	require.True(t, c.Remove(cursor))
+
+	c.removeExpired(past)
+	require.Equal(t, 0, c.Len(), "a walk whose cursor key is gone must still reclaim the rest")
+}
+
+// TestCacheWithTTLSweepKeepsLiveEntriesAcrossChunks pins that pacing the walk does not cost
+// precision: over a cache wider than a chunk, every entry past its deadline goes and every entry
+// within its deadline stays, whichever chunk it falls in.
+func TestCacheWithTTLSweepKeepsLiveEntriesAcrossChunks(t *testing.T) {
+	const entries = 2 * sweepChunk
+	c := NewWithTTL[uint64, uint64]("sweep_keeps_live_across_chunks", entries, time.Hour)
+	t.Cleanup(c.Close)
+
+	for i := range entries {
+		c.Add(uint64(i), uint64(i))
+	}
+
+	// Every even key is expired, every odd key is not. Interleaving them puts both kinds in
+	// every chunk the walk takes.
+	cutoff := time.Now()
+	c.mu.Lock()
+	for i := range entries {
+		k := uint64(i)
+		e, ok := c.cache.Peek(k)
+		require.True(t, ok)
+		if i%2 == 0 {
+			e.expiresAt = cutoff.Add(-time.Hour)
+		} else {
+			e.expiresAt = cutoff.Add(time.Hour)
+		}
+		c.cache.Add(k, e)
+	}
+	c.mu.Unlock()
+
+	for range entries/sweepChunk + 1 {
+		c.removeExpired(cutoff)
+	}
+
+	require.Equal(t, entries/2, c.Len())
+	for i := range entries {
+		require.Equal(t, i%2 == 1, held(c, uint64(i)), "key %d survived the wrong way", i)
+	}
 }
