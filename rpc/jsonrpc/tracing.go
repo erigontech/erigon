@@ -153,7 +153,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
-		stream.WriteString(txnHash.Hex())
+		stream.WriteHex(txnHash[:])
 		select {
 		default:
 		case <-ctx.Done():
