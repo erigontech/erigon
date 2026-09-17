@@ -108,7 +108,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	ibs := state.New(stateReader)
 	defer ibs.Close()
 
-	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
+	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
+	if err != nil {
+		return nil, err
+	}
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
 	}

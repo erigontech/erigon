@@ -167,8 +167,8 @@ func TestPendingTagKeepsExplicitEndpointsIntact(t *testing.T) {
 
 	uncles, err := api.GetUncleCountByBlockNumber(ctx, rpc.PendingBlockNumber)
 	require.NoError(t, err)
-	require.NotNil(t, uncles)
-	require.Zero(t, uint64(*uncles), "pending block carries no uncles")
+	require.NotNil(t, uncles, "must stay a count, not null")
+	require.Zero(t, uint64(*uncles))
 
 	dbg := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tc := range []struct {
@@ -210,19 +210,7 @@ func TestResolverKeepsCallerView(t *testing.T) {
 	overlayNum := overlayHeader.Number.Uint64()
 	require.NoError(t, stages.SaveStageProgress(events.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
 
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-
-	committed, _, _, err := rpchelper.GetCanonicalBlockNumber(m.Ctx, latest, tx, m.BlockReader)
-	require.NoError(t, err)
-	require.Equal(t, overlayNum-1, committed, "a plain tx resolves the committed head")
-
-	overlaid, _, _, err := rpchelper.GetCanonicalBlockNumber(m.Ctx, latest, base.filters.WithOverlay(tx), m.BlockReader)
-	require.NoError(t, err)
-	require.Equal(t, overlayNum, overlaid, "an overlay-aware tx resolves the overlay head")
+	requireOverlayAheadOfCommitted(t, base, m, overlayNum)
 }
 
 // TestStateEndpointsPinTheOverlayOnce unpublishes the overlay while the selector
