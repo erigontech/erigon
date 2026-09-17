@@ -1428,9 +1428,9 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless re-executes the block statelessly against the generated witness and
-// asserts the resulting state root matches. It runs only under ERIGON_ASSERT: a serving node
-// relies on the root checks of the build.
+// verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
+// result.Keys. It runs only under ERIGON_ASSERT; without it a witness is checked only against the parent
+// state root, which proves neither its codes and keys nor that re-execution resolves every node.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
