@@ -1662,6 +1662,8 @@ func TestExecutionPayloadSourceFallsBackToEmptyWhenForkChoiceHeadMoves(t *testin
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathPending, source.gloasPath)
 	require.Nil(t, source.parentExecutionRequests)
+	require.ErrorContains(t, source.fallbackCause, "no matching fork choice head for proposal parent")
+	require.ErrorContains(t, source.fallbackCause, baseBlockRoot.String())
 }
 
 func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
@@ -1674,7 +1676,7 @@ func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
 		BlockHash:       fullHash,
 		Slot:            postState.Slot(),
 	})
-	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadVal = common.Hash{}
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
 	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}, postState.Slot(), nil

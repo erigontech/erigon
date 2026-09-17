@@ -386,10 +386,11 @@ func (a *ApiHandler) preparePayloadLoopWith(
 				}
 			}
 			if selectedVersion.AfterOrEqual(clparams.GloasVersion) {
-				gloasPath = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
+				var pathErr error
+				gloasPath, pathErr = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
 				if gloasPath == gloasPayloadPathPending {
 					if time.Since(lastPendingLog) >= time.Minute {
-						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot)
+						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot, "err", pathErr)
 						lastPendingLog = time.Now()
 					}
 					continue
@@ -784,10 +785,15 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}
 	}
 	path := gloasPayloadPathPreFork
+	var pathErr error
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
-		path = a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
+		path, pathErr = a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
 	}
-	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+	if pathErr != nil {
+		source.fallbackCause = pathErr
+	}
+	return source
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
@@ -835,12 +841,12 @@ func (a *ApiHandler) isPreGloasParent(baseState *state.CachingBeaconState) bool 
 	return a.beaconChainCfg.GetCurrentStateVersion(parentSlot / a.beaconChainCfg.SlotsPerEpoch).Before(clparams.GloasVersion)
 }
 
-func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) gloasPayloadPath {
+func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) (gloasPayloadPath, error) {
 	status, matchesHead := a.forkchoiceStore.ResolveHeadPayloadStatus(baseBlockRoot)
 	if !matchesHead {
-		return gloasPayloadPathPending
+		return gloasPayloadPathPending, fmt.Errorf("%w: no matching fork choice head for proposal parent %s", errGloasPayloadPending, baseBlockRoot)
 	}
-	return a.gloasPayloadPathForHead(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}, targetSlot)
+	return a.gloasPayloadPathForHead(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}, targetSlot), nil
 }
 
 func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {

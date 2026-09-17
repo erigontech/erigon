@@ -261,8 +261,11 @@ func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint
 }
 
 func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
+	// OnTick updates time before taking f.mu. Keep viability checks, weights, and
+	// payload tiebreakers on the same slot even when the clock advances during this walk.
+	currentSlot := f.Slot()
 	// Get filtered block tree
-	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root, justifiedCheckpoint)
+	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
 
 	// Start from justified checkpoint with PENDING status
 	head := ForkChoiceNode{
@@ -285,13 +288,13 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 
 		// Find best child: max(children, key=(weight, root, tiebreaker))
 		bestChild := children[0]
-		bestWeight := ws.GetWeight(bestChild)
-		bestTiebreaker := f.getPayloadStatusTiebreaker(bestChild)
+		bestWeight := ws.GetWeight(bestChild, currentSlot)
+		bestTiebreaker := f.getPayloadStatusTiebreaker(bestChild, currentSlot)
 
 		for i := 1; i < len(children); i++ {
 			child := children[i]
-			weight := ws.GetWeight(child)
-			tiebreaker := f.getPayloadStatusTiebreaker(child)
+			weight := ws.GetWeight(child, currentSlot)
+			tiebreaker := f.getPayloadStatusTiebreaker(child, currentSlot)
 
 			// Compare: weight first, then root, then tiebreaker
 			if weight > bestWeight {
@@ -335,11 +338,19 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (Fo
 		}
 	}
 	f.mu.Lock()
+	currentSlot := f.Slot()
+	// Checkpoint I/O can cross the fork boundary. Do not replace a Gloas head
+	// with a result from the pre-fork algorithm.
+	if f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(currentSlot)) >= clparams.GloasVersion {
+		f.mu.Unlock()
+		return f.getHeadGloas()
+	}
 	defer f.mu.Unlock()
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
-	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint)
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint, currentSlot)
 	// Do a simple scan to determine the fork votes.
 	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
 	// Account for weights on each head fork
@@ -397,13 +408,10 @@ func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
 	}
 }
 
-// getFilteredBlockTree filters out dumb blocks.
-func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint) map[common.Hash]*cltypes.BeaconBlockHeader {
+// getFilteredBlockTree keeps branches that pass the justification and finalization checks.
+func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint, currentSlot uint64) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
-	// Snapshot the store epoch once for the whole walk: OnTick updates f.time
-	// without holding f.mu, so calling f.Slot() per-leaf can mix epochs across
-	// leaves around a slot boundary.
-	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	currentEpoch := f.computeEpochAtSlot(currentSlot)
 	f.getFilterBlockTree(base, blocks, currentEpoch, justifiedCheckpoint)
 	return blocks
 }

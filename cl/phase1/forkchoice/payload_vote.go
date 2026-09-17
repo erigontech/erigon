@@ -367,8 +367,8 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
 // Used to decide between chains with different payload statuses.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 {
-	if !f.isPreviousSlotPayloadDecision(node, f.Slot()) {
+func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode, currentSlot uint64) uint8 {
+	if !f.isPreviousSlotPayloadDecision(node, currentSlot) {
 		return uint8(node.PayloadStatus)
 	}
 
