@@ -280,7 +280,11 @@ func TestNewPayloadPublishesValidatedBeforeReleasingAdmission(t *testing.T) {
 	close(releaseEL)
 
 	// Sending into the admission channel blocks until the caller hands the token back.
-	store.payloadValidationAdmission <- struct{}{}
+	select {
+	case store.payloadValidationAdmission <- struct{}{}:
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("timed out waiting for the admission token to be released")
+	}
 	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot),
 		"the validated payload must be published before the admission token is released")
 	<-store.payloadValidationAdmission
@@ -325,7 +329,11 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 	close(releaseEL)
 
 	// Sending into the admission channel blocks until the caller hands the token back.
-	store.payloadValidationAdmission <- struct{}{}
+	select {
+	case store.payloadValidationAdmission <- struct{}{}:
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("timed out waiting for the admission token to be released")
+	}
 	status, ok := store.payloadStatusByRoot.Get(blockRoot)
 	require.True(t, ok, "the invalid verdict must be published before the token is released")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
