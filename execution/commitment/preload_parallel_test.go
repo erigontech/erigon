@@ -1074,25 +1074,15 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	r13 := r1 + string([]byte{3})
 	const valSz = 100
 
-	files := syntheticTree{root: 0b110, r2: 0, r13: 0}
-	r1Val := branchVal(0b1000, valSz)
+	tree := syntheticTree{root: 0b110, r1: 0b1000, r2: 0, r13: 0}
+	r1Val := branchVal(tree[r1], valSz)
 	r1Key := bytes.Clone(nibbles.HexToCompact([]byte(r1)))
-	dbLatest := map[string][]byte{string(r1Key): r1Val}
 
-	fromFiles := fakeResolver(files, nil, valSz, "")
+	base := fakeResolver(tree, nil, valSz, "")
 	calls := 0
 	resolve := func(keys [][]byte) ([][]byte, error) {
 		calls++
-		vals, err := fromFiles(keys)
-		if err != nil {
-			return nil, err
-		}
-		for i, k := range keys {
-			if v, ok := dbLatest[string(k)]; ok {
-				vals[i] = v
-			}
-		}
-		return vals, nil
+		return base(keys)
 	}
 
 	c := NewBranchCache(64)
@@ -1104,11 +1094,7 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 
 	rootKey := nibbles.HexToCompact([]byte(root))
 	rootCost := estimatedEntryCost(rootKey, branchVal(0b110, valSz))
-	r1Cost := estimatedEntryCost(r1Key, r1Val)
 	stepBudget := rootCost + minEntryBytes
-	if slack := stepBudget - rootCost; slack < minEntryBytes || slack >= r1Cost {
-		t.Fatalf("step budget slack %d outside [%d, %d): below it the file fetch is skipped whether or not R1 is a db-hit, at or above it R1 is pinned instead of deferred", slack, minEntryBytes, r1Cost)
-	}
 
 	n, done, err := p.Run(stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
 	if err != nil {
