@@ -27,70 +27,49 @@ type (
 )
 
 func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	hexutil.MarshalFastJSONElemsTo(w, bundle, blobV1JSONLen, appendBlobV1JSON)
+	if bundle == nil {
+		hexutil.WriteRawJSON(w, "null")
+		return nil
+	}
+	hexutil.WriteRawJSON(w, "[")
+	for i, b := range bundle {
+		if i > 0 {
+			hexutil.WriteRawJSON(w, ",")
+		}
+		if b == nil {
+			hexutil.WriteRawJSON(w, "null")
+			continue
+		}
+		hexutil.WriteRawJSON(w, `{"blob":`)
+		w.WriteHex(b.Blob)
+		hexutil.WriteRawJSON(w, `,"proof":`)
+		w.WriteHex(b.Proof)
+		hexutil.WriteRawJSON(w, "}")
+	}
+	hexutil.WriteRawJSON(w, "]")
 	return nil
 }
 
 func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	hexutil.MarshalFastJSONElemsTo(w, bundle, blobV2JSONLen, appendBlobV2JSON)
+	if bundle == nil {
+		hexutil.WriteRawJSON(w, "null")
+		return nil
+	}
+	hexutil.WriteRawJSON(w, "[")
+	for i, b := range bundle {
+		if i > 0 {
+			hexutil.WriteRawJSON(w, ",")
+		}
+		if b == nil {
+			hexutil.WriteRawJSON(w, "null")
+			continue
+		}
+		hexutil.WriteRawJSON(w, `{"blob":`)
+		w.WriteHex(b.Blob)
+		hexutil.WriteRawJSON(w, `,"proofs":`)
+		hexutil.MarshalFastJSONArrayTo(w, b.CellProofs)
+		hexutil.WriteRawJSON(w, "}")
+	}
+	hexutil.WriteRawJSON(w, "]")
 	return nil
-}
-
-func appendBlobV1JSON(dst []byte, b *BlobAndProofV1) []byte {
-	if b == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, `{"blob":`...)
-	dst = hexutil.AppendQuoted(dst, b.Blob)
-	dst = append(dst, `,"proof":`...)
-	dst = hexutil.AppendQuoted(dst, b.Proof)
-	return append(dst, '}')
-}
-
-func blobV1JSONLen(b *BlobAndProofV1) int {
-	if b == nil {
-		return len("null")
-	}
-	return len(`{"blob":`) + hexutil.QuotedLen(len(b.Blob)) + len(`,"proof":`) + hexutil.QuotedLen(len(b.Proof)) + len("}")
-}
-
-func appendBlobV2JSON(dst []byte, b *BlobAndProofV2) []byte {
-	if b == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, `{"blob":`...)
-	dst = hexutil.AppendQuoted(dst, b.Blob)
-	dst = append(dst, `,"proofs":`...)
-	if b.CellProofs == nil {
-		dst = append(dst, "null"...)
-	} else {
-		dst = append(dst, '[')
-		for i, p := range b.CellProofs {
-			if i > 0 {
-				dst = append(dst, ',')
-			}
-			dst = hexutil.AppendQuoted(dst, p)
-		}
-		dst = append(dst, ']')
-	}
-	return append(dst, '}')
-}
-
-func blobV2JSONLen(b *BlobAndProofV2) int {
-	if b == nil {
-		return len("null")
-	}
-	n := len(`{"blob":`) + hexutil.QuotedLen(len(b.Blob)) + len(`,"proofs":`) + len("}")
-	if b.CellProofs == nil {
-		n += len("null")
-	} else {
-		n += len("[]")
-		for i, p := range b.CellProofs {
-			if i > 0 {
-				n++
-			}
-			n += hexutil.QuotedLen(len(p))
-		}
-	}
-	return n
 }

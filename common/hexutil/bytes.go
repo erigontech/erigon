@@ -62,7 +62,18 @@ func WriteRawJSON(w JSONWriter, raw string) {
 }
 
 func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
-	MarshalFastJSONElemsTo(w, items, func(b Bytes) int { return QuotedLen(len(b)) }, func(dst []byte, b Bytes) []byte { return AppendQuoted(dst, b) })
+	if items == nil {
+		WriteRawJSON(w, "null")
+		return
+	}
+	WriteRawJSON(w, "[")
+	for i, b := range items {
+		if i > 0 {
+			WriteRawJSON(w, ",")
+		}
+		w.WriteHex(b)
+	}
+	WriteRawJSON(w, "]")
 }
 
 // MarshalFastJSONElemsTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
