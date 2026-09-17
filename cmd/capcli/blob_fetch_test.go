@@ -136,7 +136,7 @@ func TestBeaconAPISourceFallsThroughToTheNextEndpoint(t *testing.T) {
 		endpoints: []string{first.URL, broken.URL, last.URL},
 		client:    first.Client(),
 	}
-	sidecars, err := src.sidecars(t.Context(), common.HexToHash("0xabc"))
+	sidecars, err := src.sidecars(t.Context(), 14300002, common.HexToHash("0xabc"))
 	require.NoError(t, err)
 	require.Empty(t, sidecars)
 	require.Equal(t, 1, hits, "the empty and the erroring endpoint must both be passed over")
@@ -419,4 +419,36 @@ func TestBeaconAPIGetIncludesTheResponseBodyInTheError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "400")
 	require.ErrorContains(t, err, "Invalid block ID", "the endpoint's explanation must survive")
+}
+
+// Some providers cannot answer blob_sidecars by block root at all: they try to reconstruct the
+// blobs from data columns they do not hold and return 400, while the same slot answers fine.
+func TestBeaconAPISourceCanAskForSidecarsBySlot(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), bySlot: true}
+	_, err := src.sidecars(t.Context(), 14300002, common.HexToHash("0xabc"))
+	require.NoError(t, err)
+	require.Equal(t, "/eth/v1/beacon/blob_sidecars/14300002", gotPath)
+}
+
+// The default stays by root: it pins the request to the exact block we hold, with no reliance
+// on the endpoint agreeing with us about what is canonical at that slot.
+func TestBeaconAPISourceAsksByRootByDefault(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client()}
+	_, err := src.sidecars(t.Context(), 14300002, common.HexToHash("0xabc"))
+	require.NoError(t, err)
+	require.Contains(t, gotPath, "0x0000000000000000000000000000000000000000000000000000000000000abc")
 }

@@ -72,6 +72,7 @@ type BlobFetchToStore struct {
 	Attempts   uint64 `name:"attempts" help:"attempts per remote request, with backoff on throttling" default:"5"`
 	// A no-SLA endpoint can stop serving mid-run, so the slots it never covered are written out
 	// for a different source to pick up rather than being re-derived from the log.
+	BySlot        bool   `name:"sidecars-by-slot" help:"ask for blob sidecars by slot instead of by block root, for endpoints that cannot answer by root" default:"false"`
 	RemainingFile string `name:"remaining-file" help:"write slots that were left unfilled, one per line, for a later run against another source" default:""`
 }
 
@@ -165,6 +166,7 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 		endpoints:   endpoints,
 		client:      &http.Client{Timeout: time.Duration(c.Timeout) * time.Second},
 		maxAttempts: int(c.Attempts),
+		bySlot:      c.BySlot,
 	}
 	var arc *archiveSource
 	if c.Archive != "" {
@@ -347,7 +349,7 @@ func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblo
 		}
 	}
 
-	sidecars, err := src.sidecars(ctx, blockRoot)
+	sidecars, err := src.sidecars(ctx, slot, blockRoot)
 	if err != nil {
 		return err
 	}
@@ -456,6 +458,9 @@ type beaconAPISource struct {
 	client      *http.Client
 	requests    int
 	maxAttempts int
+	// Some providers answer blob_sidecars by slot but not by block root, where they attempt a
+	// data-column reconstruction they have no columns for and fail.
+	bySlot bool
 }
 
 // headerRoot returns the block root an endpoint reports for a slot. An endpoint that cannot
@@ -481,12 +486,16 @@ func (s *beaconAPISource) headerRoot(ctx context.Context, slot uint64) (common.H
 }
 
 // sidecars returns the first non-empty sidecar set any endpoint serves for blockRoot.
-func (s *beaconAPISource) sidecars(ctx context.Context, blockRoot common.Hash) ([]*cltypes.BlobSidecar, error) {
+func (s *beaconAPISource) sidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, error) {
+	blockID := fmt.Sprintf("0x%x", blockRoot)
+	if s.bySlot {
+		blockID = strconv.FormatUint(slot, 10)
+	}
 	for _, endpoint := range s.endpoints {
 		var body struct {
 			Data []*cltypes.BlobSidecar `json:"data"`
 		}
-		ok, err := s.get(ctx, fmt.Sprintf("%s/eth/v1/beacon/blob_sidecars/0x%x", endpoint, blockRoot), &body)
+		ok, err := s.get(ctx, fmt.Sprintf("%s/eth/v1/beacon/blob_sidecars/%s", endpoint, blockID), &body)
 		if err != nil {
 			log.Warn("Endpoint unreachable or erroring", "endpoint", endpoint, "blockRoot", blockRoot, "err", err)
 			continue
