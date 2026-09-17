@@ -25,7 +25,9 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -130,10 +132,39 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	if err := rawdb.WriteTd(tx, header.Hash(), number, td); err != nil {
 		return fmt.Errorf("write TD: %w", err)
 	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body); err != nil {
+	seqBefore, _ := tx.ReadSequence(kv.EthTx)
+	allocated, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body)
+	if err != nil {
 		return fmt.Errorf("write body: %w", err)
 	}
+	e.traceBodyIds("write", tx, header.Hash(), number, seqBefore, allocated)
 	return nil
+}
+
+// traceBodyIds records the txn-id range a pre-exec body owns and whether either system slot holds a key.
+// A system slot never should: its id is reserved by IncrementSequence and nothing is inserted there. Warn
+// when one does, so the write that strands a row names itself instead of being reconstructed from segments.
+func (e *ExecModule) traceBodyIds(when string, tx kv.Getter, hash common.Hash, number, seqBefore uint64, allocated bool) {
+	bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(number, hash))
+	if err != nil || bfs == nil {
+		e.logger.Warn("[TXID-TRACE] body record unreadable", "when", when, "block", number, "hash", hash, "err", err)
+		return
+	}
+	first, last := bfs.BaseTxnID.U64(), bfs.BaseTxnID.LastSystemTx(bfs.TxCount)
+	var id [8]byte
+	taken := func(txnID uint64) bool {
+		binary.BigEndian.PutUint64(id[:], txnID)
+		v, gerr := tx.GetOne(kv.EthTx, id[:])
+		return gerr == nil && v != nil
+	}
+	startTaken, endTaken := taken(first), taken(last)
+	record := e.logger.Debug
+	if startTaken || endTaken {
+		record = e.logger.Warn
+	}
+	record("[TXID-TRACE] body ids", "when", when, "block", number, "hash", hash,
+		"base", first, "last", last, "txCount", bfs.TxCount, "allocated", allocated, "seqBefore", seqBefore,
+		"startSlotTaken", startTaken, "endSlotTaken", endTaken)
 }
 
 // clearSystemSlotRows makes the SEALED body's txnum→txhash mapping correct by emptying its two

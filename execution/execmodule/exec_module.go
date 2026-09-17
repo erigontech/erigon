@@ -949,6 +949,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
 		// The body is final here, so this is where its txnum→txhash mapping is settled.
+		e.traceBodyIds("seal", t, newHash, number, 0, false)
 		if err := clearSystemSlotRows(t, bfs); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: %w", err)
 		}
