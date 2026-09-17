@@ -21,7 +21,9 @@ package hexutil_test
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -112,6 +114,17 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 			}
 		}
 	})
+	b.Run("jsonv2_encoder", func(b *testing.B) {
+		enc := jsontext.NewEncoder(io.Discard)
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := json.MarshalEncode(enc, code); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
 	b.Run("fast_v0", func(b *testing.B) {
 		b.SetBytes(size)
 		b.ReportAllocs()
