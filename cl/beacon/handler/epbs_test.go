@@ -2535,6 +2535,70 @@ func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T)
 	require.Empty(t, handler.pendingBuilderPayloads.entries)
 }
 
+func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		buildOnFullAfterRead bool
+		wantStatus           int
+	}{
+		{name: "unchanged FULL path", buildOnFullAfterRead: true, wantStatus: http.StatusOK},
+		{name: "PTC decision changes to EMPTY", wantStatus: http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+			slot := payload.SlotNumber
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentSlot().Return(slot - 1).AnyTimes()
+			clock.EXPECT().GetSlotTime(slot).Return(time.Now().Add(-time.Minute)).AnyTimes()
+			handler.ethClock = clock
+			require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+				require.Equal(t, slot-1, head.LatestBlockHeader().Slot)
+				payload.ParentHash = head.GetLatestExecutionPayloadBid().BlockHash
+				return nil
+			}))
+			baseRoot := forkchoiceStore.HeadVal
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+			buildOnFull := true
+			forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+			}}
+			forkchoiceStore.SetEnvelope(baseRoot, envelope)
+			var envelopeReads atomic.Int32
+			forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				// The first read supplies production inputs; the second revalidates the bid.
+				if envelopeReads.Add(1) == 2 {
+					buildOnFull = test.buildOnFullAfterRead
+				}
+				return envelope, nil
+			}
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
+				Return([]byte{1}, nil)
+			engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+				Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil)
+			handler.engine = engine
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", slot), http.NoBody)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.EqualValues(t, 2, envelopeReads.Load())
+			require.Equal(t, baseRoot, forkchoiceStore.HeadVal)
+			require.Equal(t, cltypes.PayloadStatusFull, forkchoiceStore.HeadPayloadStatusVal)
+			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
+			if test.wantStatus == http.StatusNotFound {
+				require.Contains(t, recorder.Body.String(), "execution parent changed")
+				require.Empty(t, handler.pendingBuilderPayloads.entries)
+				return
+			}
+			require.Len(t, handler.pendingBuilderPayloads.entries, 1)
+		})
+	}
+}
+
 func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 	for _, test := range []struct {
 		name                       string
