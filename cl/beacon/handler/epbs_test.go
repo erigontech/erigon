@@ -2978,7 +2978,10 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	service := mock_services.NewMockProposerPreferencesService(ctrl)
 	service.EXPECT().ProcessMessage(gomock.Any(), nil, preference).DoAndReturn(
 		func(_ context.Context, _ *uint64, msg *cltypes.SignedProposerPreferences) error {
-			epbsPool.AddProposerPreference(msg)
+			epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+				Slot:          msg.Message.ProposalSlot,
+				DependentRoot: msg.Message.DependentRoot,
+			}, msg)
 			return nil
 		},
 	)
@@ -3023,7 +3026,10 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 					Signature: common.Bytes96{0x33},
 				}
 				epbsPool := pool.NewEpbsPool()
-				epbsPool.AddProposerPreference(stored)
+				epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+					Slot:          stored.Message.ProposalSlot,
+					DependentRoot: stored.Message.DependentRoot,
+				}, stored)
 				clock := eth_clock.NewMockEthereumClock(ctrl)
 				genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
 				clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()

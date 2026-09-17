@@ -1000,13 +1000,14 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(
 	require.NoError(t, err)
 
 	handler.epbsPool = pool.NewEpbsPool()
-	handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
+	preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+	handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
 		Message: &cltypes.ProposerPreferences{
 			ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
 			TargetGasLimit: 36_000_000,
 		},
 	})
-	handler.epbsPool.ProposerPreferences.Remove(pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot})
+	handler.epbsPool.ProposerPreferences.Remove(preferenceKey)
 	_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
 	require.False(t, found)
 
@@ -1133,7 +1134,10 @@ func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
 			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
 		}
 		if step.preference != nil {
-			handler.epbsPool.AddProposerPreference(step.preference)
+			handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+				Slot:          step.preference.Message.ProposalSlot,
+				DependentRoot: step.preference.Message.DependentRoot,
+			}, step.preference)
 		}
 		tick++
 		return baseBlockRoot, currentSlot, true
@@ -1173,7 +1177,8 @@ func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
 		require.Equal(t, targetSlot, key.targetSlot)
 		attempts++
 		if attempts == 1 {
-			handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
+			preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+			handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
 				Message: &cltypes.ProposerPreferences{
 					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: 36_000_000,
 				},
@@ -1213,7 +1218,8 @@ func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
 		dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
 		return err
 	}))
-	handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+	preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+	handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 		ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex, TargetGasLimit: uint64(gasLimit),
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

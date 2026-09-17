@@ -192,18 +192,6 @@ func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltyp
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
 }
 
-// AddProposerPreference stores or replaces a preference.
-func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPreferences) {
-	if preference == nil || preference.Message == nil {
-		return
-	}
-	slot := preference.Message.ProposalSlot
-	p.ProposerPreferences.Add(ProposerPreferencesKey{
-		Slot:          slot,
-		DependentRoot: preference.Message.DependentRoot,
-	}, preference)
-}
-
 // InsertProposerPreference keeps the first preference for a slot and dependent root.
 // It returns false without mutation for an identical signed retry, or an error for a conflict.
 func (p *EpbsPool) InsertProposerPreference(preference *cltypes.SignedProposerPreferences) (inserted bool, err error) {
