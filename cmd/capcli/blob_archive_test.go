@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"net/http"
@@ -205,4 +206,47 @@ func TestFullBlockRejectsAJSONAnswerForTheWrongSlot(t *testing.T) {
 	_, err = s.fullBlock(t.Context(), asked, &cfg)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "answered slot")
+}
+
+// Blobscan lists a reference per backend and omits the url for ones it will not serve, so the
+// first entry is routinely url-less. Attempting it burns every retry and its backoff on each
+// blob, which at repair volume costs more than the fetch itself.
+func TestBlobPayloadSkipsAReferenceWithNoURL(t *testing.T) {
+	var payloadHits int
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mux.HandleFunc("/payload", func(w http.ResponseWriter, r *http.Request) {
+		payloadHits++
+		w.Write(make([]byte, blobLenBytes))
+	})
+	mux.HandleFunc("/blobs/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"size":%d,"dataStorageReferences":[
+			{"storage":"google"},
+			{"storage":"ipfs","url":%q}]}`, blobLenBytes, srv.URL+"/payload")
+	})
+
+	s := newArchiveSource(nil, srv.URL, 5, 0)
+	before := s.requests
+	payload, found, err := s.blobPayload(t.Context(), common.Hash{0x01})
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, payload, blobLenBytes)
+	require.Equal(t, 1, payloadHits)
+	require.Equal(t, 2, s.requests-before,
+		"one metadata request and one payload request: the url-less reference must cost nothing")
+}
+
+// A reference set with no usable url at all must be reported, not silently treated as absent.
+func TestBlobPayloadFailsWhenNoReferenceHasAURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"size":%d,"dataStorageReferences":[{"storage":"google"}]}`, blobLenBytes)
+	}))
+	defer srv.Close()
+
+	s := newArchiveSource(nil, srv.URL, 5, 0)
+	_, found, err := s.blobPayload(t.Context(), common.Hash{0x01})
+	require.Error(t, err)
+	require.False(t, found)
 }

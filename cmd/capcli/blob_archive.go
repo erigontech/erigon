@@ -234,6 +234,12 @@ func (s *archiveSource) blobPayload(ctx context.Context, versionedHash common.Ha
 	}
 	var lastErr error
 	for _, ref := range meta.DataStorageReferences {
+		// A reference the archive will not serve carries no url, and attempting it would spend
+		// every retry and its backoff before falling through to one that works.
+		if ref.URL == "" {
+			lastErr = fmt.Errorf("reference for storage %q has no url", ref.Storage)
+			continue
+		}
 		payload, ok, err := s.getRetry(ctx, ref.URL, "application/octet-stream")
 		if err != nil {
 			lastErr = err
