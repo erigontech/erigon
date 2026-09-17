@@ -1488,7 +1488,10 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	if useCache {
-		if cv, ok := dt.visible.cache.Get(hi); ok && cv.lo == lo {
+		cv, ok := dt.visible.cache.Get(hi)
+		ok = ok && cv.lo == lo
+		countDomainGetFromFileCache(dt.name, ok)
+		if ok {
 			if !cv.found {
 				return nil, false, 0, 0, nil
 			}

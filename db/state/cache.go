@@ -3,6 +3,8 @@ package state
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -33,7 +35,38 @@ type domainGetFromFileCacheItem struct {
 var (
 	domainGetFromFileCacheSize    = dbg.EnvDataSize("D_LRU_SIZE", 64*datasize.MB)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
+	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
+
+	domainGetFromFileCacheHits, domainGetFromFileCacheMisses [kv.DomainLen]atomic.Uint64
 )
+
+func init() {
+	if domainGetFromFileCacheTrace {
+		go logDomainGetFromFileCacheStats(30 * time.Second)
+	}
+}
+
+func logDomainGetFromFileCacheStats(every time.Duration) {
+	for range time.Tick(every) {
+		for d := kv.Domain(0); d < kv.DomainLen; d++ {
+			hits, misses := domainGetFromFileCacheHits[d].Load(), domainGetFromFileCacheMisses[d].Load()
+			if hits+misses > 0 {
+				log.Warn("[dbg] D_LRU", "domain", d.String(), "ratio", fmt.Sprintf("%.2f", float64(hits)/float64(hits+misses)), "hits", hits, "misses", misses)
+			}
+		}
+	}
+}
+
+func countDomainGetFromFileCache(d kv.Domain, hit bool) {
+	if !domainGetFromFileCacheTrace {
+		return
+	}
+	if hit {
+		domainGetFromFileCacheHits[d].Add(1)
+	} else {
+		domainGetFromFileCacheMisses[d].Add(1)
+	}
+}
 
 // newDomainVisible gives each visible files set one cache shared by all its txs: a value points into a file of the set,
 // and those files stay open while any tx can reach the set.
