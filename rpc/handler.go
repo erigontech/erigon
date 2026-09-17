@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -577,18 +576,6 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	if msg.isSubscribe() {
 		return h.handleSubscribe(cp, msg, stream)
 	}
-
-	// Fast path: typed generic handler registered via RegisterMethod — no reflection.
-	if !msg.isUnsubscribe() && h.isMethodAllowedByGranularControl(msg.Method) {
-		if e, ok := h.reg.invokerFor(msg.Method); ok {
-			start := time.Now()
-			answer := h.runTypedMethod(cp.ctx, msg, e.inv, stream)
-			recordRPCMetrics(answer, start, e.timerSuccess, e.timerFailure)
-			return answer
-		}
-	}
-
-	// Slow path: reflection-based handler.
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
@@ -605,35 +592,18 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	start := time.Now()
 	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
 
+	// Collect the statistics for RPC calls if metrics is enabled.
+	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
-		recordRPCMetrics(answer, start, callb.timerSuccess, callb.timerFailure)
+		rpcRequestGauge.Inc()
+		if answer != nil && answer.Error != nil {
+			failedReqeustGauge.Inc()
+			callb.timerFailure.ObserveDuration(start)
+		} else {
+			callb.timerSuccess.ObserveDuration(start)
+		}
 	}
 	return answer
-}
-
-func (h *handler) runTypedMethod(ctx context.Context, msg *jsonrpcMessage, inv invoker, stream jsonstream.Stream) *jsonrpcMessage {
-	result, err := inv.invoke(ctx, msg.Params)
-	if err != nil {
-		return msg.errorResponse(remapDBOverload(ctx, err))
-	}
-	if msg.isNotification() {
-		return nil
-	}
-	return msg.writeResponse(stream, result)
-}
-
-// recordRPCMetrics records request count and latency for a completed RPC call.
-// Note: streamable reflection callbacks return nil answer even on error (the error
-// is written directly to the stream), so those failures are counted as successes here.
-// This is a pre-existing behaviour shared with the old per-callback metrics block.
-func recordRPCMetrics(answer *jsonrpcMessage, start time.Time, timerSuccess, timerFailure metrics.Summary) {
-	rpcRequestGauge.Inc()
-	if answer != nil && answer.Error != nil {
-		failedReqeustGauge.Inc()
-		timerFailure.ObserveDuration(start)
-	} else {
-		timerSuccess.ObserveDuration(start)
-	}
 }
 
 // handleSubscribe processes *_subscribe method calls.
