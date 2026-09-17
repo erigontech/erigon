@@ -18,6 +18,7 @@ package flow
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -183,11 +184,9 @@ func TestOrchestrator_Canonical_PeerJoinShrinksAndFiresChanged(t *testing.T) {
 	})
 	waitUntil(t, func() bool { return len(o.Canonical()) == 1 }, 2*time.Second, "canonical shrinks to {A}")
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.NotEmpty(t, events)
-	last := events[len(events)-1]
-	require.Contains(t, last.Removed, "X.kv", "CanonicalChanged.Removed contains X")
+	waitForCanonicalEvent(t, &mu, &events,
+		func(e CanonicalChanged) bool { return slices.Contains(e.Removed, "X.kv") },
+		"CanonicalChanged.Removed contains X")
 }
 
 // P2-7: peer departs → canonical grows to remaining peer's set; CanonicalChanged fires.
@@ -223,11 +222,9 @@ func TestOrchestrator_Canonical_PeerDepartsGrowsAndFires(t *testing.T) {
 	bus.Publish(PeerDeparted{PeerID: "P2"})
 	waitUntil(t, func() bool { return len(o.Canonical()) == 2 }, 2*time.Second, "canonical grows to {A, X}")
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.NotEmpty(t, events)
-	last := events[len(events)-1]
-	require.Contains(t, last.Added, "X.kv", "CanonicalChanged.Added contains X after P2 departs")
+	waitForCanonicalEvent(t, &mu, &events,
+		func(e CanonicalChanged) bool { return slices.Contains(e.Added, "X.kv") },
+		"CanonicalChanged.Added contains X after P2 departs")
 }
 
 // P2-8: debounced re-eval — N peer manifests within debounce → single recompute.
@@ -285,4 +282,17 @@ func TestOrchestrator_Canonical_PeerFlapReSettles(t *testing.T) {
 	// P2 back with same manifest → canonical stays {A}.
 	waitUntil(t, func() bool { return len(o.Canonical()) == 1 }, 2*time.Second, "re-settle {A}")
 	require.Contains(t, o.Canonical(), "A.kv")
+}
+
+// waitForCanonicalEvent waits until a delivered CanonicalChanged satisfies
+// pred. Canonical() is updated before the event reaches subscribers, so
+// waiting on the state alone and then reading the newest recorded event races
+// the delivery and can observe the previous one.
+func waitForCanonicalEvent(t *testing.T, mu *sync.Mutex, events *[]CanonicalChanged, pred func(CanonicalChanged) bool, msg string) {
+	t.Helper()
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.ContainsFunc(*events, pred)
+	}, 2*time.Second, msg)
 }
