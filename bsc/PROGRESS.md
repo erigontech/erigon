@@ -41,17 +41,17 @@ Stack: #23929 → #24015 → #24025 → #24029.
 |-------|------|------------------|
 | 1,010,000 | Ramanujan | system-contract code upgrade — ✅ #24029 |
 | 1,014,369 | Niels | code upgrade — ✅ #24029 |
-| 5,582,500 | MirrorSync | BEP-131 validator-set expansion (mostly consensus) |
-| 13,837,000 | Bruno | BEP-127 gas-fee **burning** — state-affecting, not yet implemented |
-| 19,203,503 | Euler | validator-set size increase (consensus) |
-| 22,800,220 | Gibbs | |
-| 23,482,428 | Nano | disables cross-chain precompiles + address **blacklist** — not yet implemented |
-| 23,603,940 | Moran | re-enables precompiles, fixed proof format — variant not yet wired |
-| 28,196,022 | Planck | precompile proof-format fix (ics23) |
-| 29,295,050 | Luban | |
-| 29,861,024 | Plato | precompile proof-format fix (ics23) |
-| 31,103,030 | Berlin / London / Hertz | EIP-1559 base fee + EIP-2929/2930 — base-fee handling not yet implemented |
-| 35,682,300 | HertzFix | |
+| 5,582,500 | MirrorSync | validator-set expansion via upgraded contracts — code upgrade, ✅ #24029 |
+| 13,837,000 | Bruno | **BEP-95** real-time gas-fee burn — computed *inside* the upgraded ValidatorSet `deposit`, applied via blockAlloc — ✅ #24029, no native code |
+| 19,203,503 | Euler | validator-set change — upgraded contracts + proposer-selection only, no state-root impact — ✅ #24029 |
+| 22,800,220 | Gibbs | system-contract code upgrade — ✅ #24029 |
+| 23,482,428 | Nano | **disables** the 0x64/0x65 cross-chain precompiles + address **blacklist** — ⚠️ native work |
+| 23,603,940 | Moran | re-enables the precompiles with a fixed proof format — ⚠️ native (variant trimmed from #24015, re-add per-fork) |
+| 28,196,022 | Planck | precompile proof-format fix (ics23) — ⚠️ native |
+| 29,295,050 | Luban | validator election / fast-finality prep — code upgrade (verify) |
+| 29,861,024 | Plato | precompile proof-format fix (ics23) — ⚠️ native |
+| 31,103,030 | Berlin / London / Hertz | EIP-1559 base fee + EIP-2929/2930 — ⚠️ native |
+| 35,682,300 | HertzFix | chain-state hot-fix — verify |
 
 Timestamp-activated forks (Shanghai/Kepler/Feynman/Cancun/…, unix ts ≥ ~1.7e9 ≈ block 30M+)
 follow. All 19 `blockAlloc` code-upgrade sets (block- and time-keyed) are present in `chapel.json`
@@ -59,8 +59,11 @@ and applied by #24029.
 
 ### Next
 Sync is running past 2M to surface the next **state-root divergence** — i.e. a fork that changes
-behaviour beyond the contract-code upgrades #24029 already applies. Likely first hit: Bruno's fee
-burn, then Nano's precompile-disable + blacklist. Each becomes the next fork-gated fix stacked on
+behaviour beyond the contract-code upgrades #24029 already applies. MirrorSync, Bruno, Euler and
+Gibbs are all contract-upgrade or consensus-only, so #24029 covers them (Bruno's burn is internal
+to the upgraded ValidatorSet contract). The first fork needing **native** work is **Nano**
+(disables the cross-chain precompiles + address blacklist), then Moran/Planck/Plato (precompile
+variants), then Berlin/London/Hertz (base fee). Each becomes the next fork-gated fix stacked on
 #24029. Real Parlia consensus (seal/finality verification) is a separate, deferred track — the
 permissive stub already produces correct state roots.
 
