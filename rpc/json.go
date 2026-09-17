@@ -127,62 +127,58 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 	return bytes.Clone(s.Buffer()), nil
 }
 
-// writeResponse encodes result straight into stream as the success response and returns nil.
-// If result does not encode, nothing is written and the error response is returned instead.
+// writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
-func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
-	w := &responseWriter{stream: stream, id: msg.ID}
-	if fm, ok := result.(fastJSONMarshalerTo); ok && !isNilPointer(result) {
-		if err := fm.MarshalFastJSONTo(w); err != nil {
-			return msg.errorResponse(err)
+func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) {
+	writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+		if fm, ok := result.(fastJSONMarshalerTo); ok && !isNilPointer(result) {
+			return fm.MarshalFastJSONTo(rs)
 		}
-	} else if fm, ok := result.(fastJSONResult); ok {
-		enc, err := fm.MarshalFastJSON()
-		if err != nil {
-			return msg.errorResponse(err)
+		if fm, ok := result.(fastJSONResult); ok {
+			enc, err := fm.MarshalFastJSON()
+			if err == nil && len(enc) > 0 {
+				rs.WriteRawBytes(enc)
+			}
+			return err
 		}
-		w.writeResult(enc)
-	} else if err := json.NewEncoder(w).Encode(result); err != nil {
-		return msg.errorResponse(err)
+		return json.NewEncoder(encoderWriter{rs}).Encode(result)
+	})
+}
+
+// writeLazyResponse writes the response envelope and lets write fill "result", which opens on its first value.
+// An error from write becomes "error", after closing whatever part of the result was written.
+func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(jsonstream.Stream) error) {
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString(vsn)
+	stream.WriteMore()
+	if id != nil {
+		stream.WriteObjectField("id")
+		stream.WriteRawBytes(id)
+		stream.WriteMore()
+	}
+	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
+	if err := write(rs); err != nil {
+		if rs.Written() {
+			rs.CloseIfOpen()
+			stream.WriteMore()
+		}
+		HandleError(err, stream)
+	} else if !rs.Written() {
+		// A response carries exactly one of result and error, so a callback that
+		// succeeded without writing still owes a result.
+		rs.WriteNil()
 	}
 	stream.WriteObjectEnd()
-	return nil
 }
 
-// responseWriter receives json.Encoder output. Encode writes once, and only after the whole
-// value has encoded, so a result that fails leaves the stream untouched.
-type responseWriter struct {
-	stream jsonstream.Stream
-	id     json.RawMessage
-}
+// encoderWriter hands the stream json.Encoder output without its trailing newline. Encode writes once, after
+// the whole value has encoded.
+type encoderWriter struct{ stream jsonstream.Stream }
 
-func (w *responseWriter) Write(b []byte) (int, error) {
-	w.writeResult(bytes.TrimSuffix(b, []byte{'\n'}))
+func (w encoderWriter) Write(b []byte) (int, error) {
+	w.stream.WriteRawBytes(bytes.TrimSuffix(b, []byte{'\n'}))
 	return len(b), nil
-}
-
-func (w *responseWriter) WriteHex(b []byte) {
-	w.writeResultField()
-	w.stream.WriteHex(b)
-}
-
-func (w *responseWriter) writeResult(enc []byte) {
-	if len(enc) == 0 {
-		enc = null
-	}
-	w.writeResultField()
-	w.stream.WriteRawBytes(enc)
-}
-
-func (w *responseWriter) writeResultField() {
-	w.stream.WriteObjectStart()
-	w.stream.WriteObjectField("jsonrpc")
-	w.stream.WriteString(vsn)
-	w.stream.WriteMore()
-	w.stream.WriteObjectField("id")
-	w.stream.WriteRawBytes(w.id)
-	w.stream.WriteMore()
-	w.stream.WriteObjectField("result")
 }
 
 // isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.

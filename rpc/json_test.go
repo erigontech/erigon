@@ -482,9 +482,7 @@ func FuzzFillMessage(f *testing.F) {
 
 // respond mirrors answerInto: the success response, or the error response if the result does not encode.
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
-	if errMsg := (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result); errMsg != nil {
-		errMsg.writeTo(s)
-	}
+	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
 func blockResultFixture(n int) map[string]any {

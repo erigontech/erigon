@@ -659,33 +659,16 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		if msg.isNotification() {
 			return nil
 		}
-		return msg.writeResponse(stream, result)
+		msg.writeResponse(stream, result)
+		return nil
 	}
 
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString("2.0")
-	stream.WriteMore()
-	if msg.ID != nil {
-		stream.WriteObjectField("id")
-		stream.WriteRawBytes(msg.ID)
-		stream.WriteMore()
-	}
-	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
-	_, err := callb.call(ctx, msg.Method, args, rs)
-	if err != nil {
-		err = remapDBOverload(ctx, err)
-		if rs.Written() {
-			rs.CloseIfOpen()
-			stream.WriteMore()
+	writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
+			return remapDBOverload(ctx, err)
 		}
-		HandleError(err, stream)
-	} else if !rs.Written() {
-		// A response carries exactly one of result and error, so a callback that
-		// succeeded without writing still owes a result.
-		rs.WriteNil()
-	}
-	stream.WriteObjectEnd()
+		return nil
+	})
 	return nil
 }
 
