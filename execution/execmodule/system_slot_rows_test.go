@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // A sealed block's txnum→txhash mapping must leave its two system-transaction slots EMPTY.
@@ -124,4 +125,53 @@ func TestPreExecBlockIdsAreContiguousAndADroppedRoundLeavesNothing(t *testing.T)
 		}
 		return nil
 	}))
+}
+
+// Inserting a block THIS node sealed must not allocate transaction ids a second time.
+//
+// The engine's newPayload runs InsertBlocks before ValidateChain. For a block this node produced, the body already
+// has its ids — settled at the seal in the pre-exec generation — and ValidateChain stages that record into the
+// module context. InsertBlocks ran first, found no body there, and wrote the block again: IncrementSequence on the
+// module context's overlay and every transaction written at a base taken from THAT overlay's sequence. An overlay
+// snapshots the sequence when it is created and flushes it back as an ordinary row, so that base only matches the
+// seal's while the two happen to agree; when they do not, the block's transactions land on another block's ids.
+func TestInsertingALocallySealedBlockAllocatesNoTxnIds(t *testing.T) {
+	h := newRoundHarness(t)
+	ctx := h.ctx
+	exec := h.m.ExecModule
+
+	head, err := exec.CurrentHeader(ctx)
+	require.NoError(t, err)
+
+	params, in := h.attrs(head)
+	require.NoError(t, h.round(ctx, in, 0, 0), "block 1 round 1")
+	require.NoError(t, h.round(ctx, in, 0, 1), "block 1 round 2")
+	br, err := exec.SealBlock(ctx, params, false)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	require.Len(t, br.Block.Transactions(), 2)
+
+	// newPayload, in the engine's order: insert, then validate.
+	ir, err := insertBlocks(ctx, exec, []*types.Block{br.Block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ir)
+
+	committed, moduleContext, ok, err := exec.ModuleContextTxnSequenceForTest(ctx)
+	require.NoError(t, err)
+	require.True(t, ok, "InsertBlocks must have created the module context")
+	require.Equal(t, committed, moduleContext,
+		"inserting the locally sealed block advanced the module context's txn id sequence from %d to %d: it "+
+			"allocated the block's transactions a second range", committed, moduleContext)
+
+	// The block is still accepted and canonicalised, and the chain goes on from it.
+	vr, err := validateChain(ctx, exec, br.Block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "newPayload: %s", vr.ValidationError)
+	ur, err := updateForkChoice(ctx, exec, br.Block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
+
+	params2, in2 := h.attrs(br.Block.Header())
+	require.NoError(t, h.round(ctx, in2, 1, 0), "block 2 round")
+	h.sealAndAdopt(params2, 1)
 }

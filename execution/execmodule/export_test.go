@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -42,3 +43,29 @@ func (e *ExecModule) ResetFlashBodyForTest(num uint64) {
 // FlashBodyForTest returns the in-progress block's accumulated tx RLPs, so a test can assert what a failed
 // or abandoned round left behind. Test-only.
 func (e *ExecModule) FlashBodyForTest() [][]byte { return e.flashBodyCopy() }
+
+// ModuleContextTxnSequenceForTest returns the kv.EthTx sequence as the committed DB holds it and as the module
+// context's block overlay holds it, so a test can see whether a canonical insert allocated transaction ids in the
+// module context. ok is false when there is no module context yet.
+func (e *ExecModule) ModuleContextTxnSequenceForTest(ctx context.Context) (committed, moduleContext uint64, ok bool, err error) {
+	if err = e.semaphore.Acquire(ctx, 1); err != nil {
+		return 0, 0, false, err
+	}
+	defer e.semaphore.Release(1)
+	sd := e.currentContext
+	if sd == nil || sd.BlockOverlay() == nil {
+		return 0, 0, false, nil
+	}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer roTx.Rollback()
+	if committed, err = roTx.ReadSequence(kv.EthTx); err != nil {
+		return 0, 0, false, err
+	}
+	if moduleContext, err = sd.BlockOverlay().ReadSequence(kv.EthTx); err != nil {
+		return 0, 0, false, err
+	}
+	return committed, moduleContext, true, nil
+}

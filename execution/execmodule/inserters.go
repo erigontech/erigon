@@ -321,18 +321,36 @@ func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.Raw
 		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, header.Hash())
 		}
-		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+		// A block THIS node sealed already has its transaction ids, settled at the seal in its pre-exec generation.
+		// newPayload runs this insert before ValidateChain, so writing the body here would allocate it a second
+		// range from the module context's sequence — a snapshot taken when that overlay was created, which only
+		// matches the seal's base while the two happen to agree. Hand the sealed block over instead, exactly as
+		// ValidateChain does.
+		hash := header.Hash()
+		e.pendingBlockMu.Lock()
+		sealedHere := e.sealedByHash[hash] != nil
+		e.pendingBlockMu.Unlock()
+		if sealedHere && e.generationOverlay(hash, height) != nil {
+			if err := e.stageSealedForCanonicalLocked(ctx, hash, height); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+			}
+			// Staging reads through its own transaction and rolls it back; the rest of this insert reads through ours.
+			blockOverlay.UpdateTxn(roTx)
+			traceBodyIds(e.logger, "insert-blocks", blockOverlay, hash, height, 0, false)
+		} else {
+			if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+			}
+			if err := rawdb.WriteTd(blockOverlay, hash, height, td); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+			}
+			seqBefore, _ := blockOverlay.ReadSequence(kv.EthTx)
+			allocated, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, hash, height, body)
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+			}
+			traceBodyIds(e.logger, "insert-blocks", blockOverlay, hash, height, seqBefore, allocated)
 		}
-		if err := rawdb.WriteTd(blockOverlay, header.Hash(), height, td); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
-		}
-		seqBefore, _ := blockOverlay.ReadSequence(kv.EthTx)
-		allocated, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body)
-		if err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
-		}
-		traceBodyIds(e.logger, "insert-blocks", blockOverlay, header.Hash(), height, seqBefore, allocated)
 		if len(block.BlockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
