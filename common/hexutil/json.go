@@ -159,7 +159,7 @@ func (b U256) AppendText(dst []byte) ([]byte, error) {
 	return append(append(dst, '0', 'x'), digits[2*nbytes-nibbles:2*nbytes]...), nil
 }
 
-func (b U256) JSONLen() int { return len(`"0x"`) + 64 }
+func (b U256) JSONLen() int { return QuotedLen(32) }
 
 func (b U256) AppendJSON(dst []byte) []byte {
 	dst, _ = b.AppendText(append(dst, '"'))
@@ -227,7 +227,7 @@ func (b Uint64) AppendText(dst []byte) ([]byte, error) {
 	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
 }
 
-func (b Uint64) JSONLen() int { return len(`"0x"`) + 16 }
+func (b Uint64) JSONLen() int { return QuotedLen(8) }
 
 func (b Uint64) AppendJSON(dst []byte) []byte {
 	dst, _ = b.AppendText(append(dst, '"'))
