@@ -547,9 +547,11 @@ class _ArticleText(HTMLParser):
 
     def handle_data(self, data):
         data = _strip_markers(data)
-        if self._in_cell:
-            # An unescaped pipe reads as a column separator: `QUANTITY|TAG` would
-            # silently widen the row.
+        # An unescaped pipe reads as a column separator: `QUANTITY|TAG` would
+        # silently widen the row. In prose the pipe is escaped after the escape
+        # pass below, never before it, or that pass puts a second backslash in
+        # front of this one and the cell shows `QUANTITY\\|TAG`.
+        if self._in_cell and (self._in_code or self._in_pre):
             data = data.replace("|", "\\|")
         if self._in_code and not self._in_pre:
             # Runs of spaces inside a code span are content, not layout:
@@ -573,7 +575,9 @@ class _ArticleText(HTMLParser):
             # page buffer can say whether a line has begun.
             at_line_start = self._href is None and (
                 not self.out or self.out[-1].endswith("\n"))
-            data = _escape_prose(data, at_line_start)
+            data = _escape_prose(data, at_line_start, buf[-1][-1:] if buf else "")
+            if self._in_cell:
+                data = data.replace("|", "\\|")
         self._emit(data)
 
     @staticmethod
@@ -751,13 +755,19 @@ _STACK_RE = re.compile(r"\x02(\d+)\x02|\x03")
 # through. Neither is ever written into prose by this converter: a code span
 # comes from <code> and a fence from <pre>, both emitted straight into the
 # buffer, so a run reaching the prose path is text the page escaped.
-_PROSE_SPAN_RE = re.compile(r"`+|~{2,}")
-# A `<` opens inline HTML, and at the start of a line an HTML block, which runs
-# until a blank line and takes every page boundary inside it with it. HTMLParser
-# decodes character references, so a page that wrote `&lt;script&gt;` to show a
-# tag hands this path a live `<script>`. An `&` is only syntax when it begins a
-# reference, which is the one case worth escaping — prose is full of plain ones.
-_PROSE_HTML_RE = re.compile(r"<|&(?=#\d+;|#[xX][0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]*;)")
+# Everything that is syntax in Markdown but text in the page, matched in one
+# pass: escaping in two would put a backslash in front of a backslash this same
+# helper had just added. The backslash comes first for the same reason — left
+# live, it escapes whatever character follows it in the output.
+_PROSE_SPAN_RE = re.compile(
+    r"[\\`\[\]*]|~{2,}|<"
+    # An underscore between two alphanumerics opens no emphasis (CommonMark
+    # 6.2), and `eth_getProof` is how this corpus writes half its RPC methods:
+    # escaping those would put a backslash through every method name for a
+    # hazard that does not exist. One with a boundary on either side can open
+    # or close, and is escaped.
+    r"|(?<![0-9A-Za-z])_|_(?![0-9A-Za-z])"
+    r"|&(?=#\d+;|#[xX][0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]*;)")
 # The block openers, which only matter at the start of a line. The marker the
 # converter emits for a heading, an item or a quote is in the buffer before the
 # text arrives, so at that point the line is no longer at its start.
@@ -765,7 +775,7 @@ _PROSE_BLOCK_RE = re.compile(
     r"^([ \t]*)(?:([#>]|[-+*](?=[ \t]))|(\d+)([.)](?=[ \t])))")
 
 
-def _escape_prose(data, at_line_start):
+def _escape_prose(data, at_line_start, prev=""):
     """Escape the Markdown a page wrote as literal text.
 
     The built page carries what the source escaped: ``\\`\\`\\`sh`` renders as a
@@ -774,10 +784,21 @@ def _escape_prose(data, at_line_start):
     document — it swallows the rest of the page and the next page's sentinel,
     which is how a corpus loses a page with every check still passing. A literal
     `<` loses a page the same way: it opens an HTML block that runs to the next
-    blank line and swallows whatever boundary is inside it.
+    blank line and swallows whatever boundary is inside it. A bracket is quieter
+    and no less destructive — `\\[endpoint\\]: https://rpc.example` is prose the
+    page displays, and unescaped it reads as a link definition, which renders as
+    nothing at all. An `&` is only syntax when it begins a character reference,
+    which is the one case worth escaping; prose is full of plain ampersands.
     """
-    data = _PROSE_SPAN_RE.sub(lambda m: "".join("\\" + c for c in m.group(0)), data)
-    data = _PROSE_HTML_RE.sub(lambda m: "\\" + m.group(0), data)
+    # Text arrives in chunks — `erigon_v{ERIGON_VERSION}_linux` is three of them
+    # — so a chunk edge is not a word boundary. The character already written
+    # stands in as the left context, and an alphanumeric is appended as the
+    # right one, which keeps an underscore at a chunk's edge intraword: the
+    # emphasis it could open needs a partner this side cannot see anyway.
+    left = prev if prev[-1:].isalnum() else "\n"
+    probe = left + data + "a"
+    data = _PROSE_SPAN_RE.sub(
+        lambda m: "".join("\\" + c for c in m.group(0)), probe)[1:-1]
     if at_line_start:
         # Only ASCII punctuation can be backslash-escaped (CommonMark 2.4), so
         # an ordered marker is escaped on its delimiter: `\1.` suppresses the
@@ -1062,7 +1083,7 @@ def mermaid_blocks(source):
     # regions are blanked rather than removed so line structure is unchanged.
     source = _mask_jsx_comments(source)
     blocks, lines, seen = [], source.split("\n"), {}
-    i, n, heading, occurrence = 0, len(lines), "", 0
+    i, n, heading, level, occurrence = 0, len(lines), "", None, 0
     while i < n:
         h = _ATX_HEADING_RE.match(lines[i])
         opener = _peel_container(lines[i])
@@ -1075,16 +1096,22 @@ def mermaid_blocks(source):
         m = _fence_at(opener)
         if not m:
             if h:
+                # Keyed by level as well as text: Docusaurus gives a page whose
+                # title comes from front matter a generated `# Title` that has
+                # no source heading, so counting every heading with the same
+                # text would place a `## Title` diagram under that H1 instead —
+                # above the section, and above the prose introducing it.
                 heading = _heading_text(h.group(1))
-                seen[heading] = seen.get(heading, 0) + 1
-                occurrence = seen[heading] - 1
+                level = len(_ATX_LEVEL_RE.match(lines[i]).group(1))
+                seen[(heading, level)] = seen.get((heading, level), 0) + 1
+                occurrence = seen[(heading, level)] - 1
             i += 1
             continue
         # Docusaurus transforms only `lang === "mermaid"`, so an uppercase
         # info string stays an ordinary code block in the built HTML. Lowering
         # it here would splice a diagram beside the code block already there.
         marker, info, fence_indent = m[0], m[1], m[2]
-        at, at_occurrence, body, i = heading, occurrence, [], i + 1
+        at, at_level, at_occurrence, body, i = heading, level, occurrence, [], i + 1
         while i < n:
             c = _fence_at(see(lines[i]))
             if c and c[0][0] == marker[0] and len(c[0]) >= len(marker) \
@@ -1104,12 +1131,12 @@ def mermaid_blocks(source):
             # repeat a heading within themselves. The count must be of heading
             # sightings, not of diagrams — a section with no diagram still
             # advances the occurrence its successors are placed by.
-            blocks.append((at, at_occurrence,
+            blocks.append((at, at_level, at_occurrence,
                            _strip_markers(f"{fence}mermaid\n{text}\n{fence}")))
     return blocks
 
 
-def splice_diagram(body, heading, block, occurrence=0):
+def splice_diagram(body, heading, block, occurrence=0, level=None):
     """Insert `block` at the top of the section its heading opens.
 
     The diagram is absent from the built page — Docusaurus draws it client-side
@@ -1140,6 +1167,9 @@ def splice_diagram(body, heading, block, occurrence=0):
             continue
         h = _ATX_HEADING_RE.match(ln)
         if h and _heading_text(h.group(1)) == heading:
+            # A heading of another level is another heading, generated or not.
+            if level is not None and len(_ATX_LEVEL_RE.match(ln).group(1)) != level:
+                continue
             if hits == occurrence:
                 idx = i
                 break
@@ -1394,8 +1424,9 @@ def collect_pages(base_dir, route_prefix):
         # and a diagram whose text also appeared in a literal example was skipped
         # entirely. mermaid_blocks() is fence-accurate, so each block it yields is
         # a real diagram that belongs under its own heading.
-        for heading, occurrence, diagram in mermaid_blocks(text):
-            clean_body = splice_diagram(clean_body, heading, diagram, occurrence)
+        for heading, level, occurrence, diagram in mermaid_blocks(text):
+            clean_body = splice_diagram(clean_body, heading, diagram, occurrence,
+                                        level)
 
         # The duplicate H1 comes off when llms-full.txt is assembled, so a page
         # holding nothing but its own heading is empty there while passing a
