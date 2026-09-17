@@ -917,6 +917,35 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 	require.Contains(t, output.String(), "path=empty")
 }
 
+func TestGloasProductionRejectsChangedBeaconHead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	postState.SetLatestBlockHash(common.Hash{0xa1})
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash: common.Hash{0xb2},
+		Slot:      postState.Slot(),
+	})
+	engineCalled := false
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			engineCalled = true
+			return nil, errors.New("unexpected execution work on a stale parent")
+		}).AnyTimes()
+	handler.engine = engine
+
+	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), baseBlockRoot, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+
+	require.ErrorContains(t, err, "fork choice head changed")
+	require.ErrorContains(t, err, baseBlockRoot.String())
+	require.ErrorContains(t, err, forkchoiceStore.HeadVal.String())
+	require.False(t, engineCalled, "an EMPTY payload must not hide a changed beacon parent")
+}
+
 func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)

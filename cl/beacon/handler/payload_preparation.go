@@ -48,6 +48,7 @@ var (
 	errBlockWorkInFlight        = errors.New("block production, publication, or adoption is in progress")
 	errPreparationTooLate       = errors.New("slot is too close to prime a payload production would use")
 	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
+	errForkChoiceHeadChanged    = errors.New("fork choice head changed")
 	errGloasPathNeedsForkChoice = errors.New("gloas payload path requires a fork-choice update before preparation")
 )
 
@@ -510,6 +511,7 @@ func isExpectedPreparationSkip(err error) bool {
 	return isSettledPreparationOutcome(err) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
+		errors.Is(err, errForkChoiceHeadChanged) ||
 		errors.Is(err, errBlockWorkInFlight) ||
 		errors.Is(err, errGloasPayloadPending) ||
 		errors.Is(err, context.DeadlineExceeded) ||
@@ -602,7 +604,10 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	key.setTargetGasLimit(targetGasLimit)
 	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
 	// decision can change without changing the beacon head root.
-	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if err != nil {
+		return key, err
+	}
 	key.gloasPath = payloadSource.gloasPath
 	if payloadSource.fallbackCause != nil {
 		return key, payloadSource.fallbackCause
@@ -796,27 +801,31 @@ func withdrawalsStateForExecutionPayloadSource(
 }
 
 // resolveExecutionPayloadSource is shared by preparation and production so both choose the same
-// execution parent and FULL-parent requests. A pending or unreadable FULL path returns its safe
-// EMPTY-parent fallback; preparation waits instead of priming that fallback.
+// execution parent and FULL-parent requests. A changed beacon head is an error: choosing EMPTY
+// cannot repair a stale beacon parent. On a matching head, a pending or unreadable FULL path
+// returns its EMPTY-parent fallback; preparation waits instead of priming that fallback.
 func (a *ApiHandler) resolveExecutionPayloadSource(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
-) executionPayloadSource {
+) (executionPayloadSource, error) {
 	if stateVersion.Before(clparams.GloasVersion) {
-		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}
+		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}, nil
 	}
 	path := gloasPayloadPathPreFork
 	var pathErr error
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
 		path, pathErr = a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
+		if errors.Is(pathErr, errForkChoiceHeadChanged) {
+			return executionPayloadSource{}, pathErr
+		}
 	}
 	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
 	if pathErr != nil {
 		source.fallbackCause = pathErr
 	}
-	return source
+	return source, nil
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
@@ -868,7 +877,7 @@ func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSl
 		return gloasPayloadPathPending, fmt.Errorf("%w: resolve fork choice head: %w", errGloasPayloadPending, err)
 	}
 	if head.Root != baseBlockRoot {
-		return gloasPayloadPathPending, fmt.Errorf("%w: no matching fork choice head for proposal parent %s", errGloasPayloadPending, baseBlockRoot)
+		return gloasPayloadPathPending, fmt.Errorf("%w: proposal parent %s, current head %s", errForkChoiceHeadChanged, baseBlockRoot, head.Root)
 	}
 	return a.gloasPayloadPathForHead(head, targetSlot), nil
 }

@@ -1504,7 +1504,10 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if err != nil {
+		return nil, nil, err
+	}
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		switch payloadSource.gloasPath {
 		case gloasPayloadPathPending, gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
@@ -2662,6 +2665,8 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		}
 	}
 	releaseGossipReservation = false
+	// Gossip success is not local integration. Without waiting, keep the bounded marker until
+	// the produced slot becomes head or the marker expires; storage takes the gate when it runs.
 	if waitForIntegration {
 		if job == nil {
 			return errors.New("block integration job unavailable")
@@ -2672,9 +2677,9 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 			}
 			return err
 		}
+		a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 	}
 
-	a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 	return nil
 }
 
