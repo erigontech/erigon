@@ -18,6 +18,8 @@ package jsonstream
 
 import (
 	"io"
+
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // Stream is an interface that defines the common functionality between
@@ -70,6 +72,8 @@ type Stream interface {
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// WriteValue appends v into the stream's buffer, grown by v.JSONLen() first.
+	WriteValue(v jsonw.JSONAppender)
 
 	// Utility methods
 

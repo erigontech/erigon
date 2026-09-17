@@ -20,4 +20,15 @@ package jsonw
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	WriteValue(v JSONAppender)
+	WriteNil()
+	WriteArrayStart()
+	WriteMore()
+	WriteArrayEnd()
+}
+
+// JSONAppender is one JSON value that knows an upper bound of its encoded size.
+type JSONAppender interface {
+	JSONLen() int
+	AppendJSON(dst []byte) []byte
 }

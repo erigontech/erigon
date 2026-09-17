@@ -144,6 +144,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 type responseWriter struct {
 	stream jsonstream.Stream
 	id     json.RawMessage
+	opened bool
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
@@ -151,10 +152,22 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (w *responseWriter) WriteHex(b []byte) {
-	w.writeResultField()
-	w.stream.WriteHex(b)
+// open writes the result field once, before the first value of a result.
+func (w *responseWriter) open() {
+	if !w.opened {
+		w.opened = true
+		w.writeResultField()
+	}
 }
+
+func (w *responseWriter) WriteHex(b []byte)               { w.open(); w.stream.WriteHex(b) }
+func (w *responseWriter) WriteValue(v jsonw.JSONAppender) { w.open(); w.stream.WriteValue(v) }
+func (w *responseWriter) WriteNil()                       { w.open(); w.stream.WriteNil() }
+func (w *responseWriter) WriteArrayStart()                { w.open(); w.stream.WriteArrayStart() }
+
+// Separators and ends continue a value one of the writes above already opened.
+func (w *responseWriter) WriteMore()     { w.stream.WriteMore() }
+func (w *responseWriter) WriteArrayEnd() { w.stream.WriteArrayEnd() }
 
 func (w *responseWriter) writeResult(enc []byte) {
 	if len(enc) == 0 {

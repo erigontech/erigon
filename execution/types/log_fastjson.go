@@ -21,17 +21,10 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
-func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
-
 const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
-
-func appendQuotedHex(dst []byte, b []byte) []byte {
-	dst = append(dst, '"')
-	dst, _ = hexutil.Bytes(b).AppendText(dst)
-	return append(dst, '"')
-}
 
 func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 	dst = append(dst, '"')
@@ -39,33 +32,33 @@ func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 	return append(dst, '"')
 }
 
-// fastJSONLen is an upper bound on the encoded size, so the buffer is allocated
+// JSONLen is an upper bound on the encoded size, so the buffer is allocated
 // once instead of doubling.
-func (l *RPCLog) fastJSONLen() int {
+func (l *RPCLog) JSONLen() int {
 	if l == nil {
 		return len("null")
 	}
 	n := len(`{"address":,"topics":[],"data":,"blockNumber":,"transactionHash":,`) +
 		len(`"transactionIndex":,"blockHash":,"logIndex":,"removed":false,"blockTimestamp":}`)
-	n += quotedHexLen(length.Addr)
+	n += hexutil.QuotedLen(length.Addr)
 	if l.Topics == nil {
 		n += len("null") - len("[]")
 	}
-	n += len(l.Topics) * (quotedHexLen(length.Hash) + 1)
-	n += quotedHexLen(len(l.Data))
-	n += 2 * quotedHexLen(length.Hash) // transactionHash, blockHash
-	n += 4 * maxQuotedUintLen          // blockNumber, transactionIndex, logIndex, blockTimestamp
+	n += len(l.Topics) * (hexutil.QuotedLen(length.Hash) + 1)
+	n += hexutil.QuotedLen(len(l.Data))
+	n += 2 * hexutil.QuotedLen(length.Hash) // transactionHash, blockHash
+	n += 4 * maxQuotedUintLen               // blockNumber, transactionIndex, logIndex, blockTimestamp
 	return n
 }
 
-// appendFastJSON writes the log in the field order encoding/json uses for the
+// AppendJSON writes the log in the field order encoding/json uses for the
 // struct, so the output is byte-identical to reflection-based marshalling.
-func (l *RPCLog) appendFastJSON(dst []byte) []byte {
+func (l *RPCLog) AppendJSON(dst []byte) []byte {
 	if l == nil {
 		return append(dst, "null"...)
 	}
 	dst = append(dst, `{"address":`...)
-	dst = appendQuotedHex(dst, l.Address[:])
+	dst = hexutil.AppendQuoted(dst, l.Address[:])
 
 	dst = append(dst, `,"topics":`...)
 	if l.Topics == nil {
@@ -76,21 +69,21 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 			if i > 0 {
 				dst = append(dst, ',')
 			}
-			dst = appendQuotedHex(dst, l.Topics[i][:])
+			dst = hexutil.AppendQuoted(dst, l.Topics[i][:])
 		}
 		dst = append(dst, ']')
 	}
 
 	dst = append(dst, `,"data":`...)
-	dst = appendQuotedHex(dst, l.Data)
+	dst = hexutil.AppendQuoted(dst, l.Data)
 	dst = append(dst, `,"blockNumber":`...)
 	dst = appendQuotedUint64(dst, l.BlockNumber)
 	dst = append(dst, `,"transactionHash":`...)
-	dst = appendQuotedHex(dst, l.TxHash[:])
+	dst = hexutil.AppendQuoted(dst, l.TxHash[:])
 	dst = append(dst, `,"transactionIndex":`...)
 	dst = appendQuotedUint64(dst, hexutil.Uint64(l.TxIndex))
 	dst = append(dst, `,"blockHash":`...)
-	dst = appendQuotedHex(dst, l.BlockHash[:])
+	dst = hexutil.AppendQuoted(dst, l.BlockHash[:])
 	dst = append(dst, `,"logIndex":`...)
 	dst = appendQuotedUint64(dst, hexutil.Uint64(l.Index))
 	dst = strconv.AppendBool(append(dst, `,"removed":`...), l.Removed)
@@ -99,26 +92,27 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON.
 func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
+	return l.AppendJSON(make([]byte, 0, l.JSONLen())), nil
 }
 
-// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
-func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
+func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteValue(l)
+	return nil
+}
+
+func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if logs == nil {
-		return []byte("null"), nil
+		w.WriteNil()
+		return nil
 	}
-	size := len("[]") + len(logs)
-	for _, l := range logs {
-		size += l.fastJSONLen()
-	}
-	out := append(make([]byte, 0, size), '[')
+	w.WriteArrayStart()
 	for i, l := range logs {
 		if i > 0 {
-			out = append(out, ',')
+			w.WriteMore()
 		}
-		out = l.appendFastJSON(out)
+		w.WriteValue(l)
 	}
-	return append(out, ']'), nil
+	w.WriteArrayEnd()
+	return nil
 }
