@@ -1388,13 +1388,14 @@ func TestGetRawReceipts(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
-	defer func(enabled bool) { dbg.AssertEnabled = enabled }(dbg.AssertEnabled)
+	previousAssert := dbg.AssertEnabled
 	dbg.AssertEnabled = true // stateless verification of every witness runs only under assert
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
 		statecfg.Schema = previousSchema
+		dbg.AssertEnabled = previousAssert
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
