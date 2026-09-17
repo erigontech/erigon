@@ -21,7 +21,12 @@ type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
 	WriteValue(v JSONAppender)
+	// WriteString writes s as an escaped JSON string.
+	WriteString(s string)
 	WriteNil()
+	WriteObjectStart()
+	WriteObjectField(name string)
+	WriteObjectEnd()
 	WriteArrayStart()
 	WriteMore()
 	WriteArrayEnd()

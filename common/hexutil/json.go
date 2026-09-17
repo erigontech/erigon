@@ -159,6 +159,13 @@ func (b U256) AppendText(dst []byte) ([]byte, error) {
 	return append(append(dst, '0', 'x'), digits[2*nbytes-nibbles:2*nbytes]...), nil
 }
 
+func (b U256) JSONLen() int { return len(`"0x"`) + 64 }
+
+func (b U256) AppendJSON(dst []byte) []byte {
+	dst, _ = b.AppendText(append(dst, '"'))
+	return append(dst, '"')
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *U256) UnmarshalJSON(input []byte) error {
 	if !isString(input) {
@@ -218,6 +225,13 @@ func (b Uint64) MarshalText() ([]byte, error) {
 // AppendText implements encoding.TextAppender (alloc-free MarshalText).
 func (b Uint64) AppendText(dst []byte) ([]byte, error) {
 	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
+}
+
+func (b Uint64) JSONLen() int { return len(`"0x"`) + 16 }
+
+func (b Uint64) AppendJSON(dst []byte) []byte {
+	dst, _ = b.AppendText(append(dst, '"'))
+	return append(dst, '"')
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
