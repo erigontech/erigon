@@ -17,6 +17,8 @@
 package hexutil
 
 import (
+	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -58,4 +60,39 @@ func BenchmarkUnmarshalUint64(b *testing.B) {
 		var v Uint64
 		_ = v.UnmarshalJSON(input)
 	}
+}
+
+// discardJSONWriter reuses one buffer, as a response stream does.
+type discardJSONWriter struct{ buf []byte }
+
+func (w *discardJSONWriter) AvailableBuffer(n int) []byte { return slices.Grow(w.buf[:0], n) }
+func (w *discardJSONWriter) WriteRawBytes(v []byte)       { w.buf = v[:0] }
+
+// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by stdlib reflection vs MarshalFastJSONTo.
+func BenchmarkBytesMarshalJSON(b *testing.B) {
+	code := make(Bytes, 64*1024)
+	for i := range code {
+		code[i] = byte(i)
+	}
+	size := int64(QuotedLen(len(code)))
+
+	b.Run("stdlib_reflect", func(b *testing.B) {
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			if _, err := json.Marshal(code); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("fast", func(b *testing.B) {
+		var w discardJSONWriter
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := code.MarshalFastJSONTo(&w); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
