@@ -228,6 +228,62 @@ func runEmbeddedPtcVoteBlock(
 	return store, anchorRoot, child
 }
 
+func TestNewForkChoiceStorePreservesAnchorExecutionPayloadBuilderIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		version      clparams.StateVersion
+		builderIndex uint64
+		ok           bool
+	}{
+		{name: "pre-Gloas", version: clparams.FuluVersion},
+		{name: "zero index", version: clparams.GloasVersion, ok: true},
+		{name: "self build", version: clparams.GloasVersion, builderIndex: clparams.BuilderIndexSelfBuild, ok: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			anchor := state.New(&cfg)
+			anchor.SetVersion(tc.version)
+			require.NoError(t, anchor.SetSlot(1))
+			if tc.ok {
+				anchor.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+					BuilderIndex:       tc.builderIndex,
+					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+				})
+			}
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			graph := &getFinalizedExecutionHashForkGraph{
+				headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: anchor.Slot()}},
+				anchorRoot: anchorRoot,
+				anchorSlot: anchor.Slot(),
+			}
+			store, err := NewForkChoiceStore(
+				eth_clock.NewEthereumClock(0, common.Hash{}, &cfg),
+				anchor,
+				nil,
+				pool.NewOperationsPool(&cfg),
+				graph,
+				beaconevents.NewEventEmitter(),
+				synced_data.NewSyncedDataManager(&cfg, true),
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
+
+			builderIndex, ok := store.AnchorExecutionPayloadBuilderIndex()
+			require.Equal(t, tc.ok, ok)
+			if tc.ok {
+				require.Equal(t, tc.builderIndex, builderIndex)
+			}
+		})
+	}
+}
+
 type headerOnlyAnchorForkGraph struct {
 	fork_graph.ForkGraph
 	root common.Hash

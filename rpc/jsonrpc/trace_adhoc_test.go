@@ -22,7 +22,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -698,8 +697,8 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
@@ -719,13 +718,13 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)
 
-	overriddenBalance := (*hexutil.Big)(big.NewInt(7_000_000_000_000_000_000))
+	overriddenBalance := (*hexutil.U256)(uint256.MustFromDecimal("7000000000000000000000"))
 	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(bankAddr): {Balance: &overriddenBalance},
@@ -737,7 +736,7 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	require.NotNil(t, sender)
 	balance, ok := sender.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "sender balance must be reported as changed, got %v", sender.Balance)
-	require.Equal(t, (*big.Int)(overriddenBalance).String(), balance["*"].From.ToInt().String())
+	require.Equal(t, *overriddenBalance, *balance["*"].From)
 }
 
 func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
@@ -750,7 +749,7 @@ func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(recipient): {Code: &overriddenCode},
@@ -802,12 +801,12 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 
 	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	untouched := common.HexToAddress("0x00000000000000000000000000000000cafe0002")
-	untouchedBalance := (*hexutil.Big)(big.NewInt(123))
+	untouchedBalance := (*hexutil.U256)(uint256.NewInt(123))
 
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(untouched): {Balance: &untouchedBalance},
@@ -1239,7 +1238,7 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 func traceCallValueTransfer() TraceCallParam {
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.Big)(big.NewInt(1))}
+	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.U256)(uint256.NewInt(1))}
 }
 
 func TestTraceCallKeepsTraceEmptyWhenNotRequested(t *testing.T) {
