@@ -59,8 +59,12 @@ func WriteRawJSON(w JSONWriter, raw string) {
 	w.WriteRawBytes(append(w.AvailableBuffer(len(raw)), raw...))
 }
 
-// MarshalFastJSONArrayTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
 func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
+	MarshalFastJSONElemsTo(w, items, bytesJSONLen, appendBytesJSON)
+}
+
+// MarshalFastJSONElemsTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
+func MarshalFastJSONElemsTo[T any](w JSONWriter, items []T, jsonLen func(T) int, appendJSON func([]byte, T) []byte) {
 	if items == nil {
 		WriteRawJSON(w, "null")
 		return
@@ -74,8 +78,7 @@ func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
 		if i == 0 {
 			sep = '['
 		}
-		enc := append(w.AvailableBuffer(len(item)*2+len(`["0x"]`)), sep, '"', '0', 'x')
-		enc = append(hex.AppendEncode(enc, item), '"')
+		enc := appendJSON(append(w.AvailableBuffer(jsonLen(item)+len("[]")), sep), item)
 		if i == len(items)-1 {
 			enc = append(enc, ']')
 		}
@@ -85,10 +88,14 @@ func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
 
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
 func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
-	enc := append(w.AvailableBuffer(len(b)*2+4), `"`+HexPrefix...)
-	enc = hex.AppendEncode(enc, b)
-	w.WriteRawBytes(append(enc, '"'))
+	w.WriteRawBytes(appendBytesJSON(w.AvailableBuffer(bytesJSONLen(b)), b))
 	return nil
+}
+
+func bytesJSONLen(b Bytes) int { return len(b)*2 + len(`"0x"`) }
+
+func appendBytesJSON(dst []byte, b Bytes) []byte {
+	return append(hex.AppendEncode(append(dst, `"`+HexPrefix...), b), '"')
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

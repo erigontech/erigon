@@ -34,23 +34,8 @@ func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
 	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
 }
 
-// MarshalFastJSONTo writes one blob at a time, so the response never sits in one buffer.
 func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	if len(bundle) == 0 {
-		w.WriteRawBytes(bundle.appendJSON(w.AvailableBuffer(bundle.jsonLen())))
-		return nil
-	}
-	for i, b := range bundle {
-		sep := byte(',')
-		if i == 0 {
-			sep = '['
-		}
-		enc := appendBlobV1JSON(append(w.AvailableBuffer(blobV1JSONLen(b)+len("[]")), sep), b)
-		if i == len(bundle)-1 {
-			enc = append(enc, ']')
-		}
-		w.WriteRawBytes(enc)
-	}
+	hexutil.MarshalFastJSONElemsTo(w, bundle, blobV1JSONLen, appendBlobV1JSON)
 	return nil
 }
 
@@ -86,23 +71,8 @@ func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
 	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
 }
 
-// MarshalFastJSONTo writes one blob at a time, so the response never sits in one buffer.
 func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	if len(bundle) == 0 {
-		w.WriteRawBytes(bundle.appendJSON(w.AvailableBuffer(bundle.jsonLen())))
-		return nil
-	}
-	for i, b := range bundle {
-		sep := byte(',')
-		if i == 0 {
-			sep = '['
-		}
-		enc := appendBlobV2JSON(append(w.AvailableBuffer(blobV2JSONLen(b)+len("[]")), sep), b)
-		if i == len(bundle)-1 {
-			enc = append(enc, ']')
-		}
-		w.WriteRawBytes(enc)
-	}
+	hexutil.MarshalFastJSONElemsTo(w, bundle, blobV2JSONLen, appendBlobV2JSON)
 	return nil
 }
 
