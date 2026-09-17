@@ -44,17 +44,29 @@ func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 }
 
 func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	f, err := r.marshalFields()
+	executionPayload, err := json.Marshal(r.ExecutionPayload)
+	if err != nil {
+		return err
+	}
+	blockValue, err := json.Marshal(r.BlockValue)
+	if err != nil {
+		return err
+	}
+	executionRequests, err := json.Marshal(r.ExecutionRequests)
+	if err != nil {
+		return err
+	}
+	shouldOverrideBuilder, err := json.Marshal(r.ShouldOverrideBuilder)
 	if err != nil {
 		return err
 	}
 	w.WriteObjectStart()
 	{
 		w.WriteObjectField("executionPayload")
-		w.WriteRawBytes(f.executionPayload)
+		w.WriteRawBytes(executionPayload)
 		w.WriteMore()
 		w.WriteObjectField("blockValue")
-		w.WriteRawBytes(f.blockValue)
+		w.WriteRawBytes(blockValue)
 		w.WriteMore()
 		w.WriteObjectField("blobsBundle")
 		if err := r.BlobsBundle.MarshalFastJSONTo(w); err != nil {
@@ -62,32 +74,11 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 		}
 		w.WriteMore()
 		w.WriteObjectField("executionRequests")
-		w.WriteRawBytes(f.executionRequests)
+		w.WriteRawBytes(executionRequests)
 		w.WriteMore()
 		w.WriteObjectField("shouldOverrideBuilder")
-		w.WriteRawBytes(f.shouldOverrideBuilder)
+		w.WriteRawBytes(shouldOverrideBuilder)
 	}
 	w.WriteObjectEnd()
 	return nil
-}
-
-// getPayloadFields holds the fields json.Marshal encodes, marshaled before anything is written.
-type getPayloadFields struct {
-	executionPayload, blockValue, executionRequests, shouldOverrideBuilder []byte
-}
-
-func (r *GetPayloadResponse) marshalFields() (f getPayloadFields, err error) {
-	if f.executionPayload, err = json.Marshal(r.ExecutionPayload); err != nil {
-		return f, err
-	}
-	if f.blockValue, err = json.Marshal(r.BlockValue); err != nil {
-		return f, err
-	}
-	if f.executionRequests, err = json.Marshal(r.ExecutionRequests); err != nil {
-		return f, err
-	}
-	if f.shouldOverrideBuilder, err = json.Marshal(r.ShouldOverrideBuilder); err != nil {
-		return f, err
-	}
-	return f, nil
 }

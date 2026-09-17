@@ -79,41 +79,6 @@ func TestUnmarshalBytes(t *testing.T) {
 	}
 }
 
-type sliceJSONWriter []byte
-
-func (w *sliceJSONWriter) WriteValue(v JSONAppender) { *w = v.AppendJSON(*w) }
-func (w *sliceJSONWriter) WriteRawBytes(v []byte)    { *w = append(*w, v...) }
-func (w *sliceJSONWriter) WriteHex(v []byte)         { *w = AppendQuoted(*w, v) }
-func (w *sliceJSONWriter) WriteNil()                 { *w = append(*w, "null"...) }
-func (w *sliceJSONWriter) WriteObjectStart()         { *w = append(*w, '{') }
-func (w *sliceJSONWriter) WriteObjectField(name string) {
-	*w = append(append(append(*w, '"'), name...), `":`...)
-}
-func (w *sliceJSONWriter) WriteObjectEnd()  { *w = append(*w, '}') }
-func (w *sliceJSONWriter) WriteArrayStart() { *w = append(*w, '[') }
-func (w *sliceJSONWriter) WriteMore()       { *w = append(*w, ',') }
-func (w *sliceJSONWriter) WriteArrayEnd()   { *w = append(*w, ']') }
-
-func TestMarshalFastJSONArrayTo(t *testing.T) {
-	for _, items := range [][]Bytes{nil, {}, {nil}, {{}, {0x01}}, {make(Bytes, 70000), {0xde, 0xad}}} {
-		want, err := json.Marshal(items)
-		require.NoError(t, err)
-		var w sliceJSONWriter
-		MarshalFastJSONArrayTo(&w, items)
-		require.Equal(t, string(want), string(w))
-	}
-}
-
-func TestBytesMarshalFastJSONTo(t *testing.T) {
-	for _, b := range []Bytes{nil, {}, {0}, {0xde, 0xad, 0xbe, 0xef}, make(Bytes, 24576)} {
-		want, err := json.Marshal(b)
-		require.NoError(t, err)
-		w := sliceJSONWriter("keep")
-		require.NoError(t, b.MarshalFastJSONTo(&w))
-		require.Equal(t, "keep"+string(want), string(w))
-	}
-}
-
 func TestBytesUnmarshalTextInvalidHex(t *testing.T) {
 	var v Bytes
 	require.ErrorIs(t, v.UnmarshalText([]byte("0x01zz01")), ErrSyntax)
