@@ -1575,6 +1575,16 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			errors.New("execution payload bid is unavailable because the execution parent changed"))
 	}
+	// Envelope resolution can block on disk while the head changes. Check both the
+	// root and its FULL/EMPTY status again before caching the bid.
+	headAfterResolution, _, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return nil, err
+	}
+	if headAfterResolution != latestHeadNode {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			errors.New("execution payload bid is unavailable because the head changed"))
+	}
 	bid.BuilderIndex = builderIndex
 	bid.Value = 0
 	bid.ExecutionPayment = value

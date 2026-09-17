@@ -2537,6 +2537,7 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 		recoverEnvelope            bool
 		changeHead                 bool
 		changeHeadDuringResolution bool
+		duringEnvelopeRead         func(*forkchoice_mock.ForkChoiceStorageMock)
 		wantStatus                 int
 		wantError                  string
 	}{
@@ -2544,6 +2545,20 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 		{name: "FULL envelope becomes readable", recoverEnvelope: true, wantStatus: http.StatusNotFound, wantError: "execution parent changed"},
 		{name: "beacon head changes", changeHead: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
 		{name: "beacon head changes during head resolution", changeHeadDuringResolution: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
+		{
+			name: "beacon head changes during envelope read",
+			duringEnvelopeRead: func(store *forkchoice_mock.ForkChoiceStorageMock) {
+				store.HeadVal = common.Hash{0x99}
+			},
+			wantStatus: http.StatusNotFound, wantError: "head changed",
+		},
+		{
+			name: "payload status changes during envelope read",
+			duringEnvelopeRead: func(store *forkchoice_mock.ForkChoiceStorageMock) {
+				store.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			},
+			wantStatus: http.StatusNotFound, wantError: "head changed",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -2557,8 +2572,9 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 			})
 			// A transient read error keeps HasEnvelope true. Production must still
 			// be allowed to return its EMPTY-parent fallback while that error persists.
+			envelopeReadErr := errors.New("envelope storage unavailable")
 			forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				return nil, errors.New("envelope storage unavailable")
+				return nil, envelopeReadErr
 			}
 			engine := execution_client.NewMockExecutionEngine(ctrl)
 			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
@@ -2575,6 +2591,13 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 						forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 							forkchoiceStore.HeadVal = common.Hash{0x99}
 							return forkchoice.ForkChoiceNode{Root: forkchoiceStore.HeadVal, PayloadStatus: cltypes.PayloadStatusPending}, forkchoiceStore.HeadSlotVal, nil
+						}
+					}
+					if test.duringEnvelopeRead != nil {
+						// Apply the change during revalidation's disk read, after its head snapshot.
+						forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+							test.duringEnvelopeRead(forkchoiceStore)
+							return nil, envelopeReadErr
 						}
 					}
 					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
