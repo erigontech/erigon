@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -946,6 +947,34 @@ func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
 
 			require.Equal(t, test.wantHead, source.head)
 			require.Equal(t, test.wantPath, source.gloasPath)
+		})
+	}
+}
+
+func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
+	config := payloadPreparationLoopConfig(12, 0, 0)
+	genesisHash := common.Hash{0xa1}
+	genesisRoot := common.Hash{0x41}
+	for _, targetSlot := range []uint64{1, 5} {
+		t.Run(fmt.Sprintf("slot %d", targetSlot), func(t *testing.T) {
+			baseState := state.New(&config)
+			baseState.SetVersion(clparams.GloasVersion)
+			require.NoError(t, baseState.SetSlot(targetSlot))
+			baseState.SetLatestBlockHash(genesisHash)
+			// A Gloas genesis bid names the EL genesis as its parent, but has no payload of its own.
+			baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{ParentBlockHash: genesisHash})
+			forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+			forkchoiceStore.HeadVal = genesisRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
+
+			source := handler.resolveExecutionPayloadSource(baseState, genesisRoot, targetSlot, clparams.GloasVersion)
+
+			require.Equal(t, genesisHash, source.head)
+			require.Equal(t, gloasPayloadPathEmpty, source.gloasPath)
+			withdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, source)
+			require.NoError(t, err)
+			require.Nil(t, withdrawalsState, "an EMPTY genesis parent must keep the cached withdrawals")
 		})
 	}
 }

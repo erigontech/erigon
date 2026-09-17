@@ -403,12 +403,17 @@ func NewForkChoiceStore(
 	randaoMixesLists.Add(anchorRoot, r)
 	// Seed the eth2Root→eth1Hash mapping for the anchor block so that
 	// fork choice can resolve the EL genesis hash at startup.
-	anchorExecHeader := anchorState.LatestExecutionPayloadHeader()
-	if anchorExecHeader != nil && anchorExecHeader.BlockHash != (common.Hash{}) {
-		eth2Roots.Add(anchorRoot, anchorExecHeader.BlockHash)
+	var anchorExecutionHash common.Hash
+	if anchorState.Version().AfterOrEqual(clparams.GloasVersion) {
+		anchorExecutionHash = anchorState.GetLatestBlockHash()
+	} else if header := anchorState.LatestExecutionPayloadHeader(); header != nil {
+		anchorExecutionHash = header.BlockHash
+	}
+	if anchorExecutionHash != (common.Hash{}) {
+		eth2Roots.Add(anchorRoot, anchorExecutionHash)
 		// Also map the zero hash → EL genesis for the finalized checkpoint
 		// which starts as zero at genesis.
-		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
+		eth2Roots.Add(common.Hash{}, anchorExecutionHash)
 	}
 
 	headSet := make(map[common.Hash]struct{})

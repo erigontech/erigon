@@ -819,9 +819,9 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 
 func (a *ApiHandler) isPreGloasParent(baseState *state.CachingBeaconState) bool {
 	parentSlot := baseState.LatestBlockHeader().Slot
-	// Genesis has no preceding Gloas block even when the chain starts at this fork.
-	return parentSlot == a.beaconChainCfg.GenesisSlot ||
-		a.beaconChainCfg.GetCurrentStateVersion(parentSlot/a.beaconChainCfg.SlotsPerEpoch).Before(clparams.GloasVersion)
+	// Use the parent's fork, not the advanced state's version. A Gloas-at-genesis parent
+	// follows the EMPTY path; it has no executed bid payload or fresh withdrawal sweep.
+	return a.beaconChainCfg.GetCurrentStateVersion(parentSlot / a.beaconChainCfg.SlotsPerEpoch).Before(clparams.GloasVersion)
 }
 
 func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) gloasPayloadPath {

@@ -284,6 +284,53 @@ func TestNewForkChoiceStorePreservesAnchorExecutionPayloadBuilderIndex(t *testin
 	}
 }
 
+func TestNewForkChoiceStoreSeedsAnchorExecutionHash(t *testing.T) {
+	legacyHash := common.Hash{0x11}
+	latestHash := common.Hash{0x22}
+	for _, tc := range []struct {
+		name    string
+		version clparams.StateVersion
+		slot    uint64
+		want    common.Hash
+	}{
+		{name: "Fulu genesis", version: clparams.FuluVersion, want: legacyHash},
+		{name: "Gloas genesis", version: clparams.GloasVersion, want: latestHash},
+		{name: "Gloas checkpoint", version: clparams.GloasVersion, slot: 32, want: latestHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			anchor := state.New(&cfg)
+			anchor.SetVersion(tc.version)
+			require.NoError(t, anchor.SetSlot(tc.slot))
+			legacyHeader := cltypes.NewEth1Header(tc.version)
+			legacyHeader.BlockHash = legacyHash
+			anchor.SetLatestExecutionPayloadHeader(legacyHeader)
+			anchor.SetLatestBlockHash(latestHash)
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			graph := &getFinalizedExecutionHashForkGraph{
+				headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: tc.slot}},
+				anchorRoot: anchorRoot,
+				anchorSlot: tc.slot,
+			}
+			store, err := NewForkChoiceStore(
+				eth_clock.NewEthereumClock(0, common.Hash{}, &cfg), anchor, nil,
+				pool.NewOperationsPool(&cfg), graph, beaconevents.NewEventEmitter(),
+				synced_data.NewSyncedDataManager(&cfg, true), nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(),
+				false, nil,
+			)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.want, store.GetEth1Hash(anchorRoot))
+			require.Equal(t, tc.want, store.GetFinalizedExecutionHash(anchorRoot))
+			require.Equal(t, tc.want, store.GetFinalizedExecutionHash(common.Hash{}))
+		})
+	}
+}
+
 type headerOnlyAnchorForkGraph struct {
 	fork_graph.ForkGraph
 	root common.Hash
