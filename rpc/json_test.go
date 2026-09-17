@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -543,6 +545,35 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	respond(s, json.RawMessage(`7`), emptyFastJSON{})
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	respond(s, json.RawMessage(`7`), (*hexutil.Bytes)(nil))
+	require.NoError(t, s.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+func TestResponseWritesJSONToStream(t *testing.T) {
+	large := bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold)
+	for _, result := range []hexutil.Bytes{[]byte("first-and-longer"), []byte("2nd"), large, []byte("after-large")} {
+		want, err := json.Marshal(result)
+		require.NoError(t, err)
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			s := jsonstream.Get(out)
+			respond(s, json.RawMessage(`7`), result)
+			require.NoError(t, s.Flush())
+			got := s.Buffer()
+			if b, ok := out.(*bytes.Buffer); ok {
+				got = b.Bytes()
+			}
+			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
+			jsonstream.Put(s)
+		}
+	}
 }
 
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
