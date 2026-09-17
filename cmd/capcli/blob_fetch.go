@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -67,7 +68,10 @@ type BlobFetchToStore struct {
 	// VerifyOnly reproduces exactly what the dump requires of the store, without fetching or
 	// writing: a matching count row is not enough, the sidecar files must also be readable.
 	VerifyOnly bool   `name:"verify-only" help:"read every blob-bearing slot back from the store and report gaps; fetches and writes nothing" default:"false"`
-	Attempts   uint64 `name:"attempts" help:"attempts per archive request, with backoff on throttling" default:"5"`
+	Attempts   uint64 `name:"attempts" help:"attempts per remote request, with backoff on throttling" default:"5"`
+	// A no-SLA endpoint can stop serving mid-run, so the slots it never covered are written out
+	// for a different source to pick up rather than being re-derived from the log.
+	RemainingFile string `name:"remaining-file" help:"write slots that were left unfilled, one per line, for a later run against another source" default:""`
 }
 
 type blobFetchTally struct {
@@ -80,6 +84,36 @@ type blobFetchTally struct {
 	incomplete int
 	rejected   int
 	wouldFill  int
+	remaining  []uint64
+}
+
+// record marks a slot this run could not fill, so it can be handed to another source.
+func (t *blobFetchTally) record(slot uint64) {
+	t.remaining = append(t.remaining, slot)
+}
+
+// recordIfFailed keys off the failure count rather than the individual tally sites, so a new
+// kind of failure cannot omit its slot from the remaining file.
+func (t *blobFetchTally) recordIfFailed(slot uint64, failuresBefore int) {
+	if t.failures() > failuresBefore {
+		t.record(slot)
+	}
+}
+
+// writeRemainingSlots writes nothing when there is nothing left, so a stale file is never
+// mistaken for outstanding work.
+func writeRemainingSlots(path string, slots []uint64) error {
+	if path == "" || len(slots) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(slots)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	var buf strings.Builder
+	for _, slot := range sorted {
+		fmt.Fprintf(&buf, "%d\n", slot)
+	}
+	return os.WriteFile(path, []byte(buf.String()), 0o644)
 }
 
 func (t *blobFetchTally) failures() int {
@@ -127,8 +161,9 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	src := &beaconAPISource{
-		endpoints: endpoints,
-		client:    &http.Client{Timeout: time.Duration(c.Timeout) * time.Second},
+		endpoints:   endpoints,
+		client:      &http.Client{Timeout: time.Duration(c.Timeout) * time.Second},
+		maxAttempts: int(c.Attempts),
 	}
 	var arc *archiveSource
 	if c.Archive != "" {
@@ -142,54 +177,78 @@ func (c *BlobFetchToStore) Run(ctx *Context) error {
 
 	var tally blobFetchTally
 	started := time.Now()
-	for i, slot := range slots {
-		// A chunk where nothing needs filling logs nothing per slot, so without this a long
-		// run is indistinguishable from a hung one.
-		if i > 0 && i%500 == 0 {
-			log.Info("Blob store gap fill progress", "slot", slot, "done", i, "of", len(slots),
-				"elapsed", time.Since(started).Truncate(time.Second),
-				"wouldFill", tally.wouldFill, "filled", tally.filled,
-				"noBlobs", tally.noBlobs, "missedSlots", tally.missed,
-				"alreadyComplete", tally.alreadyOk, "failures", tally.failures())
-		}
-		// Below the frozen frontier the sidecars already live in segments and the store is
-		// expected to be empty, so writing there would be pointless and confusing.
-		if slot < frozen {
-			return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
-		}
-		if c.VerifyOnly {
-			if err := c.verifySlot(ctx, tx, snr, blobStorage, slot, &tally); err != nil {
-				return err
+	done := 0
+	runErr := func() error {
+		for i, slot := range slots {
+			// A chunk where nothing needs filling logs nothing per slot, so without this a long
+			// run is indistinguishable from a hung one.
+			if i > 0 && i%500 == 0 {
+				log.Info("Blob store gap fill progress", "slot", slot, "done", i, "of", len(slots),
+					"elapsed", time.Since(started).Truncate(time.Second),
+					"wouldFill", tally.wouldFill, "filled", tally.filled,
+					"noBlobs", tally.noBlobs, "missedSlots", tally.missed,
+					"alreadyComplete", tally.alreadyOk, "failures", tally.failures())
 			}
-			continue
-		}
-		var reachedRemote bool
-		if arc != nil {
-			before := arc.requests
-			if err := c.fillSlotFromArchive(ctx, tx, snr, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
-				return err
+			done = i
+			// Below the frozen frontier the sidecars already live in segments and the store is
+			// expected to be empty, so writing there would be pointless and confusing.
+			if slot < frozen {
+				return fmt.Errorf("slot %d is below the frozen blob frontier %d", slot, frozen)
 			}
-			reachedRemote = arc.requests > before
-		} else {
-			before := src.requests
-			if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
-				return err
+			failuresBefore := tally.failures()
+			if c.VerifyOnly {
+				if err := c.verifySlot(ctx, tx, snr, blobStorage, slot, &tally); err != nil {
+					return err
+				}
+				tally.recordIfFailed(slot, failuresBefore)
+				continue
 			}
-			reachedRemote = src.requests > before
+			var reachedRemote bool
+			if arc != nil {
+				before := arc.requests
+				if err := c.fillSlotFromArchive(ctx, tx, snr, blobStorage, arc, beaconConfig, slot, &tally); err != nil {
+					return err
+				}
+				reachedRemote = arc.requests > before
+			} else {
+				before := src.requests
+				if err := c.fillSlot(ctx, tx, snr, blobStorage, src, slot, &tally); err != nil {
+					return err
+				}
+				reachedRemote = src.requests > before
+			}
+			tally.recordIfFailed(slot, failuresBefore)
+			// Only pace the slots that touched a remote. Sleeping through locally answered slots
+			// turns a two hour job into a two day one for no politeness gain.
+			if c.PauseMs > 0 && reachedRemote {
+				time.Sleep(time.Duration(c.PauseMs) * time.Millisecond)
+			}
 		}
-		// Only pace the slots that touched a remote. Sleeping through locally answered slots
-		// turns a two hour job into a two day one for no politeness gain.
-		if c.PauseMs > 0 && reachedRemote {
-			time.Sleep(time.Duration(c.PauseMs) * time.Millisecond)
+		done = len(slots)
+		return nil
+	}()
+
+	// An aborted run leaves everything from the failing slot onwards untouched, and that is
+	// exactly what another source has to be given.
+	if done < len(slots) {
+		for _, slot := range slots[done:] {
+			tally.record(slot)
 		}
+	}
+	if err := writeRemainingSlots(c.RemainingFile, tally.remaining); err != nil {
+		return err
 	}
 
 	log.Info("Blob store gap fill finished",
 		"filled", tally.filled, "wouldFill", tally.wouldFill, "alreadyComplete", tally.alreadyOk,
 		"noBlobs", tally.noBlobs, "missedSlots", tally.missed, "noEndpointHadThem", tally.unserved,
 		"rootMismatch", tally.rootDiff, "incompleteAnswer", tally.incomplete,
-		"rejected", tally.rejected, "commit", c.Commit)
+		"rejected", tally.rejected, "remaining", len(tally.remaining),
+		"remainingFile", c.RemainingFile, "commit", c.Commit)
 
+	if runErr != nil {
+		return runErr
+	}
 	// A run that could not fill everything must not look like a success: the caller decides
 	// what to do, but only if it is told.
 	if n := tally.failures(); n > 0 {
@@ -392,9 +451,10 @@ func (c *BlobFetchToStore) fillSlot(ctx context.Context, tx kv.Tx, snr freezeblo
 
 // beaconAPISource reads blocks and sidecars from beacon API endpoints, in the order given.
 type beaconAPISource struct {
-	endpoints []string
-	client    *http.Client
-	requests  int
+	endpoints   []string
+	client      *http.Client
+	requests    int
+	maxAttempts int
 }
 
 // headerRoot returns the block root an endpoint reports for a slot. An endpoint that cannot
@@ -441,27 +501,50 @@ func (s *beaconAPISource) sidecars(ctx context.Context, blockRoot common.Hash) (
 // get reports ok=false for a 404, and an error for anything else that is not a 200, so
 // "this endpoint does not have it" is never confused with "this endpoint is broken".
 func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, error) {
-	s.requests++
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return false, err
+	attempts := max(s.maxAttempts, 1)
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(time.Duration(attempt-1) * 500 * time.Millisecond):
+			}
+		}
+		s.requests++
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return false, err
+		}
+		req.Header.Set("Accept", "application/json")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return false, nil
+		}
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("bad status %d", resp.StatusCode)
+			log.Warn("Endpoint throttled or erroring, backing off",
+				"status", resp.StatusCode, "attempt", attempt, "of", attempts)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return false, fmt.Errorf("bad status %d", resp.StatusCode)
+		}
+		err = json.NewDecoder(resp.Body).Decode(out)
+		resp.Body.Close()
+		if err != nil {
+			return false, fmt.Errorf("decode: %w", err)
+		}
+		return true, nil
 	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("bad status %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return false, fmt.Errorf("decode: %w", err)
-	}
-	return true, nil
+	return false, fmt.Errorf("gave up after %d attempts: %w", attempts, lastErr)
 }
 
 func splitEndpoints(in string) []string {

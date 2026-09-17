@@ -17,11 +17,13 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/require"
@@ -201,4 +203,204 @@ func TestDumpBlobsSnapshotsFromMustBeOnASegmentBoundary(t *testing.T) {
 	_, err = dp.Parse([]string{"dump-blobs-snapshots", "--datadir", t.TempDir()})
 	require.NoError(t, err)
 	require.Zero(t, defaults.DumpBlobsSnapshots.From, "omitting --from must keep the fork-boundary default")
+}
+
+// A public endpoint answers a long run with 429 or a 5xx sooner or later. Treating that as
+// fatal aborts the whole run, so it must be retried the same way archive mode already does.
+func TestBeaconAPIGetRetriesThrottlingAndServerErrors(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			w.Write([]byte(`{"data":{"root":"0x01"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 5}
+	var out struct {
+		Data struct {
+			Root string `json:"root"`
+		} `json:"data"`
+	}
+	ok, err := src.get(t.Context(), srv.URL, &out)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 3, calls, "both retryable statuses must be retried")
+	require.Equal(t, "0x01", out.Data.Root)
+}
+
+// A 404 is an answer, not a failure, and retrying it would multiply the cost of every absent
+// slot across a 200k-slot run.
+func TestBeaconAPIGetDoesNotRetryA404(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 5}
+	ok, err := src.get(t.Context(), srv.URL, &struct{}{})
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 1, calls, "a 404 must not be retried")
+}
+
+// Exhausting the attempts must surface the status, never a silent "absent" that would let the
+// run record the slot as unobtainable when the endpoint was merely throttling.
+func TestBeaconAPIGetGivesUpWithTheStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 2}
+	ok, err := src.get(t.Context(), srv.URL, &struct{}{})
+	require.Error(t, err)
+	require.False(t, ok)
+	require.ErrorContains(t, err, "503")
+}
+
+// A zero value must still make one attempt: the struct is built directly in several places.
+func TestBeaconAPIGetMakesOneAttemptWhenUnconfigured(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client()}
+	ok, err := src.get(t.Context(), srv.URL, &struct{}{})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 1, calls)
+}
+
+// The point of the file is to hand the leftover to another source, so it has to be readable
+// back by the same parser that reads the input slots file.
+func TestWriteRemainingSlotsRoundTripsThroughTheSlotsFileReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remaining.txt")
+	require.NoError(t, writeRemainingSlots(path, []uint64{14300007, 14300001, 14300004}))
+
+	slots, err := readSlotsFile(path)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{14300001, 14300004, 14300007}, slots, "written sorted and re-readable")
+}
+
+// Writing an empty file would make a clean run look like it left work behind.
+func TestWriteRemainingSlotsWritesNothingWhenAllFilled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remaining.txt")
+	require.NoError(t, writeRemainingSlots(path, nil))
+	_, err := os.Stat(path)
+	require.True(t, os.IsNotExist(err), "no file when there is nothing left to do")
+}
+
+// A slot no endpoint could serve is exactly what another source has to pick up.
+func TestTallyRecordsUnservedSlotsAsRemaining(t *testing.T) {
+	var tally blobFetchTally
+	tally.record(14300001)
+	tally.record(14300002)
+	require.Equal(t, []uint64{14300001, 14300002}, tally.remaining)
+}
+
+// Recording is driven by the failure count rather than by each of the sixteen tally sites, so
+// a newly added failure kind cannot silently omit its slot from the remaining file.
+func TestTallyRecordsASlotOnlyWhenItFailed(t *testing.T) {
+	var tally blobFetchTally
+
+	before := tally.failures()
+	tally.filled++
+	tally.recordIfFailed(14300001, before)
+	require.Empty(t, tally.remaining, "a filled slot is not remaining")
+
+	before = tally.failures()
+	tally.unserved++
+	tally.recordIfFailed(14300002, before)
+	require.Equal(t, []uint64{14300002}, tally.remaining)
+
+	before = tally.failures()
+	tally.rejected++
+	tally.recordIfFailed(14300003, before)
+	require.Equal(t, []uint64{14300002, 14300003}, tally.remaining, "every failure kind counts")
+
+	before = tally.failures()
+	tally.missed++
+	tally.recordIfFailed(14300004, before)
+	require.Equal(t, []uint64{14300002, 14300003}, tally.remaining, "a missed slot is not a failure")
+}
+
+// A 403 or 400 will not fix itself. Retrying it would burn every attempt on each of 200k slots
+// and bury the real cause (a bad key, a wrong path) under backoff noise.
+func TestBeaconAPIGetDoesNotRetryANonRetryable4xx(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 5}
+	ok, err := src.get(t.Context(), srv.URL, &struct{}{})
+	require.Error(t, err)
+	require.False(t, ok)
+	require.ErrorContains(t, err, "403")
+	require.Equal(t, 1, calls, "a 403 is final, not a throttle")
+}
+
+// A dropped connection mid-run is the common way a long job dies; it has to be retried like a
+// 5xx, and every attempt has to be counted or the pacing logic stops seeing remote traffic.
+func TestBeaconAPIGetRetriesATransportErrorAndCountsEveryAttempt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // nothing is listening now, so every attempt fails at the transport
+
+	src := &beaconAPISource{endpoints: []string{url}, client: &http.Client{}, maxAttempts: 3}
+	ok, err := src.get(t.Context(), url, &struct{}{})
+	require.Error(t, err)
+	require.False(t, ok)
+	require.Equal(t, 3, src.requests, "each attempt must count, including the failed ones")
+}
+
+// Interrupting a multi-hour run must stop it, not leave it sleeping out its backoff.
+func TestBeaconAPIGetStopsOnContextCancellationDuringBackoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 100}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	_, err := src.get(ctx, srv.URL, &struct{}{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(started), 5*time.Second, "must not sleep out 100 attempts")
+}
+
+// Without a path there is nowhere to write, and that must not be an error: the flag is optional.
+func TestWriteRemainingSlotsIsANoOpWithoutAPath(t *testing.T) {
+	require.NoError(t, writeRemainingSlots("", []uint64{14300001}))
+}
+
+// The same slot can be recorded twice (once by its own failure, once by the abort sweep), and
+// a duplicated line would make the next run re-fetch it.
+func TestWriteRemainingSlotsDeduplicates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remaining.txt")
+	require.NoError(t, writeRemainingSlots(path, []uint64{14300002, 14300001, 14300002}))
+
+	// Asserted on the raw file: readSlotsFile deduplicates on its own, so a round trip through
+	// it would pass whether or not the writer deduplicates.
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "14300001\n14300002\n", string(raw))
 }
