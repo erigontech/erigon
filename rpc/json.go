@@ -175,6 +175,16 @@ func (w *responseWriter) WriteHex(b []byte) {
 	w.stream.WriteHex(b)
 }
 
+func (w *responseWriter) WriteNil()         { w.open(); w.stream.WriteNil() }
+func (w *responseWriter) WriteObjectStart() { w.open(); w.stream.WriteObjectStart() }
+func (w *responseWriter) WriteArrayStart()  { w.open(); w.stream.WriteArrayStart() }
+
+// Separators, field names and ends continue a value one of the writes above already opened.
+func (w *responseWriter) WriteMore()                   { w.stream.WriteMore() }
+func (w *responseWriter) WriteObjectField(name string) { w.stream.WriteObjectField(name) }
+func (w *responseWriter) WriteObjectEnd()              { w.stream.WriteObjectEnd() }
+func (w *responseWriter) WriteArrayEnd()               { w.stream.WriteArrayEnd() }
+
 // isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
 func isNilPointer(v any) bool {
 	rv := reflect.ValueOf(v)

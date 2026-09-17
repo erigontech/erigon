@@ -25,16 +25,19 @@ import (
 // MarshalFastJSONTo writes one array element at a time, so the blobs never sit in one buffer.
 func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if b == nil {
-		hexutil.WriteRawJSON(w, "null")
+		w.WriteNil()
 		return nil
 	}
-	hexutil.WriteRawJSON(w, `{"commitments":`)
+	w.WriteObjectStart()
+	w.WriteObjectField("commitments")
 	hexutil.MarshalFastJSONArrayTo(w, b.Commitments)
-	hexutil.WriteRawJSON(w, `,"proofs":`)
+	w.WriteMore()
+	w.WriteObjectField("proofs")
 	hexutil.MarshalFastJSONArrayTo(w, b.Proofs)
-	hexutil.WriteRawJSON(w, `,"blobs":`)
+	w.WriteMore()
+	w.WriteObjectField("blobs")
 	hexutil.MarshalFastJSONArrayTo(w, b.Blobs)
-	hexutil.WriteRawJSON(w, "}")
+	w.WriteObjectEnd()
 	return nil
 }
 

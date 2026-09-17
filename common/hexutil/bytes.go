@@ -54,6 +54,13 @@ type JSONWriter interface {
 	WriteRawBytes([]byte)
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	WriteNil()
+	WriteObjectStart()
+	WriteObjectField(name string)
+	WriteObjectEnd()
+	WriteArrayStart()
+	WriteMore()
+	WriteArrayEnd()
 }
 
 // WriteRawJSON writes already-encoded JSON.
@@ -63,17 +70,17 @@ func WriteRawJSON(w JSONWriter, raw string) {
 
 func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
 	if items == nil {
-		WriteRawJSON(w, "null")
+		w.WriteNil()
 		return
 	}
-	WriteRawJSON(w, "[")
+	w.WriteArrayStart()
 	for i, b := range items {
 		if i > 0 {
-			WriteRawJSON(w, ",")
+			w.WriteMore()
 		}
 		w.WriteHex(b)
 	}
-	WriteRawJSON(w, "]")
+	w.WriteArrayEnd()
 }
 
 // MarshalFastJSONElemsTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.

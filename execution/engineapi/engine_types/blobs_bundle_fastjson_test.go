@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
@@ -43,6 +44,10 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
 			require.False(t, w.overrun, "a write outgrew its size hint")
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, bundle.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
 }
@@ -89,6 +94,10 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 			require.NoError(t, r.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
 			require.False(t, w.overrun, "a write outgrew its size hint")
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, r.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
 }

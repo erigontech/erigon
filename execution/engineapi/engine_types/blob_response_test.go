@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // hintedJSONWriter records whether a write outgrew the size hint of the buffer it came from.
@@ -35,6 +36,15 @@ type hintedJSONWriter struct {
 func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
 
 func (w *hintedJSONWriter) WriteHex(v []byte) { w.out = hexutil.AppendQuoted(w.out, v) }
+func (w *hintedJSONWriter) WriteNil()         { w.out = append(w.out, "null"...) }
+func (w *hintedJSONWriter) WriteObjectStart() { w.out = append(w.out, '{') }
+func (w *hintedJSONWriter) WriteObjectField(name string) {
+	w.out = append(append(append(w.out, '"'), name...), `":`...)
+}
+func (w *hintedJSONWriter) WriteObjectEnd()  { w.out = append(w.out, '}') }
+func (w *hintedJSONWriter) WriteArrayStart() { w.out = append(w.out, '[') }
+func (w *hintedJSONWriter) WriteMore()       { w.out = append(w.out, ',') }
+func (w *hintedJSONWriter) WriteArrayEnd()   { w.out = append(w.out, ']') }
 
 func (w *hintedJSONWriter) WriteRawBytes(v []byte) {
 	w.overrun = w.overrun || len(v) > w.hint
@@ -61,6 +71,10 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
 			require.False(t, w.overrun, "a write outgrew its size hint")
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, bundle.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
 }
@@ -81,6 +95,10 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
 			require.False(t, w.overrun, "a write outgrew its size hint")
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, bundle.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
 }

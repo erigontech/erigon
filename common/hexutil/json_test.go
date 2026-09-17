@@ -84,6 +84,15 @@ type sliceJSONWriter []byte
 func (w *sliceJSONWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
 func (w *sliceJSONWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
 func (w *sliceJSONWriter) WriteHex(v []byte)            { *w = AppendQuoted(*w, v) }
+func (w *sliceJSONWriter) WriteNil()                    { *w = append(*w, "null"...) }
+func (w *sliceJSONWriter) WriteObjectStart()            { *w = append(*w, '{') }
+func (w *sliceJSONWriter) WriteObjectField(name string) {
+	*w = append(append(append(*w, '"'), name...), `":`...)
+}
+func (w *sliceJSONWriter) WriteObjectEnd()  { *w = append(*w, '}') }
+func (w *sliceJSONWriter) WriteArrayStart() { *w = append(*w, '[') }
+func (w *sliceJSONWriter) WriteMore()       { *w = append(*w, ',') }
+func (w *sliceJSONWriter) WriteArrayEnd()   { *w = append(*w, ']') }
 
 func TestMarshalFastJSONArrayTo(t *testing.T) {
 	for _, items := range [][]Bytes{nil, {}, {nil}, {{}, {0x01}}, {make(Bytes, 70000), {0xde, 0xad}}} {

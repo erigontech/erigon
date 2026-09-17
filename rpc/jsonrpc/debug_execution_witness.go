@@ -547,19 +547,23 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 		w.WriteRawBytes(m.cachedJSON)
 		return nil
 	}
-	hexutil.WriteRawJSON(w, `{"state":`)
+	w.WriteObjectStart()
+	w.WriteObjectField("state")
 	hexutil.MarshalFastJSONArrayTo(w, m.State)
-	hexutil.WriteRawJSON(w, `,"codes":`)
+	w.WriteMore()
+	w.WriteObjectField("codes")
 	hexutil.MarshalFastJSONArrayTo(w, m.Codes)
 	if len(m.Keys) > 0 {
-		hexutil.WriteRawJSON(w, `,"keys":`)
+		w.WriteMore()
+		w.WriteObjectField("keys")
 		hexutil.MarshalFastJSONArrayTo(w, m.Keys)
 	}
 	if len(m.Headers) > 0 {
-		hexutil.WriteRawJSON(w, `,"headers":`)
+		w.WriteMore()
+		w.WriteObjectField("headers")
 		hexutil.MarshalFastJSONArrayTo(w, m.Headers)
 	}
-	hexutil.WriteRawJSON(w, "}")
+	w.WriteObjectEnd()
 	return nil
 }
 

@@ -28,48 +28,52 @@ type (
 
 func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if bundle == nil {
-		hexutil.WriteRawJSON(w, "null")
+		w.WriteNil()
 		return nil
 	}
-	hexutil.WriteRawJSON(w, "[")
+	w.WriteArrayStart()
 	for i, b := range bundle {
 		if i > 0 {
-			hexutil.WriteRawJSON(w, ",")
+			w.WriteMore()
 		}
 		if b == nil {
-			hexutil.WriteRawJSON(w, "null")
+			w.WriteNil()
 			continue
 		}
-		hexutil.WriteRawJSON(w, `{"blob":`)
+		w.WriteObjectStart()
+		w.WriteObjectField("blob")
 		w.WriteHex(b.Blob)
-		hexutil.WriteRawJSON(w, `,"proof":`)
+		w.WriteMore()
+		w.WriteObjectField("proof")
 		w.WriteHex(b.Proof)
-		hexutil.WriteRawJSON(w, "}")
+		w.WriteObjectEnd()
 	}
-	hexutil.WriteRawJSON(w, "]")
+	w.WriteArrayEnd()
 	return nil
 }
 
 func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if bundle == nil {
-		hexutil.WriteRawJSON(w, "null")
+		w.WriteNil()
 		return nil
 	}
-	hexutil.WriteRawJSON(w, "[")
+	w.WriteArrayStart()
 	for i, b := range bundle {
 		if i > 0 {
-			hexutil.WriteRawJSON(w, ",")
+			w.WriteMore()
 		}
 		if b == nil {
-			hexutil.WriteRawJSON(w, "null")
+			w.WriteNil()
 			continue
 		}
-		hexutil.WriteRawJSON(w, `{"blob":`)
+		w.WriteObjectStart()
+		w.WriteObjectField("blob")
 		w.WriteHex(b.Blob)
-		hexutil.WriteRawJSON(w, `,"proofs":`)
+		w.WriteMore()
+		w.WriteObjectField("proofs")
 		hexutil.MarshalFastJSONArrayTo(w, b.CellProofs)
-		hexutil.WriteRawJSON(w, "}")
+		w.WriteObjectEnd()
 	}
-	hexutil.WriteRawJSON(w, "]")
+	w.WriteArrayEnd()
 	return nil
 }
