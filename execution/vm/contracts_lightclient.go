@@ -150,3 +150,34 @@ func successfulMerkleResult() []byte {
 	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
 	return result
 }
+
+// tmHeaderValidateNano implemented as a native contract.
+// (it's disabled at Nano HF)
+type tmHeaderValidateNano struct{}
+
+func (c *tmHeaderValidateNano) RequiredGas(input []byte) uint64 {
+	return params2.TendermintHeaderValidateGas
+}
+
+func (c *tmHeaderValidateNano) Run([]byte) ([]byte, error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+func (c *tmHeaderValidateNano) Name() string {
+	return "TMHeaderValidateNano"
+}
+
+type iavlMerkleProofValidateNano struct{}
+
+func (c *iavlMerkleProofValidateNano) RequiredGas(input []byte) uint64 {
+	return params2.IAVLMerkleProofValidateGas
+}
+
+// input:
+// | payload length | payload    |
+// | 32 bytes       |            |
+func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+func (c *iavlMerkleProofValidateNano) Name() string { return "IAVLMerkleProofValidateNano" }
