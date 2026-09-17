@@ -674,9 +674,8 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 
 // destructScanFloor is the lowest TxIndex a wipe scan covers for a value floored
 // at floor, or scanEverything when the value predates the block. CodeHash keeps
-// the destroying tx's own entry, matching read_paths.go, which applies the same
-// bump to Balance — no wipe scan here takes Balance, because a destruct either
-// writes it at its own index or (EIP-8246) means to keep the prior cell.
+// the destroying tx's own entry. Balance is not scanned: a destruct either
+// writes it at its own index or preserves the prior cell.
 // UnknownDep alone means no cell: -1 is the block-begin system tx's own index.
 func destructScanFloor(path AccountPath, floor int) int {
 	if floor == UnknownDep {
@@ -1403,18 +1402,11 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		}
 		if valid == VersionValid && !absent && path != SelfDestructPath && path != AddressPath &&
-			path != IncarnationPath && path != CreateContractPath {
-			// Range-scan mirroring the read path's per-path destruct resolution
-			// (a re-creation flushes SelfDestruct=false above the wiping true
-			// cell, so latest-only probing misses it). Only non-absent reads
-			// consult the net: a destruct makes absence the truth, and a later
-			// re-establishment writes a cell that becomes the floor, so a stale
-			// absent read version-mismatches on its own. No revival relaxation,
-			// for the same reason. Deploy-derived paths scan inclusive of the
-			// floor index (a same-tx write+destruct wipes the cell itself);
-			// Balance/CodeHash stay strictly-above — the destroyer's own cells
-			// there (EIP-8246 preserved balance, reset code hash) are
-			// post-destruct truth.
+			path != IncarnationPath && path != CreateContractPath && path != BalancePath {
+			// Match the read path's wipe scan, including destructs hidden by a
+			// later revival. Only CodeHash keeps the destroyer's own cell.
+			// Balance is explicitly written or preserved; a changed balance is
+			// caught by the version/value check above.
 			lo := rr.Version().TxIndex + 1
 			if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath {
 				lo = rr.Version().TxIndex
