@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -484,9 +485,7 @@ func FuzzFillMessage(f *testing.F) {
 
 // respond mirrors answerInto: the success response, or the error response if the result does not encode.
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
-	if errMsg := (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result); errMsg != nil {
-		errMsg.writeTo(s)
-	}
+	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
 func blockResultFixture(n int) map[string]any {
@@ -551,19 +550,9 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
-	var out bytes.Buffer
-	s := jsonstream.Get(&out)
-	defer jsonstream.Put(s)
-
-	respond(s, json.RawMessage(`7`), (*hexutil.Bytes)(nil))
-	require.NoError(t, s.Flush())
-	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
-}
-
 func TestResponseWritesJSONToStream(t *testing.T) {
-	large := bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold)
-	for _, result := range []hexutil.Bytes{[]byte("first-and-longer"), []byte("2nd"), large, []byte("after-large")} {
+	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
+	for _, result := range []any{hexutil.Bytes("small"), large, (*hexutil.Bytes)(nil)} {
 		want, err := json.Marshal(result)
 		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
@@ -619,56 +608,57 @@ func TestResponseWritesAccProofResultToStream(t *testing.T) {
 
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
 // signalled only through Flush would be invisible there.
+func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
+	t.Run("json", func(t *testing.T) { testResponseEncodeFailure(t, make(chan int)) })
+	t.Run("fast", func(t *testing.T) { testResponseEncodeFailure(t, failingFastJSON{}) })
+}
+
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(hexutil.JSONWriter) error {
+func (failingFastJSON) MarshalFastJSONTo(jsonw.JSONWriter) error {
 	return errors.New("encode failed")
 }
 
-func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
-	for name, result := range map[string]any{"json": make(chan int), "fast": failingFastJSON{}} {
-		t.Run(name, func(t *testing.T) {
-			bad := func(s jsonstream.Stream) {
-				respond(s, json.RawMessage(`7`), result)
-			}
-			assertErrorResponse := func(t *testing.T, raw []byte) {
-				t.Helper()
-				var got jsonrpcMessage
-				require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
-				require.NotNil(t, got.Error, "must be an error response, got %s", raw)
-				require.Equal(t, `7`, string(got.ID))
-			}
-
-			t.Run("ws-ipc", func(t *testing.T) {
-				// answerBuffered: no writer, the caller reads Buffer() directly
-				s := jsonstream.Get(nil)
-				defer jsonstream.Put(s)
-				bad(s)
-				require.NotEmpty(t, s.Buffer(), "a dropped reply leaves the client waiting forever")
-				assertErrorResponse(t, s.Buffer())
-			})
-
-			t.Run("batch-item", func(t *testing.T) {
-				// one stream per batch entry; an empty buffer means the entry is dropped
-				var buf bytes.Buffer
-				s := jsonstream.Get(&buf)
-				defer jsonstream.Put(s)
-				bad(s)
-				require.NoError(t, s.Flush())
-				require.NotZero(t, buf.Len(), "an empty buffer drops this entry from the batch array")
-				assertErrorResponse(t, buf.Bytes())
-			})
-
-			t.Run("http-streaming", func(t *testing.T) {
-				var out bytes.Buffer
-				s := jsonstream.Get(&out)
-				defer jsonstream.Put(s)
-				bad(s)
-				require.NoError(t, s.Flush())
-				assertErrorResponse(t, out.Bytes())
-			})
-		})
+func testResponseEncodeFailure(t *testing.T, result any) {
+	bad := func(s jsonstream.Stream) {
+		respond(s, json.RawMessage(`7`), result)
 	}
+	assertErrorResponse := func(t *testing.T, raw []byte) {
+		t.Helper()
+		var got jsonrpcMessage
+		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
+		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Equal(t, `7`, string(got.ID))
+	}
+
+	t.Run("ws-ipc", func(t *testing.T) {
+		// answerBuffered: no writer, the caller reads Buffer() directly
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		bad(s)
+		require.NotEmpty(t, s.Buffer(), "a dropped reply leaves the client waiting forever")
+		assertErrorResponse(t, s.Buffer())
+	})
+
+	t.Run("batch-item", func(t *testing.T) {
+		// one stream per batch entry; an empty buffer means the entry is dropped
+		var buf bytes.Buffer
+		s := jsonstream.Get(&buf)
+		defer jsonstream.Put(s)
+		bad(s)
+		require.NoError(t, s.Flush())
+		require.NotZero(t, buf.Len(), "an empty buffer drops this entry from the batch array")
+		assertErrorResponse(t, buf.Bytes())
+	})
+
+	t.Run("http-streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		s := jsonstream.Get(&out)
+		defer jsonstream.Put(s)
+		bad(s)
+		require.NoError(t, s.Flush())
+		assertErrorResponse(t, out.Bytes())
+	})
 }
 
 // A result too large to buffer must still reach the client byte-for-byte,

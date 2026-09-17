@@ -177,7 +177,9 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 		enc []byte
 		err error
 	)
-	if fm, ok := data.(fastJSONResult); ok {
+	if fm, ok := data.(fastJSONMarshalerTo); ok && !isNilPointer(data) {
+		enc, err = marshalFastJSONTo(fm)
+	} else if fm, ok := data.(fastJSONResult); ok {
 		enc, err = fm.MarshalFastJSON()
 	} else {
 		enc, err = json.Marshal(data)

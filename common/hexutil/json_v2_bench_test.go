@@ -43,7 +43,7 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			w.Body.Reset()
-			if err := json.MarshalEncode(enc, code); err != nil {
+			if err := json.MarshalEncode(enc, &code); err != nil {
 				b.Fatal(err)
 			}
 		}
