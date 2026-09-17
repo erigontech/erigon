@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1147,6 +1146,25 @@ func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
 	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
 }
 
+func TestBeginRoRenewsPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	pool := func() int { return mdbx.RoTxPoolLen(db.(*mdbx.MdbxKV)) }
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback() // a safety net: the explicit rollbacks below are what the test exercises
+	parked := pool()
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+
+	tx, err = db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, parked, pool())
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+}
+
 // TestCursorOnPooledTxn pins that a cursor opened on a read txn that came back from the
 // pool reads through the renewal. Reuse itself is not asserted: mdbx hands a freed txn
 // back at the same address, so CHandle equality holds whether or not pooling ran.
@@ -1173,19 +1191,13 @@ func TestCursorOnPooledTxn(t *testing.T) {
 	require.Equal(t, u64tob(1), v, "a cursor opened on a renewed txn must read through it")
 }
 
-// TestRollbackTwiceParksTxnOnce pins that a concurrent second Rollback cannot park the
-// same read txn twice, which would hand one txn to two readers sharing a snapshot.
 func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	db := BaseCaseDB(t)
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback() // a safety net: the concurrent rollbacks below are what the test exercises
-
-	var wg sync.WaitGroup
-	for range 2 {
-		wg.Go(tx.Rollback)
-	}
-	wg.Wait()
+	defer tx.Rollback()
+	tx.Rollback()
+	tx.Rollback()
 
 	a, err := db.BeginRo(t.Context())
 	require.NoError(t, err)

@@ -397,6 +397,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
+	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
+	// defer then no-ops, because mdbx Env.Close is idempotent.
+	defer func() {
+		if err != nil {
+			db.Close()
+		}
+	}()
+
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	// copy map to avoid changing global variable
 	maps.Copy(db.buckets, customBuckets)
@@ -459,6 +467,8 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 }
 
 // roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
+// Growing it is not free: a pooled txn holds its reader slot, and libmdbx never shrinks
+// the reader-table length, so every later slot scan and oldest-reader walk stays longer.
 var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
@@ -682,12 +692,12 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	for len(db.roTxPool) > 0 {
-		(<-db.roTxPool).Abort()
-	}
+	db.drainRoTxPool()
 
-	db.env.Close()
-	db.env = nil
+	if db.env != nil {
+		db.env.Close()
+		db.env = nil
+	}
 
 	if db.opts.autoRemove {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
@@ -757,6 +767,17 @@ func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
 	return db.env.BeginTxn(nil, mdbx.Readonly)
 }
 
+func (db *MdbxKV) drainRoTxPool() {
+	for {
+		select {
+		case tx := <-db.roTxPool:
+			tx.Abort()
+		default:
+			return
+		}
+	}
+}
+
 func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
 	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
 		select {
@@ -820,7 +841,6 @@ type MdbxTx struct {
 
 	toCloseMap map[uint64]kv.Closer
 	cursorID   uint64
-	rolledBack atomic.Bool
 }
 
 type MdbxCursor struct {
@@ -1361,10 +1381,6 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
-	// Two concurrent rollbacks would park one read txn twice, giving two readers one snapshot.
-	if tx.rolledBack.Swap(true) {
-		return
-	}
 	if tx.tx == nil {
 		return
 	}

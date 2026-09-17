@@ -673,8 +673,7 @@ func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uin
 		if g.MatchCmp(filekey) != 0 {
 			return 0, false, nil
 		}
-		_, size = g.Skip()
-		return size, true, nil
+		return g.PeekSize(), true, nil
 	}
 	return 0, false, errors.New("no index defined")
 }

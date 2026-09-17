@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -159,6 +161,44 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return apis.eth.GetCode(ctx, testAddr, &bnh)
 	}},
+	{"eth_getTransactionCount", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.eth.GetTransactionCount(ctx, testAddr, &bnh)
+	}},
+	{"eth_getStorageAt", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.eth.GetStorageAt(ctx, testAddr, "0x0", &bnh)
+	}},
+	{"eth_getStorageValues", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &bnh)
+	}},
+	{"eth_exist", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.Exist(ctx, testAddr, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
+	}},
+	{"graphql_getAccountInfo", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		balance, nonce, code, err := apis.graphql.GetAccountInfo(ctx, testAddr, rpc.BlockNumber(ref.num))
+		return []any{balance, nonce, code}, err
+	}},
+	{"graphql_getAccountStorage", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", rpc.BlockNumber(ref.num))
+	}},
+	{"debug_accountAt", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.debug.AccountAt(ctx, ref.hash, 0, testAddr)
+	}},
+	{"debug_accountRange", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.debug.AccountRange(ctx, bnh, testAddr[:], 1, true, true, nil)
+	}},
+	{"debug_storageRangeAt", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.debug.StorageRangeAt(ctx, ref.hash, 0, testAddr, nil, 1)
+	}},
+	{"debug_getModifiedAccountsByNumber", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.debug.GetModifiedAccountsByNumber(ctx, rpc.BlockNumber(ref.num), nil)
+	}},
+	{"debug_getModifiedAccountsByHash", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.debug.GetModifiedAccountsByHash(ctx, ref.hash, nil)
+	}},
 	// A query that searches no index is served from the receipts, which are derived
 	// from the block's transactions. Filtering by address or topic adds a search
 	// over the standalone log indices, retired at the history cutoff whatever the
@@ -281,6 +321,9 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"trace_transaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.trace.Transaction(ctx, ref.txHash, new(bool), nil)
 	}},
+	{"trace_get", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.trace.Get(ctx, ref.txHash, nil, new(bool), nil)
+	}},
 	{"trace_filter", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return streamedResult(func(stream jsonstream.Stream) error {
 			return apis.trace.Filter(ctx, blockTraceFilter(ref.num), new(bool), nil, stream)
@@ -304,6 +347,55 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
+	// A witness re-executes the block, so it reads the body and the state history
+	// preceding it. The table drives the resolution step, the only part of the
+	// endpoint the gate sits in.
+	{"debug_executionWitness", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		tx, err := apis.debug.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return apis.debug.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
+	}},
+	{"eth_call", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		res, err := apis.eth.Call(ctx, pruneGatingCallArgs(), &bnh, nil, nil)
+		return []any{res}, err
+	}},
+	{"eth_estimateGas", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		args := pruneGatingCallArgs()
+		return apis.eth.EstimateGas(ctx, &args, &bnh, nil, nil)
+	}},
+	{"eth_createAccessList", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.eth.CreateAccessList(ctx, pruneGatingCallArgs(), &bnh, nil, nil)
+	}},
+	{"eth_callMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bundles, simulate := pruneGatingBundle(ref.num)
+		return apis.eth.CallMany(ctx, bundles, simulate, nil, nil)
+	}},
+	{"eth_callBundle", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.CallBundle(ctx, []common.Hash{ref.txHash}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)), nil)
+	}},
+	{"eth_simulateV1", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		req := SimulationRequest{BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{pruneGatingCallArgs()}}}}
+		return apis.eth.SimulateV1(ctx, req, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
+	}},
+	{"graphql_call", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.graphql.Call(ctx, rpc.BlockNumber(ref.num), pruneGatingCallArgs())
+	}},
+	{"trace_callMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+		return apis.trace.CallMany(ctx, traceCallManyRequest(), &bnh, nil)
+	}},
+	{"debug_traceCallMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		bundles, simulate := pruneGatingBundle(ref.num)
+		return streamedResult(func(stream jsonstream.Stream) error {
+			return apis.debug.TraceCallMany(ctx, bundles, simulate, &tracersConfig.TraceConfig{}, stream)
+		})
+	}},
 	// An Otterscan search walks the trace indices, retired at the history cutoff, and
 	// reads the transactions and receipts of every block it lands on.
 	{"ots_searchTransactionsBefore", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
@@ -319,9 +411,32 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"ots_traceTransaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.ots.TraceTransaction(ctx, ref.txHash)
 	}},
+	{"ots_getTransactionError", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		revert, err := apis.ots.GetTransactionError(ctx, ref.txHash)
+		return []any{revert}, err
+	}},
 	{"ots_hasCode", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.ots.HasCode(ctx, testAddr, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)))
 	}},
+}
+
+// pruneGatingCallArgs is a plain transfer, the cheapest call that still reads the
+// state of the block it is executed against.
+func pruneGatingCallArgs() ethapi.CallArgs {
+	gas := hexutil.Uint64(params.TxGas)
+	return ethapi.CallArgs{From: &testAddr, To: &common.Address{}, Gas: &gas}
+}
+
+// pruneGatingBundle is that same call as the bundle the callMany endpoints take.
+func pruneGatingBundle(block uint64) ([]Bundle, StateContext) {
+	return []Bundle{{Transactions: []ethapi.CallArgs{pruneGatingCallArgs()}}},
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block))}
+}
+
+// traceCallManyRequest is a single call with one trace type, in the
+// [[callparam, tracetypes]] shape trace_callMany decodes.
+func traceCallManyRequest() json.RawMessage {
+	return json.RawMessage(`[[{"from":"` + testAddr.Hex() + `","to":"` + (common.Address{}).Hex() + `"},["trace"]]]`)
 }
 
 // blockTraceFilter matches every trace of a single block.
@@ -497,6 +612,9 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chainConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+			// The stored genesis is read back by the commitment replay, whose decoder
+			// requires a difficulty: a spec without one writes a record it cannot read.
+			Difficulty: uint256.NewInt(1),
 		}),
 		execmoduletester.WithKey(testKey),
 	}
