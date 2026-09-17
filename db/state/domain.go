@@ -1489,6 +1489,9 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 
 	if useCache {
 		if cv, ok := dt.visible.cache.Get(hi); ok && cv.lo == lo {
+			if !cv.found {
+				return nil, false, 0, 0, nil
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1532,7 +1535,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		}
 
 		if useCache {
-			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), lo: lo, v: v})
+			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{found: true, lvl: uint8(i), lo: lo, v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
@@ -1541,7 +1544,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 	}
 
 	if useCache {
-		dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lvl: 0, lo: lo, v: nil})
+		dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lo: lo})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1559,7 +1562,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 
 	if useCache {
 		if cv, ok := dt.visible.cache.Get(hi); ok && cv.lo == lo {
-			return len(cv.v), true, nil
+			return len(cv.v), cv.found, nil
 		}
 	}
 	for i, f := range slices.Backward(dt.files) {

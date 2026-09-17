@@ -21,12 +21,13 @@ func u192noHash(u u192) uint32         { return uint32(u.hi) } //nolint
 type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
-// domainGetFromFileCacheItem is a latest value read from the files of one visible set: lvl indexes those files,
+// domainGetFromFileCacheItem is a latest-value lookup in the files of one visible set: lvl indexes those files,
 // lo is the second half of the key hash (the cache is keyed by the first).
 type domainGetFromFileCacheItem struct {
-	lvl uint8
-	lo  uint64
-	v   []byte
+	found bool
+	lvl   uint8
+	lo    uint64
+	v     []byte
 }
 
 var (
@@ -38,7 +39,7 @@ var (
 // and those files stay open while any tx can reach the set.
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{name: name, files: files}
-	if domainGetFromFileCacheEnabled && domainGetFromFileCacheSize > 0 {
+	if domainGetFromFileCacheEnabled && domainGetFromFileCacheSize > 0 && name != kv.CommitmentDomain {
 		d.cache = cache.NewByteLRU(domainGetFromFileCacheSize, func(_ uint64, it domainGetFromFileCacheItem) int64 {
 			return int64(len(it.v)) + cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
 		})

@@ -1110,6 +1110,28 @@ func TestDomain_LatestFromFilesCacheServesOtherTxs(t *testing.T) {
 	require.Equal(t, want, cached.v)
 }
 
+func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
+	t.Parallel()
+	d, _, _ := testDomainKeyInFiles(t)
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	absent := []byte("absent")
+
+	first := d.beginFilesRo(dv, hv, iv)
+	_, found, _, _, err := first.getLatestFromFiles(absent, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.False(t, found)
+	first.Close()
+
+	second := d.beginFilesRo(dv, hv, iv)
+	defer second.Close()
+	_, found, _, _, err = second.getLatestFromFiles(absent, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.False(t, found, "a miss one tx cached must stay a miss for the next tx")
+	_, found, err = second.getLatestFromFilesValSize(absent, 0)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func TestDomain_LatestFromFilesCacheRejectsHashCollision(t *testing.T) {
 	t.Parallel()
 	d, key, want := testDomainKeyInFiles(t)
