@@ -114,8 +114,8 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
   * Default: unset (uses the value from `erigondb.toml`)
   * Use with care — an incorrect value may affect database structure.
-* `--commitment.plainValues` *(New in v3.6)*: On the first start of a fresh datadir, write commitment values in plain form (no shortened key references). This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists.
-  * Default: `false`
+* `--commitment.plainValues` *(New in v3.6)*: Chooses the commitment branch encoding recorded in `snapshots/erigondb.toml` at the moment Erigon creates that file. `true` writes commitment values in plain form (keys inline); `false` writes shortened key references. This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists, and an `erigondb.toml` delivered by the downloader wins over it. See [Commitment Snapshot Format](/fundamentals/snapshots-management#commitment-snapshot-format).
+  * Default: plain. Leaving the flag out selects plain, which is v3.6's compiled default; passing `--commitment.plainValues=false` explicitly selects the older *referenced* encoding. Before v3.6 the compiled default was referenced.
 
 ### Pruning and Snapshots
 
