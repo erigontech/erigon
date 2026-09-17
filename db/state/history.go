@@ -1189,17 +1189,19 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
+	var v []byte
 	if compressedPageValuesCount > 1 && ht.h.pages != nil {
-		return ht.valueFromCachedPage(historyItem, compressedPageValuesCount, offset, historyKey)
+		v, err = ht.valueFromCachedPage(historyItem, compressedPageValuesCount, offset, historyKey)
+	} else {
+		g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
+		g.Reset(offset)
+		v, err = g.GetFromPage(historyKey)
 	}
-	g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
-	g.Reset(offset)
-	v, err := g.GetFromPage(historyKey)
 	if err != nil {
 		return nil, false, err
 	}
 	if traceGetAsOf == ht.h.FilenameBase {
-		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
+		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, historyItem.src.decompressor.FileName(), histTxNum, v == nil)
 	}
 	return v, true, nil
 }
@@ -1226,7 +1228,7 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 
 // valueFromCachedPage looks key up in the decompressed page at offset, caching the page on a miss.
 // A value from a cached page points into a shared page, so callers must not modify it.
-func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, pageSize int, offset uint64, key []byte) ([]byte, bool, error) {
+func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, pageSize int, offset uint64, key []byte) ([]byte, error) {
 	d := item.src.decompressor
 	k := offset*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(d)))
 	if p, ok := ht.h.pages.Get(k); ok && p.d == d && p.offset == offset {
@@ -1234,20 +1236,20 @@ func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, pageSize int, offse
 			panic(fmt.Sprintf("history page %s:%d was modified after caching", d.FileName(), offset))
 		}
 		v, _ := seg.GetFromPage(key, p.data, nil, false)
-		return v, true, nil
+		return v, nil
 	}
 	g := ht.pagedGetter(item.i, pageSize)
 	g.Reset(offset)
 	v, err := g.GetFromPage(key)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	p := historyPage{d: d, offset: offset, data: bytes.Clone(g.DecodedPage())}
 	if dbg.AssertEnabled {
 		p.sum = crc32.ChecksumIEEE(p.data)
 	}
 	ht.h.pages.Add(k, p)
-	return v, true, nil
+	return v, nil
 }
 
 func historyKey(txNum uint64, key []byte, buf []byte) []byte {
