@@ -1229,7 +1229,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 		executor.tasks = append(executor.tasks, t)
 		executor.results = append(executor.results, nil)
-		executor.txIncarnations = append(executor.txIncarnations, 0)
 		executor.execFailed = append(executor.execFailed, 0)
 
 		executor.execTasks.pushPending(i)
@@ -2457,9 +2456,6 @@ type blockExecutor struct {
 	// Stores the inputs and outputs of the last incarnation of all transactions
 	blockIO *state.VersionedIO
 
-	// Tracks the incarnation number of each transaction
-	txIncarnations []int
-
 	// Time records when the parallel execution starts
 	begin time.Time
 
@@ -3087,9 +3083,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 
 			be.cntValidationFail++
 			be.execFailed[tx]++
-			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx])
-			}
 			be.validateTasks.clearInProgress(tx)
 			if r := be.revalidateCommittedDependents(tx, nil); r != nil {
 				return r, nil
@@ -3447,48 +3440,26 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	// dispatch drains pending, enqueuing each tx. Budget bounds only fresh
-	// (incarnation 0) enqueues, which occupy an input-channel slot; retries go to the
-	// unbounded retry heap. Txs that can't go now are held aside and re-added after
-	// the loop so they aren't re-taken in the same call.
+	// dispatch drains pending, enqueuing each tx. Budget bounds enqueues, which each
+	// occupy an input-channel slot. Txs that can't go now are left in pending.
 	dispatch := func() (dispatched int) {
 		if be.execTasks.minPending() < 0 {
 			return 0
 		}
 		budget := len(be.tasks)
-		var holdBack sort.IntSlice
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 {
 				break
 			}
-			incarnation := be.txIncarnations[nextTx]
-			// A fresh tx needs a free input-channel slot. If none, leave it in pending
+			// A tx needs a free input-channel slot. If none, leave it in pending
 			// (peek, don't take): re-inserting the lowest index would be O(pending) churn.
-			if incarnation == 0 && budget <= 0 {
+			if budget <= 0 {
 				break
 			}
 			be.execTasks.takeNextPending()
 			execTask := be.tasks[nextTx]
 			isNextValidated := nextTx == maxValidated+1
-
-			if !isNextValidated && incarnation > 0 {
-				txIndex := execTask.Version().TxIndex
-				if be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
-					be.versionMap.ValidateVersion(txIndex, be.blockIO,
-						func(_, writtenVersion state.Version) state.VersionValidity {
-							wi := writtenVersion.TxIndex + 1
-							if wi >= 0 && wi < len(be.txIncarnations) &&
-								writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[wi] {
-								return state.VersionValid
-							}
-							return state.VersionInvalid
-						}, false, "") != state.VersionValid {
-					holdBack = append(holdBack, nextTx)
-					continue
-				}
-			}
 
 			tv := &taskVersion{
 				execTask:     execTask,
@@ -3508,7 +3479,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 			be.selfLoopDispatched[nextTx] = true
 			version := execTask.Version()
-			version.Incarnation = incarnation
+			version.Incarnation = 0
 			tv.version = version
 			pe.dispatchRunSelfLoop(be, tv)
 			budget--
@@ -3516,14 +3487,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			if !isNextValidated {
 				be.cntSpecExec++
 			}
-			if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
-				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx])
-			}
 			be.cntExec++
 			dispatched++
-		}
-		for _, tx := range holdBack {
-			be.execTasks.pushPending(tx)
 		}
 		return dispatched
 	}
