@@ -146,7 +146,7 @@ func TestProvider_FinalizeUnwind_FSAndInventoryConverge(t *testing.T) {
 	// four 003015..003019 ranges qualify; the four 003010..003014
 	// ranges have FromBlock ≤ 3,014,500 and are preserved.
 	toBlock := uint64(3_014_500)
-	pastEntries := p.collectFilesPastBlock(toBlock, 0)
+	pastEntries := p.collectFilesPastBlock(toBlock, 0, 0)
 	require.Len(t, pastEntries, 12, "12 entries past toBlock=3,014,500 (4 ranges × 3 kinds)")
 
 	stageNames := make([]string, 0, len(pastEntries))
@@ -227,7 +227,7 @@ func TestProvider_FinalizeUnwind_FSAndInventoryConverge_NoOpWhenAlreadyConsisten
 
 	// Target ABOVE every range — nothing to trim.
 	toBlock := uint64(3_020_000)
-	pastEntries := p.collectFilesPastBlock(toBlock, 0)
+	pastEntries := p.collectFilesPastBlock(toBlock, 0, 0)
 	require.Empty(t, pastEntries, "target above every range → nothing to stage")
 
 	require.NoError(t, p.FinalizeUnwind())
@@ -259,7 +259,7 @@ func TestProvider_AbortUnwind_FSAndInventoryUnchanged(t *testing.T) {
 
 	// Stage the past-target entries.
 	toBlock := uint64(3_011_500)
-	pastEntries := p.collectFilesPastBlock(toBlock, 0)
+	pastEntries := p.collectFilesPastBlock(toBlock, 0, 0)
 	require.Len(t, pastEntries, 3, "3 past-target entries (1 range × 3 kinds)")
 	stageNames := make([]string, 0, len(pastEntries))
 	stagePaths := make([]string, 0, len(pastEntries))

@@ -278,66 +278,6 @@ func TestPopulateFromName_NilOrEmpty(t *testing.T) {
 	require.False(t, PopulateFromName(&FileEntry{}))
 }
 
-// TestPopulateFromName_V4StateFileSkipsStepAxis pins the v4.0 dispatch:
-// PopulateFromName has no stepSize so it cannot convert v4.0 raw
-// txnums to step indices. Rather than silently writing the txnum
-// value into FromStep/ToStep (the legacy bug this fix guards), it
-// leaves the step axis at zero so the caller using
-// PopulateFromNameWithStepSize is the only path that populates v4.0
-// step coords.
-func TestPopulateFromName_V4StateFileSkipsStepAxis(t *testing.T) {
-	t.Parallel()
-	e := &FileEntry{Name: "v4.0-accounts.0-128000.kv"}
-	populated := PopulateFromName(e)
-	require.True(t, populated, "Kind and Domain still populate even without step axis")
-	require.Equal(t, DomainAccounts, e.Domain)
-	require.Equal(t, KindKV, e.Kind)
-	require.Equal(t, uint64(0), e.FromStep,
-		"v4.0 raw-txnum names must NOT silently populate FromStep — stepSize unknown")
-	require.Equal(t, uint64(0), e.ToStep,
-		"v4.0 raw-txnum names must NOT silently populate ToStep — stepSize unknown")
-}
-
-// TestPopulateFromNameWithStepSize_V4Dispatch confirms the v4.0
-// version-aware variant converts raw txnums to step indices via
-// the supplied stepSize.
-func TestPopulateFromNameWithStepSize_V4Dispatch(t *testing.T) {
-	t.Parallel()
-	const stepSize = 1000
-	e := &FileEntry{Name: "v4.0-accounts.0-128000.kv"}
-	require.True(t, PopulateFromNameWithStepSize(e, stepSize))
-	require.Equal(t, uint64(0), e.FromStep, "0 / 1000 = 0")
-	require.Equal(t, uint64(128), e.ToStep, "128000 / 1000 = 128")
-}
-
-// TestPopulateFromNameWithStepSize_LegacyUnchanged confirms the v4.0
-// variant doesn't alter the legacy step-indexed path — the same
-// (FromStep, ToStep) as PopulateFromName returns.
-func TestPopulateFromNameWithStepSize_LegacyUnchanged(t *testing.T) {
-	t.Parallel()
-	e := &FileEntry{Name: "v1.0-accounts.0-256.kv"}
-	require.True(t, PopulateFromNameWithStepSize(e, 1000))
-	require.Equal(t, uint64(0), e.FromStep)
-	require.Equal(t, uint64(256), e.ToStep,
-		"legacy v1.0 files are already step-indexed; stepSize doesn't divide them")
-}
-
-// TestPopulateFromNameWithStepSize_ZeroStepSize confirms the v4.0
-// variant degrades to PopulateFromName-equivalent behavior when
-// stepSize==0: legacy files populate normally; v4.0 files skip the
-// step axis (can't divide by zero).
-func TestPopulateFromNameWithStepSize_ZeroStepSize(t *testing.T) {
-	t.Parallel()
-	legacy := &FileEntry{Name: "v1.0-accounts.0-256.kv"}
-	require.True(t, PopulateFromNameWithStepSize(legacy, 0))
-	require.Equal(t, uint64(256), legacy.ToStep, "legacy files don't need stepSize")
-
-	v4 := &FileEntry{Name: "v4.0-accounts.0-128000.kv"}
-	require.True(t, PopulateFromNameWithStepSize(v4, 0))
-	require.Equal(t, uint64(0), v4.ToStep,
-		"v4.0 files with stepSize==0 leave step axis unset (no divide-by-zero)")
-}
-
 // TestRelPathForName_Idempotent: the inventory mixes basenames and
 // already-relative names (disk-scan path uses basenames; legacy
 // retire OnFilesChange uses subdir-prefixed names). RelPathForName
@@ -400,4 +340,32 @@ func TestAdvanceStep_ZeroKeyNoOp(t *testing.T) {
 	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, State: LifecycleIndexed})
 	advanced := inv.AdvanceStep(StepKey{}, LifecycleAdvertisable)
 	require.Empty(t, advanced)
+}
+
+// TestPopulateFromName_V4StateFileTxNumRange pins that a v4 state file is
+// registered with its exact txNum coverage and no step range. v4 files are
+// cut mid-step by unwinds and retire tails, so a step range would either
+// overstate or erase their coverage; every range decision reads TxNumRange.
+func TestPopulateFromName_V4StateFileTxNumRange(t *testing.T) {
+	const stepSize = 390625
+	e := &FileEntry{Name: "domain/v4.0-commitment.126579863-126953125.kv"}
+	require.True(t, PopulateFromName(e))
+
+	require.Equal(t, DomainCommitment, e.Domain)
+	require.Equal(t, KindKV, e.Kind)
+	require.Zero(t, e.FromStep, "a v4 file has no step range")
+	require.Zero(t, e.ToStep, "a v4 file has no step range")
+	from, to := e.TxNumRange(stepSize)
+	require.Equal(t, uint64(126579863), from)
+	require.Equal(t, uint64(126953125), to)
+}
+
+// TestFileEntry_TxNumRange_StepNamed confirms step-named state files keep
+// their step-derived coverage.
+func TestFileEntry_TxNumRange_StepNamed(t *testing.T) {
+	e := &FileEntry{Name: "domain/v2.2-commitment.256-319.kv"}
+	require.True(t, PopulateFromName(e))
+	from, to := e.TxNumRange(390625)
+	require.Equal(t, uint64(256*390625), from)
+	require.Equal(t, uint64(319*390625), to)
 }

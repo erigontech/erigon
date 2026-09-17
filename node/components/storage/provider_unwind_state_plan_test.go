@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
+
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -360,6 +362,69 @@ func TestOverrideActionForDomain(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.wantAction, got)
+		})
+	}
+}
+
+// TestClassifyV4StateFileForUnwind pins the exact-range verdict for v4 state
+// files. They are cut mid-step, so the step classifier cannot place them: it
+// sees no step range and keeps every one, leaving content past the target
+// visible after the unwind.
+func TestClassifyV4StateFileForUnwind(t *testing.T) {
+	t.Parallel()
+	const lastTxNum = 124_947_128
+	cases := []struct {
+		name     string
+		from, to uint64
+		want     stateFileAction
+	}{
+		{"ends before target", 124_609_375, 124_900_000, actionKeep},
+		{"ends exactly after target", 124_609_375, lastTxNum + 1, actionKeep},
+		{"straddles target", 124_609_375, 125_000_000, actionRegenTruncate},
+		{"starts at target", lastTxNum, 125_000_000, actionRegenTruncate},
+		{"starts just past target", lastTxNum + 1, 125_000_000, actionRemove},
+		{"entirely past target", 126_562_500, 126_579_863, actionRemove},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, classifyV4StateFileForUnwind(tc.from, tc.to, lastTxNum))
+		})
+	}
+}
+
+// TestPlanStateFileUnwind_V4Files pins how the unwind regen treats v4 .kv
+// files: judged by exact txNum range, truncated from their own first txNum,
+// never split-emitted. Planned by step, every v4 file is kept, and a v4
+// straddler would be rewritten as if it started at txNum 0.
+func TestPlanStateFileUnwind_V4Files(t *testing.T) {
+	t.Parallel()
+	const (
+		stepSize     = 390_625
+		lastTxNum    = 124_947_128 // mid-step 319
+		alignedTxNum = 319*stepSize - 1
+	)
+	entry := func(name string) *snapshot.FileEntry {
+		e := &snapshot.FileEntry{Name: name, Local: true}
+		snapshot.PopulateFromName(e)
+		return e
+	}
+	cases := []struct {
+		name string
+		file string
+		want stateFileUnwindPlan
+	}{
+		{"v4 straddler truncates from its own start", "domain/v4.0-accounts.124609375-125000000.kv",
+			stateFileUnwindPlan{action: actionRegenTruncate, fromTxNum: 124_609_375}},
+		{"v4 past target is removed", "domain/v4.0-accounts.126562500-126579863.kv",
+			stateFileUnwindPlan{action: actionRemove, fromTxNum: 126_562_500}},
+		{"v4 before target is kept", "domain/v4.0-accounts.124218750-124609375.kv",
+			stateFileUnwindPlan{action: actionKeep, fromTxNum: 124_218_750}},
+		{"wide step straddler still split-emits", "domain/v2.2-accounts.256-320.kv",
+			stateFileUnwindPlan{action: actionRegenTruncate, fromTxNum: 256 * stepSize, splitEmit: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, planStateFileUnwind(entry(tc.file), stepSize, lastTxNum, alignedTxNum, true))
 		})
 	}
 }

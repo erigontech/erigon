@@ -19,6 +19,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -258,4 +259,39 @@ func TestDriver_NonPauseErrorStillQuarantines(t *testing.T) {
 
 	require.True(t, d.isQuarantined("bad.kv"),
 		"3 non-pause failures at threshold=3 must quarantine")
+}
+
+// TestDriver_V4StateFileNeverValidated pins that a v4 state file stops at
+// LifecycleIndexed. v4 files are transient local outputs of unwinds and retire
+// tails, replaced by the background merge; they are never seeded or published,
+// so the publication validators can never pass for them and would pause or
+// quarantine them on every sweep.
+func TestDriver_V4StateFileNeverValidated(t *testing.T) {
+	inv := snapshot.NewInventory()
+	v4 := &snapshot.FileEntry{Name: "domain/v4.0-commitment.126579863-126953125.kv", Local: true, State: snapshot.LifecycleIndexed}
+	snapshot.PopulateFromName(v4)
+	require.NoError(t, inv.AddFile(v4))
+	stepNamed := &snapshot.FileEntry{Name: "domain/v2.2-commitment.256-320.kv", Local: true, State: snapshot.LifecycleIndexed}
+	snapshot.PopulateFromName(stepNamed)
+	require.NoError(t, inv.AddFile(stepNamed))
+
+	var mu sync.Mutex
+	var validated []string
+	d := &Driver{
+		Inv: inv,
+		OnValidation: func(_ context.Context, e *snapshot.FileEntry) error {
+			mu.Lock()
+			defer mu.Unlock()
+			validated = append(validated, e.Name)
+			return nil
+		},
+	}
+	d.Sweep(context.Background(), nil)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{stepNamed.Name}, validated, "only the step-named file enters validation")
+	state, ok := inv.LifecycleState(v4.Name)
+	require.True(t, ok)
+	require.Equal(t, snapshot.LifecycleIndexed, state, "a v4 file stays at Indexed")
 }

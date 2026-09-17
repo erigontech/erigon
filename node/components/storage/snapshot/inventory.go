@@ -91,6 +91,14 @@ type FileEntry struct {
 	FromBlock uint64
 	ToBlock   uint64
 
+	// TxNum range [FromTxNum, ToTxNum) of a v4.0+ state file, whose name
+	// carries raw txNums. v4 files are cut mid-step, so they have no step
+	// range; FromStep/ToStep stay zero and these fields hold the exact
+	// coverage. Zero for every other file — use TxNumRange to read a state
+	// file's txNum coverage regardless of naming.
+	FromTxNum uint64
+	ToTxNum   uint64
+
 	// File name (relative to snapshots directory; may include subdirs).
 	Name string
 
@@ -183,6 +191,20 @@ type Anchors struct {
 
 // IsZero reports whether no anchor has been recorded.
 func (a Anchors) IsZero() bool { return a == Anchors{} }
+
+// IsTxNumNamed reports whether the entry is a v4.0+ state file, named by txNum.
+func (f *FileEntry) IsTxNumNamed() bool {
+	return f.ToTxNum > 0
+}
+
+// TxNumRange returns the [from, to) txNum coverage of a state file: exact
+// for v4.0+ files, step-derived for step-named ones.
+func (f *FileEntry) TxNumRange(stepSize uint64) (from, to uint64) {
+	if f.ToTxNum > 0 {
+		return f.FromTxNum, f.ToTxNum
+	}
+	return f.FromStep * stepSize, f.ToStep * stepSize
+}
 
 // Range returns the StepRange for this file entry.
 func (f *FileEntry) Range() StepRange {

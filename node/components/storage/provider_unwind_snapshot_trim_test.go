@@ -109,7 +109,7 @@ func TestCollectFilesPastBlock_StraddleFileSurvives(t *testing.T) {
 	p := &Provider{Inventory: inv}
 	// Aggregator stays nil; state files are out of scope for this
 	// block-trim test.
-	out := p.collectFilesPastBlock(2_912_999, 0)
+	out := p.collectFilesPastBlock(2_912_999, 0, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -148,7 +148,7 @@ func TestCollectFilesPastBlock_ExactBoundaryStays(t *testing.T) {
 	}
 
 	p := &Provider{Inventory: inv}
-	out := p.collectFilesPastBlock(2_912_999, 0)
+	out := p.collectFilesPastBlock(2_912_999, 0, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -180,7 +180,7 @@ func TestCollectFilesPastBlock_AllPastRemoved(t *testing.T) {
 	}
 
 	p := &Provider{Inventory: inv}
-	out := p.collectFilesPastBlock(2_910_000, 0)
+	out := p.collectFilesPastBlock(2_910_000, 0, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -225,7 +225,7 @@ func TestCollectFilesPastBlock_StateDomainFilesPastStepBoundary(t *testing.T) {
 	// Aggregator sentinel — collectFilesPastBlock only checks for non-nil.
 	// Any non-zero-pointer value works.
 	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
-	out := p.collectFilesPastBlock(2_912_500, 266)
+	out := p.collectFilesPastBlock(2_912_500, 266, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -246,8 +246,8 @@ func TestCollectFilesPastBlock_StateDomainFilesPastStepBoundary(t *testing.T) {
 // fix to the soak v14 iter-3 wedge: when the aggregator has merged
 // step files into wider chunks, the file STRADDLING stepBoundary
 // (FromStep < stepBoundary AND ToStep > stepBoundary) must NOT be
-// collected for removal. It is needed for boundaryStepFileForDomain
-// to regenerate in place — destroying it would leave the unwind with
+// collected for removal. The regen path truncates it in place —
+// destroying it would leave the unwind with
 // no commitment anchor → Caplin's catchup wedges on `behind
 // commitment`.
 //
@@ -274,7 +274,7 @@ func TestCollectFilesPastBlock_StraddleStateFilePreserved(t *testing.T) {
 	}
 
 	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
-	out := p.collectFilesPastBlock(3_006_443, 275)
+	out := p.collectFilesPastBlock(3_006_443, 275, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -310,7 +310,7 @@ func TestCollectFilesPastBlock_StateFileEntirelyPastStillTrimmed(t *testing.T) {
 	}
 
 	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
-	out := p.collectFilesPastBlock(3_006_443, 275)
+	out := p.collectFilesPastBlock(3_006_443, 275, 0)
 
 	got := make([]string, len(out))
 	for i, e := range out {
@@ -325,4 +325,77 @@ func TestCollectFilesPastBlock_StateFileEntirelyPastStillTrimmed(t *testing.T) {
 		},
 		got,
 		"files with FromStep >= stepBoundary lie entirely past the boundary and must be trimmed")
+}
+
+// TestCollectFilesPastBlock_V4StateFilesPastBoundaryCollected pins that v4
+// state files are trimmed when they lie past the unwind target. They are
+// named by txNum and registered without a step axis, so a step comparison
+// never selects them. Left visible, a v4 commitment file above the target
+// makes SeekCommitment resume past it while the other domains were rewound:
+// execution skips the gap and the first block after it fails on gas used.
+func TestCollectFilesPastBlock_V4StateFilesPastBoundaryCollected(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, name := range []string{
+		"domain/v2.2-commitment.256-319.kv",
+		// v4 #1 cut at the target (lastTxNum 124947128): stays.
+		"domain/v4.0-commitment.124609375-124947129.kv",
+		// Produced by an earlier, shallower unwind: entirely past the target.
+		"domain/v4.0-commitment.126562500-126579863.kv",
+		"domain/v4.0-commitment.126579863-126953125.kv",
+		"domain/v4.0-accounts.126562500-126579863.kv",
+	} {
+		e := &snapshot.FileEntry{Name: name, Local: true}
+		snapshot.PopulateFromName(e)
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
+	out := p.collectFilesPastBlock(3_543_422, 320, 124_947_128)
+
+	got := make([]string, len(out))
+	for i, e := range out {
+		got[i] = e.Name
+	}
+	sort.Strings(got)
+	require.Equal(t,
+		[]string{
+			"domain/v4.0-accounts.126562500-126579863.kv",
+			"domain/v4.0-commitment.126562500-126579863.kv",
+			"domain/v4.0-commitment.126579863-126953125.kv",
+		},
+		got,
+		"v4 state files past the unwind target must be trimmed; the v4 file cut at the target stays")
+}
+
+// TestCollectFilesPastBlock_V4TailPastTargetInBoundaryStepCollected pins that
+// a v4 tail starting inside the boundary step but after the target is trimmed.
+// Unwinds cut v4 files mid-step, so a later, deeper unwind can land in the
+// same step ahead of such a tail; a step comparison keeps it even though all
+// of its content lies past the target.
+func TestCollectFilesPastBlock_V4TailPastTargetInBoundaryStepCollected(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, name := range []string{
+		// v4 #1 straddling the target (lastTxNum 126570000): stays for regen.
+		"domain/v4.0-commitment.126562500-126579863.kv",
+		// v4 #2 tail in the same step, starting past the target.
+		"domain/v4.0-commitment.126579863-126953125.kv",
+	} {
+		e := &snapshot.FileEntry{Name: name, Local: true}
+		snapshot.PopulateFromName(e)
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
+	out := p.collectFilesPastBlock(3_605_000, 325, 126_570_000)
+
+	got := make([]string, len(out))
+	for i, e := range out {
+		got[i] = e.Name
+	}
+	require.Equal(t,
+		[]string{"domain/v4.0-commitment.126579863-126953125.kv"},
+		got,
+		"a v4 tail wholly past the target must be trimmed even inside the boundary step")
 }

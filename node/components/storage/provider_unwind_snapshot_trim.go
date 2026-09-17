@@ -45,12 +45,12 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 		return nil, nil
 	}
 
-	stepBoundary, err := p.computeStepBoundaryForBlock(ctx, tx, toBlock)
+	stepBoundary, lastTxNum, err := p.computeStepBoundaryForBlock(ctx, tx, toBlock)
 	if err != nil {
 		return nil, err
 	}
 
-	toRemove := p.collectFilesPastBlock(toBlock, stepBoundary)
+	toRemove := p.collectFilesPastBlock(toBlock, stepBoundary, lastTxNum)
 
 	// Block-snapshot straddle rebuilds. The file whose [FromBlock,
 	// ToBlock) straddles toBlock has valid block-data for blocks ≤
@@ -123,19 +123,19 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 // Returns 0 with no error when the Provider has no Aggregator
 // (state-file trim is skipped; the caller checks Aggregator-nil
 // separately).
-func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) (uint64, error) {
+func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) (stepBoundary, lastTxNum uint64, err error) {
 	if p.Aggregator == nil {
-		return 0, nil
+		return 0, 0, nil
 	}
-	lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
+	lastTxNum, err = rawdbv3.TxNums.Max(ctx, tx, toBlock)
 	if err != nil {
-		return 0, fmt.Errorf("read TxNums.Max(%d): %w", toBlock, err)
+		return 0, 0, fmt.Errorf("read TxNums.Max(%d): %w", toBlock, err)
 	}
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
-		return 0, fmt.Errorf("aggregator StepSize() == 0 — chain misconfigured")
+		return 0, 0, fmt.Errorf("aggregator StepSize() == 0 — chain misconfigured")
 	}
-	return (lastTxNum / stepSize) + 1, nil
+	return (lastTxNum / stepSize) + 1, lastTxNum, nil
 }
 
 // collectFilesPastBlock walks the inventory and returns every file
@@ -147,7 +147,7 @@ func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.Tempor
 // regenerateBoundaryStepFiles). State files are only collected when
 // p.Aggregator != nil — without an aggregator the stepBoundary input
 // is 0 and would over-trim everything.
-func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapshot.FileEntry {
+func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary, lastTxNum uint64) []*snapshot.FileEntry {
 	var out []*snapshot.FileEntry
 	var blockHits, stateHits, stateScanned int
 	domainsScanned := 0
@@ -164,7 +164,7 @@ func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapsh
 			domainsScanned++
 			for _, e := range p.Inventory.AllDomainFiles(domain) {
 				stateScanned++
-				if e.FromStep >= stepBoundary {
+				if stateFileStartsPast(e, stepBoundary, lastTxNum) {
 					out = append(out, e)
 					stateHits++
 				}
@@ -180,4 +180,14 @@ func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapsh
 	}
 
 	return out
+}
+
+// stateFileStartsPast reports whether a state file holds nothing at or below
+// the unwind target. v4 files are cut mid-step, so they are judged by their
+// exact first txNum against lastTxNum rather than by step.
+func stateFileStartsPast(e *snapshot.FileEntry, stepBoundary, lastTxNum uint64) bool {
+	if e.IsTxNumNamed() {
+		return e.FromTxNum > lastTxNum
+	}
+	return e.FromStep >= stepBoundary
 }

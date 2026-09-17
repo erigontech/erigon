@@ -169,12 +169,6 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	if stepSize == 0 {
 		return nil, fmt.Errorf("aggregator StepSize() == 0")
 	}
-	stepBoundary := (lastTxNum / stepSize) + 1
-	// True when lastTxNum is the last txN of its step (i.e. lastTxNum+1
-	// is a step edge). Mid-step targets require classifying the file
-	// whose ToStep equals stepBoundary as a straddler so it emits a v4
-	// mid-step file instead of overwriting the step-aligned name.
-	boundaryAligned := (lastTxNum+1)%stepSize == 0
 
 	// Encode the commitment anchor once — every regen of the
 	// commitment domain plants the same blob.
@@ -260,8 +254,9 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		}
 
 		// Walk every file; map each to an action via classifyStateFileForUnwind.
-		for i, fileEntry := range domainFiles {
-			action := classifyStateFileForUnwind(ranges[i], stepBoundary, boundaryAligned)
+		for _, fileEntry := range domainFiles {
+			plan := planStateFileUnwind(fileEntry, stepSize, lastTxNum, recompute.alignedTxNum, recompute.alignedBranches != nil)
+			action := plan.action
 			action, err = overrideActionForDomain(action, kvDomain, ixCoversTarget)
 			if err != nil {
 				return nil, fmt.Errorf("classify %s file %s: %w", sd, fileEntry.Name, err)
@@ -301,13 +296,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// step alone). For mode-C (per-step straddler, fromStep ==
 			// targetStep) only the stub is needed; the plain v4 truncate
 			// path below handles that.
-			targetStepIdx := kv.Step(0)
-			if recompute.alignedBranches != nil {
-				targetStepIdx = kv.Step((recompute.alignedTxNum + 1) / stepSize)
-			}
-			splitEmit := action == actionRegenTruncate &&
-				recompute.alignedBranches != nil &&
-				kv.Step(fileEntry.FromStep) < targetStepIdx
+			splitEmit := action == actionRegenTruncate && plan.splitEmit
 
 			// Mode-C boundary regen dispatch:
 			//   - Commitment truncate → WriteCommitmentBoundaryFileV4 (uses the
@@ -337,7 +326,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				pairs = append(pairs, alignedPairEntry, stubPairEntry)
 				continue
 			case kvDomain == kv.CommitmentDomain && action == actionRegenTruncate:
-				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, plan.fromTxNum, action, lastTxNum, oldPath)
 				regenPath := finalPath + ".regen"
 				if recompute.regenBranches == nil {
 					return nil, fmt.Errorf("regenerateBoundaryStepFiles: commitment truncate needs recompute.regenBranches (Apply must run first)")
@@ -355,9 +344,9 @@ func (p *Provider) regenerateBoundaryStepFiles(
 					domain:       kvDomain,
 				})
 			case action == actionRegenTruncate:
-				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, plan.fromTxNum, action, lastTxNum, oldPath)
 				regenPath := finalPath + ".regen"
-				fromTxN := uint64(fileEntry.FromStep) * stepSize
+				fromTxN := plan.fromTxNum
 				walker := historyKeyWalker(tx, kvDomain, fromTxN, lastTxNum)
 				if err := WriteStateBoundaryFileV4(
 					ctx, kvDomain, walker, lookup, lastTxNum,
@@ -383,7 +372,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 					historyPairs = append(historyPairs, *hp)
 				}
 			default:
-				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, plan.fromTxNum, action, lastTxNum, oldPath)
 				regenPath := finalPath + ".regen"
 				if err := RegenerateBoundaryStepFile(
 					ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
@@ -472,7 +461,8 @@ func (p *Provider) pairedHistoryStraddler(sd snapshot.Domain, kvEntry *snapshot.
 		return nil, nil
 	}
 	for _, e := range p.Inventory.AllDomainFiles(sd) {
-		if e.FromStep != kvEntry.FromStep || e.ToStep != kvEntry.ToStep {
+		if e.FromStep != kvEntry.FromStep || e.ToStep != kvEntry.ToStep ||
+			e.FromTxNum != kvEntry.FromTxNum || e.ToTxNum != kvEntry.ToTxNum {
 			continue
 		}
 		switch e.Kind {
@@ -600,37 +590,11 @@ func (p *Provider) emitSplitStraddler(
 //
 // Pure logic — no I/O, no side effects — so its two branches can be
 // pinned with a stub-aggregator unit test without any real disk or tx.
-func boundaryRegenFinalPath(agg StateAggregator, kvDomain kv.Domain, fromStep, stepSize uint64, action stateFileAction, lastTxNum uint64, oldPath string) string {
+func boundaryRegenFinalPath(agg StateAggregator, kvDomain kv.Domain, fromTxN uint64, action stateFileAction, lastTxNum uint64, oldPath string) string {
 	if action != actionRegenTruncate {
 		return oldPath
 	}
-	fromTxN := fromStep * stepSize
 	return agg.DomainKVFilePathV4(kvDomain, fromTxN, lastTxNum+1)
-}
-
-// boundaryStepFileForDomain returns the FileEntry for the .kv file
-// whose [FromStep, ToStep) range contains stepBoundary — the file
-// covering the txNum range that straddles the unwind target. When
-// the aggregator has merged step files into wider chunks, the
-// boundary is reached strictly inside a merged file; the aligned
-// case (ToStep == stepBoundary) is the strict sub-case where the
-// boundary lands exactly on a file edge. Returns nil when no file
-// straddles stepBoundary (early history before the step has retired,
-// or stepBoundary is past every retired file).
-func (p *Provider) boundaryStepFileForDomain(domain snapshot.Domain, stepBoundary uint64) *snapshot.FileEntry {
-	for _, e := range p.Inventory.AllDomainFiles(domain) {
-		if e.Kind != snapshot.KindKV {
-			continue
-		}
-		if e.FromStep >= stepBoundary {
-			continue
-		}
-		if e.ToStep < stepBoundary {
-			continue
-		}
-		return e
-	}
-	return nil
 }
 
 // snapshotDomainToKVDomain maps storage's string-typed Domain enum to

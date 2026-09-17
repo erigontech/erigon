@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // stateFileAction is the verdict the mode-B planner assigns to a
@@ -102,6 +103,57 @@ func classifyStateFileForUnwind(r stateFileRange, stepBoundary uint64, boundaryA
 		return actionRegenTruncate
 	}
 	return actionRemove
+}
+
+// stateFileUnwindPlan is what an unwind does with one local .kv file.
+type stateFileUnwindPlan struct {
+	action stateFileAction
+	// fromTxNum is where a regenerated file's content starts.
+	fromTxNum uint64
+	// splitEmit marks a multi-step straddler of a mid-step target: it is
+	// rewritten as an aligned wide file plus a v4 stub for the target step.
+	splitEmit bool
+}
+
+// planStateFileUnwind decides what an unwind to lastTxNum does with one local
+// .kv file. haveAligned reports a mid-step target whose compute produced an
+// aligned horizon at alignedTxNum; only then can a straddler split-emit.
+func planStateFileUnwind(e *snapshot.FileEntry, stepSize, lastTxNum, alignedTxNum uint64, haveAligned bool) stateFileUnwindPlan {
+	if e.IsTxNumNamed() {
+		// A v4 file already lies within one step, so it never split-emits.
+		return stateFileUnwindPlan{
+			action:    classifyV4StateFileForUnwind(e.FromTxNum, e.ToTxNum, lastTxNum),
+			fromTxNum: e.FromTxNum,
+		}
+	}
+	stepBoundary := lastTxNum/stepSize + 1
+	// A mid-step target turns the file whose ToStep equals stepBoundary into
+	// a straddler, so it emits a v4 file instead of overwriting the
+	// step-aligned name.
+	boundaryAligned := (lastTxNum+1)%stepSize == 0
+	action := classifyStateFileForUnwind(stateFileRange{FromStep: e.FromStep, ToStep: e.ToStep}, stepBoundary, boundaryAligned)
+	var targetStep uint64
+	if haveAligned {
+		targetStep = (alignedTxNum + 1) / stepSize
+	}
+	return stateFileUnwindPlan{
+		action:    action,
+		fromTxNum: e.FromStep * stepSize,
+		splitEmit: action == actionRegenTruncate && haveAligned && e.FromStep < targetStep,
+	}
+}
+
+// classifyV4StateFileForUnwind returns the unwind action for a v4 state file
+// covering txNums [fromTxNum, toTxNum), given the unwind target lastTxNum.
+func classifyV4StateFileForUnwind(fromTxNum, toTxNum, lastTxNum uint64) stateFileAction {
+	switch {
+	case toTxNum <= lastTxNum+1:
+		return actionKeep
+	case fromTxNum > lastTxNum:
+		return actionRemove
+	default:
+		return actionRegenTruncate
+	}
 }
 
 // classifiedFiles partitions a domain's state-domain .kv files by

@@ -576,6 +576,11 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		if d.OnValidation == nil {
 			return
 		}
+		// v4 state files are transient: the background merge replaces them
+		// and they are never seeded or published, so Indexed is terminal.
+		if e.IsTxNumNamed() {
+			return
+		}
 		logger.Debug("[storage-lifecycle] dispatch OnValidation", "name", e.Name)
 		if err := d.OnValidation(ctx, e); err != nil {
 			if errors.Is(err, validation.ErrPause) {
