@@ -483,7 +483,7 @@ func TestParseRetryAfterSeconds(t *testing.T) {
 // at each step rather than a spread. Providers ask for jitter for exactly this reason.
 func TestBackoffDelayIsJittered(t *testing.T) {
 	seen := map[time.Duration]int{}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		d := backoffDelay(5, 0)
 		require.GreaterOrEqual(t, d, 8*time.Second/2, "jitter must not collapse the wait")
 		require.LessOrEqual(t, d, 8*time.Second, "jitter must not exceed the computed step")
@@ -494,7 +494,7 @@ func TestBackoffDelayIsJittered(t *testing.T) {
 
 // Retry-After is an instruction, not a suggestion: jitter must not shorten it.
 func TestRetryAfterIsNotJittered(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.Equal(t, 30*time.Second, backoffDelay(3, 30*time.Second))
 	}
 }
