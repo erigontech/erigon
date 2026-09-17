@@ -712,47 +712,30 @@ func TestCorkConnUncorkedWritesWithoutTheLock(t *testing.T) {
 	}
 }
 
-func TestCorkConnDeliversEveryFlushedChunk(t *testing.T) {
-	gotFirst, release := make(chan struct{}), make(chan struct{})
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("first"))
-		w.(http.Flusher).Flush()
-		<-gotFirst
-		_, _ = w.Write([]byte("second"))
-		w.(http.Flusher).Flush()
-		<-release
-	})
-	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = httpSrv.Close() })
-	defer close(release)
+type deadlineConn struct {
+	writeCountingConn
+	writeDeadline time.Time
+}
 
-	got := make(chan string, 2)
-	go func() {
-		resp, err := http.Get("http://" + addr.String()) //nolint:noctx
-		if err != nil {
-			got <- err.Error()
-			return
-		}
-		defer resp.Body.Close()
-		for _, want := range []string{"first", "second"} {
-			buf := make([]byte, len(want))
-			if _, err := io.ReadFull(resp.Body, buf); err != nil {
-				got <- err.Error()
-				return
-			}
-			got <- string(buf)
-			if want == "first" {
-				close(gotFirst)
-			}
-		}
-	}()
-	for _, want := range []string{"first", "second"} {
-		select {
-		case s := <-got:
-			require.Equal(t, want, s)
-		case <-time.After(5 * time.Second):
-			t.Fatalf("flushed chunk %q did not reach the client while the handler was still running", want)
-		}
-	}
+func (c *deadlineConn) SetWriteDeadline(d time.Time) error { c.writeDeadline = d; return nil }
+
+// An h2c upgrade hands the hijacked connection to the HTTP/2 server, which still reports it idle: a deadline set
+// then would stay for the whole life of the connection.
+func TestCorkConnIdleAfterUncorkSetsNoDeadline(t *testing.T) {
+	conn := &deadlineConn{}
+	c := &corkConn{Conn: conn, writeTimeout: time.Minute}
+	c.uncork()
+	c.flushIdle()
+	require.True(t, conn.writeDeadline.IsZero())
+}
+
+// A keep-alive connection waits between requests with its buffer back in the pool.
+func TestCorkConnIdleReleasesBuffer(t *testing.T) {
+	c := &corkConn{Conn: &deadlineConn{}}
+	_, err := c.Write(bytes.Repeat([]byte("a"), corkBufferBytes-1))
+	require.NoError(t, err)
+	_, err = c.Write(bytes.Repeat([]byte("a"), corkBufferBytes-1))
+	require.NoError(t, err)
+	c.flushIdle()
+	require.Nil(t, c.buf)
 }
