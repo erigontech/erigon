@@ -1949,17 +1949,12 @@ func (be *blockExecutor) takeSuperseded() supersededWrites {
 }
 
 type txResult struct {
-	blockNum              uint64
-	blockHash             common.Hash
-	txNum                 uint64
-	blockGasUsed          int64
-	cumulativeBlobGasUsed uint64
-	receipt               *types.Receipt
-	logs                  []*types.Log
-	traceFroms            map[accounts.Address]struct{}
-	traceTos              map[accounts.Address]struct{}
-	writes                *state.WriteSet
-	rules                 *chain.Rules
+	blockNum     uint64
+	blockHash    common.Hash
+	txNum        uint64
+	blockGasUsed int64
+	writes       *state.WriteSet
+	rules        *chain.Rules
 }
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
@@ -3282,15 +3277,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			result := be.finalizedResults[tx]
 
 			applyResult := txResult{
-				blockNum:              be.number(),
-				blockHash:             be.hash(),
-				traceFroms:            result.TraceFroms,
-				traceTos:              result.TraceTos,
-				txNum:                 task.Version().TxNum,
-				rules:                 task.Rules(),
-				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
+				blockNum:  be.number(),
+				blockHash: be.hash(),
+				txNum:     task.Version().TxNum,
+				rules:     task.Rules(),
 			}
 
+			var logs []*types.Log
 			if result.Receipt != nil {
 				// EIP-8037 / EIP-7778: block-level gas is max(cum execution,
 				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
@@ -3305,8 +3298,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// progress / uncommittedGas tracking; receipt gas is fine here.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
-				applyResult.receipt = result.Receipt
-				applyResult.logs = result.Receipt.Logs
+				logs = result.Receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
@@ -3329,8 +3321,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
-			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
-				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
+			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, result.Receipt, result.cumulativeBlobGasUsed,
+				logs, result.TraceFroms, result.TraceTos); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
 
@@ -3457,15 +3449,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
 
-				// Block-end logs belong to no receipt, so the per-tx publish
-				// loop, which indexes receipt logs only, never sees them. Index
-				// them here, on the exec loop that owns sd.mem, to keep the log
-				// indexes identical to the ones the serial executor builds.
-				if len(blockEndLogs) > 0 {
-					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, 0,
-						blockEndLogs, nil, nil, true); err != nil {
-						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
-					}
+				// Block-end system calls have no receipt, so the per-tx publish
+				// loop never indexes their logs. Write them at the block's final
+				// virtual txNum on the exec loop, which owns mutations of sd.mem.
+				// Use the logs-only method because the per-tx path has already
+				// handled the receipt cache at this txNum.
+				if err := pe.rs.ApplyLogIndexes(finalVersion.TxNum, blockEndLogs); err != nil {
+					return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

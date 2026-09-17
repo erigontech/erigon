@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -1849,7 +1850,7 @@ func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.
 // putLogEmittingContract writes `LOG1` bytecode at addr so that every system
 // call to it appends exactly one log to the caller's IntraBlockState.
 func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
-	code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+	code := []byte{byte(vm.PUSH1), logIndexTopic[31], byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
 	acc := accounts.NewAccount()
 	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
@@ -1865,12 +1866,19 @@ func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Addre
 }
 
 type indexCountingMemBatch struct {
-	kv.TemporalMemBatch
-	adds map[kv.InvertedIdx]int
+	// SharedDomains also calls changeset methods outside kv.TemporalMemBatch.
+	// Embedding the concrete batch keeps those methods available.
+	*dbstate.TemporalMemBatch
+	adds map[indexAddition]int
+}
+
+type indexAddition struct {
+	table kv.InvertedIdx
+	txNum uint64
 }
 
 func (m *indexCountingMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) error {
-	m.adds[table]++
+	m.adds[indexAddition{table: table, txNum: txNum}]++
 	return m.TemporalMemBatch.IndexAdd(table, key, txNum)
 }
 
@@ -1882,64 +1890,24 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	const syscalls = 3
 
 	db := newResumeTestDB(t)
-	config := chain.TestChainBerlinConfig
-	contract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
-	seedLogEmittingContract(t, db, contract)
-
-	txTask := &exec.TxTask{
-		Header: &types.Header{
-			Number:   *uint256.NewInt(1),
-			GasLimit: 10_000_000,
-		},
-		TxNum:   1,
-		TxIndex: 0,
-		Config:  config,
-	}
+	seedLogEmittingContract(t, db, logIndexContract)
 
 	logger := log.New()
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(roTx.Rollback)
 	indexes := &indexCountingMemBatch{
-		TemporalMemBatch: roTx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()),
-		adds:             make(map[kv.InvertedIdx]int),
+		TemporalMemBatch: dbstate.NewTemporalMemBatch(roTx, kvmetrics.NewDomainMetrics()),
+		adds:             make(map[indexAddition]int),
 	}
 	domains, err := execctx.NewSharedDomains(t.Context(), roTx, logger, execctx.WithMemBatch(indexes))
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
-	pe := &parallelExecutor{
-		txExecutor: txExecutor{
-			cfg: ExecuteBlockCfg{
-				chainConfig: config,
-				db:          db,
-				engine:      &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls},
-				vmConfig:    &vm.Config{},
-			},
-			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
-			logger: logger,
-		},
-	}
+	pe := newParallelLogIndexTestExec(db, domains, syscalls)
+	runParallelLogIndexTestBlock(t, pe, roTx)
 
-	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
-	eTask := &execTask{Task: txTask, index: 0}
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
-	be.execTasks.setInProgress(0)
-
-	txResult := &exec.TxResult{
-		Task: &taskVersion{
-			execTask: eTask,
-			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
-		},
-		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
-	}
-
-	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	require.NoError(t, res.Err)
-
-	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
-	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
+	assert.Equal(t, map[indexAddition]int{
+		{table: kv.LogAddrIdx, txNum: logIndexFinalTxNum}:  syscalls,
+		{table: kv.LogTopicIdx, txNum: logIndexFinalTxNum}: syscalls,
+	}, indexes.adds)
 }

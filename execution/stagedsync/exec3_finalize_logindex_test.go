@@ -29,6 +29,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -40,8 +43,83 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// logIndexContract is the address the block-end system call emits its log from.
-var logIndexContract = common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+const logIndexFinalTxNum = uint64(101)
+
+var (
+	logIndexContract = common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+	logIndexTopic    = common.Hash{31: 0x42}
+)
+
+// An empty block still has a start and an end virtual task. Their txNums must
+// differ from each other and from the block number so the index assertions
+// detect using the wrong identifier.
+func newLogIndexTestTasks(config *chain.Config) []exec.Task {
+	header := &types.Header{Number: *uint256.NewInt(7), GasLimit: 10_000_000, ReceiptHash: empty.RootHash}
+	tasks := make([]exec.Task, 2)
+	for i := range tasks {
+		tasks[i] = &exec.TxTask{
+			Header:          header,
+			TxNum:           logIndexFinalTxNum - 1 + uint64(i),
+			TxIndex:         i - 1,
+			Config:          config,
+			EvmBlockContext: evmtypes.BlockContext{BlockNumber: header.Number.Uint64()},
+		}
+	}
+	return tasks
+}
+
+func newParallelLogIndexTestExec(db kv.TemporalRwDB, domains *execctx.SharedDomains, calls int) *parallelExecutor {
+	logger := log.New()
+	return &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: chain.TestChainBerlinConfig,
+				db:          db,
+				engine: &logEmittingSyscallEngine{
+					Engine:   ethash.NewFaker(),
+					contract: accounts.InternAddress(logIndexContract),
+					calls:    calls,
+				},
+				vmConfig: &vm.Config{},
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+	}
+}
+
+func newLogIndexTestBlock(tasks []exec.Task) *blockExecutor {
+	be := newBlockExec(newParallelTestBlockFromTasks(tasks), new(protocol.GasPool).AddGas(tasks[0].BlockGasLimit()),
+		nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = make([]*execTask, len(tasks))
+	be.results = make([]*execResult, len(tasks))
+	for i, task := range tasks {
+		be.tasks[i] = &execTask{Task: task, index: i}
+	}
+	return be
+}
+
+func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx) {
+	t.Helper()
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	be := newLogIndexTestBlock(tasks)
+	for i, task := range be.tasks {
+		be.execTasks.setInProgress(i)
+		version := task.Version()
+		version.Incarnation = 1
+		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+			Task: &taskVersion{execTask: task, version: version},
+		}, tx)
+		require.NoError(t, err)
+		if i < len(tasks)-1 {
+			require.Nil(t, res)
+		} else {
+			require.NotNil(t, res)
+			require.NoError(t, res.Err)
+		}
+	}
+}
 
 func indexedTxNums(t *testing.T, tx kv.TemporalTx, idx kv.InvertedIdx, key []byte) []uint64 {
 	t.Helper()
@@ -52,83 +130,99 @@ func indexedTxNums(t *testing.T, tx kv.TemporalTx, idx kv.InvertedIdx, key []byt
 	return txNums
 }
 
-// A block-end system call emits its logs outside any transaction receipt, at the
-// block's final txNum. Both executors must index them the same way: the log index
-// files they build are compared against the published snapshots, and a chain whose
-// consensus emits logs at block end, such as Gnosis, has one in nearly every block.
+// Consensus system calls can emit logs after all regular transactions have
+// finished. Those logs have no receipt, but snapshot indexes must still place
+// them at the block's final virtual txNum.
 func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	engine := &logEmittingSyscallEngine{
 		Engine:   ethash.NewFaker(),
 		contract: accounts.InternAddress(logIndexContract),
 		calls:    1,
 	}
-	se, task := newSerialFinalizeTestExec(t, engine)
-	task.Header.ReceiptHash = empty.RootHash
+	se, _ := newSerialFinalizeTestExec(t, engine)
+	tasks := newLogIndexTestTasks(se.cfg.chainConfig)
 	rwTx := se.applyTx.(kv.TemporalRwTx)
 	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))
 
-	block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, nil, nil)
-	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, true, false)
+	block := newParallelTestBlockFromTasks(tasks)
+	_, err := se.executeBlock(t.Context(), block, tasks, false, false)
 	require.NoError(t, err)
 	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
 
-	require.Equal(t, []uint64{task.TxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	topic := common.Hash{31: 0x42}
-	require.Equal(t, []uint64{task.TxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, topic[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
 
 func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 	db := newResumeTestDB(t)
-	config := chain.TestChainBerlinConfig
 	seedLogEmittingContract(t, db, logIndexContract)
 
-	logger := log.New()
 	rwTx, domains := temporaltest.NewTestTxSD(t, db)
-	pe := &parallelExecutor{
-		txExecutor: txExecutor{
-			cfg: ExecuteBlockCfg{
-				chainConfig: config,
-				db:          db,
-				engine: &logEmittingSyscallEngine{
-					Engine:   ethash.NewFaker(),
-					contract: accounts.InternAddress(logIndexContract),
-					calls:    1,
-				},
-				vmConfig: &vm.Config{},
-			},
-			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
-			logger: logger,
-		},
-	}
+	pe := newParallelLogIndexTestExec(db, domains, 1)
+	runParallelLogIndexTestBlock(t, pe, rwTx)
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
 
-	txTask := &exec.TxTask{
-		Header:  &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000},
-		TxNum:   1,
-		TxIndex: 0,
-		Config:  config,
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
+}
+
+// The final virtual transaction clears the latest receipt-cache value, while
+// history preserves the last regular receipt. Indexing block-end system-call
+// logs must leave that receipt readable at its original transaction number.
+func TestParallelBlockEndLogsPreserveReceiptHistory(t *testing.T) {
+	savedRCache := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
+
+	db := newResumeTestDB(t)
+	seedLogEmittingContract(t, db, logIndexContract)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 1)
+	pe.rs = state.NewStateV3Buffered(state.NewStateV3(domains, true, pe.logger))
+
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, pe.cfg.chainConfig, 0)}
+	for i, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.TxIndex = i
+		txTask.Txs = txs
 	}
-	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
-	eTask := &execTask{Task: txTask, index: 0}
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
+	be := newLogIndexTestBlock(tasks)
+	regularTask, finalTask := be.tasks[0], be.tasks[1]
+	regularVersion := regularTask.Version()
+	regularVersion.Incarnation = 1
 	be.execTasks.setInProgress(0)
-
-	txResult := &exec.TxResult{
-		Task: &taskVersion{
-			execTask: eTask,
-			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: txTask.TxNum},
+	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: regularTask, version: regularVersion},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed:        21_000,
+			BlockExecutionGasUsed: 21_000,
 		},
-		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
-	}
+	}, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, res)
+	cachedReceipt, _, err := domains.GetLatest(kv.RCacheDomain, rwTx, rawtemporaldb.ReceiptCacheKey)
+	require.NoError(t, err)
+	require.NotEmpty(t, cachedReceipt)
 
-	res, err := be.nextResult(t.Context(), pe, txResult, rwTx)
+	finalVersion := finalTask.Version()
+	finalVersion.Incarnation = 1
+	be.execTasks.setInProgress(1)
+	res, err = be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: finalTask, version: finalVersion},
+	}, rwTx)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.NoError(t, res.Err)
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 
-	require.Equal(t, []uint64{txTask.TxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	topic := common.Hash{31: 0x42}
-	require.Equal(t, []uint64{txTask.TxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, topic[:]))
+	priorReceipt, ok, err := rwTx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, regularVersion.TxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, cachedReceipt, priorReceipt)
+	latestReceipt, _, err := rwTx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, latestReceipt)
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
