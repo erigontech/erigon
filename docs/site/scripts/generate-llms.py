@@ -863,7 +863,7 @@ def _dedent_to(line, base):
 
 
 _JSX_COMMENT_RE = re.compile(r"\{/\*.*?\*/\}", re.DOTALL)
-_ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
+_ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$")
 
 # Docusaurus reads `{#custom-id}` as the heading's id and renders it nowhere, so
 # the built page carries `Flow` for a source `## Flow {#custom-flow}`. Matching
@@ -1101,8 +1101,8 @@ def mermaid_blocks(source):
                 # no source heading, so counting every heading with the same
                 # text would place a `## Title` diagram under that H1 instead —
                 # above the section, and above the prose introducing it.
-                heading = _heading_text(h.group(1))
-                level = len(_ATX_LEVEL_RE.match(lines[i]).group(1))
+                heading = _heading_text(h.group(2))
+                level = len(h.group(1))
                 seen[(heading, level)] = seen.get((heading, level), 0) + 1
                 occurrence = seen[(heading, level)] - 1
             i += 1
@@ -1166,9 +1166,9 @@ def splice_diagram(body, heading, block, occurrence=0, level=None):
         if fence is not None:
             continue
         h = _ATX_HEADING_RE.match(ln)
-        if h and _heading_text(h.group(1)) == heading:
+        if h and _heading_text(h.group(2)) == heading:
             # A heading of another level is another heading, generated or not.
-            if level is not None and len(_ATX_LEVEL_RE.match(ln).group(1)) != level:
+            if level is not None and len(h.group(1)) != level:
                 continue
             if hits == occurrence:
                 idx = i

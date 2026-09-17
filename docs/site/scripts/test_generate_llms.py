@@ -178,6 +178,12 @@ class MermaidSpliceTests(unittest.TestCase):
     def test_no_mermaid_yields_nothing(self):
         self.assertEqual([], g.mermaid_blocks("prose\n\n```bash\nls\n```\n"))
 
+    def test_empty_headings_without_diagrams(self):
+        for heading in ("## ", "##\t", "## {/* Reserved section */}"):
+            with self.subTest(heading=heading):
+                src = f"Introduction.\n\n{heading}\n\nMore prose.\n"
+                self.assertEqual([], g.mermaid_blocks(src))
+
 
 class BuiltPathTests(unittest.TestCase):
     def test_flat_page_and_index_forms(self):
