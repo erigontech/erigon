@@ -98,19 +98,6 @@ func TestExecStatusList_AddDependency_BlockerAlreadyComplete(t *testing.T) {
 	require.False(t, m.isBlocked(2))
 }
 
-func TestExecStatusList_DrainDeferredIfReady(t *testing.T) {
-	var m execStatusList
-	m.pushDeferred(5)
-	m.pushDeferred(7)
-
-	m.drainDeferredIfReady(func(tx int) bool { return tx == 5 })
-	require.True(t, m.checkPending(5), "ready deferred tx moved to pending")
-	require.False(t, m.checkPending(7), "not-ready deferred tx stays deferred")
-
-	m.drainDeferred()
-	require.True(t, m.checkPending(7), "unconditional drain moves the rest")
-}
-
 func TestExecStatusList_RevalidationRange(t *testing.T) {
 	var m execStatusList
 	for i := range 5 {

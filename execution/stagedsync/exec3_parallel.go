@@ -3444,14 +3444,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 		be.wakeAt = map[int][]int{}
 	}
-	// Drain deferred tx N when its blockers clear AND no worker at index < N is in
-	// flight (whose floor writes must stay visible to N's re-read). Dependency-driven,
-	// not the contiguous maxValidated gate, which deadlocks dependency-ordered
-	// validation by regressing on a real invalidation.
-	drainMinIP := be.execTasks.minInProgress()
-	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
-	})
 
 	maxValidated := be.validateTasks.maxComplete()
 
@@ -3536,13 +3528,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		return dispatched
 	}
 
-	// Forward-progress net: force-drain deferred only when nothing dispatched,
-	// pending is empty, and nothing is in flight. Guarded on empty pending because
-	// non-empty pending is always dispatchable and the net must not drain past it.
-	if dispatch() == 0 && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
-		be.execTasks.drainDeferred()
-		dispatch()
-	}
+	dispatch()
 }
 
 func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
