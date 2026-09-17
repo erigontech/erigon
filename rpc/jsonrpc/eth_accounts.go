@@ -37,10 +37,9 @@ import (
 // all addresses in a single eth_getStorageValues request.
 const maxGetStorageSlots = 1024
 
-// stateReaderAt opens an overlay-aware read transaction, resolves the canonical
-// block number, checks prune history and block execution, and creates a state
-// reader — all on that one transaction, so the block a request resolves and the
-// state it reads back cannot come from different overlay generations.
+// stateReaderAt resolves the selector and builds its state reader on one
+// overlay-aware transaction, so the block a request resolves and the state it
+// reads back cannot come from different overlay generations.
 // The caller must defer tx.Rollback() on the returned tx.
 func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)

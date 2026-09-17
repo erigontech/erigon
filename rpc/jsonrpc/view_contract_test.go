@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -37,12 +38,26 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-// pendingTestAPIs builds a short committed chain and an API set whose Filters
-// optionally carries the in-memory pending block a payload-building node holds.
+// stateProbeAddr receives one wei per block in the fixture chain, so its
+// balance identifies which block a state read resolved to.
+var stateProbeAddr = common.Address{0xab}
+
+// pendingTestAPIs builds a committed chain whose state differs block by block,
+// plus an API set whose Filters optionally carries the in-memory pending block
+// a payload-building node holds.
 func pendingTestAPIs(t *testing.T, withPending bool) (*APIImpl, *execmoduletester.ExecModuleTester, uint64) {
 	t.Helper()
 	m := execmoduletester.New(t)
-	c, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) { gen.SetCoinbase(common.Address{1}) })
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	c, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+		txn, err := types.SignTx(
+			types.NewTransaction(uint64(i), stateProbeAddr, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			signer, m.Key,
+		)
+		require.NoError(t, err)
+		gen.AddTx(txn)
+	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(c))
 
@@ -68,14 +83,14 @@ func pendingTestAPIs(t *testing.T, withPending bool) (*APIImpl, *execmoduleteste
 	return newEthApiForTest(base, m.DB, nil, nil), m, pendingNum
 }
 
-// TestPendingTagOnStateEndpoints pins the contract that the state endpoints
-// serve the newest state the node can produce for "pending". Erigon has no
-// queryable pending state, and feeding the in-memory pending block number into
-// a committed-state reader used to fail outright on a payload-building node.
+// TestPendingTagOnStateEndpoints pins where "pending" lands on the state
+// endpoints. Erigon has no executed pending state, so it must resolve to the
+// latest executed block — the fixture gives every block a distinct balance so a
+// resolution to any other block is caught.
 func TestPendingTagOnStateEndpoints(t *testing.T) {
-	addr := common.Address{1}
+	addr := stateProbeAddr
 	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	latestExecuted := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 
 	for _, withPending := range []bool{true, false} {
 		name := "pending block absent"
@@ -83,15 +98,22 @@ func TestPendingTagOnStateEndpoints(t *testing.T) {
 			name = "pending block present"
 		}
 		t.Run(name, func(t *testing.T) {
-			api, m, _ := pendingTestAPIs(t, withPending)
+			api, m, pendingNum := pendingTestAPIs(t, withPending)
 			ctx := m.Ctx
+			tip := pendingNum - 1
 
-			wantBalance, err := api.GetBalance(ctx, addr, &latest)
+			wantBalance, err := api.GetBalance(ctx, addr, &latestExecuted)
 			require.NoError(t, err)
+			require.Equal(t, uint64(tip), wantBalance.ToInt().Uint64(), "fixture: one wei per block")
+
+			parent := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tip - 1))
+			parentBalance, err := api.GetBalance(ctx, addr, &parent)
+			require.NoError(t, err)
+			require.NotEqual(t, wantBalance, parentBalance, "fixture must differ block to block")
 
 			gotBalance, err := api.GetBalance(ctx, addr, &pending)
 			require.NoError(t, err, "eth_getBalance must not fail on the pending tag")
-			require.Equal(t, wantBalance, gotBalance)
+			require.Equal(t, wantBalance, gotBalance, "pending must resolve to the latest executed block")
 
 			_, err = api.GetCode(ctx, addr, &pending)
 			require.NoError(t, err)
@@ -102,7 +124,7 @@ func TestPendingTagOnStateEndpoints(t *testing.T) {
 			_, err = api.GetStorageValues(ctx, map[common.Address][]common.Hash{addr: {{}}}, &pending)
 			require.NoError(t, err)
 
-			wantGas, err := api.EstimateGas(ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &latest, nil, nil)
+			wantGas, err := api.EstimateGas(ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &latestExecuted, nil, nil)
 			require.NoError(t, err)
 			gotGas, err := api.EstimateGas(ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &pending, nil, nil)
 			require.NoError(t, err, "eth_estimateGas must not fail on the pending tag")
@@ -203,17 +225,18 @@ func TestResolverKeepsCallerView(t *testing.T) {
 	require.Equal(t, overlayNum, overlaid, "an overlay-aware tx resolves the overlay head")
 }
 
-// TestStateEndpointsPinTheOverlayOnce drives the overlay/commit race directly:
-// the overlay is unpublished while the selector is being resolved, which used
-// to leave the block number on one generation and the state read on another.
-// A request that pins once keeps answering from the generation it started on.
+// TestStateEndpointsPinTheOverlayOnce unpublishes the overlay while the selector
+// is being resolved: the request must keep answering from the generation it
+// pinned, so the block it resolves stays one its state view can serve.
 func TestStateEndpointsPinTheOverlayOnce(t *testing.T) {
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	addr := common.Address{1}
 
 	t.Run("eth_getBalance", func(t *testing.T) {
 		base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
-		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayHeader.Number.Uint64()))
+		overlayNum := overlayHeader.Number.Uint64()
+		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
+		requireOverlayAheadOfCommitted(t, base, m, overlayNum)
 		api := newEthApiForTest(base, m.DB, nil, nil)
 
 		_, err := api.GetBalance(m.Ctx, addr, &latest)
@@ -222,10 +245,31 @@ func TestStateEndpointsPinTheOverlayOnce(t *testing.T) {
 
 	t.Run("eth_estimateGas", func(t *testing.T) {
 		base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
-		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayHeader.Number.Uint64()))
+		overlayNum := overlayHeader.Number.Uint64()
+		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
+		requireOverlayAheadOfCommitted(t, base, m, overlayNum)
 		api := newEthApiForTest(base, m.DB, nil, nil)
 
 		_, err := api.EstimateGas(m.Ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &latest, nil, nil)
 		require.NoError(t, err, "the overlay unpublished mid-resolution must not split the view")
 	})
+}
+
+// requireOverlayAheadOfCommitted asserts the published overlay really does
+// resolve a later head than the committed view, so a request that answers at
+// the overlay head demonstrably used the pinned generation.
+func requireOverlayAheadOfCommitted(t *testing.T, base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayNum uint64) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	committed, _, _, err := rpchelper.GetCanonicalBlockNumber(m.Ctx, latest, tx, m.BlockReader)
+	require.NoError(t, err)
+	require.Less(t, committed, overlayNum, "fixture: the overlay head must lead the committed head")
+
+	overlaid, _, _, err := rpchelper.GetCanonicalBlockNumber(m.Ctx, latest, base.filters.WithOverlay(tx), m.BlockReader)
+	require.NoError(t, err)
+	require.Equal(t, overlayNum, overlaid)
 }

@@ -165,8 +165,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if blockNrOrHash == nil {
 		blockNrOrHash = &latestNumOrHash
 	}
-	// There is no queryable pending state, so estimate against the newest state
-	// the node can serve rather than against a header it cannot back.
+	// The pending block is a proposal with no executed state behind it, so
+	// estimate at the latest executed block instead.
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		blockNrOrHash = &latestExecutedNumOrHash
 	}
