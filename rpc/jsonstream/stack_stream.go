@@ -93,7 +93,18 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
-	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	s.commit(hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b), start)
+}
+
+func (s *StackStream) WriteValue(v jsonw.JSONAppender) {
+	buf := s.stream.Buffer()
+	start := len(buf)
+	s.commit(v.AppendJSON(slices.Grow(buf, v.JSONLen())), start)
+}
+
+// commit keeps the value appended at buf[start:] in the buffer, or hands it to the writer when it is at
+// least FlushThreshold.
+func (s *StackStream) commit(buf []byte, start int) {
 	if s.out != nil && len(buf)-start >= FlushThreshold {
 		s.stream.SetBuffer(buf[:start])
 		s.writeThrough(buf[start:])
@@ -101,14 +112,6 @@ func (s *StackStream) WriteHex(b []byte) {
 		s.stream.SetBuffer(buf)
 	}
 	s.popCommaOrField()
-}
-
-func (s *StackStream) WriteValue(v jsonw.JSONAppender) {
-	buf := s.stream.Buffer()
-	start := len(buf)
-	buf = v.AppendJSON(slices.Grow(buf, v.JSONLen()))
-	s.stream.SetBuffer(buf[:start])
-	s.WriteRawBytes(buf[start:])
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
