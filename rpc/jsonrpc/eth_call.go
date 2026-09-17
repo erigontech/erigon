@@ -522,7 +522,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 	for _, storageKey := range storageKeys {
-		sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
+		sdCtx.TouchKey(kv.StorageDomain, string(address[:])+string(storageKey.Hash[:]), nil)
 	}
 
 	nodes, root, err := sdCtx.WitnessNodesByHash(ctx)
@@ -547,26 +547,17 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	proof.AccountProof = toHexBytes(accountProof)
-	if accountRLP == nil {
-		for i, storageKey := range storageKeys {
-			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   storageKey.EncodeKey(),
-				Value: new(hexutil.U256),
-				Proof: []hexutil.Bytes{},
-			}
-		}
-		return proof, assertProofVerifies(header.Root, proof)
-	}
-
 	var acc accounts.Account
-	if err := acc.DecodeForHashing(accountRLP); err != nil {
-		return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+	if accountRLP != nil {
+		if err := acc.DecodeForHashing(accountRLP); err != nil {
+			return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+		}
+		proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
+		proof.Nonce = hexutil.Uint64(acc.Nonce)
+		proof.CodeHash = acc.CodeHash.Value()
+		proof.StorageHash = acc.Root
 	}
-	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
-	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash.Value()
-	proof.StorageHash = acc.Root
-	if len(storageKeys) == 0 || acc.Root == common.BytesToHash(empty.RootHash[:]) {
+	if accountRLP == nil || acc.Root == empty.RootHash {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   storageKey.EncodeKey(),
