@@ -1041,11 +1041,31 @@ type BlobArchiveStoreCheck struct {
 
 	chainCfg
 	outputFolder
-	FromSlot uint64 `help:"from slot" default:"0"`
+	FromSlot uint64 `help:"highest slot to check; the scan walks downward from here" default:"0"`
+	// Below the frozen blob frontier the sidecars live in segments and the store is empty by
+	// design, so scanning past it reports every blob-bearing slot there as mismatched.
+	ToSlot uint64 `help:"lowest slot to check; defaults to the Deneb fork" default:"0"`
+}
+
+// lowestSlot never scans below the Deneb fork, where there are no sidecars to check at all.
+func (b *BlobArchiveStoreCheck) lowestSlot(denebSlot uint64) uint64 {
+	if b.ToSlot == 0 {
+		return denebSlot
+	}
+	return max(denebSlot, b.ToSlot)
+}
+
+func (b *BlobArchiveStoreCheck) validateRange() error {
+	if b.ToSlot != 0 && b.ToSlot > b.FromSlot {
+		return fmt.Errorf("--to-slot %d is above --from-slot %d, which would scan nothing", b.ToSlot, b.FromSlot)
+	}
+	return nil
 }
 
 func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
-
+	if err := b.validateRange(); err != nil {
+		return err
+	}
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
 	if err != nil {
 		return err
@@ -1069,7 +1089,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
-	targetSlot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	targetSlot := b.lowestSlot(beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch)
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err

@@ -247,3 +247,45 @@ func TestBlobArchiveStoreCheckPropagatesDeleteFailure(t *testing.T) {
 	_, _, err = checkBlobStore(t.Context(), tx, reader, storage, slot, slot, true)
 	require.ErrorIs(t, err, wantErr, "a failed delete must not be swallowed")
 }
+
+// Without a lower bound the scan runs to the Deneb fork. Below the frozen blob frontier the
+// sidecars live in segments and the store is empty by design, so every blob-bearing slot down
+// there reports as mismatched and the real gap is lost among millions of false ones.
+func TestBlobArchiveStoreCheckExposesTheLowerBound(t *testing.T) {
+	var cli struct {
+		BlobArchiveStoreCheck BlobArchiveStoreCheck `cmd:""`
+	}
+	parser, err := kong.New(&cli)
+	require.NoError(t, err)
+
+	_, err = parser.Parse([]string{"blob-archive-store-check", "--datadir", t.TempDir(),
+		"--from-slot", "14740000", "--to-slot", "14300000"})
+	require.NoError(t, err, "the command must define --to-slot")
+	require.Equal(t, uint64(14740000), cli.BlobArchiveStoreCheck.FromSlot)
+	require.Equal(t, uint64(14300000), cli.BlobArchiveStoreCheck.ToSlot)
+}
+
+// The scan walks downward, so a lower bound above the upper one would silently scan nothing and
+// report a clean store.
+func TestBlobArchiveStoreCheckRejectsAnInvertedRange(t *testing.T) {
+	c := BlobArchiveStoreCheck{FromSlot: 14300000, ToSlot: 14740000}
+	require.Error(t, c.validateRange(), "an inverted range must not look like a clean scan")
+
+	ok := BlobArchiveStoreCheck{FromSlot: 14740000, ToSlot: 14300000}
+	require.NoError(t, ok.validateRange())
+}
+
+// Parsing the flag is not enough: it has to actually bound the scan, or the audit still walks
+// to the Deneb fork and drowns the real gap in false mismatches.
+func TestBlobArchiveStoreCheckLowerBoundActuallyBoundsTheScan(t *testing.T) {
+	const deneb = uint64(8_626_176)
+
+	unset := BlobArchiveStoreCheck{FromSlot: 14_740_000}
+	require.Equal(t, deneb, unset.lowestSlot(deneb), "unset means scan to the Deneb fork")
+
+	bounded := BlobArchiveStoreCheck{FromSlot: 14_740_000, ToSlot: 14_300_000}
+	require.Equal(t, uint64(14_300_000), bounded.lowestSlot(deneb), "the bound must be used")
+
+	belowDeneb := BlobArchiveStoreCheck{FromSlot: 14_740_000, ToSlot: 1_000}
+	require.Equal(t, deneb, belowDeneb.lowestSlot(deneb), "never scan below Deneb")
+}
