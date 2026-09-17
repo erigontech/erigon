@@ -48,9 +48,8 @@ type BranchCache struct {
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk *trunk
 
-	pinned        atomic.Pointer[maphash.Map[*trunk]]
-	pinnedMu      sync.Mutex
-	pinnedEntries atomic.Int64
+	pinned   atomic.Pointer[maphash.Map[*trunk]]
+	pinnedMu sync.Mutex
 
 	tail    atomic.Pointer[tailLRU]
 	tailCap uint32
@@ -533,40 +532,31 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
-			c.pinnedAdd(st)
+			st.entries.Add(1)
 		}
 		return
 	}
 	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
-		c.pinnedAdd(st)
-	}
-}
-
-func (c *BranchCache) pinnedAdd(st *trunk) {
-	st.entries.Add(1)
-	c.pinnedEntries.Add(1)
-}
-
-func (c *BranchCache) pinnedDrop(st *trunk) {
-	for n := st.entries.Load(); n > 0; n = st.entries.Load() {
-		if st.entries.CompareAndSwap(n, n-1) {
-			c.pinnedEntries.Add(-1)
-			return
-		}
+		st.entries.Add(1)
 	}
 }
 
 func (c *BranchCache) PinnedCount() int {
-	return int(c.pinnedEntries.Load())
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	var n int64
+	p.Range(func(_ uint64, st *trunk) bool {
+		n += st.entries.Load()
+		return true
+	})
+	return int(n)
 }
 
 func (c *BranchCache) UnpinContract(contractHash []byte) {
-	p := c.pinned.Load()
-	if p == nil {
-		return
-	}
-	if st, loaded := p.LoadAndDelete(contractHash); loaded {
-		c.pinnedEntries.Add(-st.entries.Swap(0))
+	if p := c.pinned.Load(); p != nil {
+		p.Delete(contractHash)
 	}
 }
 
@@ -621,10 +611,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			if slot.Swap(nil) != nil {
-				c.pinnedDrop(st)
+				st.entries.Add(-1)
 			}
 		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
-			c.pinnedDrop(st)
+			st.entries.Add(-1)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {
@@ -646,7 +636,6 @@ func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.clearTrunk()
 	c.pinned.Store(nil)
-	c.pinnedEntries.Store(0)
 	if tail := c.tail.Load(); tail != nil {
 		tail.reset()
 	}
@@ -682,7 +671,7 @@ func (c *BranchCache) Stats() string {
 		"branch-cache root hit=%d miss=%d (%.1f%%) | trunk hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | staleEvicted=%d",
 		rh, rm, pct(rh, rm),
 		kh, km, pct(kh, km),
-		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
+		ph, pm, pct(ph, pm), c.PinnedCount(),
 		th, tm, pct(th, tm), c.tailLen(),
 		float64(bb)/1024/1024, c.staleEvicted.Load(),
 	)

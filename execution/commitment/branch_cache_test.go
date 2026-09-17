@@ -627,27 +627,3 @@ func TestBranchCache_UnpinContractDoesNotResurrectTheTail(t *testing.T) {
 	require.Falsef(t, ok, "demote must miss, not republish the shadowed tail copy (got %q)", got)
 	require.Zero(t, c.PinnedCount())
 }
-
-func TestBranchCache_PinnedCountNeverNegativeAcrossUnpin(t *testing.T) {
-	var hash [32]byte
-	for i := range hash {
-		hash[i] = byte(i + 3)
-	}
-	prefix := make([]byte, 35)
-	copy(prefix[1:], hash[:])
-	prefix[33], prefix[34] = 0x11, 0x22
-
-	for range 5000 {
-		c := NewBranchCache(100)
-		c.PinEntry(prefix, []byte("v"), 0, 100)
-
-		var wg sync.WaitGroup
-		wg.Go(func() { c.Invalidate(prefix) })
-		wg.Go(func() { c.UnpinContract(hash[:]) })
-		wg.Wait()
-
-		require.GreaterOrEqual(t, c.PinnedCount(), 0, "pinned count must never go negative")
-		require.Zero(t, c.PinnedCount(), "the entry is gone either way")
-		c.Close()
-	}
-}

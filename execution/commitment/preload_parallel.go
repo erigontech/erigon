@@ -57,7 +57,6 @@ type ContractTrunkPreloadParallel struct {
 	pendingChildren []pathKey
 
 	nextDepth       int
-	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
@@ -154,7 +153,6 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, pk.key)
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++
@@ -286,8 +284,6 @@ func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 func (p *ContractTrunkPreloadParallel) queueEmpty() bool {
 	return p.QueueRemaining() == 0 || p.nextDepth > maxStorageTrunkDepth
 }
-
-func (p *ContractTrunkPreloadParallel) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 
 func PreloadContractTrunkParallel(
 	ctx context.Context,

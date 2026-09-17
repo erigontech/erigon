@@ -599,7 +599,7 @@ func TestContractTrunkPreloadParallel_DbBranchesPerStep(t *testing.T) {
 	}
 }
 
-func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
+func TestContractTrunkPreloadParallel_PinnedEntriesMatchCache(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	resolve := fakeResolver(tree, nil, valSz, "")
@@ -620,21 +620,8 @@ func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
 	} else if !done {
 		t.Fatal("expected done after large step")
 	}
-	prefixes := p.PinnedPrefixes()
-	if len(prefixes) != p.PinnedTotal() {
-		t.Fatalf("PinnedPrefixes len %d != PinnedTotal %d", len(prefixes), p.PinnedTotal())
-	}
-	for _, pf := range prefixes {
-		if _, _, ok := c.Get(pf); !ok {
-			t.Fatalf("prefix %x in PinnedPrefixes but not in cache", pf)
-		}
-	}
-	seen := map[string]bool{}
-	for _, pf := range prefixes {
-		if seen[string(pf)] {
-			t.Fatalf("duplicate prefix %x in PinnedPrefixes", pf)
-		}
-		seen[string(pf)] = true
+	if c.PinnedCount() != p.PinnedTotal() {
+		t.Fatalf("cache pinned %d != PinnedTotal %d; a prefix was pinned twice or lost", c.PinnedCount(), p.PinnedTotal())
 	}
 }
 
@@ -1026,12 +1013,8 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	if p.PinnedTotal() != len(tree) {
 		t.Fatalf("pinned %d, want the whole tree (%d)", p.PinnedTotal(), len(tree))
 	}
-	seen := map[string]bool{}
-	for _, pf := range p.PinnedPrefixes() {
-		if seen[string(pf)] {
-			t.Fatalf("prefix %x pinned twice across the deferral boundary", pf)
-		}
-		seen[string(pf)] = true
+	if c.PinnedCount() != p.PinnedTotal() {
+		t.Fatalf("cache pinned %d != PinnedTotal %d; a prefix was pinned twice across the deferral boundary", c.PinnedCount(), p.PinnedTotal())
 	}
 }
 

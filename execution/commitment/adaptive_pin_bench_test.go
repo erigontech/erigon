@@ -49,7 +49,6 @@ func BenchmarkAdaptivePinDemote(b *testing.B) {
 		for slot := range pinned {
 			pk := benchStoragePrefix(hash, uint16(slot))
 			c.PinEntry(pk, val, 0, 100)
-			p.pinnedPrefixes = append(p.pinnedPrefixes, pk)
 			p.pinned++
 		}
 		if c.PinnedCount() != pinned {
