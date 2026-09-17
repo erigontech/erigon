@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestNewID(t *testing.T) {
@@ -240,10 +241,17 @@ type fastJSONPayload struct{}
 
 func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"`), nil }
 
+type streamedPayload struct{}
+
+func (streamedPayload) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteHex([]byte{0xab})
+	return nil
+}
+
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[fastJSONResult]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null"} {
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
