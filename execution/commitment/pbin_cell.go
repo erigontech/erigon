@@ -71,14 +71,15 @@ const pbinGridRows = pbinMaxPathBits
 // TrailingZeros16 arithmetic ports from the hex engine unchanged; only bits 0
 // and 1 are ever set.
 type pbinGrid struct {
-	root         pbinCell
-	rows         [pbinGridRows][2]pbinCell
-	depths       [pbinGridRows]int16
-	branchBefore [pbinGridRows]bool
-	prevRecord   [pbinGridRows][]byte
-	touchMap     [pbinGridRows]uint16
-	afterMap     [pbinGridRows]uint16
-	activeRows   int
+	root          pbinCell
+	rows          [pbinGridRows][2]pbinCell
+	depths        [pbinGridRows]int16
+	branchBefore  [pbinGridRows]bool
+	prevRecord    [pbinGridRows][]byte
+	prevRecordSet [pbinGridRows]bool
+	touchMap      [pbinGridRows]uint16
+	afterMap      [pbinGridRows]uint16
+	activeRows    int
 }
 
 // resetForReuse clears only the rows below activeRows. The stale cells above
@@ -90,7 +91,8 @@ func (g *pbinGrid) resetForReuse() {
 		g.rows[row][1].reset()
 		g.depths[row] = 0
 		g.branchBefore[row] = false
-		g.prevRecord[row] = nil
+		g.prevRecord[row] = g.prevRecord[row][:0]
+		g.prevRecordSet[row] = false
 		g.touchMap[row] = 0
 		g.afterMap[row] = 0
 	}
@@ -101,7 +103,7 @@ func (g *pbinGrid) resetForReuse() {
 // no record. Never nil, so the write layer takes it as the known previous value
 // instead of reading the store itself.
 func (g *pbinGrid) prevRecordFor(row int) []byte {
-	if g.prevRecord[row] == nil {
+	if !g.prevRecordSet[row] {
 		return []byte{}
 	}
 	return g.prevRecord[row]

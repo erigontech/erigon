@@ -90,13 +90,12 @@ func TestPBinBranchCodecRoundTripPrefixBitLengths(t *testing.T) {
 			pbinTestChunkLeafCell(0x5A, pbinMaxPathBits-bitLen),
 		}
 
-		rec, err := enc.encode(0b11, 0b11, &cells)
+		rec, err := enc.encode(&cells)
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
 
 		var got [2]pbinCell
-		afterMap, err := pbinDecodeBranch(bytes.Clone(rec), &got, 0, nil)
+		err = pbinDecodeBranch(bytes.Clone(rec), &got, 0, nil)
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
-		require.Equal(t, uint16(0b11), afterMap)
 		require.Equalf(t, cells, got, "bitLen %d", bitLen)
 	}
 }
@@ -106,7 +105,7 @@ func TestPBinBranchCodecOmitsRecordHeader(t *testing.T) {
 
 	cells := [2]pbinCell{pbinTestBranchCell(0xA5, 3), pbinTestBranchCell(0x5A, 7)}
 	var enc pbinBranchEncoder
-	rec, err := enc.encode(0b11, 0b11, &cells)
+	rec, err := enc.encode(&cells)
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldBranch|pbinFieldHash), rec[0])
 }
@@ -120,13 +119,12 @@ func TestPBinBranchDecodeAcceptsDescentDepthAndDigestCache(t *testing.T) {
 	storageKey := pbinPathFromBytes(keys.storageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
 	storage.prefix = storageKey.slice(17, storageKey.bitLen)
 	want := [2]pbinCell{pbinTestBranchCell(0xA5, 17), storage}
-	record, err := enc.encode(0b11, 0b11, &want)
+	record, err := enc.encode(&want)
 	require.NoError(t, err)
 
 	var got [2]pbinCell
-	afterMap, err := pbinDecodeBranch(record, &got, 17, &keys)
+	err = pbinDecodeBranch(record, &got, 17, &keys)
 	require.NoError(t, err)
-	require.Equal(t, uint16(0b11), afterMap)
 	require.Equal(t, want, got)
 }
 
@@ -145,7 +143,7 @@ func TestPBinBranchCodecOmitsStoragePrefix(t *testing.T) {
 			other := pbinTestBranchCell(0xA5, 3)
 
 			var enc pbinBranchEncoder
-			record, err := enc.encode(pbinCellBits, pbinCellBits, &[2]pbinCell{storage, other})
+			record, err := enc.encode(&[2]pbinCell{storage, other})
 			require.NoError(t, err)
 
 			fields := byte(pbinFieldLeaf | pbinFieldStorageAddr | pbinFieldHash)
@@ -154,11 +152,11 @@ func TestPBinBranchCodecOmitsStoragePrefix(t *testing.T) {
 			require.Equal(t, want, record[1:1+len(want)])
 
 			var got [2]pbinCell
-			_, err = pbinDecodeBranch(record, &got, depth, &keys)
+			err = pbinDecodeBranch(record, &got, depth, &keys)
 			require.NoError(t, err)
 			require.Equal(t, storage, got[0])
 
-			again, err := enc.encode(pbinCellBits, pbinCellBits, &got)
+			again, err := enc.encode(&got)
 			require.NoError(t, err)
 			require.Equal(t, record, again)
 		})
@@ -170,11 +168,11 @@ func TestPBinBranchDecodeStoragePrefixRequiresDigestCache(t *testing.T) {
 
 	storage := pbinTestLeafCell(0x5A, 0)
 	var enc pbinBranchEncoder
-	record, err := enc.encode(pbinCellBits, pbinCellBits, &[2]pbinCell{storage, pbinTestBranchCell(0xA5, 3)})
+	record, err := enc.encode(&[2]pbinCell{storage, pbinTestBranchCell(0xA5, 3)})
 	require.NoError(t, err)
 
 	var cells [2]pbinCell
-	_, err = pbinDecodeBranch(record, &cells, 1, nil)
+	err = pbinDecodeBranch(record, &cells, 1, nil)
 	require.ErrorContains(t, err, "digest cache")
 }
 
@@ -188,7 +186,7 @@ func TestPBinBranchCodecKeepsAccountPrefix(t *testing.T) {
 	copy(account.accountAddr[:], bytes.Repeat([]byte{0x42}, length.Addr))
 
 	var enc pbinBranchEncoder
-	record, err := enc.encode(pbinCellBits, pbinCellBits, &[2]pbinCell{account, pbinTestBranchCell(0x11, 0)})
+	record, err := enc.encode(&[2]pbinCell{account, pbinTestBranchCell(0x11, 0)})
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldLeaf|pbinFieldAccountAddr), record[0])
 	require.Equal(t, byte(account.prefix.bitLen), record[1])
@@ -200,7 +198,7 @@ func TestPBinBranchCodecKeepsCodeChunkPrefix(t *testing.T) {
 
 	chunk := pbinTestChunkLeafCell(0x31, 7)
 	var enc pbinBranchEncoder
-	record, err := enc.encode(pbinCellBits, pbinCellBits, &[2]pbinCell{chunk, pbinTestBranchCell(0x11, 0)})
+	record, err := enc.encode(&[2]pbinCell{chunk, pbinTestBranchCell(0x11, 0)})
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldLeaf|pbinFieldLeafValue|pbinFieldHash), record[0])
 	require.Equal(t, byte(chunk.prefix.bitLen), record[1])
@@ -268,29 +266,26 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 	accountLeaf.accountAddrLen = length.Addr
 
 	for _, tc := range []struct {
-		name     string
-		touchMap uint16
-		afterMap uint16
-		cells    [2]pbinCell
+		name  string
+		cells [2]pbinCell
 	}{
-		{"both branches", 0b11, 0b11, [2]pbinCell{pbinTestBranchCell(0x01, 3), pbinTestBranchCell(0x02, 528)}},
-		{"leaf and branch", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x03, 271), pbinTestBranchCell(0x04, 5)}},
-		{"hashless account leaf", 0b11, 0b11, [2]pbinCell{accountLeaf, pbinTestChunkLeafCell(0x05, 64)}},
-		{"maps do not control payload", 0b10, 0b10, [2]pbinCell{pbinTestBranchCell(0x07, 9), pbinTestBranchCell(0x08, 9)}},
-		{"record-resident chunk leaf", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x09, 12), pbinTestBranchCell(0x0A, 21)}},
-		{"two chunk leaves", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x0B, 0), pbinTestChunkLeafCell(0x0C, 528)}},
+		{"both branches", [2]pbinCell{pbinTestBranchCell(0x01, 3), pbinTestBranchCell(0x02, 528)}},
+		{"leaf and branch", [2]pbinCell{pbinTestChunkLeafCell(0x03, 271), pbinTestBranchCell(0x04, 5)}},
+		{"hashless account leaf", [2]pbinCell{accountLeaf, pbinTestChunkLeafCell(0x05, 64)}},
+		{"maps do not control payload", [2]pbinCell{pbinTestBranchCell(0x07, 9), pbinTestBranchCell(0x08, 9)}},
+		{"record-resident chunk leaf", [2]pbinCell{pbinTestChunkLeafCell(0x09, 12), pbinTestBranchCell(0x0A, 21)}},
+		{"two chunk leaves", [2]pbinCell{pbinTestChunkLeafCell(0x0B, 0), pbinTestChunkLeafCell(0x0C, 528)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			var enc pbinBranchEncoder
-			rec, err := enc.encode(tc.touchMap, tc.afterMap, &tc.cells)
+			rec, err := enc.encode(&tc.cells)
 			require.NoError(t, err)
 
 			var got [2]pbinCell
-			afterMap, err := pbinDecodeBranch(rec, &got, 0, nil)
+			err = pbinDecodeBranch(rec, &got, 0, nil)
 			require.NoError(t, err)
-			require.Equal(t, uint16(0b11), afterMap)
 			require.Equal(t, tc.cells, got)
 		})
 	}
@@ -312,15 +307,15 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 			t.Parallel()
 
 			var enc pbinBranchEncoder
-			rec, err := enc.encode(0b11, 0b11, &tc.cells)
+			rec, err := enc.encode(&tc.cells)
 			require.NoError(t, err)
 			want := bytes.Clone(rec)
 
 			var got [2]pbinCell
-			_, err = pbinDecodeBranch(want, &got, 0, nil)
+			err = pbinDecodeBranch(want, &got, 0, nil)
 			require.NoError(t, err)
 
-			again, err := enc.encode(0b11, 0b11, &got)
+			again, err := enc.encode(&got)
 			require.NoError(t, err)
 			require.Equal(t, want, again)
 		})
@@ -429,7 +424,7 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var cells [2]pbinCell
-			_, err := pbinDecodeBranch(tc.rec, &cells, 0, nil)
+			err := pbinDecodeBranch(tc.rec, &cells, 0, nil)
 			require.Error(t, err)
 		})
 	}
@@ -438,21 +433,25 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 func TestPBinBranchEncodeRejects(t *testing.T) {
 	t.Parallel()
 
+	var enc pbinBranchEncoder
+	_, err := enc.encode(&[2]pbinCell{})
+	require.Error(t, err)
+}
+
+func TestPBinCheckCellMapsRejects(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name     string
 		touchMap uint16
 		afterMap uint16
-		cells    [2]pbinCell
 	}{
-		{"cell bit outside the arity", 0b100, 0b100, [2]pbinCell{}},
-		{"touched bit outside the arity", 0b1011, 0b11, [2]pbinCell{pbinTestBranchCell(1, 1), pbinTestBranchCell(2, 1)}},
-		{"present cell with no node kind", 0b01, 0b01, [2]pbinCell{}},
+		{"cell bit outside the arity", 0b100, 0b100},
+		{"touched bit outside the arity", 0b1011, 0b11},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var enc pbinBranchEncoder
-			_, err := enc.encode(tc.touchMap, tc.afterMap, &tc.cells)
-			require.Error(t, err)
+			require.Error(t, pbinCheckCellMaps(tc.touchMap, tc.afterMap))
 		})
 	}
 }
@@ -471,11 +470,11 @@ func TestPBinBranchCodecDropsLoadedState(t *testing.T) {
 	cells[0].Flags = NonceUpdate
 
 	var enc pbinBranchEncoder
-	rec, err := enc.encode(0b11, 0b11, &cells)
+	rec, err := enc.encode(&cells)
 	require.NoError(t, err)
 
 	var got [2]pbinCell
-	_, err = pbinDecodeBranch(bytes.Clone(rec), &got, 0, &keys)
+	err = pbinDecodeBranch(bytes.Clone(rec), &got, 0, &keys)
 	require.NoError(t, err)
 	require.Equal(t, cellLoadNone, got[0].loaded)
 	require.Zero(t, got[0].Nonce)
@@ -491,10 +490,10 @@ func TestPBinBranchDecodeClearsReusedCells(t *testing.T) {
 	want := [2]pbinCell{pbinTestBranchCell(0x0F, 3), pbinTestBranchCell(0xF0, 0)}
 
 	var enc pbinBranchEncoder
-	rec, err := enc.encode(0b11, 0b11, &want)
+	rec, err := enc.encode(&want)
 	require.NoError(t, err)
 
-	_, err = pbinDecodeBranch(bytes.Clone(rec), &cells, 0, nil)
+	err = pbinDecodeBranch(bytes.Clone(rec), &cells, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, want, cells)
 }

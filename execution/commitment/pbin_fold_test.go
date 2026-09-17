@@ -187,16 +187,15 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 
 			var stored [2]pbinCell
 			keys := pbinDigestCache{sum: pbinSelectedSum}
-			afterMap, err := pbinDecodeBranch(data, &stored, divergence+1, &keys)
+			err = pbinDecodeBranch(data, &stored, divergence+1, &keys)
 			require.NoError(t, err)
-			require.Equal(t, uint16(0b11), afterMap)
 			for i := range stored {
 				storageKey := pbinPathFromBytes(keys.storageKey(stored[i].storageAddr[:length.Addr], stored[i].storageAddr[length.Addr:]))
 				require.Equal(t, storageKey.slice(divergence+1, storageKey.bitLen), stored[i].prefix)
 			}
 
 			var enc pbinBranchEncoder
-			again, err := enc.encode(0b11, afterMap, &stored)
+			again, err := enc.encode(&stored)
 			require.NoError(t, err)
 			require.Equal(t, data, []byte(again))
 		})

@@ -34,18 +34,36 @@ const (
 // chunk boundaries. Padding to a multiple of 31 happens before the scan, which
 // is what makes a PUSH whose data runs off the end count against the padded tail.
 func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
+	var s pbinChunkScratch
+	return s.chunkify(code)
+}
+
+type pbinChunkScratch struct {
+	padded     []byte
+	pushdataAt []byte
+	chunks     [][pbinValueLength]byte
+}
+
+func (s *pbinChunkScratch) chunkify(code []byte) [][pbinValueLength]byte {
 	if len(code) == 0 {
 		return nil
 	}
 	padded := code
 	if rem := len(code) % pbinChunkDataLen; rem != 0 {
-		padded = make([]byte, len(code)+pbinChunkDataLen-rem)
-		copy(padded, code)
+		s.padded = append(s.padded[:0], code...)
+		for range pbinChunkDataLen - rem {
+			s.padded = append(s.padded, 0)
+		}
+		padded = s.padded
 	}
 
 	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. It runs a whole
 	// chunk past the code so a PUSH32 on the last byte has room.
-	pushdataAt := make([]byte, len(padded)+pbinValueLength)
+	if cap(s.pushdataAt) < len(padded)+pbinValueLength {
+		s.pushdataAt = make([]byte, len(padded)+pbinValueLength)
+	}
+	pushdataAt := s.pushdataAt[:len(padded)+pbinValueLength]
+	clear(pushdataAt)
 	for pos := 0; pos < len(padded); {
 		var pushdata int
 		if padded[pos] >= pbinPush1 && padded[pos] <= pbinPush32 {
@@ -58,13 +76,14 @@ func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
 		pos += pushdata
 	}
 
-	chunks := make([][pbinValueLength]byte, 0, len(padded)/pbinChunkDataLen)
+	chunks := s.chunks[:0]
 	for pos := 0; pos < len(padded); pos += pbinChunkDataLen {
 		var chunk [pbinValueLength]byte
 		chunk[0] = min(pushdataAt[pos], pbinChunkDataLen)
 		copy(chunk[1:], padded[pos:pos+pbinChunkDataLen])
 		chunks = append(chunks, chunk)
 	}
+	s.chunks = chunks
 	return chunks
 }
 

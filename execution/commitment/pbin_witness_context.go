@@ -167,9 +167,7 @@ func (c *pbinWitnessContext) branchRecord(node *pbinWitnessNode, path *pbinBitpa
 		}
 	}
 	var encoder pbinBranchEncoder
-	// The touch map is write-time bookkeeping a read discards, so it says the same
-	// as the after map.
-	record, err := encoder.encode(pbinCellBits, pbinCellBits, &cells)
+	record, err := encoder.encode(&cells)
 	if err != nil {
 		return nil, err
 	}

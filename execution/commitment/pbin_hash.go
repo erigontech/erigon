@@ -122,6 +122,9 @@ func (h *pbinHasher) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, erro
 	case pbinNodeEmpty:
 		return pbinEmptyTreeHash, nil
 	case pbinNodeBranch:
+		if c.hashLen == length.Hash && h.tracer == nil {
+			return c.hash, nil
+		}
 		if c.childrenSet {
 			return h.branchHash(&c.prefix, &c.children[0], &c.children[1]), nil
 		}

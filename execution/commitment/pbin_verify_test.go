@@ -203,12 +203,8 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 		return cells, fmt.Errorf("pbin verify: no record for the %d-bit node at %x", nodePath.bitLen, key)
 	}
 	keys := pbinDigestCache{sum: pbinSelectedSum}
-	afterMap, err := pbinDecodeBranch(data, &cells, nodePath.bitLen+1, &keys)
-	if err != nil {
+	if err := pbinDecodeBranch(data, &cells, nodePath.bitLen+1, &keys); err != nil {
 		return cells, fmt.Errorf("pbin verify: record at %x: %w", key, err)
-	}
-	if afterMap != pbinCellBits {
-		return cells, fmt.Errorf("pbin verify: record at %x keeps %02b of its children, want both", key, afterMap)
 	}
 	return cells, nil
 }
@@ -406,7 +402,7 @@ func TestPBinVerifyCatchesSwappedCells(t *testing.T) {
 
 	cells[0], cells[1] = cells[1], cells[0]
 	var enc pbinBranchEncoder
-	swapped, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+	swapped, err := enc.encode(&cells)
 	require.NoError(t, err)
 	require.NoError(t, ms.PutBranch(pbinEncodeBitPath(&path), bytes.Clone(swapped), nil))
 

@@ -54,7 +54,7 @@ func pbinTestSpecCell(t *testing.T, kind pbinNodeKind, spec string) pbinCell {
 func pbinTestPutRecord(t *testing.T, ms *MockState, path pbinBitpath, cells [2]pbinCell) {
 	t.Helper()
 	var enc pbinBranchEncoder
-	rec, err := enc.encode(0b11, 0b11, &cells)
+	rec, err := enc.encode(&cells)
 	require.NoError(t, err)
 	require.NoError(t, ms.PutBranch(pbinEncodeBitPath(&path), bytes.Clone(rec), nil))
 }

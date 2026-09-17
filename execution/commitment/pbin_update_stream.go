@@ -40,9 +40,10 @@ type pbinUpdateStream struct {
 	state PatriciaContext
 	emit  pbinUpdateSink
 
-	siblingKey [pbinAccountKeyLength]byte
-	codeChunks []pbinCodeChunk
-	keyDigest  pbinDigestCache
+	siblingKey   [pbinAccountKeyLength]byte
+	codeChunks   []pbinCodeChunk
+	keyDigest    pbinDigestCache
+	chunkScratch pbinChunkScratch
 
 	// witness is what the parent state cannot tell a witness pass about the block.
 	// See chunkSource and removesAccount.
@@ -291,7 +292,7 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 }
 
 func (s *pbinUpdateStream) queueChunks(code []byte, codeHash common.Hash) {
-	for i, chunk := range pbinChunkifyCode(code) {
+	for i, chunk := range s.chunkScratch.chunkify(code) {
 		var cc pbinCodeChunk
 		copy(cc.key[:], s.keyDigest.codeChunkKey(codeHash, i))
 		cc.value = chunk

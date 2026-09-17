@@ -53,7 +53,7 @@ func PBinEncodeLegacyRecord(key, current []byte) ([]byte, error) {
 	}
 	converter := NewPBinRecordConverter()
 	var cells [2]pbinCell
-	if _, err = pbinDecodeBranch(current, &cells, path.bitLen+1, &converter.keys); err != nil {
+	if err = pbinDecodeBranch(current, &cells, path.bitLen+1, &converter.keys); err != nil {
 		return nil, fmt.Errorf("pbin encode legacy: record at %x: %w", key, err)
 	}
 
@@ -203,7 +203,7 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 	depth := path.bitLen + 1
 
 	var cells [2]pbinCell
-	touchMap, afterMap, err := pbinLegacyDecodeBranch(data, &cells)
+	_, afterMap, err := pbinLegacyDecodeBranch(data, &cells)
 	if err != nil {
 		return nil, fmt.Errorf("pbin convert: record at %x: %w", key, err)
 	}
@@ -212,7 +212,7 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 			"a one-cell node is collapsed by foldPropagate and never stored", key, n, afterMap))
 	}
 
-	out, err := c.enc.encode(touchMap, afterMap, &cells)
+	out, err := c.enc.encode(&cells)
 	if err != nil {
 		return nil, fmt.Errorf("pbin convert: re-encode at %x: %w", key, err)
 	}
@@ -222,7 +222,7 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 	// address and this depth. Reading the result back is the only thing that
 	// proves the dropped bits were the derivable ones.
 	var got [2]pbinCell
-	if _, err = pbinDecodeBranch(out, &got, depth, &c.keys); err != nil {
+	if err = pbinDecodeBranch(out, &got, depth, &c.keys); err != nil {
 		return nil, fmt.Errorf("pbin convert: verify at %x: %w", key, err)
 	}
 	for bit := range cells {
@@ -276,7 +276,7 @@ func (c *PBinRecordConverter) CompareLegacy(key, legacy, current []byte) error {
 	}
 
 	var currentCells [2]pbinCell
-	if _, err = pbinDecodeBranch(current, &currentCells, path.bitLen+1, &c.keys); err != nil {
+	if err = pbinDecodeBranch(current, &currentCells, path.bitLen+1, &c.keys); err != nil {
 		return fmt.Errorf("pbin compare: current record at %x: %w", key, err)
 	}
 	for bit := range legacyCells {

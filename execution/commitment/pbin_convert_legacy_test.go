@@ -93,7 +93,7 @@ func TestPBinEncodeLegacyRecordRoundTrips(t *testing.T) {
 		pbinTestChunkLeafCell(0x5A, 7),
 	}
 	var enc pbinBranchEncoder
-	current, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+	current, err := enc.encode(&cells)
 	require.NoError(t, err)
 
 	legacy, err := PBinEncodeLegacyRecord(key, current)
@@ -145,7 +145,7 @@ func TestPBinConvertBranchMatchesTheCurrentEncoder(t *testing.T) {
 			require.NoError(t, err)
 
 			var enc pbinBranchEncoder
-			want, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+			want, err := enc.encode(&cells)
 			require.NoError(t, err)
 			require.Equal(t, want, got, "conversion must land on what the current encoder writes")
 			require.Less(t, len(got), len(legacy), "the current format is the smaller one")
@@ -286,7 +286,7 @@ func TestPBinCompareLegacyMatchesAndRejectsMismatch(t *testing.T) {
 		pbinTestChunkLeafCell(0x5A, 7),
 	}
 	var enc pbinBranchEncoder
-	current, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+	current, err := enc.encode(&cells)
 	require.NoError(t, err)
 	legacy, err := PBinEncodeLegacyRecord(key, current)
 	require.NoError(t, err)

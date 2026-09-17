@@ -55,6 +55,7 @@ type PBinPatriciaHashed struct {
 
 	lastKey    [pbinStorageKeyLength]byte // the deepest key visited so far, which the next one must exceed
 	lastKeyLen int16
+	keyBuf     []byte
 
 	traceW io.Writer
 
@@ -154,6 +155,11 @@ var pbinRootKey = []byte{0x08}
 // PBinIsRootKey reports whether key names the root-cell record. The record is a
 // bare cell, so nothing in its bytes distinguishes it from a branch record.
 func PBinIsRootKey(key []byte) bool { return bytes.Equal(key, pbinRootKey) }
+
+func (pph *PBinPatriciaHashed) recordKey(p *pbinBitpath) []byte {
+	pph.keyBuf = pbinAppendBitPath(pph.keyBuf[:0], p)
+	return pph.keyBuf
+}
 
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the
@@ -507,7 +513,7 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	g.rows[row][0].reset()
 	g.rows[row][1].reset()
 	g.touchMap[row], g.afterMap[row], g.branchBefore[row] = 0, 0, false
-	g.prevRecord[row] = nil
+	g.prevRecord[row], g.prevRecordSet[row] = g.prevRecord[row][:0], false
 
 	if u.action == pbinUnfoldRecord {
 		return pph.unfoldBranchNode(row, upDepth+1, touched && !present)
@@ -543,7 +549,7 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 // and is now gone, which takes the whole subtree below it with it.
 func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	g := &pph.grid
-	key := pbinEncodeBitPath(&pph.currentKey)
+	key := pph.recordKey(&pph.currentKey)
 
 	data, _, err := pph.ctx.Branch(key)
 	if err != nil {
@@ -553,17 +559,17 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.bitLen)
 	}
 
-	afterMap, err := pbinDecodeBranch(data, &g.rows[row], depth, &pph.updateStream.keyDigest)
-	if err != nil {
+	if err = pbinDecodeBranch(data, &g.rows[row], depth, &pph.updateStream.keyDigest); err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
-	g.prevRecord[row] = bytes.Clone(data)
+	g.prevRecord[row] = append(g.prevRecord[row][:0], data...)
+	g.prevRecordSet[row] = true
 	// The record's own touch map is write-time bookkeeping; nothing in this run
 	// has touched the row yet.
 	if deleted {
-		g.touchMap[row], g.afterMap[row] = afterMap, 0
+		g.touchMap[row], g.afterMap[row] = pbinCellBits, 0
 	} else {
-		g.touchMap[row], g.afterMap[row] = 0, afterMap
+		g.touchMap[row], g.afterMap[row] = 0, pbinCellBits
 	}
 	g.branchBefore[row] = true
 	g.depths[row] = depth
@@ -664,7 +670,7 @@ func (pph *PBinPatriciaHashed) fold() error {
 		return err
 	}
 	g.activeRows--
-	g.prevRecord[row] = nil
+	g.prevRecordSet[row] = false
 	pph.currentKey.truncate(max(upDepth-1, 0))
 	return nil
 }
@@ -690,12 +696,12 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 		return err
 	}
 
-	key := pbinEncodeBitPath(&pph.currentKey)
-	record, err := pph.branchEncoder.encode(g.touchMap[row], g.afterMap[row], &g.rows[row])
+	key := pph.recordKey(&pph.currentKey)
+	record, err := pph.branchEncoder.encode(&g.rows[row])
 	if err != nil {
 		return err
 	}
-	if err = pph.ctx.PutBranch(key, bytes.Clone(record), g.prevRecordFor(row)); err != nil {
+	if err = pph.ctx.PutBranch(key, record, g.prevRecordFor(row)); err != nil {
 		return fmt.Errorf("pbin: write branch at %x: %w", key, err)
 	}
 
@@ -772,7 +778,7 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 		path := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
 
-		key := pbinEncodeBitPath(&path)
+		key := pph.recordKey(&path)
 		data, _, err := pph.ctx.Branch(key)
 		if err != nil {
 			return fmt.Errorf("pbin: read branch at %x: %w", key, err)
@@ -780,12 +786,11 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 		if len(data) == 0 {
 			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.bitLen)
 		}
-		afterMap, err := pbinDecodeBranch(data, &cells, path.bitLen+1, &pph.updateStream.keyDigest)
-		if err != nil {
+		if err = pbinDecodeBranch(data, &cells, path.bitLen+1, &pph.updateStream.keyDigest); err != nil {
 			return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 		}
 		for bit := range cells {
-			if afterMap&(uint16(1)<<uint(bit)) == 0 || cells[bit].kind != pbinNodeBranch {
+			if cells[bit].kind != pbinNodeBranch {
 				continue
 			}
 			child := path
@@ -806,7 +811,7 @@ func (pph *PBinPatriciaHashed) deleteRowRecord(row int) error {
 	if !pph.grid.branchBefore[row] {
 		return nil
 	}
-	key := pbinEncodeBitPath(&pph.currentKey)
+	key := pph.recordKey(&pph.currentKey)
 	if err := pph.ctx.PutBranch(key, []byte{}, pph.grid.prevRecordFor(row)); err != nil {
 		return fmt.Errorf("pbin: delete branch at %x: %w", key, err)
 	}
@@ -921,7 +926,7 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 			errPBinCellHash, nodeKey.bitLen, c.prefix.bitLen)
 	}
 	nodeKey.append(&c.prefix)
-	key := pbinEncodeBitPath(&nodeKey)
+	key := pph.recordKey(&nodeKey)
 
 	data, _, err := pph.ctx.Branch(key)
 	if err != nil {
@@ -933,7 +938,7 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 	pph.counters.materializeReads++
 
 	var cells [2]pbinCell
-	if _, err = pbinDecodeBranch(data, &cells, nodeKey.bitLen+1, &pph.updateStream.keyDigest); err != nil {
+	if err = pbinDecodeBranch(data, &cells, nodeKey.bitLen+1, &pph.updateStream.keyDigest); err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
 	childPath := nodeKey

@@ -62,10 +62,7 @@ type pbinBranchEncoder struct {
 	buf []byte
 }
 
-func (e *pbinBranchEncoder) encode(touchMap, afterMap uint16, cells *[2]pbinCell) ([]byte, error) {
-	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
-		return nil, err
-	}
+func (e *pbinBranchEncoder) encode(cells *[2]pbinCell) ([]byte, error) {
 	e.buf = e.buf[:0]
 
 	var err error
@@ -127,20 +124,21 @@ func pbinAppendCell(dst []byte, c *pbinCell, omitStoragePrefix bool) ([]byte, er
 
 // pbinDecodeBranch fills both cells from a record. It rejects every spelling the
 // encoder would not produce, so a record has one canonical form.
-func pbinDecodeBranch(data []byte, cells *[2]pbinCell, depth int16, keys *pbinDigestCache) (afterMap uint16, err error) {
+func pbinDecodeBranch(data []byte, cells *[2]pbinCell, depth int16, keys *pbinDigestCache) error {
 	cells[0].reset()
 	cells[1].reset()
 
 	pos := 0
+	var err error
 	for i := range cells {
 		if pos, err = pbinDecodeCell(data, pos, &cells[i], depth, keys, true); err != nil {
-			return 0, err
+			return err
 		}
 	}
 	if pos != len(data) {
-		return 0, fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
+		return fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
 	}
-	return pbinCellBits, nil
+	return nil
 }
 
 func pbinDecodeCell(data []byte, pos int, c *pbinCell, depth int16, keys *pbinDigestCache, omitStoragePrefix bool) (int, error) {
