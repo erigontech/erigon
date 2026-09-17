@@ -54,7 +54,7 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 		keys, values := make([][]byte, 300), make([][]byte, 300)
 		for i := range keys {
 			keys[i] = crypto.Keccak256([]byte{byte(i), byte(i >> 8)})
-			if i%3 != 0 { // every third key stays absent
+			if i%3 != 0 {
 				values[i] = bytes.Repeat([]byte{byte(i) | 1}, valueLen)
 				tr.Update(keys[i], values[i])
 			}
@@ -83,7 +83,6 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 	}
 }
 
-// An empty trie proves absence with no nodes at all: its root has no encoded node to walk.
 func TestProofFromNodesEmptyTrie(t *testing.T) {
 	proof, value, err := ProofFromNodes(map[string][]byte{}, EmptyRoot[:], crypto.Keccak256([]byte("any")))
 	require.NoError(t, err)

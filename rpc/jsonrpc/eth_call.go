@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -524,14 +525,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		sdCtx.TouchKey(kv.StorageDomain, string(address[:])+string(storageKey.Hash[:]), nil)
 	}
 
-	// the proof is the captured node bytes on each key's path, whose hashes the fold already computed, so nothing is
-	// decoded into a trie, encoded again, or hashed again
 	nodes, root, err := sdCtx.WitnessNodesByHash(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !bytes.Equal(root, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in proof trie proofRoot(%x)!=expectedRoot(%x)", root, header.Root[:])
+		return nil, fmt.Errorf("witness root %x does not match header root %x", root, header.Root[:])
 	}
 	// set initial response fields
 	proof := &accounts.AccProofResult{
@@ -548,27 +547,17 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	proof.AccountProof = toHexBytes(accountProof)
-	if accountRLP == nil {
-		for i, storageKey := range storageKeys {
-			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   storageKey.EncodeKey(),
-				Value: new(hexutil.U256),
-				Proof: []hexutil.Bytes{},
-			}
-		}
-		return proof, assertProofVerifies(header.Root, proof)
-	}
-
 	var acc accounts.Account
-	if err := acc.DecodeForHashing(accountRLP); err != nil {
-		return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+	if accountRLP != nil {
+		if err := acc.DecodeForHashing(accountRLP); err != nil {
+			return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+		}
+		proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
+		proof.Nonce = hexutil.Uint64(acc.Nonce)
+		proof.CodeHash = acc.CodeHash.Value()
+		proof.StorageHash = acc.Root
 	}
-	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
-	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash.Value()
-	proof.StorageHash = acc.Root
-	// nothing to prove for an account without storage
-	if len(storageKeys) == 0 || acc.Root == common.BytesToHash(empty.RootHash[:]) {
+	if accountRLP == nil || acc.Root == empty.RootHash {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   storageKey.EncodeKey(),
@@ -579,10 +568,6 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return proof, assertProofVerifies(header.Root, proof)
 	}
 
-	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 	// get storage key proofs
 	for i, storageKey := range storageKeys {
 		// Stop early if the RPC request was canceled while proofs are being built.
@@ -590,15 +575,19 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		storageProof, _, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
+		storageProof, leaf, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
 			return nil, err
 		}
-		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
-		if err != nil { // a zero value next to a proof of the real one would be worse than no answer
-			return nil, fmt.Errorf("read storage %x of %x: %w", storageKey.Hash, address, err)
+		value := new(uint256.Int)
+		if leaf != nil {
+			b, _, err := rlp.SplitString(leaf)
+			if err != nil {
+				return nil, fmt.Errorf("decode storage %x of %x from its proof: %w", storageKey.Hash, address, err)
+			}
+			value.SetBytes(b)
 		}
-		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
+		proof.StorageProof[i].Value = (*hexutil.U256)(value)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -609,8 +598,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	return proof, assertProofVerifies(header.Root, proof)
 }
 
-// assertProofVerifies re-verifies the answer under ERIGON_ASSERT: the nodes come from the fold's own hashes, so a
-// serving node only checks the root, but a capture or walk defect must fail loudly in tests and on asserting nodes.
+// assertProofVerifies runs only under ERIGON_ASSERT: a serving node relies on the root check.
 func assertProofVerifies(stateRoot common.Hash, proof *accounts.AccProofResult) error {
 	if !dbg.AssertEnabled {
 		return nil
