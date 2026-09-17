@@ -92,25 +92,17 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
-	s.commit(hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b), start)
+	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	s.stream.SetBuffer(buf[:start])
+	s.WriteRawBytes(buf[start:])
 }
 
 func (s *StackStream) WriteValue(v hexutil.JSONAppender) {
 	buf := s.stream.Buffer()
 	start := len(buf)
-	s.commit(v.AppendJSON(slices.Grow(buf, v.JSONLen())), start)
-}
-
-// commit keeps the value appended at buf[start:] buffered, or hands it to the writer when it is at least
-// FlushThreshold.
-func (s *StackStream) commit(buf []byte, start int) {
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
-	s.popCommaOrField()
+	buf = v.AppendJSON(slices.Grow(buf, v.JSONLen()))
+	s.stream.SetBuffer(buf[:start])
+	s.WriteRawBytes(buf[start:])
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
