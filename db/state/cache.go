@@ -25,14 +25,15 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 // lo is the second half of the key hash (the cache is keyed by the first).
 type domainGetFromFileCacheItem struct {
 	found bool
-	lvl   uint8
+	lvl   uint32
 	lo    uint64
 	v     []byte
 }
 
-var domainGetFromFileCacheSize = dbg.EnvDataSize("D_LRU_SIZE", 64*datasize.MB)
+// D_LRU_SIZE is the total for one visible files set, split evenly between the domains that have the cache: all but CommitmentDomain.
+var domainGetFromFileCacheSize = dbg.EnvDataSize("D_LRU_SIZE", 320*datasize.MB) / datasize.ByteSize(kv.DomainLen-1)
 
-// newDomainVisible gives each visible files set one cache shared by all its txs: a value points into a file of the set,
+// newDomainVisible gives each visible files set one cache shared by all its txs: a value may point into a file of the set,
 // and those files stay open while any tx can reach the set.
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{name: name, files: files}

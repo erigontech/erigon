@@ -1108,6 +1108,13 @@ func TestDomain_LatestFromFilesCacheServesOtherTxs(t *testing.T) {
 	require.True(t, ok, "a value one tx read from files must serve the next tx")
 	require.Equal(t, lo, cached.lo)
 	require.Equal(t, want, cached.v)
+
+	cached.v = []byte("served-from-cache")
+	second.visible.cache.Add(hi, cached)
+	got, found, _, _, err = second.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, cached.v, got, "a lookup must be served from the cache")
 }
 
 func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
@@ -1124,6 +1131,11 @@ func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
 
 	second := d.beginFilesRo(dv, hv, iv)
 	defer second.Close()
+	hi, lo := second.ht.iit.hashKey(absent)
+	cached, ok := second.visible.cache.Get(hi)
+	require.True(t, ok, "a miss must be cached")
+	require.Equal(t, lo, cached.lo)
+	require.False(t, cached.found)
 	_, found, _, _, err = second.getLatestFromFiles(absent, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.False(t, found, "a miss one tx cached must stay a miss for the next tx")
