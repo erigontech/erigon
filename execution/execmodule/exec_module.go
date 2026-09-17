@@ -937,9 +937,12 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		// No in-progress record to re-key (or it disagrees with the sealed body) — write one. This is the
 		// allocating path above, so it is the fallback, not the norm, and it runs ONCE: into the generation, whose
 		// record every target then takes.
-		if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
+		seqBefore, _ := ov.ReadSequence(kv.EthTx)
+		allocated, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body)
+		if err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
 		}
+		traceBodyIds(e.logger, "seal-fallback", ov, newHash, number, seqBefore, allocated)
 		if bfs, rerr = rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, newHash)); rerr != nil || bfs == nil {
 			return fmt.Errorf("IngestSealedFlashblock: read back written body: %v", rerr)
 		}
@@ -949,7 +952,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
 		// The body is final here, so this is where its txnum→txhash mapping is settled.
-		e.traceBodyIds("seal", t, newHash, number, 0, false)
+		traceBodyIds(e.logger, "seal", t, newHash, number, 0, false)
 		if err := clearSystemSlotRows(t, bfs); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: %w", err)
 		}

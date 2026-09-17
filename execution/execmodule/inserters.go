@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -137,17 +138,20 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	if err != nil {
 		return fmt.Errorf("write body: %w", err)
 	}
-	e.traceBodyIds("write", tx, header.Hash(), number, seqBefore, allocated)
+	traceBodyIds(e.logger, "preexec-round", tx, header.Hash(), number, seqBefore, allocated)
 	return nil
 }
 
-// traceBodyIds records the txn-id range a pre-exec body owns and whether either system slot holds a key.
-// A system slot never should: its id is reserved by IncrementSequence and nothing is inserted there. Warn
-// when one does, so the write that strands a row names itself instead of being reconstructed from segments.
-func (e *ExecModule) traceBodyIds(when string, tx kv.Getter, hash common.Hash, number, seqBefore uint64, allocated bool) {
+// traceBodyIds records the txn-id range a body owns, at a site that creates a block's DB representation,
+// and whether either system slot holds a key. A system slot never should: its id is reserved by
+// IncrementSequence and nothing is inserted there. Warn when one does, so the write that strands a row names
+// itself instead of being reconstructed from segments. Every such site is traced — pre-exec rounds, the seal,
+// the seal's allocating fallback, newPayload's fork validation and InsertBlocks — because they write into
+// different overlays, each allocating from its own view of the sequence.
+func traceBodyIds(logger log.Logger, when string, tx kv.Getter, hash common.Hash, number, seqBefore uint64, allocated bool) {
 	bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(number, hash))
 	if err != nil || bfs == nil {
-		e.logger.Warn("[TXID-TRACE] body record unreadable", "when", when, "block", number, "hash", hash, "err", err)
+		logger.Warn("[TXID-TRACE] body record unreadable", "when", when, "block", number, "hash", hash, "err", err)
 		return
 	}
 	first, last := bfs.BaseTxnID.U64(), bfs.BaseTxnID.LastSystemTx(bfs.TxCount)
@@ -158,9 +162,9 @@ func (e *ExecModule) traceBodyIds(when string, tx kv.Getter, hash common.Hash, n
 		return gerr == nil && v != nil
 	}
 	startTaken, endTaken := taken(first), taken(last)
-	record := e.logger.Debug
+	record := logger.Debug
 	if startTaken || endTaken {
-		record = e.logger.Warn
+		record = logger.Warn
 	}
 	record("[TXID-TRACE] body ids", "when", when, "block", number, "hash", hash,
 		"base", first, "last", last, "txCount", bfs.TxCount, "allocated", allocated, "seqBefore", seqBefore,
@@ -273,9 +277,12 @@ func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.Raw
 		if err := rawdb.WriteTd(blockOverlay, header.Hash(), height, td); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
+		seqBefore, _ := blockOverlay.ReadSequence(kv.EthTx)
+		allocated, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body)
+		if err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
+		traceBodyIds(e.logger, "insert-blocks", blockOverlay, header.Hash(), height, seqBefore, allocated)
 		if len(block.BlockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)

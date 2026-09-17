@@ -467,9 +467,12 @@ func (fv *ForkValidator) ExecuteInto(ctx context.Context, sd *execctx.SharedDoma
 	if validationError != nil {
 		return engine_types.InvalidStatus, notifications, validationError, nil
 	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(tx, hash, number, body); err != nil {
+	seqBefore, _ := tx.ReadSequence(kv.EthTx)
+	allocated, err := rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
+	if err != nil {
 		return status, nil, nil, err
 	}
+	traceBodyIds(log.Root(), "execute-into", tx, hash, number, seqBefore, allocated)
 	return engine_types.ValidStatus, notifications, nil, nil
 }
 
@@ -532,10 +535,13 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 		fv.validHashes.Add(hash, true)
 	}
 
-	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
+	seqBefore, _ := tx.ReadSequence(kv.EthTx)
+	var allocated bool
+	allocated, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 	if criticalError != nil {
 		return //nolint:nilnesserr
 	}
+	traceBodyIds(log.Root(), "validate-and-store", tx, hash, number, seqBefore, allocated)
 
 	status = engine_types.ValidStatus
 	return
