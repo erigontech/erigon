@@ -380,6 +380,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return result.Err
 			}
 			if result.Err != nil {
+				// An infrastructure failure (transient read error) fails the stage
+				// retryably; only a genuine execution verdict is an invalid block.
+				if result.Operational {
+					return fmt.Errorf("txnIdx=%d: %w", txTask.TxIndex, result.Err)
+				}
 				return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
@@ -426,6 +431,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
+				// A system-contract read can fail during Finalize and be applied as a
+				// zero value without surfacing through err; it is an infrastructure
+				// failure, not an invalid block, so return it unwrapped.
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return fmt.Errorf("can't finalize block %d: state read: %w", txTask.BlockNumber(), stateErr)
+				}
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}

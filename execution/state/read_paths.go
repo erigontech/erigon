@@ -50,6 +50,7 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 		sdb.codeReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 	return size, err
 }
 
@@ -73,6 +74,7 @@ func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key ac
 	}
 	sdb.storageReadCount++
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -109,6 +111,7 @@ func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, 
 		sdb.codeReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 	return code, err
 }
 
@@ -136,6 +139,7 @@ func (sdb *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // recording an OCC read.
 func (sdb *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	acc, err := sdb.stateReader.ReadAccountData(addr)
+	sdb.recordStateReadError(err)
 	if err != nil {
 		return accounts.EmptyCodeHash, err
 	}
@@ -172,6 +176,7 @@ func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int,
 		sdb.codeReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 	return size, err
 }
 

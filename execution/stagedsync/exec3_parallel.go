@@ -150,9 +150,10 @@ type parallelExecutor struct {
 type stopKind uint8
 
 const (
-	stopReachedMax stopKind = iota // all requested work applied — clean batch end
-	stopMoreWork                   // size/exhausted cut before maxBlock — resume next cycle
-	stopBadBlock                   // wrong trie root — fail the implicated block and unwind
+	stopReachedMax  stopKind = iota // all requested work applied — clean batch end
+	stopMoreWork                    // size/exhausted cut before maxBlock — resume next cycle
+	stopBadBlock                    // wrong trie root — fail the implicated block and unwind
+	stopOperational                 // infrastructure failure — abort without a block verdict
 )
 
 func (k stopKind) String() string {
@@ -163,6 +164,8 @@ func (k stopKind) String() string {
 		return "more-work"
 	case stopBadBlock:
 		return "bad-block"
+	case stopOperational:
+		return "operational"
 	default:
 		return fmt.Sprintf("stopKind(%d)", uint8(k))
 	}
@@ -192,6 +195,13 @@ func stopCauseOf(ctx context.Context) (*stopCause, bool) {
 		return s, true
 	}
 	return nil, false
+}
+
+// cancelOperational aborts the exec loop with an infrastructure-failure cause: a
+// transient read/roTx error or a worker panic, not a block-validity verdict. It
+// must not surface as ErrInvalidBlock (that would unwind a valid block).
+func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
+	pe.cancelExecLoop(&stopCause{block: blockNum, kind: stopOperational, err: err})
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
@@ -543,6 +553,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
 						return fail.err
 					}
+					// An operational abort is an infrastructure failure, not a block
+					// verdict: return it raw (retryable, no unwind) before the missing-block
+					// guard, since it legitimately leaves later blocks unexecuted.
+					if sc, ok := stopCauseOf(executorContext); ok && sc.kind == stopOperational {
+						return sc.err
+					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
@@ -599,8 +615,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
 						finalized = true
+						// An infrastructure failure aborts the batch retryably without a
+						// block verdict; a validity verdict goes through fail so it wins its
+						// block over a concurrent commit wrong-root.
+						if applyResult.Operational {
+							pe.cancelOperational(applyResult.BlockNum, applyResult.Err)
+						} else {
+							fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
+						}
 						continue
 					}
 					// failInfra routes an apply-loop infrastructure fault through
@@ -1591,6 +1614,7 @@ type blockResult struct {
 	ParentHash       common.Hash
 	StateRoot        common.Hash
 	Err              error
+	Operational      bool // Err is an infrastructure failure, not a block-validity verdict
 	BlockGasUsed     uint64
 	BlobGasUsed      uint64
 	lastTxNum        uint64
@@ -1667,6 +1691,10 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// Execution-slot gate: held only while executing, released while resting
 		// mid-EVM on a dependency, so a resting worker does not reduce concurrency.
 		slotHeld := false
+		// slotErr carries the last acquireSlot failure cause: nil means shutdown
+		// (workersCtx cancelled — return silently), non-nil means an infrastructure
+		// failure the caller must surface as an operational result.
+		var slotErr error
 		releaseSlot := func() {
 			if !slotHeld {
 				return
@@ -1683,6 +1711,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// the loop binds via ResetTx (lock-free), the mid-EVM waitCommit rebinds via
 		// BindTxHeld (RunTxTask already holds the worker lock).
 		acquireSlot := func() bool {
+			slotErr = nil
 			select {
 			case <-pe.execSem:
 				slotHeld = true
@@ -1693,12 +1722,29 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			if err != nil {
 				pe.execSem <- struct{}{}
 				slotHeld = false
+				slotErr = err
 				return false
 			}
 			goRoTx = tx
 			return true
 		}
 		defer releaseSlot()
+		send := func(r *exec.TxResult) {
+			select {
+			case pe.results <- r:
+			case <-pe.workersCtx.Done():
+			}
+		}
+		// A worker must never vanish on a fatal condition — the exec loop would wait
+		// forever for a result that never arrives. sendFatal condemns the block;
+		// sendOperational reports an infrastructure failure that fails the stage
+		// retryably (transient roTx/read error, worker panic) without a block verdict.
+		sendFatal := func(err error) {
+			send(&exec.TxResult{Task: tv, Err: err})
+		}
+		sendOperational := func(err error) {
+			send(&exec.TxResult{Task: tv, Err: err, Operational: true})
+		}
 		// Mid-flow dep-pause hook: a read observing an in-flight (estimate) write
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
@@ -1709,26 +1755,17 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return false
 			}
 			if !acquireSlot() {
+				if slotErr != nil {
+					sendOperational(fmt.Errorf("block %d tx %d: reopen roTx: %w", be.blockNum, tv.index, slotErr))
+				}
 				return false
 			}
 			// RunTxTask holds the worker lock across this mid-EVM rebind.
 			return w.BindTxHeld(goRoTx) == nil
 		}
-		send := func(r *exec.TxResult) {
-			select {
-			case pe.results <- r:
-			case <-pe.workersCtx.Done():
-			}
-		}
-		// A worker must never vanish on a fatal condition (panic, or exhausted
-		// incarnation budget) — the exec loop would wait forever for a result that
-		// never arrives. Convert both into a fatal result so the block fails.
-		sendFatal := func(err error) {
-			send(&exec.TxResult{Task: tv, Err: err})
-		}
 		defer func() {
 			if rec := recover(); rec != nil {
-				sendFatal(fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
+				sendOperational(fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
 					be.blockNum, tv.index, rec, dbg.Stack()))
 			}
 		}()
@@ -1762,10 +1799,14 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// mis-classify a speculative error (frontier advanced mid-run) as genuine.
 			finalExec := be.frontier() >= tv.index-1
 			if !acquireSlot() {
+				if slotErr != nil {
+					sendOperational(fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, slotErr))
+				}
 				return
 			}
 			if err := w.ResetTx(goRoTx); err != nil {
 				releaseSlot()
+				sendOperational(fmt.Errorf("block %d tx %d: reset roTx: %w", be.blockNum, tv.index, err))
 				return
 			}
 			// Invariant: each RUN of a tx uses a strictly ascending incarnation. Two
@@ -2637,6 +2678,19 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
+// operationalBlockResult carries an infrastructure failure (transient read/roTx
+// error, worker panic) that must fail the stage retryably rather than condemn
+// the block. Err is left unwrapped by ErrInvalidBlock so the apply loop routes
+// it through cancelOperational.
+func (be *blockExecutor) operationalBlockResult(err error) *blockResult {
+	return &blockResult{
+		BlockNum:    be.blockNum,
+		BlockHash:   be.blockHash,
+		Err:         err,
+		Operational: true,
+	}
+}
+
 // finalizeValidatedTx runs the in-order finalize tail for a validated tx: receipt
 // cumulative-gas offsets, block-gas accounting, finalize, write normalization, and
 // queueing for publish. stateReader is the loop-shared reader, lazily created here
@@ -3115,9 +3169,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		// The worker sends an error only after executing against the full committed
-		// prefix, so it is authoritative: the block is invalid. Surface through
-		// blockResult.Err, not (nil, err) which would race the channel-close check.
+		// prefix, so it is authoritative. Surface through blockResult.Err, not
+		// (nil, err) which would race the channel-close check. An infrastructure
+		// failure (Operational) fails the stage retryably; anything else is a
+		// block-validity verdict.
 		txVersion := res.Version()
+		if res.Operational {
+			return be.operationalBlockResult(fmt.Errorf("could not apply tx %d:%d [%d:%v]: %w", be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
+		}
 		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
 	}
 
@@ -3347,10 +3406,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				if _, err := pe.cfg.engine.Finalize(
+				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.blockNum, err)), nil
+					tt.Withdrawals, chainReader, syscall, false, pe.logger)
+				// A system-contract read can fail during Finalize and be applied as a
+				// zero value without surfacing through finErr; treat it as an
+				// infrastructure failure, not an invalid block.
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return be.operationalBlockResult(fmt.Errorf("can't finalize block %d: state read: %w", be.blockNum, stateErr)), nil
+				}
+				if finErr != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.blockNum, finErr)), nil
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
