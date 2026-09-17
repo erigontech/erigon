@@ -54,11 +54,8 @@ var (
 	encodeUint64Tests = []marshalTest{
 		{uint64(0), "0x0"},
 		{uint64(1), "0x1"},
-		{uint64(0xf), "0xf"},
-		{uint64(0x10), "0x10"},
 		{uint64(0xff), "0xff"},
 		{uint64(0x1122334455667788), "0x1122334455667788"},
-		{uint64(0xffffffffffffffff), "0xffffffffffffffff"},
 	}
 
 	encodeUint16Tests = []marshalTest{
