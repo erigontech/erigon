@@ -452,3 +452,29 @@ func TestBeaconAPISourceAsksByRootByDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, gotPath, "0x0000000000000000000000000000000000000000000000000000000000000abc")
 }
+
+// A linear 500ms step gives up 5s into a throttle that lasts minutes. Growth has to outlast the
+// rate limit, and the endpoint's own Retry-After outranks any guess we make.
+func TestBackoffDelayGrowsAndHonoursRetryAfter(t *testing.T) {
+	require.Zero(t, backoffDelay(1, 0), "the first attempt must not wait")
+
+	var prev time.Duration
+	for attempt := 2; attempt <= 8; attempt++ {
+		d := backoffDelay(attempt, 0)
+		require.Greater(t, d, prev, "attempt %d must wait longer than the previous", attempt)
+		require.LessOrEqual(t, d, maxBackoff, "must stay capped")
+		prev = d
+	}
+
+	require.Equal(t, 30*time.Second, backoffDelay(2, 30*time.Second),
+		"Retry-After must win over the computed delay")
+	require.Equal(t, maxBackoff, backoffDelay(2, time.Hour),
+		"an absurd Retry-After must still be capped")
+}
+
+// A 429 without Retry-After is normal; the caller must not stall on a zero parse.
+func TestParseRetryAfterSeconds(t *testing.T) {
+	require.Equal(t, 5*time.Second, parseRetryAfter("5"))
+	require.Zero(t, parseRetryAfter(""))
+	require.Zero(t, parseRetryAfter("not-a-number"))
+}
