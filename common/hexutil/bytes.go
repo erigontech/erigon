@@ -20,6 +20,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var bytesT = reflect.TypeFor[Bytes]()
@@ -46,14 +48,8 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
-// JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
-type JSONWriter interface {
-	// WriteHex writes b as a 0x-prefixed hex string.
-	WriteHex(b []byte)
-}
-
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
-func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
+func (b Bytes) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteHex(b)
 	return nil
 }

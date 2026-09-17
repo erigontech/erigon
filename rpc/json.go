@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 const (
@@ -114,7 +114,7 @@ type fastJSONResult interface {
 // fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. It returns
 // any error before its first call to w, so a failed result leaves the stream untouched.
 type fastJSONMarshalerTo interface {
-	MarshalFastJSONTo(w hexutil.JSONWriter) error
+	MarshalFastJSONTo(w jsonw.JSONWriter) error
 }
 
 // writeResponse encodes result straight into stream as the success response and returns nil.
