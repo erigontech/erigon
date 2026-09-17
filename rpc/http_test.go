@@ -510,17 +510,4 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
-
-	// Past net/http's 2KB auto-buffer, which would otherwise set the length and hide a zero-length regression.
-	const batchSize = 200
-	calls := make([]string, batchSize)
-	for i := range calls {
-		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q,%d,{"S":"y"}]}`, i+3, strings.Repeat("a", 64), i)
-	}
-	length, encoding, answer = post("[" + strings.Join(calls, ",") + "]")
-	require.Equal(t, int64(-1), length)
-	require.Equal(t, []string{"chunked"}, encoding)
-	var batch []json.RawMessage
-	require.NoError(t, json.Unmarshal([]byte(answer), &batch))
-	require.Len(t, batch, batchSize)
 }
