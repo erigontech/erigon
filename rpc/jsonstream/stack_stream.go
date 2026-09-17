@@ -66,12 +66,6 @@ func (s *StackStream) Buffer() []byte {
 	return s.stream.Buffer()
 }
 
-func (s *StackStream) AvailableBuffer(sizeHint int) []byte {
-	buf := slices.Grow(s.stream.Buffer(), sizeHint)
-	s.stream.SetBuffer(buf)
-	return buf[len(buf):]
-}
-
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
@@ -98,7 +92,18 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
-	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	s.commit(hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b), start)
+}
+
+func (s *StackStream) WriteValue(v hexutil.JSONAppender) {
+	buf := s.stream.Buffer()
+	start := len(buf)
+	s.commit(v.AppendJSON(slices.Grow(buf, v.JSONLen())), start)
+}
+
+// commit keeps the value appended at buf[start:] buffered, or hands it to the writer when it is at least
+// FlushThreshold.
+func (s *StackStream) commit(buf []byte, start int) {
 	if s.out != nil && len(buf)-start >= FlushThreshold {
 		s.stream.SetBuffer(buf[:start])
 		s.writeThrough(buf[start:])

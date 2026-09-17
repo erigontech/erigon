@@ -31,9 +31,9 @@ func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 	return append(dst, '"')
 }
 
-// fastJSONLen is an upper bound on the encoded size, so the buffer is allocated
+// JSONLen is an upper bound on the encoded size, so the buffer is allocated
 // once instead of doubling.
-func (l *RPCLog) fastJSONLen() int {
+func (l *RPCLog) JSONLen() int {
 	if l == nil {
 		return len("null")
 	}
@@ -50,9 +50,9 @@ func (l *RPCLog) fastJSONLen() int {
 	return n
 }
 
-// appendFastJSON writes the log in the field order encoding/json uses for the
+// AppendJSON writes the log in the field order encoding/json uses for the
 // struct, so the output is byte-identical to reflection-based marshalling.
-func (l *RPCLog) appendFastJSON(dst []byte) []byte {
+func (l *RPCLog) AppendJSON(dst []byte) []byte {
 	if l == nil {
 		return append(dst, "null"...)
 	}
@@ -92,15 +92,26 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 }
 
 func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
+	return l.AppendJSON(make([]byte, 0, l.JSONLen())), nil
 }
 
 func (l *RPCLog) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	w.WriteRawBytes(l.appendFastJSON(w.AvailableBuffer(l.fastJSONLen())))
+	w.WriteValue(l)
 	return nil
 }
 
 func (logs RPCLogs) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	hexutil.MarshalFastJSONElemsTo(w, logs, (*RPCLog).fastJSONLen, func(dst []byte, l *RPCLog) []byte { return l.appendFastJSON(dst) })
+	if logs == nil {
+		w.WriteNil()
+		return nil
+	}
+	w.WriteArrayStart()
+	for i, l := range logs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		w.WriteValue(l)
+	}
+	w.WriteArrayEnd()
 	return nil
 }

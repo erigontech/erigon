@@ -40,10 +40,6 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(bundle)
 			require.NoError(t, err)
-			w := &hintedJSONWriter{}
-			require.NoError(t, bundle.MarshalFastJSONTo(w))
-			require.Equal(t, string(want), string(w.out))
-			require.False(t, w.overrun, "a write outgrew its size hint")
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, bundle.MarshalFastJSONTo(s))
@@ -90,10 +86,6 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(r)
 			require.NoError(t, err)
-			w := &hintedJSONWriter{}
-			require.NoError(t, r.MarshalFastJSONTo(w))
-			require.Equal(t, string(want), string(w.out))
-			require.False(t, w.overrun, "a write outgrew its size hint")
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, r.MarshalFastJSONTo(s))

@@ -48,12 +48,10 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 
 // JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
 type JSONWriter interface {
-	// AvailableBuffer returns an empty buffer with at least sizeHint spare capacity. The stream owns it:
-	// append one value and pass it to WriteRawBytes.
-	AvailableBuffer(sizeHint int) []byte
 	WriteRawBytes([]byte)
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	WriteValue(v JSONAppender)
 	WriteNil()
 	WriteObjectStart()
 	WriteObjectField(name string)
@@ -63,9 +61,10 @@ type JSONWriter interface {
 	WriteArrayEnd()
 }
 
-// WriteRawJSON writes already-encoded JSON.
-func WriteRawJSON(w JSONWriter, raw string) {
-	w.WriteRawBytes(append(w.AvailableBuffer(len(raw)), raw...))
+// JSONAppender is one JSON value that knows an upper bound of its encoded size.
+type JSONAppender interface {
+	JSONLen() int
+	AppendJSON(dst []byte) []byte
 }
 
 func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
@@ -81,29 +80,6 @@ func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
 		w.WriteHex(b)
 	}
 	w.WriteArrayEnd()
-}
-
-// MarshalFastJSONElemsTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
-func MarshalFastJSONElemsTo[T any](w JSONWriter, items []T, jsonLen func(T) int, appendJSON func([]byte, T) []byte) {
-	if items == nil {
-		WriteRawJSON(w, "null")
-		return
-	}
-	if len(items) == 0 {
-		WriteRawJSON(w, "[]")
-		return
-	}
-	for i, item := range items {
-		sep := byte(',')
-		if i == 0 {
-			sep = '['
-		}
-		enc := appendJSON(append(w.AvailableBuffer(jsonLen(item)+len("[]")), sep), item)
-		if i == len(items)-1 {
-			enc = append(enc, ']')
-		}
-		w.WriteRawBytes(enc)
-	}
 }
 
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.

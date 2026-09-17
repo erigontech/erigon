@@ -29,14 +29,16 @@ func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 		return nil
 	}
 	w.WriteObjectStart()
-	w.WriteObjectField("commitments")
-	hexutil.MarshalFastJSONArrayTo(w, b.Commitments)
-	w.WriteMore()
-	w.WriteObjectField("proofs")
-	hexutil.MarshalFastJSONArrayTo(w, b.Proofs)
-	w.WriteMore()
-	w.WriteObjectField("blobs")
-	hexutil.MarshalFastJSONArrayTo(w, b.Blobs)
+	{
+		w.WriteObjectField("commitments")
+		hexutil.MarshalFastJSONArrayTo(w, b.Commitments)
+		w.WriteMore()
+		w.WriteObjectField("proofs")
+		hexutil.MarshalFastJSONArrayTo(w, b.Proofs)
+		w.WriteMore()
+		w.WriteObjectField("blobs")
+		hexutil.MarshalFastJSONArrayTo(w, b.Blobs)
+	}
 	w.WriteObjectEnd()
 	return nil
 }
@@ -46,23 +48,30 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if err != nil {
 		return err
 	}
-	enc := append(w.AvailableBuffer(f.jsonLen()), `{"executionPayload":`...)
-	enc = append(enc, f.executionPayload...)
-	enc = append(enc, `,"blockValue":`...)
-	enc = append(enc, f.blockValue...)
-	w.WriteRawBytes(append(enc, `,"blobsBundle":`...))
-	if err := r.BlobsBundle.MarshalFastJSONTo(w); err != nil {
-		return err
+	w.WriteObjectStart()
+	{
+		w.WriteObjectField("executionPayload")
+		w.WriteRawBytes(f.executionPayload)
+		w.WriteMore()
+		w.WriteObjectField("blockValue")
+		w.WriteRawBytes(f.blockValue)
+		w.WriteMore()
+		w.WriteObjectField("blobsBundle")
+		if err := r.BlobsBundle.MarshalFastJSONTo(w); err != nil {
+			return err
+		}
+		w.WriteMore()
+		w.WriteObjectField("executionRequests")
+		w.WriteRawBytes(f.executionRequests)
+		w.WriteMore()
+		w.WriteObjectField("shouldOverrideBuilder")
+		w.WriteRawBytes(f.shouldOverrideBuilder)
 	}
-	enc = append(w.AvailableBuffer(f.jsonLen()), `,"executionRequests":`...)
-	enc = append(enc, f.executionRequests...)
-	enc = append(enc, `,"shouldOverrideBuilder":`...)
-	enc = append(enc, f.shouldOverrideBuilder...)
-	w.WriteRawBytes(append(enc, '}'))
+	w.WriteObjectEnd()
 	return nil
 }
 
-// getPayloadFields holds the fields json.Marshal encodes; the bundle is streamed.
+// getPayloadFields holds the fields json.Marshal encodes, marshaled before anything is written.
 type getPayloadFields struct {
 	executionPayload, blockValue, executionRequests, shouldOverrideBuilder []byte
 }
@@ -81,12 +90,4 @@ func (r *GetPayloadResponse) marshalFields() (f getPayloadFields, err error) {
 		return f, err
 	}
 	return f, nil
-}
-
-func (f *getPayloadFields) jsonLen() int {
-	return len(`{"executionPayload":`) + len(f.executionPayload) +
-		len(`,"blockValue":`) + len(f.blockValue) +
-		len(`,"blobsBundle":`) +
-		len(`,"executionRequests":`) + len(f.executionRequests) +
-		len(`,"shouldOverrideBuilder":`) + len(f.shouldOverrideBuilder) + len("}")
 }

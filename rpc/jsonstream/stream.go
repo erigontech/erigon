@@ -18,6 +18,8 @@ package jsonstream
 
 import (
 	"io"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // Stream is an interface that defines the common functionality between
@@ -68,12 +70,10 @@ type Stream interface {
 	WriteMore()
 	WriteObjectField(fieldName string)
 
-	// AvailableBuffer returns an empty buffer with at least sizeHint spare capacity for one value,
-	// which is then passed to WriteRawBytes. A value that fits the stream's buffer is not copied.
-	AvailableBuffer(sizeHint int) []byte
-
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// WriteValue appends v into the stream's buffer, grown by v.JSONLen() first.
+	WriteValue(v hexutil.JSONAppender)
 
 	// Utility methods
 

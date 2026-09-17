@@ -81,11 +81,11 @@ func TestUnmarshalBytes(t *testing.T) {
 
 type sliceJSONWriter []byte
 
-func (w *sliceJSONWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
-func (w *sliceJSONWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
-func (w *sliceJSONWriter) WriteHex(v []byte)            { *w = AppendQuoted(*w, v) }
-func (w *sliceJSONWriter) WriteNil()                    { *w = append(*w, "null"...) }
-func (w *sliceJSONWriter) WriteObjectStart()            { *w = append(*w, '{') }
+func (w *sliceJSONWriter) WriteValue(v JSONAppender) { *w = v.AppendJSON(*w) }
+func (w *sliceJSONWriter) WriteRawBytes(v []byte)    { *w = append(*w, v...) }
+func (w *sliceJSONWriter) WriteHex(v []byte)         { *w = AppendQuoted(*w, v) }
+func (w *sliceJSONWriter) WriteNil()                 { *w = append(*w, "null"...) }
+func (w *sliceJSONWriter) WriteObjectStart()         { *w = append(*w, '{') }
 func (w *sliceJSONWriter) WriteObjectField(name string) {
 	*w = append(append(append(*w, '"'), name...), `":`...)
 }

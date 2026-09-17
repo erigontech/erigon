@@ -550,7 +550,7 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 type streamedJSON string
 
 func (a streamedJSON) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	w.WriteRawBytes(append(w.AvailableBuffer(len(a)), a...))
+	w.WriteRawBytes([]byte(a))
 	return nil
 }
 

@@ -26,31 +26,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// hintedJSONWriter records whether a write outgrew the size hint of the buffer it came from.
-type hintedJSONWriter struct {
-	out     []byte
-	hint    int
-	overrun bool
-}
-
-func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
-
-func (w *hintedJSONWriter) WriteHex(v []byte) { w.out = hexutil.AppendQuoted(w.out, v) }
-func (w *hintedJSONWriter) WriteNil()         { w.out = append(w.out, "null"...) }
-func (w *hintedJSONWriter) WriteObjectStart() { w.out = append(w.out, '{') }
-func (w *hintedJSONWriter) WriteObjectField(name string) {
-	w.out = append(append(append(w.out, '"'), name...), `":`...)
-}
-func (w *hintedJSONWriter) WriteObjectEnd()  { w.out = append(w.out, '}') }
-func (w *hintedJSONWriter) WriteArrayStart() { w.out = append(w.out, '[') }
-func (w *hintedJSONWriter) WriteMore()       { w.out = append(w.out, ',') }
-func (w *hintedJSONWriter) WriteArrayEnd()   { w.out = append(w.out, ']') }
-
-func (w *hintedJSONWriter) WriteRawBytes(v []byte) {
-	w.overrun = w.overrun || len(v) > w.hint
-	w.out = append(w.out, v...)
-}
-
 func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 	full := worstCaseBundleV2()
 	cases := map[string]BlobsBundleV2{
@@ -67,10 +42,6 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV2(bundle))
 			require.NoError(t, err)
-			w := &hintedJSONWriter{}
-			require.NoError(t, bundle.MarshalFastJSONTo(w))
-			require.Equal(t, string(want), string(w.out))
-			require.False(t, w.overrun, "a write outgrew its size hint")
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, bundle.MarshalFastJSONTo(s))
@@ -91,10 +62,6 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV1(bundle))
 			require.NoError(t, err)
-			w := &hintedJSONWriter{}
-			require.NoError(t, bundle.MarshalFastJSONTo(w))
-			require.Equal(t, string(want), string(w.out))
-			require.False(t, w.overrun, "a write outgrew its size hint")
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, bundle.MarshalFastJSONTo(s))

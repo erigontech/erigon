@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -516,23 +517,8 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// hintedJSONWriter records whether a write outgrew the size hint of the buffer it came from.
-type hintedJSONWriter struct {
-	hexutil.JSONWriter // RPCLogs writes through AvailableBuffer and WriteRawBytes only
-	out                []byte
-	hint               int
-	overrun            bool
-}
-
-func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
-
-func (w *hintedJSONWriter) WriteRawBytes(v []byte) {
-	w.overrun = w.overrun || len(v) > w.hint
-	w.out = append(w.out, v...)
-}
-
 // The fast encoders replace json.Marshal for these results, so they must match it byte for byte and
-// stay within fastJSONLen.
+// stay within JSONLen.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
 	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
@@ -566,10 +552,10 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			w := &hintedJSONWriter{}
-			require.NoError(t, logs.MarshalFastJSONTo(w))
-			require.Equal(t, string(want), string(w.out))
-			require.False(t, w.overrun, "a write outgrew its size hint")
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, logs.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
@@ -577,10 +563,7 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 				got, err := l.MarshalFastJSON()
 				require.NoError(t, err)
 				require.Equal(t, string(want), string(got))
-				require.LessOrEqual(t, len(got), l.fastJSONLen())
-				w := &hintedJSONWriter{}
-				require.NoError(t, l.MarshalFastJSONTo(w))
-				require.Equal(t, string(want), string(w.out))
+				require.LessOrEqual(t, len(got), l.JSONLen())
 			}
 		})
 	}

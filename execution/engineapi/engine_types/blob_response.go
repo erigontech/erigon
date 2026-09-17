@@ -41,11 +41,13 @@ func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 			continue
 		}
 		w.WriteObjectStart()
-		w.WriteObjectField("blob")
-		w.WriteHex(b.Blob)
-		w.WriteMore()
-		w.WriteObjectField("proof")
-		w.WriteHex(b.Proof)
+		{
+			w.WriteObjectField("blob")
+			w.WriteHex(b.Blob)
+			w.WriteMore()
+			w.WriteObjectField("proof")
+			w.WriteHex(b.Proof)
+		}
 		w.WriteObjectEnd()
 	}
 	w.WriteArrayEnd()
@@ -67,11 +69,13 @@ func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 			continue
 		}
 		w.WriteObjectStart()
-		w.WriteObjectField("blob")
-		w.WriteHex(b.Blob)
-		w.WriteMore()
-		w.WriteObjectField("proofs")
-		hexutil.MarshalFastJSONArrayTo(w, b.CellProofs)
+		{
+			w.WriteObjectField("blob")
+			w.WriteHex(b.Blob)
+			w.WriteMore()
+			w.WriteObjectField("proofs")
+			hexutil.MarshalFastJSONArrayTo(w, b.CellProofs)
+		}
 		w.WriteObjectEnd()
 	}
 	w.WriteArrayEnd()

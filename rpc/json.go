@@ -160,11 +160,6 @@ func (w *responseWriter) open() {
 	}
 }
 
-func (w *responseWriter) AvailableBuffer(sizeHint int) []byte {
-	w.open()
-	return w.stream.AvailableBuffer(sizeHint)
-}
-
 func (w *responseWriter) WriteRawBytes(b []byte) {
 	w.open()
 	w.stream.WriteRawBytes(b)
@@ -173,6 +168,11 @@ func (w *responseWriter) WriteRawBytes(b []byte) {
 func (w *responseWriter) WriteHex(b []byte) {
 	w.open()
 	w.stream.WriteHex(b)
+}
+
+func (w *responseWriter) WriteValue(v hexutil.JSONAppender) {
+	w.open()
+	w.stream.WriteValue(v)
 }
 
 func (w *responseWriter) WriteNil()         { w.open(); w.stream.WriteNil() }
