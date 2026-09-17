@@ -169,7 +169,7 @@ func (p *Provider) FinalizeUnwind() error {
 			// 2026-06-30 alongside the truncated-rename landing.
 			if p.Inventory != nil {
 				entry := &snapshot.FileEntry{
-					Name:         filepath.Base(pair.finalPath),
+					Name:         snapshot.RelPathForName(filepath.Base(pair.finalPath)),
 					Local:        true,
 					Advertisable: true,
 				}

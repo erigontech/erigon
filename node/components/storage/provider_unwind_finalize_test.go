@@ -26,6 +26,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
+
 	"github.com/erigontech/erigon/db/dbservices"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -719,4 +721,31 @@ func TestProvider_FinalizeUnwind_SplitEmitAlignedPlusStub(t *testing.T) {
 		"Delete must carry aligned + stub new basenames AND the retired broad basename")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_RegistersRegenUnderKindSubdir pins the inventory
+// name a regen output is registered under: the kind-prefixed form every other
+// registration path uses. A bare basename adds a second entry for the same
+// file, which downstream passes then have to reconcile by basename.
+func TestProvider_FinalizeUnwind_RegistersRegenUnderKindSubdir(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "domain"), 0o755))
+	base := "v4.0-accounts.124609375-124947129.kv"
+	finalPath := filepath.Join(tmpDir, "domain", base)
+	regenPath := finalPath + ".regen"
+	require.NoError(t, os.WriteFile(regenPath, []byte("regen-content"), 0o600))
+
+	inv := snapshot.NewInventory()
+	p := &Provider{snapDir: tmpDir, Inventory: inv, downloaderClient: &recordingDownloaderClient{}}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{{regenPath: regenPath, finalPath: finalPath}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	_, bare := inv.LifecycleState(base)
+	require.False(t, bare, "the bare basename must not be registered")
+	_, prefixed := inv.LifecycleState("domain/" + base)
+	require.True(t, prefixed, "the regen output must be registered under its kind subdir")
 }

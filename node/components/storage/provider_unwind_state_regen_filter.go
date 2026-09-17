@@ -36,13 +36,12 @@ import (
 func localKVRanges(entries []*snapshot.FileEntry) ([]*snapshot.FileEntry, []stateFileRange) {
 	files := make([]*snapshot.FileEntry, 0, len(entries))
 	ranges := make([]stateFileRange, 0, len(entries))
-	// Dedup by basename: Inventory can carry the same on-disk file under
-	// both the bare filename (from a legacy add path) and a subdir-prefixed
-	// name (`domain/<name>`) from the current OnFilesChange wire. Both
-	// resolve to the same on-disk file; treating them as distinct entries
-	// causes the downstream regen loop to call WriteCommitmentBoundaryFileV4
-	// twice for the same target, and the second call panics on the
-	// exhausted `recompute.regenBranches` etl.Collector.
+	// Dedup by basename: a flat-layout datadir can carry the same on-disk
+	// file under both the bare filename and the subdir-prefixed
+	// `domain/<name>` form. Both resolve to one file, and treating them as
+	// distinct entries makes the regen loop call
+	// WriteCommitmentBoundaryFileV4 twice for the same target — the second
+	// call panics on the exhausted `recompute.regenBranches` etl.Collector.
 	seen := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
 		if e == nil || e.Kind != snapshot.KindKV || !e.Local {
