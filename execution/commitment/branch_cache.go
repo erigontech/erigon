@@ -101,6 +101,7 @@ type trunk struct {
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
 
+	entries  atomic.Int64
 	maxDepth uint8
 }
 
@@ -524,22 +525,49 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(prefix))
+	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
-			c.pinnedEntries.Add(1)
+			c.pinnedAdd(st)
 		}
 		return
 	}
 	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
-		c.pinnedEntries.Add(1)
+		c.pinnedAdd(st)
+	}
+}
+
+func (c *BranchCache) pinnedAdd(st *trunk) {
+	st.entries.Add(1)
+	c.pinnedEntries.Add(1)
+}
+
+func (c *BranchCache) pinnedDrop(st *trunk) {
+	for n := st.entries.Load(); n > 0; n = st.entries.Load() {
+		if st.entries.CompareAndSwap(n, n-1) {
+			c.pinnedEntries.Add(-1)
+			return
+		}
 	}
 }
 
 func (c *BranchCache) PinnedCount() int {
 	return int(c.pinnedEntries.Load())
+}
+
+func (c *BranchCache) UnpinContract(contractHash []byte) {
+	p := c.pinned.Load()
+	if p == nil {
+		return
+	}
+	if st, loaded := p.LoadAndDelete(contractHash); loaded {
+		c.pinnedEntries.Add(-st.entries.Swap(0))
+	}
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
@@ -593,10 +621,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			if slot.Swap(nil) != nil {
-				c.pinnedEntries.Add(-1)
+				c.pinnedDrop(st)
 			}
 		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
-			c.pinnedEntries.Add(-1)
+			c.pinnedDrop(st)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {

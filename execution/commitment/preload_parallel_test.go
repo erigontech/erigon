@@ -148,7 +148,7 @@ func TestPreloadParallel_FullBudget_BreadthFirst(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestPreloadParallel_BudgetCutoff(t *testing.T) {
 	}
 	budget += 10
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, budget, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, budget, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestPreloadParallel_NotFoundStopsDescent(t *testing.T) {
 	}
 	r2 := root + string([]byte{2})
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, map[string]bool{r2: true}, 100, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, nil, fakeResolver(tree, map[string]bool{r2: true}, 100, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 		return base(keys)
 	}
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, budget, nil, resolve, c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, budget, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestPreloadParallel_DbTombstoneDropsBranch(t *testing.T) {
 	dbBranches := map[string][]byte{string(rootKey): {}}
 
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestPreloadParallel_DbHitsShadowFiles(t *testing.T) {
 	dbBranches := map[string][]byte{string(nibbles.HexToCompact([]byte(r1))): freshR1}
 
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestPreloadParallel_ResolverError(t *testing.T) {
 		}
 	}
 	c := NewBranchCache(64)
-	_, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, 100, root+string([]byte{1})), c, nil)
+	_, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, nil, fakeResolver(tree, nil, 100, root+string([]byte{1})), c, nil)
 	if err == nil {
 		t.Fatal("expected error from the resolver")
 	}
@@ -392,7 +392,7 @@ func TestContractTrunkPreloadParallel_ResumeAcrossSteps(t *testing.T) {
 	resolve := fakeResolver(tree, nil, valSz, "")
 
 	cRef := NewBranchCache(64)
-	if _, err := PreloadContractTrunkParallel(hash, 1<<20, nil, resolve, cRef, nil); err != nil {
+	if _, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, nil, resolve, cRef, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -405,7 +405,7 @@ func TestContractTrunkPreloadParallel_ResumeAcrossSteps(t *testing.T) {
 	const maxSteps = 50
 	var steps int
 	for ; steps < maxSteps; steps++ {
-		_, done, err := p.Run(perStep, nil, resolve, c, nil)
+		_, done, err := p.Run(t.Context(), perStep, nil, resolve, c, nil)
 		if err != nil {
 			t.Fatalf("step %d: %v", steps, err)
 		}
@@ -444,7 +444,7 @@ func TestContractTrunkPreloadParallel_RunAfterCompleteIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n1, done1, err := p.Run(1<<20, nil, resolve, c, nil)
+	n1, done1, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestContractTrunkPreloadParallel_RunAfterCompleteIsNoOp(t *testing.T) {
 		t.Fatalf("first Run pinned %d, want %d", n1, len(tree))
 	}
 	prevPinned := c.PinnedCount()
-	n2, done2, err := p.Run(1<<20, nil, resolve, c, nil)
+	n2, done2, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +482,7 @@ func TestContractTrunkPreloadParallel_StepBudgetCaps(t *testing.T) {
 	rootKey := nibbles.HexToCompact(hexNibbles(hash))
 	entry := estimatedEntryOverheadBytes + len(rootKey) + valSz
 	smallBudget := 3*entry + 10
-	n1, done1, err := p.Run(smallBudget, nil, resolve, c, nil)
+	n1, done1, err := p.Run(t.Context(), smallBudget, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestContractTrunkPreloadParallel_StepBudgetCaps(t *testing.T) {
 	if p.QueueRemaining() == 0 {
 		t.Fatal("expected frontier to be non-empty after small-budget step")
 	}
-	_, done2, err := p.Run(1<<20, nil, resolve, c, nil)
+	_, done2, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +523,7 @@ func TestContractTrunkPreloadParallel_ResumeAfterResolverError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, done, err := p.Run(1<<20, nil, failingResolve, c, nil)
+	_, done, err := p.Run(t.Context(), 1<<20, nil, failingResolve, c, nil)
 	if err == nil {
 		t.Fatal("expected resolver error")
 	}
@@ -535,7 +535,7 @@ func TestContractTrunkPreloadParallel_ResumeAfterResolverError(t *testing.T) {
 	}
 	preErrPinned := p.PinnedTotal()
 	// The error path returns before updating p.frontier/p.nextDepth.
-	n, done, err := p.Run(1<<20, nil, healthyResolve, c, nil)
+	n, done, err := p.Run(t.Context(), 1<<20, nil, healthyResolve, c, nil)
 	if err != nil {
 		t.Fatalf("retry failed: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestContractTrunkPreloadParallel_DbBranchesPerStep(t *testing.T) {
 	}
 	rootKey := nibbles.HexToCompact([]byte(root))
 	stepBudget := estimatedEntryOverheadBytes + len(rootKey) + valSz + 10
-	if _, _, err := p.Run(stepBudget, dbWave0, resolve, c, nil); err != nil {
+	if _, _, err := p.Run(t.Context(), stepBudget, dbWave0, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	}
 	if p.DbHitsPinned() != 1 {
@@ -586,7 +586,7 @@ func TestContractTrunkPreloadParallel_DbBranchesPerStep(t *testing.T) {
 		t.Fatalf("wave 0: root pinned with stale file value, expected fresh dbBranches value")
 	}
 
-	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+	if _, done, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !done {
 		t.Fatalf("expected done after large budget; queue=%d", p.QueueRemaining())
@@ -611,11 +611,11 @@ func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
 	rootKey := nibbles.HexToCompact(hexNibbles(hash))
 	entry := estimatedEntryOverheadBytes + len(rootKey) + valSz
 	for range 2 {
-		if _, _, err := p.Run(2*entry+10, nil, resolve, c, nil); err != nil {
+		if _, _, err := p.Run(t.Context(), 2*entry+10, nil, resolve, c, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+	if _, done, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !done {
 		t.Fatal("expected done after large step")
@@ -645,7 +645,7 @@ func TestContractTrunkPreloadParallel_NilCacheError(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
-	if _, _, err := p.Run(1<<20, nil, resolve, nil, nil); err == nil {
+	if _, _, err := p.Run(t.Context(), 1<<20, nil, resolve, nil, nil); err == nil {
 		t.Fatal("expected error when cache is nil")
 	}
 }
@@ -655,7 +655,7 @@ func TestPreloadContractTrunkParallel_NilCacheWithLoggerReturnsError(t *testing.
 	hash := make([]byte, 32)
 	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
 
-	_, err := PreloadContractTrunkParallel(hash, 1<<20, nil, resolve, nil, log.Root())
+	_, err := PreloadContractTrunkParallel(t.Context(), hash, 1<<20, nil, resolve, nil, log.Root())
 	if err == nil {
 		t.Fatal("expected error when cache is nil")
 	}
@@ -671,7 +671,7 @@ func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := p.Run(1<<20, nil, nil, c, nil); err == nil {
+	if _, _, err := p.Run(t.Context(), 1<<20, nil, nil, c, nil); err == nil {
 		t.Fatal("expected error when resolver is nil")
 	}
 }
@@ -695,7 +695,7 @@ func TestContractTrunkPreloadParallel_RunReleasesScratch(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewBranchCache(64)
-	n, queueEmpty, err := p.Run(1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, queueEmpty, err := p.Run(t.Context(), 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,7 +767,7 @@ func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
 	}
 	res := make(chan runResult, 1)
 	go func() {
-		n, done, err := p.Run(stepBudget, dbBranches, resolve, c, nil)
+		n, done, err := p.Run(t.Context(), stepBudget, dbBranches, resolve, c, nil)
 		res <- runResult{n, done, err}
 	}()
 
@@ -787,7 +787,7 @@ func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
 		t.Fatalf("pinned %d entries, want 1 (the root)", got.pinned)
 	}
 
-	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+	if _, done, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !done {
 		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
@@ -839,7 +839,7 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 			go func() {
 				var r sweepResult
 				for range maxSteps {
-					_, done, err := p.Run(budget, dbBranches, resolve, c, nil)
+					_, done, err := p.Run(t.Context(), budget, dbBranches, resolve, c, nil)
 					if err != nil {
 						r.err = err
 						break
@@ -922,7 +922,7 @@ func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 			var pinned int
 			var queueEmpty bool
 			go func() {
-				pinned, queueEmpty, err = p.Run(tc.stepBudget, nil, resolve, c, nil)
+				pinned, queueEmpty, err = p.Run(t.Context(), tc.stepBudget, nil, resolve, c, nil)
 				close(done)
 			}()
 			select {
@@ -943,7 +943,7 @@ func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 				t.Fatal("deferred children were dropped instead of resumed")
 			}
 
-			if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+			if _, done, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 				t.Fatal(err)
 			} else if !done {
 				t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
@@ -988,7 +988,7 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	var pinned int
 	var queueEmpty bool
 	go func() {
-		pinned, queueEmpty, err = p.Run(stepBudget, dbBranches, resolve, c, nil)
+		pinned, queueEmpty, err = p.Run(t.Context(), stepBudget, dbBranches, resolve, c, nil)
 		close(done)
 	}()
 	select {
@@ -1018,7 +1018,7 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 		t.Fatalf("pendingChildren holds %x, want R1's child", got)
 	}
 
-	if _, done, err := p.Run(1<<20, dbBranches, resolve, c, nil); err != nil {
+	if _, done, err := p.Run(t.Context(), 1<<20, dbBranches, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !done {
 		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
@@ -1051,12 +1051,12 @@ func TestContractTrunkPreloadParallel_DepthCeilingReportsDoneOnAnyBudget(t *test
 		t.Fatal("queue drained, so the queued-but-finished state is not exercised")
 	}
 
-	if _, queueEmpty, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+	if _, queueEmpty, err := p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !queueEmpty {
 		t.Error("a spendable budget past the depth ceiling reported work remaining")
 	}
-	if _, queueEmpty, err := p.Run(0, nil, resolve, c, nil); err != nil {
+	if _, queueEmpty, err := p.Run(t.Context(), 0, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !queueEmpty {
 		t.Error("a zero budget past the depth ceiling disagreed with the spendable one")
