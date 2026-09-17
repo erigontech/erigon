@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -1426,6 +1427,21 @@ func (a *ApiHandler) getBuilderPayload(
 			message.Header.Time,
 			expectedTimestamp,
 		)
+	}
+	if baseState.Version().AfterOrEqual(clparams.CapellaVersion) {
+		// Blinded block processing applies expected withdrawals without checking the header's root.
+		// Validate it before a relay bid can replace the local payload.
+		expected, err := state.GetExpectedWithdrawals(baseState, targetEpoch)
+		if err != nil {
+			return nil, nil, err
+		}
+		expectedRoot, err := merkle_tree.ListObjectSSZRoot(expected.Withdrawals, a.beaconChainCfg.MaxWithdrawalsPerPayload)
+		if err != nil {
+			return nil, nil, err
+		}
+		if message.Header.WithdrawalsRoot != expectedRoot {
+			return nil, nil, fmt.Errorf("builder payload withdrawals root %s does not match expected %s", message.Header.WithdrawalsRoot, common.Hash(expectedRoot))
+		}
 	}
 	if message.BlobKzgCommitments == nil {
 		return nil, nil, errors.New("missing blob KZG commitments")
