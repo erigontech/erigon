@@ -1,4 +1,4 @@
-//go:build go1.27
+//go:build go1.27 && goexperiment.jsonv2
 
 package rpc
 
@@ -10,19 +10,6 @@ import (
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
-
-// marshalInto appends the v1-compatible JSON encoding of v to buf. Streaming
-// into buf keeps the encoder's own buffer at its flush threshold instead of
-// growing it to the response size, and skips the copy json.Marshal makes on the
-// way out.
-//
-// The destination must stay a buffer the caller can discard. MarshalWrite emits
-// as it goes, so a value that fails deep in a slice has already written the
-// earlier elements; pointed at a connection those bytes would be unretractable
-// and the client would see truncated JSON instead of an error response.
-func marshalInto(buf *bytes.Buffer, v any) error {
-	return jsonv2.MarshalWrite(buf, v, json.DefaultOptionsV1())
-}
 
 // maxPooledResult bounds what the pool retains. The bound must sit above the
 // responses worth pooling: one that misses it is rebuilt from a small buffer
@@ -39,7 +26,9 @@ func encodeResult(w *responseWriter, v any) error {
 			resultBufPool.Put(buf)
 		}
 	}()
-	if err := marshalInto(buf, v); err != nil {
+	// Into a discardable buffer, not the stream: MarshalWrite emits as it goes, so a value failing deep in a slice
+	// has already written the earlier elements, and the client must get an error response, not truncated JSON.
+	if err := jsonv2.MarshalWrite(buf, v, json.DefaultOptionsV1()); err != nil {
 		return err
 	}
 	// writeResult copies buf into the stream or writes it through before it returns.
