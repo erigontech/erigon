@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"slices"
@@ -519,7 +520,10 @@ func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 	if retryAfter > 0 {
 		return min(retryAfter, maxBackoff)
 	}
-	return min(time.Duration(1<<(attempt-2))*time.Second, maxBackoff)
+	step := min(time.Duration(1<<(attempt-2))*time.Second, maxBackoff)
+	// Jitter keeps concurrent or successive retries from landing in lockstep, which is what
+	// turns a throttle into a burst at every step.
+	return step/2 + time.Duration(rand.Int63n(int64(step/2)+1))
 }
 
 func parseRetryAfter(header string) time.Duration {

@@ -478,3 +478,23 @@ func TestParseRetryAfterSeconds(t *testing.T) {
 	require.Zero(t, parseRetryAfter(""))
 	require.Zero(t, parseRetryAfter("not-a-number"))
 }
+
+// Without jitter every retry of a throttled run lands in lockstep, so the endpoint sees a burst
+// at each step rather than a spread. Providers ask for jitter for exactly this reason.
+func TestBackoffDelayIsJittered(t *testing.T) {
+	seen := map[time.Duration]int{}
+	for i := 0; i < 50; i++ {
+		d := backoffDelay(5, 0)
+		require.GreaterOrEqual(t, d, 8*time.Second/2, "jitter must not collapse the wait")
+		require.LessOrEqual(t, d, 8*time.Second, "jitter must not exceed the computed step")
+		seen[d]++
+	}
+	require.Greater(t, len(seen), 5, "repeated calls must not all return the same delay")
+}
+
+// Retry-After is an instruction, not a suggestion: jitter must not shorten it.
+func TestRetryAfterIsNotJittered(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		require.Equal(t, 30*time.Second, backoffDelay(3, 30*time.Second))
+	}
+}
