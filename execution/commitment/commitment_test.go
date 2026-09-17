@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 	"math/rand"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -1241,7 +1243,7 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.ClearDeferred()
 }
 
-func premergeTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) BranchData {
+func shardedFlushTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) BranchData {
 	tb.Helper()
 	cellData := generateCellEncodeDataRow(tb, row, bm)
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
@@ -1249,56 +1251,71 @@ func premergeTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16
 	return BranchData(bytes.Clone(enc))
 }
 
-func TestPremergeDeferredUpdates_FlushWritesWithoutReMerging(t *testing.T) {
+type countingFlushCtx struct {
+	PatriciaContext
+	mu      *sync.Mutex
+	written map[string][]byte
+	prev    map[string][]byte
+	calls   *atomic.Int64
+}
+
+func (c *countingFlushCtx) PutBranch(prefix, data, prevData []byte) error {
+	c.calls.Add(1)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, dup := c.written[string(prefix)]; dup {
+		return fmt.Errorf("prefix %x written twice", prefix)
+	}
+	c.written[string(prefix)] = bytes.Clone(data)
+	c.prev[string(prefix)] = bytes.Clone(prevData)
+	return nil
+}
+
+func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testing.T) {
 	row, bm, _ := encodeCellRow(t, 16)
 	be := NewBranchEncoder(1024)
-	raw := premergeTestBranch(t, be, row, bm)
-	prev := premergeTestBranch(t, be, row, bm>>4)
-	same := premergeTestBranch(t, be, row, bm>>8)
+	raw := shardedFlushTestBranch(t, be, row, bm>>4)
+	prev := shardedFlushTestBranch(t, be, row, bm)
+	same := shardedFlushTestBranch(t, be, row, bm>>8)
 
 	wantMerged, err := NewHexBranchMerger(1024).Merge(prev, raw)
 	require.NoError(t, err)
 	wantMerged = bytes.Clone(wantMerged)
 
-	for _, workers := range []int{1, 2} {
+	for _, workers := range []int{1, 4, 16} {
 		t.Run("workers"+strconv.Itoa(workers), func(t *testing.T) {
-			seeded := getDeferredUpdate([]byte{0x01}, raw, prev)
-			fresh := getDeferredUpdate([]byte{0x02}, raw, nil)
-			unchanged := getDeferredUpdate([]byte{0x03}, same, same)
-			deferred := []*DeferredBranchUpdate{seeded, fresh, unchanged}
-			defer func() {
-				for _, upd := range deferred {
-					putDeferredUpdate(upd)
-				}
-			}()
-
-			require.NoError(t, PremergeDeferredUpdates(deferred))
-			for _, upd := range deferred {
-				require.Truef(t, upd.merged, "prefix %x left unmerged by the per-subtree pass", upd.prefix)
-			}
-			require.Equal(t, BranchData(wantMerged), seeded.encoded)
-			require.Equal(t, []byte(prev), seeded.prev, "prev must survive the merge for the changeset undo record")
-			require.Equal(t, BranchData(raw), fresh.encoded, "an empty prev encodes as raw")
-			require.Nil(t, unchanged.encoded, "prev==raw stays a skipped write")
-
-			for i := range seeded.raw {
-				seeded.raw[i] ^= 0xff
-			}
-			require.NoError(t, PremergeDeferredUpdates(deferred), "a second pre-merge must be a no-op")
-
+			var mu sync.Mutex
+			var calls, made atomic.Int64
 			written, prevSeen := map[string][]byte{}, map[string][]byte{}
-			n, err := ApplyDeferredBranchUpdates(deferred, workers, func(prefix, data, prevData []byte) error {
-				written[string(prefix)] = bytes.Clone(data)
-				prevSeen[string(prefix)] = bytes.Clone(prevData)
-				return nil
-			}, nil)
-			require.NoError(t, err)
-			require.Equal(t, 2, n)
+			factory := func(context.Context) (PatriciaContext, func()) {
+				made.Add(1)
+				return &countingFlushCtx{mu: &mu, written: written, prev: prevSeen, calls: &calls}, func() {}
+			}
+
+			pu := &parallelUpdate{}
+			pu.deferredCombined = append(pu.deferredCombined,
+				getDeferredUpdate([]byte{0x01}, raw, prev),
+				getDeferredUpdate([]byte{0x02}, raw, nil),
+				getDeferredUpdate([]byte{0x03}, same, same))
+			for i := range 64 {
+				pu.deferredCombined = append(pu.deferredCombined,
+					getDeferredUpdate([]byte{0x10, byte(i)}, raw, prev))
+			}
+			wantWrites := int64(len(pu.deferredCombined) - 1)
+
+			p := NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
+			p.SetNumWorkers(workers)
+			require.NoError(t, p.applyDeferredUpdates(context.Background(), pu))
+
+			require.Equal(t, wantWrites, calls.Load(), "every record but the unchanged one is written exactly once")
+			require.Len(t, written, int(wantWrites))
 			require.Equal(t, []byte(wantMerged), written[string([]byte{0x01})],
-				"flush must write the pre-merged bytes; a re-merge would pick up the corrupted raw")
-			require.Equal(t, []byte(prev), prevSeen[string([]byte{0x01})])
-			require.Equal(t, []byte(raw), written[string([]byte{0x02})])
-			require.NotContains(t, written, string([]byte{0x03}))
+				"a sharded worker merges its own record against prev")
+			require.Equal(t, []byte(prev), prevSeen[string([]byte{0x01})],
+				"prev must survive the merge for the changeset undo record")
+			require.Equal(t, []byte(raw), written[string([]byte{0x02})], "an empty prev encodes as raw")
+			require.NotContains(t, written, string([]byte{0x03}), "prev==raw stays a skipped write")
+			require.LessOrEqual(t, made.Load(), int64(workers), "no worker shares a trie context")
 		})
 	}
 }

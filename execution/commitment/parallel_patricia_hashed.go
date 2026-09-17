@@ -316,10 +316,6 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		}
 	}()
 
-	if err := PremergeDeferredUpdates(deferred); err != nil {
-		return fmt.Errorf("premerge deferred branch updates: %w", err)
-	}
-
 	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
 	var claimed, written, bytesOut atomic.Int64
 	var g errgroup.Group
@@ -337,12 +333,17 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 			if wctx == nil {
 				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 			}
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerMergerPool.Put(merger)
 			for {
 				i := int(claimed.Add(1)) - 1
 				if i >= len(deferred) {
 					return nil
 				}
 				upd := deferred[i]
+				if err := mergeDeferredUpdate(upd, merger); err != nil {
+					return err
+				}
 				if upd.encoded == nil {
 					continue
 				}
