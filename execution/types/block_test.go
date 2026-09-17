@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -121,7 +120,7 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := BlockAccessList{{Address: common.Address{1}}}
 	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
 	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
 		t.Errorf("BAL mismatch: got %v want %v", got, bal)
@@ -173,7 +172,7 @@ func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
 	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
 	block.size.Store(123)
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 
 	withSidecar := block.WithBlockAccessListSidecar(sidecar)

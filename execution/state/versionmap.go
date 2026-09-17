@@ -212,6 +212,7 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
+		addr := accounts.InternAddress(accountChanges.Address)
 		if dbg.TraceBALFeed {
 			fmt.Printf(
 				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
@@ -235,7 +236,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 						change.Value.Hex(),
 					)
 				}
-				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				vm.WriteStorage(addr, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
@@ -248,7 +249,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 					&balanceChange.Value,
 				)
 			}
-			vm.WriteBalance(accountChanges.Address, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+			vm.WriteBalance(addr, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
 			if dbg.TraceBALFeed {
@@ -260,7 +261,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 					nonceChange.Value,
 				)
 			}
-			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+			vm.WriteNonce(addr, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
 			if dbg.TraceBALFeed {
@@ -277,9 +278,9 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			// siblings lets a concurrent reader see code but no code hash.
 			code := accounts.NewCode(codeChange.Bytecode)
 			v := Version{TxIndex: int(codeChange.Index) - 1}
-			vm.WriteCode(accountChanges.Address, v, code, true)
-			vm.WriteCodeHash(accountChanges.Address, v, code.Hash, true)
-			vm.WriteCodeSize(accountChanges.Address, v, code.Len(), true)
+			vm.WriteCode(addr, v, code, true)
+			vm.WriteCodeHash(addr, v, code.Hash, true)
+			vm.WriteCodeSize(addr, v, code.Len(), true)
 		}
 	}
 }
