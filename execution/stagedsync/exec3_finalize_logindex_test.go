@@ -126,7 +126,6 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.NoError(t, res.Err)
-	require.Len(t, txResult.Logs, 1)
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 
 	require.Equal(t, []uint64{txTask.TxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))

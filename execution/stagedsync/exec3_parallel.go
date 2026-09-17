@@ -1955,12 +1955,11 @@ type txResult struct {
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
-	logs                  []*types.Log // yes, logs exist inside `receipt`, but Finalize txn producing `logs` without `receipt`
+	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet
 	rules                 *chain.Rules
-	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
@@ -3457,14 +3456,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
-				lastResult.Logs = append(lastResult.Logs, blockEndLogs...)
 
 				// Block-end logs belong to no receipt, so the per-tx publish
 				// loop, which indexes receipt logs only, never sees them. Index
 				// them here, on the exec loop that owns sd.mem, to keep the log
 				// indexes identical to the ones the serial executor builds.
 				if len(blockEndLogs) > 0 {
-					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, be.blobGasUsed,
+					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, 0,
 						blockEndLogs, nil, nil, true); err != nil {
 						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
 					}
@@ -3500,21 +3498,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Send finalize txResult through the channel for index writes.
-		// State writes are already in the BlockStateCache.
+		// Finalize writes are already in BlockStateCache. Forward them as well so
+		// commitment calculation and accumulator notifications include these changes.
 		if !finalizeWrites.IsEmpty() {
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:              be.number(),
-				blockHash:             be.hash(),
-				txNum:                 txTask.Version().TxNum,
-				rules:                 lastResult.Rules(),
-				writes:                finalizeWrites,
-				logs:                  lastResult.Logs,
-				traceFroms:            lastResult.TraceFroms,
-				traceTos:              lastResult.TraceTos,
-				cumulativeBlobGasUsed: be.blobGasUsed,
-				isFinalize:            true,
+				blockNum:  be.number(),
+				blockHash: be.hash(),
+				txNum:     txTask.Version().TxNum,
+				rules:     lastResult.Rules(),
+				writes:    finalizeWrites,
 			}, false); err != nil {
 				return nil, err
 			}
