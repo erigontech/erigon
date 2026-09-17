@@ -188,7 +188,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
+func TestGetHeadNodeRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -224,18 +224,18 @@ func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
-	expectedStatus, matchesHead := store.ResolveHeadPayloadStatus(root)
-	require.True(t, matchesHead)
-	require.Equal(t, cltypes.PayloadStatusEmpty, expectedStatus)
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
 
 	store.mu.Lock()
 	store.headHash = common.Hash{}
 	store.headPayloadStatus = cltypes.PayloadStatusPending
 	store.mu.Unlock()
 
-	status, matchesHead := store.ResolveHeadPayloadStatus(root)
-	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
-	require.Equal(t, expectedStatus, status)
+	head, _, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
 
 	// A recomputation may select a different root. The old root must not inherit
 	// the new head's status, and the published selection must advance with it.
@@ -248,16 +248,14 @@ func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	store.updateChildren(10, root, childRoot)
 	store.OnTick(12 * cfg.SecondsPerSlot)
 
-	status, matchesHead = store.ResolveHeadPayloadStatus(root)
-	require.False(t, matchesHead)
-	require.Equal(t, cltypes.PayloadStatusPending, status)
+	head, selectedSlot, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+	require.Equal(t, uint64(11), selectedSlot)
 	publishedRoot, publishedSlot, ok = manager.SelectedHead()
 	require.True(t, ok)
 	require.Equal(t, childRoot, publishedRoot)
 	require.Equal(t, uint64(11), publishedSlot)
-	status, matchesHead = store.ResolveHeadPayloadStatus(childRoot)
-	require.True(t, matchesHead)
-	require.Equal(t, cltypes.PayloadStatusEmpty, status)
 }
 
 type countingHeadForkGraph struct {
@@ -467,19 +465,10 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 		wg.Wait()
 	})
 	results := make(chan ForkChoiceNode, readers)
-	for i := range readers {
+	for range readers {
 		wg.Go(func() {
-			if i%2 == 0 {
-				head, _, _ := store.GetHeadNode()
-				results <- head
-				return
-			}
-			status, matches := store.ResolveHeadPayloadStatus(root)
-			if !matches {
-				results <- ForkChoiceNode{}
-				return
-			}
-			results <- ForkChoiceNode{Root: root, PayloadStatus: status}
+			head, _, _ := store.GetHeadNode()
+			results <- head
 		})
 	}
 	// Park every reader after its cache miss. Once released, only the first
@@ -501,7 +490,7 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 	require.Equal(t, int32(1), graph.leafVisits.Load(), "one cache invalidation must cause only one tree walk")
 }
 
-func TestResolveHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
+func TestGetHeadNodeUsesPreGloasForkChoice(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	manager := synced_data.NewSyncedDataManager(&cfg, true)
 	root := common.Hash{0xaa}
@@ -522,21 +511,15 @@ func TestResolveHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
 
-	status, matchesHead := store.ResolveHeadPayloadStatus(root)
+	head, slot, err := store.GetHeadNode()
 
-	require.False(t, matchesHead)
-	require.Equal(t, cltypes.PayloadStatusPending, status)
-	_, _, selected := manager.SelectedHead()
-	require.False(t, selected, "a Gloas-only query must not publish a pre-Gloas head")
-}
-
-func TestHeadPayloadStatusWarningIsRateLimited(t *testing.T) {
-	store := newGloasWeightTreeTestStore()
-	startedAt := time.Unix(100, 0)
-
-	require.True(t, store.shouldLogHeadResolutionFailure(startedAt))
-	require.False(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute-time.Nanosecond)))
-	require.True(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute)))
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, head)
+	require.Equal(t, uint64(10), slot)
+	publishedRoot, publishedSlot, selected := manager.SelectedHead()
+	require.True(t, selected)
+	require.Equal(t, head.Root, publishedRoot)
+	require.Equal(t, slot, publishedSlot)
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
@@ -1092,18 +1075,14 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Zero(t, applyWeightDelta(3, 10, false))
 }
 
-func TestResolveHeadPayloadStatusRequiresMatchingRoot(t *testing.T) {
+func TestGetHeadNodeReturnsCachedSnapshot(t *testing.T) {
 	headRoot := common.Hash{0x41}
 	store := &ForkChoiceStore{
 		headHash:          headRoot,
 		headPayloadStatus: cltypes.PayloadStatusFull,
 	}
 
-	status, ok := store.ResolveHeadPayloadStatus(headRoot)
-	require.True(t, ok)
-	require.Equal(t, cltypes.PayloadStatusFull, status)
-
-	status, ok = store.ResolveHeadPayloadStatus(common.Hash{0x42})
-	require.False(t, ok)
-	require.Equal(t, cltypes.PayloadStatusPending, status)
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
 }

@@ -102,7 +102,6 @@ type ForkChoiceStore struct {
 	headHash                           common.Hash
 	headSlot                           uint64
 	headPayloadStatus                  cltypes.PayloadStatus
-	headPayloadStatusLogAt             atomic.Int64
 	genesisTime                        uint64
 	genesisValidatorsRoot              common.Hash
 	anchorExecutionPayloadBuilderIndex uint64

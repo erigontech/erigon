@@ -2399,6 +2399,7 @@ func setupExecutionPayloadBidTest(t *testing.T, ctrl *gomock.Controller) (*ApiHa
 	require.NotNil(t, parentBid)
 	parentBid.ParentBlockHash = common.HexToHash("0xaaaa")
 	parentBid.BlockHash = common.HexToHash("0xbbbb")
+	postState.SetLatestBlockHash(parentBid.ParentBlockHash)
 	require.NoError(t, handler.syncedData.OnHeadState(postState))
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
@@ -2508,11 +2509,14 @@ func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T)
 	})
 	// Model an EMPTY decision followed by a FULL snapshot of the same root.
 	// Revalidation must derive the execution parent from the snapshot it checks.
-	forkchoiceStore.ResolveHeadPayloadStatusFn = func(common.Hash) (cltypes.PayloadStatus, bool) {
-		return cltypes.PayloadStatusEmpty, true
-	}
+	headReads := 0
 	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
-		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: cltypes.PayloadStatusFull}, forkchoiceStore.HeadSlotVal, nil
+		headReads++
+		status := cltypes.PayloadStatusEmpty
+		if headReads > 1 {
+			status = cltypes.PayloadStatusFull
+		}
+		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: status}, forkchoiceStore.HeadSlotVal, nil
 	}
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
@@ -2988,7 +2992,9 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
+	stored, ok := epbsPool.GetPreference(preference.Message.ProposalSlot, preference.Message.DependentRoot)
+	require.True(t, ok)
+	require.Same(t, preference, stored)
 }
 
 func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
@@ -3018,7 +3024,6 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 				}
 				epbsPool := pool.NewEpbsPool()
 				epbsPool.AddProposerPreference(stored)
-				generation := epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot)
 				clock := eth_clock.NewMockEthereumClock(ctrl)
 				genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
 				clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
@@ -3055,7 +3060,6 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 				require.True(t, ok)
 				require.Same(t, stored, retained)
 				require.Equal(t, retry, retained)
-				require.Equal(t, generation, epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot))
 			})
 		}
 	}
@@ -3120,7 +3124,7 @@ func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
 				}
 				require.Equal(t, wantStatus, recorders[i].Code, recorders[i].Body.String())
 			}
-			require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(96))
+			require.Len(t, epbsPool.GetPreferencesForSlot(96), 1)
 			require.Equal(t, uint32(1), gossipCalls.Load())
 		})
 	}
@@ -3156,7 +3160,7 @@ func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T)
 	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
+	require.Empty(t, handler.epbsPool.GetPreferencesForSlot(preference.Message.ProposalSlot))
 }
 
 func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailures(t *testing.T) {

@@ -1285,7 +1285,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	}
 	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
 	targetGasLimit := parentBid.GasLimit
-	if configured, _ := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
+	if configured := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
 		targetGasLimit = uint64(*configured)
 	}
 	timeout := time.Second
@@ -1550,7 +1550,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, nil, err
 	}
-	targetGasLimit, _ := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	targetGasLimit := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 	var executionPayload *cltypes.Eth1Block
 	// Keep the produced block's value independent from the engine-owned value.
 	executionValue := new(big.Int)

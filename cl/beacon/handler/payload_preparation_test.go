@@ -648,6 +648,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 			baseBlockRoot := common.Hash{0x41}
 			forkchoiceStore.HeadVal = baseBlockRoot
 			parentHash := common.Hash{0xa1}
+			postState.SetLatestBlockHash(parentHash)
 			postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 				ParentBlockHash: parentHash,
 				BlockHash:       common.Hash{0xb2},
@@ -796,7 +797,7 @@ func TestPreparePayloadLoopChecksProposerBeforeGloasDecisionWait(t *testing.T) {
 	require.Zero(t, attempts)
 }
 
-func TestPrecheckRegisteredProposerRejectsHeadOutsideLookahead(t *testing.T) {
+func TestPrecheckPreparationInputsRejectsHeadOutsideLookahead(t *testing.T) {
 	_, handler, syncedData, _, _ := setupGloasPreparationTest(t)
 	headState := state.New(handler.beaconChainCfg)
 	headState.SetVersion(clparams.GloasVersion)
@@ -809,7 +810,7 @@ func TestPrecheckRegisteredProposerRejectsHeadOutsideLookahead(t *testing.T) {
 			return view(headState, headRoot, headState.Slot())
 		})
 
-	err := handler.precheckRegisteredProposer(headRoot, targetSlot)
+	_, err := handler.precheckPreparationInputs(preparationKey{headRoot: headRoot, targetSlot: targetSlot})
 
 	require.ErrorIs(t, err, errHeadTooFarBack)
 }
@@ -840,10 +841,9 @@ func TestPreparePayloadLoopWarnsWhenGloasPathRemainsPending(t *testing.T) {
 			return view(postState, baseBlockRoot, currentSlot)
 		},
 	).AnyTimes()
-	forkchoiceStore.ResolveHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
-		require.Equal(t, baseBlockRoot, root)
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		cancel()
-		return cltypes.PayloadStatusPending, false
+		return forkchoice.ForkChoiceNode{}, 0, nil
 	}
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
@@ -932,6 +932,7 @@ func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
 			latestHeader := baseState.LatestBlockHeader()
 			latestHeader.Slot = test.parentSlot
 			baseState.SetLatestBlockHeader(&latestHeader)
+			baseState.SetLatestBlockHash(test.wantHead)
 			baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 				ParentBlockHash: emptyParent,
 				ParentBlockRoot: common.Hash{0x92},
@@ -1076,7 +1077,81 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	require.ErrorIs(t, err, stopErr)
 }
 
-func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
+func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	config := payloadPreparationLoopConfig(1, 1, 2)
+	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	targetSlot := currentSlot + 1
+	handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+		t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+	)
+	handler.epbsPool = pool.NewEpbsPool()
+	var dependentRoot common.Hash
+	require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+		header := head.LatestExecutionPayloadHeader()
+		header.GasLimit = 30_000_000
+		head.SetLatestExecutionPayloadHeader(header)
+		var err error
+		dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+		return err
+	}))
+	preference := func(root common.Hash, validator, gas uint64) *cltypes.SignedProposerPreferences {
+		return &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+			ProposalSlot: targetSlot, DependentRoot: root, ValidatorIndex: validator, TargetGasLimit: gas,
+		}}
+	}
+	steps := []struct {
+		name         string
+		preference   *cltypes.SignedProposerPreferences
+		prune        bool
+		wantAttempts int
+	}{
+		{name: "parent fallback", wantAttempts: 1},
+		{name: "other dependent root", preference: preference(common.Hash{0x51}, 0, 36_000_000), wantAttempts: 1},
+		{name: "other validator", preference: preference(dependentRoot, 1, 36_000_000), wantAttempts: 1},
+		{name: "same effective limit", preference: preference(dependentRoot, 0, 30_000_000), wantAttempts: 1},
+		{name: "remove same limit", prune: true, wantAttempts: 1},
+		{name: "explicit zero", preference: preference(dependentRoot, 0, 0), wantAttempts: 2},
+		{name: "restore fallback", prune: true, wantAttempts: 3},
+		{name: "re-add different limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+		{name: "replace same limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+		{name: "prune and re-add before next tick", prune: true, preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 5},
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	tick, attempts := 0, 0
+	syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+		if tick > 0 {
+			require.Equal(t, steps[tick-1].wantAttempts, attempts, steps[tick-1].name)
+		}
+		if tick == len(steps) {
+			cancel()
+			return baseBlockRoot, currentSlot, false
+		}
+		step := steps[tick]
+		if step.prune {
+			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
+		}
+		if step.preference != nil {
+			handler.epbsPool.AddProposerPreference(step.preference)
+		}
+		tick++
+		return baseBlockRoot, currentSlot, true
+	}).AnyTimes()
+	handler.preparePayloadLoopWith(ctx, func(
+		_ context.Context,
+		key preparationKey,
+		_ *payloadPreparationScratch,
+	) (preparationKey, error) {
+		attempts++
+		return key, nil
+	})
+
+	require.Equal(t, len(steps), tick)
+	require.Equal(t, steps[len(steps)-1].wantAttempts, attempts)
+}
+
+func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	config := payloadPreparationLoopConfig(1, 1, 2)
 	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
@@ -1103,16 +1178,15 @@ func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
 					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: 36_000_000,
 				},
 			})
-			_, found, usedGeneration := handler.epbsPool.GetPreferenceWithGeneration(targetSlot, dependentRoot)
+			preference, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
 			require.True(t, found)
-			require.NotZero(t, usedGeneration)
-			// Prune the preference before the attempt settles, so it must record the generation
-			// it actually used rather than the pool's current zero generation.
+			usedGasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
+			// Pruning during a build must not replace the limit that the attempt used with
+			// the fallback limit. The next tick must detect that difference and re-prepare.
 			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
 			_, found = handler.epbsPool.GetPreference(targetSlot, dependentRoot)
 			require.False(t, found)
-			require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(targetSlot))
-			key.proposerPreferencesGeneration = usedGeneration
+			key.setTargetGasLimit(&usedGasLimit)
 			return key, nil
 		}
 		cancel()
@@ -1120,6 +1194,66 @@ func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
 	})
 
 	require.Equal(t, 2, attempts)
+}
+
+func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	config := payloadPreparationLoopConfig(1, 2, 2)
+	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	targetSlot := currentSlot + 1
+	handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+		t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+	)
+	handler.epbsPool = pool.NewEpbsPool()
+	const proposerIndex = uint64(42)
+	const gasLimit = hexutil.Uint64(36_000_000)
+	var dependentRoot common.Hash
+	require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+		var err error
+		dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+		return err
+	}))
+	handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex, TargetGasLimit: uint64(gasLimit),
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ticks := 0
+	syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+		ticks++
+		if ticks == 3 {
+			cancel()
+			return baseBlockRoot, currentSlot, false
+		}
+		return baseBlockRoot, currentSlot, true
+	}).AnyTimes()
+	attempts := 0
+	handler.preparePayloadLoopWith(ctx, func(
+		_ context.Context,
+		key preparationKey,
+		_ *payloadPreparationScratch,
+	) (preparationKey, error) {
+		attempts++
+		// Before Fulu, advancing the copied state can be needed to discover this proposer.
+		// Later ticks must reuse that index when reading the effective preference.
+		key.proposerIndex = proposerIndex
+		limit := gasLimit
+		key.setTargetGasLimit(&limit)
+		return key, nil
+	})
+
+	require.Equal(t, 3, ticks)
+	require.Equal(t, 1, attempts)
+}
+
+func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
+	var unset, zero preparationKey
+	limit := hexutil.Uint64(0)
+	zero.setTargetGasLimit(&limit)
+
+	require.NotEqual(t, unset, zero, "an explicit zero and an omitted attribute are different build inputs")
+	zero.setTargetGasLimit(nil)
+	require.Equal(t, unset, zero)
 }
 
 func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
@@ -1134,10 +1268,9 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	statusReads := 0
-	forkchoiceStore.ResolveHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
-		require.Equal(t, baseBlockRoot, root)
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		statusReads++
-		return cltypes.PayloadStatusEmpty, true
+		return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot - 1, nil
 	}
 	attempts := 0
 	handler.preparePayloadLoopWith(ctx, func(
@@ -1608,6 +1741,7 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 	baseBlockRoot := common.Hash{0x41}
 	forkchoiceStore.HeadVal = baseBlockRoot
 	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
@@ -1629,6 +1763,7 @@ func TestExecutionPayloadSourceFallsBackToEmptyForPendingGloasDecision(t *testin
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
 	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
@@ -1649,6 +1784,7 @@ func TestExecutionPayloadSourceFallsBackToEmptyWhenForkChoiceHeadMoves(t *testin
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
 	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
@@ -2431,11 +2567,12 @@ func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
 			return view(postState, viewRoot, postState.Slot())
 		})
 	sampled := preparationKey{
-		targetSlot:                    targetSlot,
-		headRoot:                      common.Hash{0x40},
-		validatorGeneration:           1,
-		gloasPath:                     gloasPayloadPathEmpty,
-		proposerPreferencesGeneration: 2,
+		targetSlot:          targetSlot,
+		headRoot:            common.Hash{0x40},
+		validatorGeneration: 1,
+		gloasPath:           gloasPayloadPathEmpty,
+		targetGasLimit:      30_000_000,
+		targetGasLimitSet:   true,
 	}
 	var scratch payloadPreparationScratch
 
@@ -2443,6 +2580,8 @@ func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
 
 	require.ErrorIs(t, err, errNotOurProposal)
 	sampled.headRoot = viewRoot
+	sampled.proposerIndex, err = postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
 	require.Equal(t, sampled, outcome, "an early skip must retain unresolved inputs while updating the viewed head")
 }
 

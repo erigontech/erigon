@@ -418,6 +418,7 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	handler.engine = engine
 
 	parentBid := postState.GetLatestExecutionPayloadBid()
+	postState.SetLatestBlockHash(parentBid.ParentBlockHash)
 	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
 	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
 	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
@@ -480,6 +481,7 @@ func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
 	handler.engine = engine
 
 	parentBid := postState.GetLatestExecutionPayloadBid()
+	postState.SetLatestBlockHash(parentBid.ParentBlockHash)
 	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
 	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
 	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
@@ -883,6 +885,7 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 	forkchoiceStore.HeadVal = baseBlockRoot
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
@@ -923,6 +926,7 @@ func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.
 	handler.logger = logger
 	baseBlockRoot := common.Hash{0x41}
 	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
@@ -3998,8 +4002,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	postState.SetLatestExecutionPayloadHeader(elHeader)
 	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
 	postState.SetLatestBlockHash(elHead.Hash())
-	// GLOAS deferred payload: set LatestExecutionPayloadBid so that ResolveHeadPayloadStatus()==FULL &&
-	// ShouldBuildOnFull (both returning true in the mock) select bid.BlockHash as the EL head.
+	// The FULL parent path builds on the bid's payload hash, after applying its requests.
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		BlockHash:       elHead.Hash(),
 		ParentBlockHash: elHead.Hash(),
@@ -4018,8 +4021,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	fcu.HeadVal = baseBlockRoot
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
-	// GLOAS deferred payload: the mock returns ResolveHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
-	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
+	// A FULL parent needs its envelope's execution requests to compute withdrawals.
 	fcu.SetEnvelope(baseBlockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),

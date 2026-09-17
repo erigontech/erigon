@@ -488,11 +488,8 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		}
 	}
 	if e.HeadPayloadStatus != nil {
-		// Obtain the root whose payload status the step asks us to resolve.
-		headRoot, _, err := store.GetHead(nil)
+		head, _, err := store.GetHeadNode()
 		assert.NoError(t, err, stepstr)
-		headPayloadStatus, matchesHead := store.ResolveHeadPayloadStatus(headRoot)
-		assert.True(t, matchesHead, stepstr)
-		assert.EqualValues(t, *e.HeadPayloadStatus, int(headPayloadStatus), stepstr)
+		assert.EqualValues(t, *e.HeadPayloadStatus, int(head.PayloadStatus), stepstr)
 	}
 }

@@ -56,7 +56,6 @@ type ForkChoiceStorageMock struct {
 	HeadSlotVal                           uint64
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
 	BlockProcessingVal                    bool
-	ResolveHeadPayloadStatusFn            func(common.Hash) (cltypes.PayloadStatus, bool)
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
@@ -705,23 +704,6 @@ func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cl
 
 func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool {
 	return true
-}
-
-func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
-	if f.ResolveHeadPayloadStatusFn != nil {
-		return f.ResolveHeadPayloadStatusFn(root)
-	}
-	if f.GetHeadNodeFn != nil {
-		head, _, err := f.GetHeadNodeFn()
-		if err != nil || head.Root != root {
-			return cltypes.PayloadStatusPending, false
-		}
-		return head.PayloadStatus, true
-	}
-	if f.HeadVal != root {
-		return cltypes.PayloadStatusPending, false
-	}
-	return f.HeadPayloadStatusVal, true
 }
 
 func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {

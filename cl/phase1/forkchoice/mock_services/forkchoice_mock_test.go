@@ -27,19 +27,20 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-func TestResolveHeadPayloadStatusRequiresMatchingHead(t *testing.T) {
+func TestGetHeadNodeReturnsConfiguredSnapshot(t *testing.T) {
 	root := common.Hash{0x41}
-	store := &ForkChoiceStorageMock{HeadPayloadStatusVal: cltypes.PayloadStatusEmpty}
+	store := &ForkChoiceStorageMock{
+		HeadVal:              root,
+		HeadSlotVal:          42,
+		HeadPayloadStatusVal: cltypes.PayloadStatusEmpty,
+	}
 
-	status, matches := store.ResolveHeadPayloadStatus(root)
+	head, slot, err := store.GetHeadNode()
 
-	require.False(t, matches)
-	require.Equal(t, cltypes.PayloadStatusPending, status)
-
-	store.HeadVal = root
-	status, matches = store.ResolveHeadPayloadStatus(root)
-	require.True(t, matches)
-	require.Equal(t, cltypes.PayloadStatusEmpty, status)
+	require.NoError(t, err)
+	require.Equal(t, root, head.Root)
+	require.Equal(t, uint64(42), slot)
+	require.Equal(t, cltypes.PayloadStatusEmpty, head.PayloadStatus)
 }
 
 func TestForkChoiceStorageMockStoresEnvelopeWithNilMap(t *testing.T) {
