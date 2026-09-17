@@ -429,10 +429,8 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 }
 
 // ApplyTxIndexes writes trace indices, log indices, and receipts.
-// When skipReceiptCache is true, the receipt-cache domain write is skipped.
-// This is needed for the parallel executor's block-finalize txResult which
-// shares the system-tx-end txNum; a second DomainPut at the same txNum would
-// overwrite the history entry that preserves the last regular tx's receipt.
+// When receipt caching is enabled, a nil receipt clears the current cached value.
+// Use ApplyLogIndexes for log-only writes that must leave the receipt cache intact.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -441,11 +439,24 @@ func (rs *StateV3) ApplyTxIndexes(
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
-	skipReceiptCache ...bool,
 ) error {
-	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
+	}
+	return nil
+}
+
+// ApplyLogIndexes writes log address and topic indexes without changing receipts.
+func (rs *StateV3) ApplyLogIndexes(txNum uint64, logs []*types.Log) error {
+	for _, lg := range logs {
+		if err := rs.domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
+			return err
+		}
+		for i := range lg.Topics {
+			if err := rs.domains.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txNum); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -465,7 +476,7 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		rs.traceAddr = addr.Value()
@@ -481,15 +492,8 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	for _, lg := range logs {
-		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
-			return err
-		}
-		for i := range lg.Topics {
-			if err := domains.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txNum); err != nil {
-				return err
-			}
-		}
+	if err := rs.ApplyLogIndexes(txNum, logs); err != nil {
+		return err
 	}
 
 	var putter kv.TemporalPutDel
@@ -507,7 +511,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	if rs.persistReceiptsCacheV2 && !skipReceiptCache {
+	if rs.persistReceiptsCacheV2 {
 		if putter == nil {
 			putter = domains.AsPutDel(tx)
 		}
