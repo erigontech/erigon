@@ -376,7 +376,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.disableStreaming {
-		// An empty buffer means the answer went out through the codec (a batch), so its length is unknown here.
+		// Codec writes (batches) never share a request with a buffered answer, so a non-empty buffer is the whole response.
 		if !sent.sent && len(stream.Buffer()) > 0 {
 			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
 		}
