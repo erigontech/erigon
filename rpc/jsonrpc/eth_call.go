@@ -521,7 +521,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 	for _, storageKey := range storageKeys {
-		sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
+		sdCtx.TouchKey(kv.StorageDomain, string(address[:])+string(storageKey.Hash[:]), nil)
 	}
 
 	// the proof is the captured node bytes on each key's path, whose hashes the fold already computed, so nothing is
