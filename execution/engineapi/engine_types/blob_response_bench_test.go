@@ -18,14 +18,17 @@ package engine_types
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // BenchmarkBlobsBundleV2Marshal compares the worst-case getBlobsV3 response (128 blobs, each with
-// its full set of cell proofs) encoded by stdlib reflection vs MarshalFastJSON.
+// its full set of cell proofs) encoded by stdlib reflection vs MarshalFastJSONTo.
 func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
 	bundle := worstCaseBundleV2()
-	enc, _ := bundle.MarshalFastJSON()
+	enc, _ := json.Marshal(bundle)
 	size := int64(len(enc))
 
 	b.Run("stdlib_reflect", func(b *testing.B) {
@@ -39,10 +42,11 @@ func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
 		}
 	})
 	b.Run("fast", func(b *testing.B) {
+		s := jsonstream.Get(io.Discard)
 		b.SetBytes(size)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := bundle.MarshalFastJSON(); err != nil {
+			if err := bundle.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
 		}

@@ -55,9 +55,6 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV2(bundle))
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
 			w := &hintedJSONWriter{}
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
@@ -78,9 +75,6 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV1(bundle))
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
 			w := &hintedJSONWriter{}
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))

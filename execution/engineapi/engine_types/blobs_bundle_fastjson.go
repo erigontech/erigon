@@ -22,12 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// MarshalFastJSON serializes the getPayload blobs bundle into one pre-sized buffer (direct hex
-// encoding) instead of reflection, byte-identical to json.Marshal of the bundle.
-func (b *BlobsBundle) MarshalFastJSON() ([]byte, error) {
-	return b.appendJSON(make([]byte, 0, b.jsonLen())), nil
-}
-
 // MarshalFastJSONTo writes one array element at a time, so the blobs never sit in one buffer.
 func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	if b == nil {
@@ -44,75 +38,7 @@ func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	return nil
 }
 
-func (b *BlobsBundle) jsonLen() int {
-	if b == nil {
-		return len("null")
-	}
-	return len(`{"commitments":`) + hexArrayLen(b.Commitments) +
-		len(`,"proofs":`) + hexArrayLen(b.Proofs) +
-		len(`,"blobs":`) + hexArrayLen(b.Blobs) + len("}")
-}
-
-func (b *BlobsBundle) appendJSON(dst []byte) []byte {
-	if b == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, `{"commitments":`...)
-	dst = appendHexArray(dst, b.Commitments)
-	dst = append(dst, `,"proofs":`...)
-	dst = appendHexArray(dst, b.Proofs)
-	dst = append(dst, `,"blobs":`...)
-	dst = appendHexArray(dst, b.Blobs)
-	return append(dst, '}')
-}
-
-func appendHexArray(dst []byte, arr []hexutil.Bytes) []byte {
-	if arr == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range arr {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = appendQuotedHex(dst, b)
-	}
-	return append(dst, ']')
-}
-
-func hexArrayLen(arr []hexutil.Bytes) int {
-	if arr == nil {
-		return len("null")
-	}
-	n := len("[]")
-	for i, b := range arr {
-		if i > 0 {
-			n++
-		}
-		n += quotedHexLen(len(b))
-	}
-	return n
-}
-
-// MarshalFastJSON assembles the getPayload envelope field-by-field, fast-marshaling the
-// (reflection-heavy) BlobsBundle and deferring to json.Marshal for the smaller fields.
-// Byte-identical to json.Marshal(r).
-func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
-	if r == nil {
-		return jsonNull(), nil
-	}
-	f, err := r.marshalFields()
-	if err != nil {
-		return nil, err
-	}
-	return f.appendJSON(make([]byte, 0, f.jsonLen()+r.BlobsBundle.jsonLen()), r.BlobsBundle), nil
-}
-
 func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	if r == nil {
-		hexutil.WriteRawJSON(w, "null")
-		return nil
-	}
 	f, err := r.marshalFields()
 	if err != nil {
 		return err
@@ -133,7 +59,7 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	return nil
 }
 
-// getPayloadFields holds the fields json.Marshal encodes; the bundle is appended directly.
+// getPayloadFields holds the fields json.Marshal encodes; the bundle is streamed.
 type getPayloadFields struct {
 	executionPayload, blockValue, executionRequests, shouldOverrideBuilder []byte
 }
@@ -160,18 +86,4 @@ func (f *getPayloadFields) jsonLen() int {
 		len(`,"blobsBundle":`) +
 		len(`,"executionRequests":`) + len(f.executionRequests) +
 		len(`,"shouldOverrideBuilder":`) + len(f.shouldOverrideBuilder) + len("}")
-}
-
-func (f *getPayloadFields) appendJSON(dst []byte, bundle *BlobsBundle) []byte {
-	dst = append(dst, `{"executionPayload":`...)
-	dst = append(dst, f.executionPayload...)
-	dst = append(dst, `,"blockValue":`...)
-	dst = append(dst, f.blockValue...)
-	dst = append(dst, `,"blobsBundle":`...)
-	dst = bundle.appendJSON(dst)
-	dst = append(dst, `,"executionRequests":`...)
-	dst = append(dst, f.executionRequests...)
-	dst = append(dst, `,"shouldOverrideBuilder":`...)
-	dst = append(dst, f.shouldOverrideBuilder...)
-	return append(dst, '}')
 }

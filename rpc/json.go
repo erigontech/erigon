@@ -126,9 +126,6 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 		if err := fm.MarshalFastJSONTo(w); err != nil {
 			return msg.errorResponse(err)
 		}
-		if !w.opened {
-			writeResult(stream, msg.ID, nil)
-		}
 	} else if fm, ok := result.(fastJSONResult); ok {
 		enc, err := fm.MarshalFastJSON()
 		if err != nil {

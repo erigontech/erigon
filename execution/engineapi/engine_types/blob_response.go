@@ -16,59 +16,19 @@
 
 package engine_types
 
-import (
-	"encoding/hex"
+import "github.com/erigontech/erigon/common/hexutil"
 
-	"github.com/erigontech/erigon/common/hexutil"
-)
-
-// BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSON
-// serializes the whole response into one pre-sized buffer (direct hex encoding) instead of reflection,
-// byte-identical to json.Marshal of the underlying slice (see blob_response_test.go).
+// BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSONTo
+// streams one blob at a time with direct hex encoding instead of reflection, byte-identical to
+// json.Marshal of the underlying slice (see blob_response_test.go).
 type (
 	BlobsBundleV1 []*BlobAndProofV1
 	BlobsBundleV2 []*BlobAndProofV2
 )
 
-func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
-	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
-}
-
 func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	hexutil.MarshalFastJSONElemsTo(w, bundle, blobV1JSONLen, appendBlobV1JSON)
 	return nil
-}
-
-func (bundle BlobsBundleV1) jsonLen() int {
-	if bundle == nil {
-		return len("null")
-	}
-	size := len("[]")
-	for i, b := range bundle {
-		if i > 0 {
-			size++
-		}
-		size += blobV1JSONLen(b)
-	}
-	return size
-}
-
-func (bundle BlobsBundleV1) appendJSON(dst []byte) []byte {
-	if bundle == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range bundle {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = appendBlobV1JSON(dst, b)
-	}
-	return append(dst, ']')
-}
-
-func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
-	return bundle.appendJSON(make([]byte, 0, bundle.jsonLen())), nil
 }
 
 func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
@@ -76,42 +36,14 @@ func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	return nil
 }
 
-func (bundle BlobsBundleV2) jsonLen() int {
-	if bundle == nil {
-		return len("null")
-	}
-	size := len("[]")
-	for i, b := range bundle {
-		if i > 0 {
-			size++
-		}
-		size += blobV2JSONLen(b)
-	}
-	return size
-}
-
-func (bundle BlobsBundleV2) appendJSON(dst []byte) []byte {
-	if bundle == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range bundle {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = appendBlobV2JSON(dst, b)
-	}
-	return append(dst, ']')
-}
-
 func appendBlobV1JSON(dst []byte, b *BlobAndProofV1) []byte {
 	if b == nil {
 		return append(dst, "null"...)
 	}
 	dst = append(dst, `{"blob":`...)
-	dst = appendQuotedHex(dst, b.Blob)
+	dst = hexutil.AppendQuoted(dst, b.Blob)
 	dst = append(dst, `,"proof":`...)
-	dst = appendQuotedHex(dst, b.Proof)
+	dst = hexutil.AppendQuoted(dst, b.Proof)
 	return append(dst, '}')
 }
 
@@ -119,7 +51,7 @@ func blobV1JSONLen(b *BlobAndProofV1) int {
 	if b == nil {
 		return len("null")
 	}
-	return len(`{"blob":`) + quotedHexLen(len(b.Blob)) + len(`,"proof":`) + quotedHexLen(len(b.Proof)) + len("}")
+	return len(`{"blob":`) + hexutil.QuotedLen(len(b.Blob)) + len(`,"proof":`) + hexutil.QuotedLen(len(b.Proof)) + len("}")
 }
 
 func appendBlobV2JSON(dst []byte, b *BlobAndProofV2) []byte {
@@ -127,7 +59,7 @@ func appendBlobV2JSON(dst []byte, b *BlobAndProofV2) []byte {
 		return append(dst, "null"...)
 	}
 	dst = append(dst, `{"blob":`...)
-	dst = appendQuotedHex(dst, b.Blob)
+	dst = hexutil.AppendQuoted(dst, b.Blob)
 	dst = append(dst, `,"proofs":`...)
 	if b.CellProofs == nil {
 		dst = append(dst, "null"...)
@@ -137,7 +69,7 @@ func appendBlobV2JSON(dst []byte, b *BlobAndProofV2) []byte {
 			if i > 0 {
 				dst = append(dst, ',')
 			}
-			dst = appendQuotedHex(dst, p)
+			dst = hexutil.AppendQuoted(dst, p)
 		}
 		dst = append(dst, ']')
 	}
@@ -148,7 +80,7 @@ func blobV2JSONLen(b *BlobAndProofV2) int {
 	if b == nil {
 		return len("null")
 	}
-	n := len(`{"blob":`) + quotedHexLen(len(b.Blob)) + len(`,"proofs":`) + len("}")
+	n := len(`{"blob":`) + hexutil.QuotedLen(len(b.Blob)) + len(`,"proofs":`) + len("}")
 	if b.CellProofs == nil {
 		n += len("null")
 	} else {
@@ -157,18 +89,8 @@ func blobV2JSONLen(b *BlobAndProofV2) int {
 			if i > 0 {
 				n++
 			}
-			n += quotedHexLen(len(p))
+			n += hexutil.QuotedLen(len(p))
 		}
 	}
 	return n
 }
-
-func quotedHexLen(n int) int { return len(`"0x`) + 2*n + len(`"`) }
-
-func appendQuotedHex(dst, src []byte) []byte {
-	dst = append(dst, '"', '0', 'x')
-	dst = hex.AppendEncode(dst, src)
-	return append(dst, '"')
-}
-
-func jsonNull() []byte { return []byte("null") }

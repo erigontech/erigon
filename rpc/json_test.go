@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -566,18 +567,13 @@ func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
 func TestResponseWritesJSONToStream(t *testing.T) {
 	large := streamedJSON(`"` + strings.Repeat("x", 2*jsonstream.FlushThreshold) + `"`)
 	for _, result := range []streamedJSON{`"first-and-longer"`, `"2nd"`, large, `"after-large"`} {
-		for _, out := range []*bytes.Buffer{new(bytes.Buffer), nil} {
-			var s jsonstream.Stream
-			if out != nil {
-				s = jsonstream.Get(out)
-			} else {
-				s = jsonstream.Get(nil)
-			}
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			s := jsonstream.Get(out)
 			respond(s, json.RawMessage(`7`), result)
 			require.NoError(t, s.Flush())
 			got := s.Buffer()
-			if out != nil {
-				got = out.Bytes()
+			if b, ok := out.(*bytes.Buffer); ok {
+				got = b.Bytes()
 			}
 			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(result)+`}`, string(got))
 			jsonstream.Put(s)

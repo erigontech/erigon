@@ -39,9 +39,6 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(bundle)
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
 			w := &hintedJSONWriter{}
 			require.NoError(t, bundle.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
@@ -67,7 +64,6 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		"worst-case bundle": {
 			BlobsBundle: worstCaseBlobsBundle(),
 		},
-		"nil response": nil,
 		"populated payload": {
 			ExecutionPayload: &ExecutionPayload{
 				ParentHash:    common.HexToHash("0xabc1"),
@@ -89,9 +85,6 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(r)
 			require.NoError(t, err)
-			got, err := r.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
 			w := &hintedJSONWriter{}
 			require.NoError(t, r.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))

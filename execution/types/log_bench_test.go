@@ -18,9 +18,11 @@ package types
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
@@ -30,9 +32,10 @@ func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 		logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}}
 	}
 	b.Run("fast", func(b *testing.B) {
+		s := jsonstream.Get(io.Discard)
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := logs.MarshalFastJSON(); err != nil {
+			if err := logs.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
 		}

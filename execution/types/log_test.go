@@ -530,9 +530,8 @@ func (w *hintedJSONWriter) WriteRawBytes(v []byte) {
 	w.out = append(w.out, v...)
 }
 
-// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
-// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
-// so the bound is checked directly as well.
+// The fast encoders replace json.Marshal for these results, so they must match it byte for byte and
+// stay within fastJSONLen.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
 	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
@@ -566,16 +565,10 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			got, err := logs.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
 			w := &hintedJSONWriter{}
 			require.NoError(t, logs.MarshalFastJSONTo(w))
 			require.Equal(t, string(want), string(w.out))
 			require.False(t, w.overrun, "a write outgrew its size hint")
-			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
-				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
-			}
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)

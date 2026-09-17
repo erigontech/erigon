@@ -18,16 +18,18 @@ package engine_types
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // BenchmarkBlobsBundleMarshal compares the worst-case getPayload blobs bundle (a full mainnet block,
-// 21 blobs with Osaka cell proofs) encoded by stdlib reflection vs MarshalFastJSON.
+// 21 blobs with Osaka cell proofs) encoded by stdlib reflection vs MarshalFastJSONTo.
 func BenchmarkBlobsBundleMarshal(b *testing.B) {
 	bundle := worstCaseBlobsBundle()
-	enc, _ := bundle.MarshalFastJSON()
+	enc, _ := json.Marshal(bundle)
 	size := int64(len(enc))
 
 	b.Run("stdlib_reflect", func(b *testing.B) {
@@ -40,10 +42,11 @@ func BenchmarkBlobsBundleMarshal(b *testing.B) {
 		}
 	})
 	b.Run("fast", func(b *testing.B) {
+		s := jsonstream.Get(io.Discard)
 		b.SetBytes(size)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := bundle.MarshalFastJSON(); err != nil {
+			if err := bundle.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -70,9 +73,10 @@ func BenchmarkGetPayloadResponseJSON(b *testing.B) {
 		}
 	})
 	b.Run("marshal", func(b *testing.B) {
+		s := jsonstream.Get(io.Discard)
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := resp.MarshalFastJSON(); err != nil {
+			if err := resp.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
 		}

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -430,9 +431,10 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
-	var streamed jsonBytesWriter
-	require.NoError(t, cached.MarshalFastJSONTo(&streamed))
-	require.Equal(t, wantBytes, []byte(streamed))
+	streamed := jsonstream.Get(nil)
+	defer jsonstream.Put(streamed)
+	require.NoError(t, cached.MarshalFastJSONTo(streamed))
+	require.Equal(t, wantBytes, streamed.Buffer())
 }
 
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
@@ -738,11 +740,6 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 	})
 }
 
-type jsonBytesWriter []byte
-
-func (w *jsonBytesWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
-func (w *jsonBytesWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
-
 func TestExecutionWitnessResultMarshalFastJSONTo(t *testing.T) {
 	for name, m := range map[string]*ExecutionWitnessResult{
 		"empty":     {},
@@ -753,9 +750,10 @@ func TestExecutionWitnessResultMarshalFastJSONTo(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := m.MarshalFastJSON()
 			require.NoError(t, err)
-			var got jsonBytesWriter
-			require.NoError(t, m.MarshalFastJSONTo(&got))
-			require.Equal(t, string(want), string(got))
+			got := jsonstream.Get(nil)
+			defer jsonstream.Put(got)
+			require.NoError(t, m.MarshalFastJSONTo(got))
+			require.Equal(t, string(want), string(got.Buffer()))
 		})
 	}
 }

@@ -60,7 +60,7 @@ func WriteRawJSON(w JSONWriter, raw string) {
 }
 
 func MarshalFastJSONArrayTo(w JSONWriter, items []Bytes) {
-	MarshalFastJSONElemsTo(w, items, bytesJSONLen, appendBytesJSON)
+	MarshalFastJSONElemsTo(w, items, func(b Bytes) int { return QuotedLen(len(b)) }, func(dst []byte, b Bytes) []byte { return AppendQuoted(dst, b) })
 }
 
 // MarshalFastJSONElemsTo writes items as a JSON array one element at a time, so a large array never sits in one buffer.
@@ -88,13 +88,15 @@ func MarshalFastJSONElemsTo[T any](w JSONWriter, items []T, jsonLen func(T) int,
 
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
 func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
-	w.WriteRawBytes(appendBytesJSON(w.AvailableBuffer(bytesJSONLen(b)), b))
+	w.WriteRawBytes(AppendQuoted(w.AvailableBuffer(QuotedLen(len(b))), b))
 	return nil
 }
 
-func bytesJSONLen(b Bytes) int { return len(b)*2 + len(`"0x"`) }
+// QuotedLen is the length of n bytes encoded by AppendQuoted.
+func QuotedLen(n int) int { return len(`"0x"`) + 2*n }
 
-func appendBytesJSON(dst []byte, b Bytes) []byte {
+// AppendQuoted appends b as a 0x-prefixed hex JSON string.
+func AppendQuoted(dst, b []byte) []byte {
 	return append(hex.AppendEncode(append(dst, `"`+HexPrefix...), b), '"')
 }
 
