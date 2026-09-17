@@ -829,7 +829,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	witness, err := witnessTrie.ExtractWitness(true, nil)
+	witness, err := witnessTrie.ExtractWitness(false, nil)
 	if err != nil {
 		return nil, err
 	}
