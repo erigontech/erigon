@@ -1483,7 +1483,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.visible.cache != nil && dt.name != kv.CommitmentDomain && !bounded && buf == nil
+	useCache := dt.visible.cache != nil && !bounded && buf == nil
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1557,7 +1557,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.visible.cache != nil && dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := dt.visible.cache != nil && maxTxNum == math.MaxUint64
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	if useCache {
