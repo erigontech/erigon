@@ -71,6 +71,8 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
+	case chainRules.IsNano:
+		return PrecompiledContractsNanoForBSC
 	case chainRules.IsParlia:
 		// BSC base cross-chain precompiles. Later BSC-fork sets (Nano+, Cancun
 		// KZG, Prague BLS) are added as those forks are reached.
@@ -205,6 +207,13 @@ var PrecompiledContractsIstanbulForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsNanoForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsIstanbul)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidateNano{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidateNano{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -212,6 +221,7 @@ var (
 	PrecompiledAddressesBerlin         []accounts.Address
 	PrecompiledAddressesIstanbul       []accounts.Address
 	PrecompiledAddressesIstanbulForBSC []accounts.Address
+	PrecompiledAddressesNanoForBSC     []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -228,6 +238,9 @@ func init() {
 	}
 	for k := range PrecompiledContractsIstanbulForBSC {
 		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
+	}
+	for k := range PrecompiledContractsNanoForBSC {
+		PrecompiledAddressesNanoForBSC = append(PrecompiledAddressesNanoForBSC, k)
 	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
@@ -246,6 +259,8 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
+	case rules.IsNano:
+		return PrecompiledAddressesNanoForBSC
 	case rules.IsParlia:
 		return PrecompiledAddressesIstanbulForBSC
 	case rules.IsOsaka:

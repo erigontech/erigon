@@ -48,6 +48,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		DisabledEIPs:       c.DisabledEIPs,
 		IsAura:             c.Aura != nil,
 		IsParlia:           c.Parlia != nil,
+		IsNano:             c.IsNano(bc.BlockNumber),
 	}
 
 	if c.L2 != nil {

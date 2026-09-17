@@ -455,6 +455,11 @@ func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
 }
 
+// IsNano returns whether num is either equal to the Nano fork block or greater (bsc only)
+func (c *Config) IsNano(num uint64) bool {
+	return isForked(c.NanoBlock, num)
+}
+
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
 		return accounts.NilAddress
@@ -746,6 +751,9 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
 	}
+	if incompatible(c.NanoBlock, newcfg.NanoBlock, head) {
+		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
+	}
 
 	return nil
 }
@@ -849,7 +857,7 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
-	IsParlia                                          bool
+	IsParlia, IsNano                                  bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.
