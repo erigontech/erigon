@@ -172,13 +172,13 @@ func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
 
 	// System address should be excluded (no state changes, only revertable access).
 	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
+		require.NotEqual(t, sysAddr.Value(), ac.Address,
 			"system address should be excluded from BAL when it has no state changes and only revertable accesses")
 	}
 	// User address should be present.
 	found := false
 	for _, ac := range bal {
-		if ac.Address == userAddr {
+		if ac.Address == userAddr.Value() {
 			found = true
 			break
 		}
@@ -207,7 +207,7 @@ func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testi
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -229,7 +229,7 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 	bal := io.AsBlockAccessList()
 
 	require.Len(t, bal, 1)
-	require.Equal(t, params.SystemAddress, bal[0].Address)
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
 
 // TestAsBlockAccessList_SystemAddressIncludedWithStateChanges verifies that the
@@ -256,7 +256,7 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -293,7 +293,7 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
+		require.NotEqual(t, sysAddr.Value(), ac.Address,
 			"system address should be excluded: non-revertable access from system call (txIndex < 0) should not trigger inclusion")
 	}
 }
@@ -322,7 +322,7 @@ func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -355,7 +355,7 @@ func TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL(t *testing.T) {
 
 	bal := io.AsBlockAccessList()
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"net-zero balance write (matches pre-block balance, no intermediates) must not appear in BAL")
 		}
@@ -394,7 +394,7 @@ func TestVersionedIO_BalanceRestoreAfterIntermediateIsRecorded(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 2,
 				"both the intermediate write and the restore-to-initial write must appear in BAL")
@@ -432,7 +432,7 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx1's write of 200 is a no-op (same as tx0's 200); stale read must not cause a spurious second entry")
@@ -484,7 +484,7 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx 1's burn write must remain in BAL — a post-write read with the same value must not seed initialBalanceValue and trigger the net-zero filter")
@@ -524,7 +524,7 @@ func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address != addr {
+		if ac.Address != addr.Value() {
 			continue
 		}
 		found = true
@@ -1245,7 +1245,7 @@ func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Len(t, bal[0].BalanceChanges, 1)
 	require.Equal(t, uint64(1), bal[0].BalanceChanges[0].Value.Uint64(),
 		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
@@ -1260,7 +1260,7 @@ func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1, "a destroyed account with no net changes is still a touched BAL entry")
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Empty(t, bal[0].BalanceChanges)
 }
 
@@ -1637,7 +1637,7 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"balance is unchanged (7->7); the promoted read is the baseline so EELS emits no BalanceChange\n%s", bal.DebugString())
 		}
@@ -1664,7 +1664,7 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Empty(t, ac.CodeChanges,
 				"a delegation set then cleared in the same tx nets to empty code; pre-block code of an absent account is empty, so no code change must be recorded\n%s", bal.DebugString())
@@ -1701,7 +1701,7 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.CodeChanges, 1,
 				"the delegation clear is a real pre!=post code change and must stay in the BAL\n%s", bal.DebugString())
@@ -1796,7 +1796,7 @@ type referenceAccount struct {
 
 func newReferenceAccount(addr accounts.Address) *referenceAccount {
 	return &referenceAccount{
-		changes:  &types.AccountChanges{Address: addr},
+		changes:  &types.AccountChanges{Address: addr.Value()},
 		origVals: map[accounts.StorageKey]uint256.Int{},
 	}
 }

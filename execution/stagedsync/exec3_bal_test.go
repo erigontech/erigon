@@ -8,7 +8,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type countingBlockAccessListGetter struct {
@@ -24,7 +23,7 @@ func (g *countingBlockAccessListGetter) GetOne(string, []byte) ([]byte, error) {
 
 func TestBlockAccessList(t *testing.T) {
 	nonEmptyBALHash := common.Hash{1}
-	storedBAL := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	storedBAL := types.BlockAccessList{{Address: common.Address{1}}}
 	storedBALBytes, err := types.EncodeBlockAccessListBytes(storedBAL)
 	if err != nil {
 		t.Fatal(err)
