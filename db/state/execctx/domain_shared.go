@@ -1128,7 +1128,25 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+	if v, ok, err = sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+		return v, ok, err
+	}
+	// Read-through chaining, as GetLatest does: on a local mem miss walk the parent chain's mem batches so a
+	// frontier SD stack resolves against the newest ancestor that holds the key. Without it an as-of read for
+	// a key the PARENT block wrote misses memory and the caller (the commitment calculator's state reader)
+	// falls back to the DB — which on the frontier has not been flushed yet, so it answers with a value from
+	// before the parent block, or none at all. The fold then writes that stale account into the successor's
+	// root while the round's root says otherwise, and only a node re-executing the block sees the difference.
+	// Closed ancestors are detached: their contents are already persisted, so reads fall through to the DB.
+	for sd.parent != nil && sd.parent.sdCtx == nil {
+		sd.parent = sd.parent.parent
+	}
+	for p := sd.parent; p != nil && p.sdCtx != nil; p = p.parent {
+		if v, ok, err = p.mem.GetAsOf(domain, key, ts); err != nil || ok {
+			return v, ok, err
+		}
+	}
+	return nil, false, nil
 }
 
 // DomainPut

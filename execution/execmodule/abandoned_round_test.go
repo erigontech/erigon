@@ -31,12 +31,19 @@ type roundHarness struct {
 }
 
 func newRoundHarness(t *testing.T) *roundHarness {
-	h := &roundHarness{t: t, ctx: t.Context()}
-	for i := range h.keys {
+	var keys [2]*ecdsa.PrivateKey
+	for i := range keys {
 		k, err := crypto.GenerateKey()
 		require.NoError(t, err)
-		h.keys[i] = k
+		keys[i] = k
 	}
+	return newRoundHarnessWithKeys(t, keys)
+}
+
+// newRoundHarnessWithKeys builds the harness on given sender keys. The trie's shape follows the senders'
+// addresses, so a defect that depends on it reproduces only for particular keys.
+func newRoundHarnessWithKeys(t *testing.T, keys [2]*ecdsa.PrivateKey) *roundHarness {
+	h := &roundHarness{t: t, ctx: t.Context(), keys: keys}
 	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	cfg := *chain.AllProtocolChanges //nolint:govet // the tester wants a value, and this copy is never shared
 	cfg.AmsterdamTime = nil
