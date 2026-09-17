@@ -1729,21 +1729,42 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			return true
 		}
 		defer releaseSlot()
-		send := func(r *exec.TxResult) {
+		// aborted latches once a terminal result (fatal verdict or operational infra
+		// failure) is sent. A mid-EVM waitCommit failure sends its result but cannot
+		// stop RunTxTask from continuing to completion, so the worker would otherwise
+		// send a second result for the same task; the latch drops it. Ordinary
+		// self-loop results (send) are non-terminal and may legitimately be sent
+		// across incarnations until a terminal one latches.
+		aborted := false
+		rawSend := func(r *exec.TxResult) {
 			select {
 			case pe.results <- r:
 			case <-pe.workersCtx.Done():
 			}
+		}
+		send := func(r *exec.TxResult) {
+			if aborted {
+				return
+			}
+			rawSend(r)
 		}
 		// A worker must never vanish on a fatal condition — the exec loop would wait
 		// forever for a result that never arrives. sendFatal condemns the block;
 		// sendOperational reports an infrastructure failure that fails the stage
 		// retryably (transient roTx/read error, worker panic) without a block verdict.
 		sendFatal := func(err error) {
-			send(&exec.TxResult{Task: tv, Err: err})
+			if aborted {
+				return
+			}
+			aborted = true
+			rawSend(&exec.TxResult{Task: tv, Err: err})
 		}
 		sendOperational := func(err error) {
-			send(&exec.TxResult{Task: tv, Err: err, Operational: true})
+			if aborted {
+				return
+			}
+			aborted = true
+			rawSend(&exec.TxResult{Task: tv, Err: err, Operational: true})
 		}
 		// Mid-flow dep-pause hook: a read observing an in-flight (estimate) write
 		// releases this worker's slot, waits for that writer's task to commit,
@@ -1760,8 +1781,14 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				}
 				return false
 			}
-			// RunTxTask holds the worker lock across this mid-EVM rebind.
-			return w.BindTxHeld(goRoTx) == nil
+			// RunTxTask holds the worker lock across this mid-EVM rebind. A bind
+			// failure leaves the EVM reading through a dead roTx, so report it as an
+			// infrastructure failure rather than continuing.
+			if err := w.BindTxHeld(goRoTx); err != nil {
+				sendOperational(fmt.Errorf("block %d tx %d: rebind roTx: %w", be.blockNum, tv.index, err))
+				return false
+			}
+			return true
 		}
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -1824,6 +1851,12 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			}
 			result := w.RunTxTask(tv)
 			releaseSlot()
+			// A mid-EVM waitCommit failure already sent a terminal result and left the
+			// tx running against a dead roTx; its result is meaningless — stop here.
+			if aborted {
+				pe.releaseWorker(w)
+				return
+			}
 			if result.Err != nil {
 				pe.releaseWorker(w)
 				if finalExec {
