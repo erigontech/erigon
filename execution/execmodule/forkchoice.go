@@ -229,7 +229,16 @@ func (e *ExecModule) unwindIfNeeded(
 		if err != nil {
 			return nil, err
 		}
-		for !isCanonicalHash {
+		// Canonicality is judged through the block reader, which falls through
+		// to the header segments, so a block retired while execution lagged
+		// reads as canonical with no txNums entry behind it. Stopping there
+		// leaves a hole the append cannot cross — it reads canonical hashes
+		// from the db alone — so collect down to the txNums tip.
+		txNumsTip, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return nil, err
+		}
+		for !isCanonicalHash || (txNumsTip > 0 && currentParentNumber > txNumsTip) {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -341,7 +350,10 @@ func (e *ExecModule) unwindIfNeeded(
 		// newCanonicals[len-1] is the reconnection point, taken from the
 		// canonical chain, which runs ahead of the txNums index — hence
 		// FromTip rather than a plain append.
-		if err := rawdb.AppendCanonicalTxNumsFromTip(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+		retiredBody := func(blockNum uint64, _ common.Hash) (*types.BodyForStorage, error) {
+			return e.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
+		}
+		if err := rawdb.AppendCanonicalTxNumsFromTip(tx, newCanonicals[len(newCanonicals)-1].number, retiredBody); err != nil {
 			return nil, err
 		}
 	}

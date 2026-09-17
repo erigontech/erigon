@@ -264,7 +264,7 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 		if err := rawdbv3.TxNums.Truncate(batch, currentHeight); err != nil {
 			return err
 		}
-		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
+		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight, nil); err != nil {
 			return err
 		}
 	}

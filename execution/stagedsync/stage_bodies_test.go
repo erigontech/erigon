@@ -83,7 +83,7 @@ func TestBodiesCanonical(t *testing.T) {
 	}
 
 	// test append with gap
-	err = rawdb.AppendCanonicalTxNums(tx, 5)
+	err = rawdb.AppendCanonicalTxNums(tx, 5, nil)
 	require.Error(err)
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
 	require.ErrorAs(err, &e1)

@@ -712,6 +712,11 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
+// CanonicalBodyReader resolves a canonical block's stored body. The db copy is
+// dropped once the block is retired, so callers that must cross the retirement
+// horizon pass a reader that falls through to the block segments.
+type CanonicalBodyReader func(blockNum uint64, hash common.Hash) (*types.BodyForStorage, error)
+
 // AppendCanonicalTxNumsFromTip appends canonical txNums starting at from,
 // retrying from the index tip when from sits above it.
 //
@@ -722,16 +727,66 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 // hole. Callers that derive from from the canonical chain want this
 // wrapper; callers that have just truncated to from-1 can append
 // directly.
-func AppendCanonicalTxNumsFromTip(tx kv.RwTx, from uint64) error {
-	err := AppendCanonicalTxNums(tx, from)
-	var gap rawdbv3.ErrTxNumsAppendWithGap
-	if errors.As(err, &gap) {
-		return AppendCanonicalTxNums(tx, gap.LastBlock()+1)
+func AppendCanonicalTxNumsFromTip(tx kv.RwTx, from uint64, body CanonicalBodyReader) error {
+	beforeBlock, beforeTxNum, err := rawdbv3.TxNums.Last(tx)
+	if err != nil {
+		return err
 	}
-	return err
+
+	appendErr := AppendCanonicalTxNums(tx, from, body)
+	var gap rawdbv3.ErrTxNumsAppendWithGap
+	if errors.As(appendErr, &gap) {
+		appendErr = AppendCanonicalTxNums(tx, gap.LastBlock()+1, body)
+	}
+	if appendErr != nil {
+		return appendErr
+	}
+
+	afterBlock, afterTxNum, err := rawdbv3.TxNums.Last(tx)
+	if err != nil {
+		return err
+	}
+	// Genesis keeps blockNum 0, so an empty index and an index holding only
+	// genesis both report block 0 — progress has to be judged on txNum too.
+	if afterBlock > beforeBlock || afterTxNum > beforeTxNum {
+		return nil
+	}
+	// The append reads canonical hashes and bodies from the db alone, so it
+	// stops at the first block already retired into the segments — under
+	// minimal pruning a canonical marker whose body is gone. Reporting that
+	// as success pins txNums below the head for good: execution then finds
+	// no work and the head never moves again.
+	for _, blockNum := range []uint64{afterBlock + 1, from} {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h != (common.Hash{}) {
+			return fmt.Errorf("txNums stuck at %d: block %d is canonical but the append could not reach it", afterBlock, blockNum)
+		}
+	}
+	return nil
 }
 
-func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
+// canonicalBodyForStorage reads a block's stored body, falling back to the
+// caller's reader once the db copy has been pruned away by retirement. Both
+// paths yield the stored TxCount, which counts the two system txns — the
+// block reader's Body() subtracts them, so it cannot be used here.
+func canonicalBodyForStorage(tx kv.Getter, hash common.Hash, blockNum uint64, body CanonicalBodyReader) (*types.BodyForStorage, error) {
+	if data := ReadStorageBodyRLP(tx, hash, blockNum); len(data) > 0 {
+		bodyForStorage := &types.BodyForStorage{}
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return nil, err
+		}
+		return bodyForStorage, nil
+	}
+	if body == nil {
+		return nil, nil
+	}
+	return body(blockNum, hash)
+}
+
+func AppendCanonicalTxNums(tx kv.RwTx, from uint64, body CanonicalBodyReader) (err error) {
 	nextBaseTxNum := 0
 	if from > 0 {
 		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(context.Background(), tx, from-1)
@@ -750,13 +805,12 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			break
 		}
 
-		data := ReadStorageBodyRLP(tx, h, blockNum)
-		if len(data) == 0 {
-			break
-		}
-		bodyForStorage := types.BodyForStorage{}
-		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
+		bodyForStorage, err := canonicalBodyForStorage(tx, h, blockNum, body)
+		if err != nil {
 			return err
+		}
+		if bodyForStorage == nil {
+			break
 		}
 
 		nextBaseTxNum += int(bodyForStorage.TxCount)
