@@ -328,7 +328,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 type Account struct {
 	Nonce            *hexutil.Uint64              `json:"nonce"`
 	Code             *hexutil.Bytes               `json:"code"`
-	Balance          **hexutil.Big                `json:"balance"`
+	Balance          **hexutil.U256               `json:"balance"`
 	State            *map[common.Hash]common.Hash `json:"state"`
 	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
 	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`
@@ -439,10 +439,10 @@ func (b *RPCBlock) MarkPending() {
 	b.Hash, b.Nonce, b.Miner = nil, nil, nil
 }
 
-// rpcMarshalHeader converts the given header to the RPC output. The hash is passed
+// RPCMarshalHeader converts the given header to the RPC output. The hash is passed
 // in because types.Block hands out header copies that drop the memoized hash, and
 // recomputing it costs an RLP encode plus a keccak per call.
-func rpcMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
+func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	result := &RPCHeader{
 		Number:           (*hexutil.U256)(&head.Number),
 		Hash:             &hash,
@@ -502,7 +502,7 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	}
 
 	result := &RPCBlock{
-		RPCHeader:    *rpcMarshalHeader(block.Header(), block.Hash()),
+		RPCHeader:    *RPCMarshalHeader(block.Header(), block.Hash()),
 		Size:         hexutil.Uint64(block.Size()),
 		Transactions: transactions,
 		Uncles:       uncleHashes,

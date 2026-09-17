@@ -222,22 +222,31 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count))
-	if err != nil {
-		return nil, pid, err
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count), count)
+	if responseErr != nil && len(responsePacket) == 0 {
+		return nil, pid, responseErr
 	}
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		if uint64(len(data.raw)) > clparams.MaxChunkSize {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
+			return envelopes, pid, err
+		}
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
+		}
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range decode: %w", err)
+		}
+		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range validation: %w", err)
 		}
 		envelopes = append(envelopes, envelope)
 	}
-	return envelopes, pid, nil
+	return envelopes, pid, responseErr
 }
 
 // SendExecutionPayloadEnvelopesByRootReq retrieves execution payload envelopes by block root.
@@ -259,22 +268,31 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))))
-	if err != nil {
-		return nil, pid, err
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))), uint64(len(roots)))
+	if responseErr != nil && len(responsePacket) == 0 {
+		return nil, pid, responseErr
 	}
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		if uint64(len(data.raw)) > clparams.MaxChunkSize {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
+			return envelopes, pid, err
+		}
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
+		}
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root decode: %w", err)
+		}
+		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root validation: %w", err)
 		}
 		envelopes = append(envelopes, envelope)
 	}
-	return envelopes, pid, nil
+	return envelopes, pid, responseErr
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
@@ -381,7 +399,7 @@ type responseData struct {
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
-func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
+func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData, maxChunks *uint64) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
@@ -395,25 +413,27 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 	r := bytes.NewReader(message.Data)
 	sr := snappypool.Reader(r)
 	defer snappypool.PutReader(sr)
+	expectChunk := false
 	for {
 		forkDigest := make([]byte, 4)
-		if n, err := r.Read(forkDigest); err != nil {
-			if err == io.EOF {
+		if _, err := io.ReadFull(r, forkDigest); err != nil {
+			if err == io.EOF && !expectChunk {
 				break
 			}
-			return nil, message.Peer.Pid, err
-		} else if n == 0 {
-			break
+			return responsePacket, message.Peer.Pid, fmt.Errorf("incomplete response fork digest: %w", err)
 		}
-
+		if maxChunks != nil && uint64(len(responsePacket)) >= *maxChunks {
+			b.BanPeer(message.Peer.Pid)
+			return responsePacket, message.Peer.Pid, fmt.Errorf("response contains more chunks than requested: limit %d", *maxChunks)
+		}
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
+			return responsePacket, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, errors.New("received message too big")
+			return responsePacket, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -423,20 +443,20 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
 			if err != nil {
-				return nil, message.Peer.Pid, fmt.Errorf("read error: %w", err)
+				return responsePacket, message.Peer.Pid, fmt.Errorf("read error: %w", err)
 			}
 			bytesRead += n
 		}
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, errors.New("null fork digest")
+			return responsePacket, message.Peer.Pid, errors.New("null fork digest")
 		}
 
 		responseForkDigest := utils.Uint32ToBytes4(respForkDigest)
 		version, err := b.ethClock.StateVersionByForkDigest(responseForkDigest)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
+			return responsePacket, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
 		}
 		responsePacket = append(responsePacket, responseData{
 			version:    version,
@@ -449,8 +469,9 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			break
 		} else if err != nil {
 			log.Debug("failed to read byte", "err", err)
-			return nil, message.Peer.Pid, err
+			return responsePacket, message.Peer.Pid, err
 		}
+		expectChunk = true
 	}
 	return responsePacket, message.Peer.Pid, nil
 }
@@ -461,6 +482,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	topic string,
 	reqPayload []byte,
 	maxResponseBytes uint64,
+	maxChunks ...uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -473,7 +495,11 @@ func (b *BeaconRpcP2P) sendRequest(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(message)
+	var chunkLimit *uint64
+	if len(maxChunks) > 0 {
+		chunkLimit = &maxChunks[0]
+	}
+	return b.parseResponseData(message, chunkLimit)
 }
 
 func (b *BeaconRpcP2P) sendRequestWithPeer(
@@ -495,7 +521,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(message)
+	return b.parseResponseData(message, nil)
 }
 
 func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {
