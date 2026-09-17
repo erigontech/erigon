@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -655,9 +656,10 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 // tests do not reach: genesis, a block hash, an unknown block, and the transaction
 // index bound.
 func TestGetWitness(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()

@@ -111,9 +111,9 @@ structural differences.
 
 Before returning, the producer self-verifies the witness: `verifyWitnessStateless` re-executes the block using
 only the witness as state, and asserts that the resulting post-state root equals `block.Root()`. A witness that
-fails this check is never returned — the call errors. The check is on by default and can be disabled for
-diagnostics with `ERIGON_WITNESS_NO_VERIFY=true`. `WITNESS_STRICT_VERIFY=true` tightens it further, making
-re-execution error on any unresolved (missing) trie node instead of treating it as empty.
+fails this check is never returned — the call errors. The check runs only with `ERIGON_ASSERT=true`.
+`WITNESS_STRICT_VERIFY=true` tightens it further, making re-execution error on any unresolved (missing) trie
+node instead of treating it as empty.
 
 A witness is a **sufficient** proof, not a canonical-minimal one: re-execution to the correct root is the only
 correctness condition, so two conforming producers may legitimately differ in which redundant nodes or codes
