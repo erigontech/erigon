@@ -14,20 +14,25 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package hexutil
+//go:build go1.27
+
+package hexutil_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkUnmarshalBig(b *testing.B) {
 	input := []byte(`"0x123456789abcdef123456789abcdef"`)
 	for b.Loop() {
-		var v Big
+		var v hexutil.Big
 		if err := v.UnmarshalJSON(input); err != nil {
 			b.Fatal(err)
 		}
@@ -44,7 +49,7 @@ func BenchmarkU256AppendText(b *testing.B) {
 		{"u64", uint256.NewInt(0x1234567890abcdef)},
 		{"full", new(uint256.Int).SetAllOne()},
 	} {
-		v := U256(*tc.v)
+		v := hexutil.U256(*tc.v)
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
@@ -57,7 +62,7 @@ func BenchmarkU256AppendText(b *testing.B) {
 func BenchmarkUnmarshalUint64(b *testing.B) {
 	input := []byte(`"0x123456789abcdf"`)
 	for b.Loop() {
-		var v Uint64
+		var v hexutil.Uint64
 		_ = v.UnmarshalJSON(input)
 	}
 }
@@ -68,15 +73,16 @@ type discardJSONWriter struct{ buf []byte }
 func (w *discardJSONWriter) AvailableBuffer(n int) []byte { return slices.Grow(w.buf[:0], n) }
 func (w *discardJSONWriter) WriteRawBytes(v []byte)       { w.buf = v[:0] }
 
-// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by stdlib reflection vs MarshalFastJSONTo.
+// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs MarshalFastJSONTo.
 func BenchmarkBytesMarshalJSON(b *testing.B) {
-	code := make(Bytes, 64*1024)
+	code := make(hexutil.Bytes, 64*1024)
+	buf := make([]byte, 2*64*1024)
 	for i := range code {
 		code[i] = byte(i)
 	}
-	size := int64(QuotedLen(len(code)))
+	size := int64(hexutil.QuotedLen(len(code)))
 
-	b.Run("stdlib_reflect", func(b *testing.B) {
+	b.Run("jsonv2", func(b *testing.B) {
 		b.SetBytes(size)
 		b.ReportAllocs()
 		for b.Loop() {
@@ -85,7 +91,15 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 			}
 		}
 	})
-	b.Run("fast", func(b *testing.B) {
+	b.Run("fast_v0", func(b *testing.B) {
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			buf, _ = code.AppendText(buf[:0])
+		}
+	})
+
+	b.Run("fast_v2", func(b *testing.B) {
 		var w discardJSONWriter
 		b.SetBytes(size)
 		b.ReportAllocs()
@@ -95,4 +109,19 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 			}
 		}
 	})
+
+	b.Run("fast_v2_stream", func(b *testing.B) {
+		stream := jsonstream.Get(nil)
+		defer jsonstream.Put(stream)
+
+		var w discardJSONWriter
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := code.MarshalFastJSONTo(&w); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
 }
