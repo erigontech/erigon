@@ -19,7 +19,7 @@ package jsonstream
 import (
 	"io"
 
-	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var (
@@ -99,7 +99,7 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
-func (s *LazyFieldStream) WriteValue(v hexutil.JSONAppender) { s.ensure(); s.inner.WriteValue(v) }
+func (s *LazyFieldStream) WriteValue(v jsonw.JSONAppender) { s.ensure(); s.inner.WriteValue(v) }
 
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a

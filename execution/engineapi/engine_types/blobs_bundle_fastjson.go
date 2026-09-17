@@ -20,10 +20,11 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // MarshalFastJSONTo writes one array element at a time, so the blobs never sit in one buffer.
-func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (b *BlobsBundle) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if b == nil {
 		w.WriteNil()
 		return nil
@@ -43,7 +44,7 @@ func (b *BlobsBundle) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	return nil
 }
 
-func (r *GetPayloadResponse) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (r *GetPayloadResponse) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	executionPayload, err := json.Marshal(r.ExecutionPayload)
 	if err != nil {
 		return err

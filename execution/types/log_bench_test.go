@@ -18,32 +18,57 @@ package types
 
 import (
 	"encoding/json"
-	"io"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
+// BenchmarkRPCLogsMarshalFastJSON compares an eth_getLogs result of 1000 logs written into an
+// http.ResponseWriter by a reused json.Encoder vs MarshalFastJSONTo through a pooled stream.
 func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	logs := make(RPCLogs, 1000)
 	for i := range logs {
 		logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}}
 	}
+	enc, err := json.Marshal(logs)
+	if err != nil {
+		b.Fatal(err)
+	}
+	size := int64(len(enc))
+
 	b.Run("fast", func(b *testing.B) {
-		s := jsonstream.Get(io.Discard)
-		b.ReportAllocs()
-		for b.Loop() {
+		w := httptest.NewRecorder()
+		serve := func() {
+			w.Body.Reset()
+			s := jsonstream.Get(w)
+			defer jsonstream.Put(s)
 			if err := logs.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
+			if err := s.Flush(); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			serve()
+		}
+		if w.Body.Len() != int(size) {
+			b.Fatalf("wrote %d bytes, want %d", w.Body.Len(), size)
 		}
 	})
 	b.Run("reflect", func(b *testing.B) {
+		w := httptest.NewRecorder()
+		e := json.NewEncoder(w)
+		b.SetBytes(size)
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := json.Marshal(logs); err != nil {
+			w.Body.Reset()
+			if err := e.Encode(&logs); err != nil {
 				b.Fatal(err)
 			}
 		}

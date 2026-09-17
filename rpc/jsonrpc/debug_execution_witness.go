@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -542,7 +543,7 @@ func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
 }
 
 // MarshalFastJSONTo writes one node or code at a time, byte-identical to MarshalFastJSON.
-func (m *ExecutionWitnessResult) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if m.cachedJSON != nil {
 		w.WriteRawBytes(m.cachedJSON)
 		return nil

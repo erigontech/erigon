@@ -19,6 +19,7 @@ package rpc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -547,19 +549,9 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
-	var out bytes.Buffer
-	s := jsonstream.Get(&out)
-	defer jsonstream.Put(s)
-
-	respond(s, json.RawMessage(`7`), (*hexutil.Bytes)(nil))
-	require.NoError(t, s.Flush())
-	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
-}
-
 func TestResponseWritesJSONToStream(t *testing.T) {
-	large := bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold)
-	for _, result := range []hexutil.Bytes{[]byte("first-and-longer"), []byte("2nd"), large, []byte("after-large")} {
+	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
+	for _, result := range []any{hexutil.Bytes("small"), large, (*hexutil.Bytes)(nil)} {
 		want, err := json.Marshal(result)
 		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
@@ -579,8 +571,19 @@ func TestResponseWritesJSONToStream(t *testing.T) {
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
 // signalled only through Flush would be invisible there.
 func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
+	t.Run("json", func(t *testing.T) { testResponseEncodeFailure(t, make(chan int)) })
+	t.Run("fast", func(t *testing.T) { testResponseEncodeFailure(t, failingFastJSON{}) })
+}
+
+type failingFastJSON struct{}
+
+func (failingFastJSON) MarshalFastJSONTo(jsonw.JSONWriter) error {
+	return errors.New("encode failed")
+}
+
+func testResponseEncodeFailure(t *testing.T, result any) {
 	bad := func(s jsonstream.Stream) {
-		respond(s, json.RawMessage(`7`), make(chan int))
+		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
 		t.Helper()

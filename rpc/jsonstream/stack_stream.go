@@ -25,6 +25,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -97,7 +98,7 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.WriteRawBytes(buf[start:])
 }
 
-func (s *StackStream) WriteValue(v hexutil.JSONAppender) {
+func (s *StackStream) WriteValue(v jsonw.JSONAppender) {
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = v.AppendJSON(slices.Grow(buf, v.JSONLen()))

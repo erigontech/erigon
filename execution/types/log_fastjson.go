@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
@@ -91,16 +92,12 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.AppendJSON(make([]byte, 0, l.JSONLen())), nil
-}
-
-func (l *RPCLog) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteValue(l)
 	return nil
 }
 
-func (logs RPCLogs) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if logs == nil {
 		w.WriteNil()
 		return nil

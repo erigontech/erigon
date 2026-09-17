@@ -16,7 +16,10 @@
 
 package engine_types
 
-import "github.com/erigontech/erigon/common/hexutil"
+import (
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+)
 
 // BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSONTo
 // streams one blob at a time with direct hex encoding instead of reflection, byte-identical to
@@ -26,7 +29,7 @@ type (
 	BlobsBundleV2 []*BlobAndProofV2
 )
 
-func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (bundle BlobsBundleV1) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if bundle == nil {
 		w.WriteNil()
 		return nil
@@ -54,7 +57,7 @@ func (bundle BlobsBundleV1) MarshalFastJSONTo(w hexutil.JSONWriter) error {
 	return nil
 }
 
-func (bundle BlobsBundleV2) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+func (bundle BlobsBundleV2) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if bundle == nil {
 		w.WriteNil()
 		return nil
