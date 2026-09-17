@@ -78,21 +78,11 @@ func (w *discardJSONWriter) WriteRawBytes(v []byte)       { w.buf = v[:0] }
 // BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs MarshalFastJSONTo.
 func BenchmarkBytesMarshalJSON(b *testing.B) {
 	code := make(hexutil.Bytes, 64*1024)
-	buf := make([]byte, 2*64*1024)
 	for i := range code {
 		code[i] = byte(i)
 	}
 	size := int64(hexutil.QuotedLen(len(code)))
 
-	b.Run("jsonv2", func(b *testing.B) {
-		b.SetBytes(size)
-		b.ReportAllocs()
-		for b.Loop() {
-			if _, err := json.Marshal(code); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
 	b.Run("jsonv2_encoder", func(b *testing.B) {
 		w := httptest.NewRecorder()
 		enc := jsontext.NewEncoder(w)
@@ -101,25 +91,6 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 		for b.Loop() {
 			w.Body.Reset()
 			if err := json.MarshalEncode(enc, code); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-
-	b.Run("fast_v0", func(b *testing.B) {
-		b.SetBytes(size)
-		b.ReportAllocs()
-		for b.Loop() {
-			buf, _ = code.AppendText(buf[:0])
-		}
-	})
-
-	b.Run("fast_v2", func(b *testing.B) {
-		var w discardJSONWriter
-		b.SetBytes(size)
-		b.ReportAllocs()
-		for b.Loop() {
-			if err := code.MarshalFastJSONTo(&w); err != nil {
 				b.Fatal(err)
 			}
 		}

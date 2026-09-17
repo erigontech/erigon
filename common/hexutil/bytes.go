@@ -91,6 +91,10 @@ func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
 	w.WriteRawBytes(AppendQuoted(w.AvailableBuffer(QuotedLen(len(b))), b))
 	return nil
 }
+func (b Bytes) MarshalFastJSONTo2(w JSONWriter) error {
+	w.WriteRawBytes(AppendQuoted(w.AvailableBuffer(QuotedLen(len(b))), b))
+	return nil
+}
 
 // QuotedLen is the length of n bytes encoded by AppendQuoted.
 func QuotedLen(n int) int { return len(`"0x"`) + 2*n }
