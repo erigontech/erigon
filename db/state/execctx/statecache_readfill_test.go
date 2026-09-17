@@ -1064,24 +1064,24 @@ func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
 	require.True(t, ok, "a canonical session must keep filling the shared state cache after its own unwind")
 }
 
-func TestValidationCommitReleasesBranchReadBound(t *testing.T) {
+func TestValidationCommitAppliesDeferredBranchUnwind(t *testing.T) {
 	t.Parallel()
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
+	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	key := []byte{1, 2}
+	branches.Put(key, []byte("stale"), 1, 20)
+
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.Unwind(16, nil)
+	_, _, ok := branches.Get(key)
+	require.True(t, ok, "a speculative session must leave the shared branch cache intact")
+
 	require.NoError(t, sd.Commit(t.Context(), tx))
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	branches := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
-	key := []byte{1, 2}
-	branches.Put(key, []byte("adopted"), 1, 20)
-	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
-	require.NoError(t, err)
-	require.Equal(t, []byte("adopted"), got)
+	_, _, ok = branches.Get(key)
+	require.False(t, ok, "commit must apply the deferred unwind to the shared branch cache")
 }
