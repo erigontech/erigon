@@ -500,11 +500,10 @@ func TestResolveWitnessBlockUsesCommittedView(t *testing.T) {
 	require.NotEqual(t, overlayHeader.Hash(), info.Block.Hash())
 }
 
-// TestGetTransactionByHash_PendingTx_UsesOverlayHead pins that the pending-tx
-// fallback in GetTransactionByHash reads the current header through the block
-// overlay: the returned tx's gas price (derived from that header's base fee)
-// must reflect the overlay head, not the stale MDBX-committed head.
-func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
+// TestGetTransactionByHash_PendingTxGasPriceIsFeeCap pins that the pending-tx
+// fallback in GetTransactionByHash prices the transaction at its fee cap: no
+// head, committed or in the overlay, may feed a projected base fee into it.
+func TestGetTransactionByHash_PendingTxGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 
@@ -517,8 +516,8 @@ func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
 	got, err := api.GetTransactionByHash(h.m.Ctx, pendingTxn.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, pendingTxn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 func TestTransactionByHashMethodsPinOverlayView(t *testing.T) {
@@ -609,9 +608,9 @@ func newOverlayRacePendingPool(t *testing.T, m *execmoduletester.ExecModuleTeste
 	return pool, txn
 }
 
-// TestTxPoolContent_UsesOverlayHead pins that txpool_content reads the current
-// header through the block overlay, matching TestGetTransactionByHash_PendingTx_UsesOverlayHead.
-func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
+// TestTxPoolContent_PendingGasPriceIsFeeCap pins the pooled representation for
+// txpool_content, matching TestGetTransactionByHash_PendingTxGasPriceIsFeeCap.
+func TestTxPoolContent_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
@@ -621,13 +620,13 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	require.NoError(t, err)
 	got := content["pending"][h.m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 // TestTxPoolContent_PublishCycleDuringTxAcquisition pins atomic acquisition for
-// the txpool family: the pending gas price is derived from the head base fee,
-// so a cycle landing during the open silently prices against the stale head.
+// the txpool family: a cycle landing while the tx is opened must not leave the
+// handler reading through an overlay that has already been closed under it.
 func TestTxPoolContent_PublishCycleDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
@@ -641,8 +640,8 @@ func TestTxPoolContent_PublishCycleDuringTxAcquisition(t *testing.T) {
 	require.NoError(t, err)
 	got := content["pending"][h.m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"a publish/commit/unpublish cycle during tx acquisition must not price against the stale head")
+	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a publish/commit/unpublish cycle during tx acquisition must still answer from a live view")
 }
 
 // TestGetBlockTransactionCountByHash_SeesOverlayHead pins that the by-hash
@@ -1581,9 +1580,9 @@ func TestGetModifiedAccountsByHash_FutureStartBlockErrors(t *testing.T) {
 	require.ErrorContains(t, err, "later than the latest block")
 }
 
-// TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the
-// current header through the block overlay, matching TestTxPoolContent_UsesOverlayHead.
-func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
+// TestTxPoolContentFrom_PendingGasPriceIsFeeCap pins the pooled representation
+// for txpool_contentFrom, matching TestTxPoolContent_PendingGasPriceIsFeeCap.
+func TestTxPoolContentFrom_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
@@ -1593,8 +1592,8 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	require.NoError(t, err)
 	got := content["pending"][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 // TestFeeHistory_SeesOverlayHead pins that eth_feeHistory resolves "latest" through the

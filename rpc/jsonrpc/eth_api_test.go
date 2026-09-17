@@ -33,8 +33,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -567,4 +569,21 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	got, err := api.GetChainID(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+// A pooled transaction is priced at its fee cap, so the head's projected base
+// fee must not reach the response even though the pending path still reads it.
+func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
+	feeCap := uint256.NewInt(1_000_000_000)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+	head := &types.Header{
+		Number:   *uint256.NewInt(100),
+		GasLimit: 30_000_000,
+		GasUsed:  15_000_000,
+		BaseFee:  uint256.NewInt(1_000),
+	}
+
+	result := newRPCPendingTransaction(txn, head, &chain.Config{ChainID: uint256.NewInt(1), LondonBlock: common.NewUint64(0)})
+	require.NotNil(t, result.GasPrice)
+	require.Equal(t, feeCap.ToBig(), result.GasPrice.ToInt())
 }

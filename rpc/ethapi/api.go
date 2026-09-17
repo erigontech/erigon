@@ -544,6 +544,10 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 			m[k] = nullVal
 		}
 	}
+	// A transaction that was only signed has no gas price yet, not even a fee cap.
+	if r.Tx.MaxFeePerGas != nil {
+		m["gasPrice"] = nullVal
+	}
 	zeroHex := json.RawMessage(`"0x0"`)
 	for _, k := range []string{"v", "r", "s"} {
 		if v, ok := m[k]; !ok || string(v) == "null" {
@@ -589,6 +593,7 @@ type RPCTransaction struct {
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
+	pending := blockHash == (common.Hash{})
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -639,7 +644,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		if txn.Type() == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+			result.GasPrice = computeGasPrice(txn, pending, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -667,7 +672,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		result.From = from.Value()
 	}
 
-	if blockHash != (common.Hash{}) {
+	if !pending {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
 		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
@@ -676,13 +681,15 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.U256 {
-	if baseFee != nil {
+// computeGasPrice reports the effective gas price of a transaction already in a
+// block, and the fee cap of a pending one, as the execution-apis spec requires.
+func computeGasPrice(txn types.Transaction, pending bool, baseFee *uint256.Int) *hexutil.U256 {
+	if baseFee != nil && !pending {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.U256)(&price)
 	}
-	return nil
+	return (*hexutil.U256)(txn.GetFeeCap())
 }
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
