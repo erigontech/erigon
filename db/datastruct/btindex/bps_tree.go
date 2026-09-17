@@ -445,8 +445,7 @@ func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (int, bool, error) {
 	if err != nil || !ok {
 		return 0, false, err
 	}
-	_, size := g.Skip()
-	return size, true, nil
+	return g.PeekSize(), true, nil
 }
 
 func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, err error) {
