@@ -49,9 +49,7 @@ func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
 		b.Add(1, make([]byte, 64))
 		return weak.Make(b.c)
 	}()
-	for range 3 {
-		runtime.GC()
-	}
+	runtime.GC()
 	require.Nil(t, dropped.Value(), "an unbudgeted cache dropped without Close must be collected")
 }
 
