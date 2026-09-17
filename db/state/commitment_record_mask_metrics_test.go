@@ -97,6 +97,22 @@ func TestCommitmentV3RecordWalkIsCountedByOutcome(t *testing.T) {
 	require.Positive(t, checked, "at least one node with fewer than 16 children must exist")
 }
 
+const branchCacheTrunkDepth = 4
+
+func v3NodeDepth(nodeKey []byte) int {
+	if len(nodeKey) == 0 {
+		return 0
+	}
+	switch term := nodeKey[len(nodeKey)-1]; {
+	case term == 0x00:
+		return 2*len(nodeKey) - 2
+	case term&0xf0 == 0xf0:
+		return 2*len(nodeKey) - 1
+	default:
+		return -1
+	}
+}
+
 func TestCommitmentV3UnknownMaskNodeReadExhaustsTheFileWalk(t *testing.T) {
 	db, _, byNode, files := acceptanceFilesFixture(t)
 
@@ -130,7 +146,11 @@ func TestCommitmentV3UnknownMaskNodeReadExhaustsTheFileWalk(t *testing.T) {
 		_, _, _, err = sd.ReadCommitmentRecords(tx, []byte(nodeKey), present, true, nil)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, knownNodeReads())
-		require.Zero(t, satisfied.reads(), "a known mask after the cache fill is served without reaching the aggregator")
+		if v3NodeDepth([]byte(nodeKey)) <= branchCacheTrunkDepth {
+			require.Zero(t, satisfied.reads(), "a trunk-depth node is served from the branch cache after the fill")
+		} else {
+			require.EqualValues(t, 1, satisfied.reads(), "a node past the trunk is not cached at all, so a known mask still reaches the aggregator")
+		}
 		require.EqualValues(t, 2, exhausted.reads())
 		checked++
 	}

@@ -206,3 +206,54 @@ func TestBranchCacheV3CachesOnlyWrittenChildren(t *testing.T) {
 	require.Nil(t, narrow[3], "a masked-out sibling must not be materialised")
 	require.Equal(t, []byte("child-9"), narrow[9])
 }
+
+func TestV3DeepEdgeRecordsAreNotFilledIntoTheTail(t *testing.T) {
+	deepPath := []byte{1, 2, 3, 4, 5, 6}
+	shallowPath := []byte{1, 2}
+
+	put := func(c *BranchCache, path []byte, nibble int, data []byte) (mask uint16, cached bool) {
+		nodeKey := nibbles.EncodeKeyV3(path)
+		var records [16][]byte
+		var steps, txNums [16]uint64
+		records[nibble] = data
+		steps[nibble], txNums[nibble] = 1, 1
+		c.PutChildren(nodeKey, uint16(1)<<nibble, &records, &steps, &txNums)
+		m, ok := c.NodeMask(nodeKey)
+		if !ok {
+			return 0, false
+		}
+		_, _, hit := c.Get(v3RecordKey(path, byte(nibble)))
+		return m, hit
+	}
+
+	t.Run("deep edge is dropped", func(t *testing.T) {
+		c := NewBranchCache(DefaultBranchCacheTailCapacity, true)
+		defer c.Close()
+		require.Greater(t, len(deepPath), trunkDepthFull)
+
+		mask, cached := put(c, deepPath, 7, []byte("deep-record"))
+		require.False(t, cached, "a deep v3 edge record must not be cached")
+		require.Zero(t, mask&(uint16(1)<<7), "an uncached record must not be claimed by the node mask")
+		require.Zero(t, c.tailLen(), "nothing may reach the tail LRU")
+	})
+
+	t.Run("shallow edge still lands in the trunk", func(t *testing.T) {
+		c := NewBranchCache(DefaultBranchCacheTailCapacity, true)
+		defer c.Close()
+		require.LessOrEqual(t, len(shallowPath), trunkDepthFull)
+
+		mask, cached := put(c, shallowPath, 3, []byte("shallow-record"))
+		require.True(t, cached, "a trunk-depth v3 edge record must still be cached")
+		require.NotZero(t, mask&(uint16(1)<<3), "a cached record must be claimed by the node mask")
+	})
+
+	t.Run("legacy mode still fills the tail", func(t *testing.T) {
+		c := NewBranchCache(DefaultBranchCacheTailCapacity, false)
+		defer c.Close()
+
+		key := []byte{0x10, 0x23, 0x45, 0x67, 0x89, 0xab}
+		c.Put(key, []byte("legacy-row"), 1, 1)
+		_, _, hit := c.Get(key)
+		require.True(t, hit, "the v2 path must keep its tail fallback")
+	})
+}

@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func TestReadCommitmentRecordsMergesMemAndCacheSources(t *testing.T) {
@@ -40,9 +41,9 @@ func TestReadCommitmentRecordsMergesMemAndCacheSources(t *testing.T) {
 	require.NotNil(t, branchCache)
 	branchCache.SetEdgeRecords(true)
 
-	nodeKey := []byte{0x0a, 0x0c}
+	nodeKey := nibbles.EncodeKeyV3([]byte{0x0a, 0x0c})
 	childKey := func(nibble byte) []byte {
-		return append(append([]byte{}, nodeKey...), 0x80|nibble)
+		return nibbles.ChildKeyV3(nodeKey, nibble)
 	}
 
 	cached := []byte("from-cache")

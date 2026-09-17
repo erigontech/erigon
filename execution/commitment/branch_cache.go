@@ -625,30 +625,36 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	return entry, true
 }
 
-func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
+func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) bool {
 	if isRootPrefix(prefix) {
 		c.root.Store(entry)
-		return
+		return true
 	}
 	if slot := c.trunkSlot(prefix, true); slot != nil {
 		slot.Store(entry)
-		return
+		return true
 	}
 	var nibBuf [4]byte
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			for cur := slot.Load(); cur != nil; cur = slot.Load() {
 				if slot.CompareAndSwap(cur, entry) {
-					return
+					return true
 				}
 			}
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
 		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, entry) {
-			return
+			return true
+		}
+	}
+	if c.edgeRecordsInCommitment.Load() {
+		if depth, isEdge := v3EdgeDepth(prefix); isEdge && depth > trunkDepthFull {
+			return false
 		}
 	}
 	c.tailForWrite().Add(maphash.Hash(prefix), entry)
+	return true
 }
 
 // PinEntry copies data; safe to mutate the input after the call.
@@ -955,7 +961,9 @@ func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][
 		childKey[len(nodeKey)] = 0x80 | byte(nibble)
 		data := make([]byte, len(record))
 		copy(data, record)
-		c.store(childKey, &branchCacheEntry{data: data, step: steps[nibble], txN: txNums[nibble], epoch: epoch})
+		if !c.store(childKey, &branchCacheEntry{data: data, step: steps[nibble], txN: txNums[nibble], epoch: epoch}) {
+			continue
+		}
 		written |= uint16(1) << nibble
 		step = max(step, steps[nibble])
 		txN = max(txN, txNums[nibble])
