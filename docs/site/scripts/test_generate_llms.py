@@ -811,6 +811,39 @@ class RenderingFidelityTests(unittest.TestCase):
                          .replace("\\", ""))
         self.assertEqual("\\- not a bullet", self.render("<p>- not a bullet</p>"))
 
+    def test_a_literal_html_tag_in_prose_is_escaped(self):
+        # HTMLParser decodes `&lt;script&gt;`, so the prose path is handed a
+        # live tag. Written raw it opens an HTML block that runs to the next
+        # blank line and takes the following page boundary with it.
+        out = self.render("<p>A literal tag follows.</p><p>&lt;script&gt;</p>"
+                          "<p>This paragraph must remain prose.</p>")
+        self.assertIn("\\<script>", out)
+        self.assertIn("This paragraph must remain prose.", out)
+
+    def test_only_a_reference_shaped_ampersand_is_escaped(self):
+        # `&amp;amp;` decodes to `&amp;`, which reads as an entity again.
+        self.assertEqual("\\&amp; is an entity",
+                         self.render("<p>&amp;amp; is an entity</p>"))
+        # A plain ampersand is prose; escaping every one of them would churn
+        # the corpus for nothing.
+        self.assertEqual("Erigon & Caplin",
+                         self.render("<p>Erigon &amp; Caplin</p>"))
+
+    def test_an_escaped_heading_still_places_its_diagram(self):
+        # Source `trace\_call`, rendered `trace_call`: the escape is spelling.
+        src = "## trace\\_call\n\n```mermaid\ngraph TD\n```\n"
+        self.assertEqual("tracecall", g.mermaid_blocks(src)[0][0])
+        body = "## trace_call\n\nEvery box above is a Go package.\n\n## Later\n\nx"
+        out = g.splice_diagram(body, "tracecall", "```mermaid\ngraph TD\n```")
+        self.assertLess(out.index("graph TD"), out.index("Every box above"))
+
+    def test_a_heading_entity_still_places_its_diagram(self):
+        src = "## Request &amp; response\n\n```mermaid\nA\n```\n"
+        self.assertEqual("Request & response", g.mermaid_blocks(src)[0][0])
+        body = "## Request & response\n\nExplanation.\n\n## Later\n\nx"
+        out = g.splice_diagram(body, "Request & response", "```mermaid\nA\n```")
+        self.assertLess(out.index("mermaid"), out.index("Explanation."))
+
     def test_a_marker_inside_link_text_is_not_escaped(self):
         # `[#1516](…)` writes the `#` one column into the line, behind the
         # link's own bracket, where it opens nothing.

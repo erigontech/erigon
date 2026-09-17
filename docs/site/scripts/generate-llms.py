@@ -20,6 +20,7 @@ import json
 import re
 import sys
 from collections import Counter
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -751,6 +752,12 @@ _STACK_RE = re.compile(r"\x02(\d+)\x02|\x03")
 # comes from <code> and a fence from <pre>, both emitted straight into the
 # buffer, so a run reaching the prose path is text the page escaped.
 _PROSE_SPAN_RE = re.compile(r"`+|~{2,}")
+# A `<` opens inline HTML, and at the start of a line an HTML block, which runs
+# until a blank line and takes every page boundary inside it with it. HTMLParser
+# decodes character references, so a page that wrote `&lt;script&gt;` to show a
+# tag hands this path a live `<script>`. An `&` is only syntax when it begins a
+# reference, which is the one case worth escaping — prose is full of plain ones.
+_PROSE_HTML_RE = re.compile(r"<|&(?=#\d+;|#[xX][0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]*;)")
 # The block openers, which only matter at the start of a line. The marker the
 # converter emits for a heading, an item or a quote is in the buffer before the
 # text arrives, so at that point the line is no longer at its start.
@@ -765,9 +772,12 @@ def _escape_prose(data, at_line_start):
     paragraph saying ```sh``, not as a fence. Writing that back unescaped makes
     it syntax again, and a fence reopened this way runs to the end of the
     document — it swallows the rest of the page and the next page's sentinel,
-    which is how a corpus loses a page with every check still passing.
+    which is how a corpus loses a page with every check still passing. A literal
+    `<` loses a page the same way: it opens an HTML block that runs to the next
+    blank line and swallows whatever boundary is inside it.
     """
     data = _PROSE_SPAN_RE.sub(lambda m: "".join("\\" + c for c in m.group(0)), data)
+    data = _PROSE_HTML_RE.sub(lambda m: "\\" + m.group(0), data)
     if at_line_start:
         # Only ASCII punctuation can be backslash-escaped (CommonMark 2.4), so
         # an ordered marker is escaped on its delimiter: `\1.` suppresses the
@@ -840,6 +850,9 @@ _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
 _HEADING_ID_RE = re.compile(r"[ \t]*\{#[^}\s]*\}[ \t]*$")
 _HEADING_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _HEADING_MARKUP_RE = re.compile(r"[*_`]")
+# A backslash escape before ASCII punctuation is spelling, not text: the source
+# writes `trace\_call` for a heading the page renders as `trace_call`.
+_HEADING_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 
 def _heading_text(s):
@@ -855,6 +868,12 @@ def _heading_text(s):
     """
     s = _HEADING_ID_RE.sub("", s)
     s = _HEADING_LINK_RE.sub(r"\1", s)
+    # Spelling before markup: `trace\_call` has to lose its backslash while it
+    # still stands in front of the underscore, or the source keeps a stray `\`
+    # where the rendered side keeps nothing. Character references go the same
+    # way — `Request &amp; response` is the page's `Request & response`.
+    s = _HEADING_ESCAPE_RE.sub(r"\1", s)
+    s = unescape(s)
     s = _HEADING_MARKUP_RE.sub("", s)
     return re.sub(r"\s+", " ", s).strip()
 _ATX_LEVEL_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+\S")
