@@ -2179,9 +2179,9 @@ func (result *execResult) calcFees(
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
-	}
-	if sharedDestination {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeBurnt)
+		if sharedDestination {
+			newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeBurnt)
+		}
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && !sharedDestination {

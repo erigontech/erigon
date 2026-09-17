@@ -873,6 +873,25 @@ func TestFinalizeTxSimple_SharedFeeDestination(t *testing.T) {
 	require.Equal(t, expected, balance.Val, "a shared destination must receive both the tip and the burn")
 }
 
+func TestFinalizeTxSimple_SharedFeeDestinationSelfdestructBurnsBothCredits(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	contract := fMakeAccount(0, 1)
+	contract.CodeHash = accounts.InternCodeHash(common.HexToHash(
+		"0x1122334455667788990011223344556677889900112233445566778899001122"))
+	s.accts[s.coinbase] = contract
+	s.txOut.SetSelfDestruct(s.coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.SelfDestructPath},
+		Val:         true,
+	})
+
+	writes := s.runFinalizeTx(t, nil)
+
+	require.Nil(t, findBalance(writes, s.coinbase),
+		"a pre-Amsterdam SELFDESTRUCT of a shared tip and burn destination drops both credits with the deleted object, as serial does")
+}
+
 // TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
 // fix for the parallel-exec lost-coinbase-fee race. The apply-loop tip
 // credit (calcFees) writes coinbase BalancePath BEFORE validate runs.
