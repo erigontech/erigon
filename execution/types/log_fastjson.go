@@ -24,7 +24,15 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
+func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
+
 const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
+
+func appendQuotedHex(dst []byte, b []byte) []byte {
+	dst = append(dst, '"')
+	dst, _ = hexutil.Bytes(b).AppendText(dst)
+	return append(dst, '"')
+}
 
 func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 	dst = append(dst, '"')
@@ -40,14 +48,14 @@ func (l *RPCLog) JSONLen() int {
 	}
 	n := len(`{"address":,"topics":[],"data":,"blockNumber":,"transactionHash":,`) +
 		len(`"transactionIndex":,"blockHash":,"logIndex":,"removed":false,"blockTimestamp":}`)
-	n += hexutil.QuotedLen(length.Addr)
+	n += quotedHexLen(length.Addr)
 	if l.Topics == nil {
 		n += len("null") - len("[]")
 	}
-	n += len(l.Topics) * (hexutil.QuotedLen(length.Hash) + 1)
-	n += hexutil.QuotedLen(len(l.Data))
-	n += 2 * hexutil.QuotedLen(length.Hash) // transactionHash, blockHash
-	n += 4 * maxQuotedUintLen               // blockNumber, transactionIndex, logIndex, blockTimestamp
+	n += len(l.Topics) * (quotedHexLen(length.Hash) + 1)
+	n += quotedHexLen(len(l.Data))
+	n += 2 * quotedHexLen(length.Hash) // transactionHash, blockHash
+	n += 4 * maxQuotedUintLen          // blockNumber, transactionIndex, logIndex, blockTimestamp
 	return n
 }
 
@@ -58,7 +66,7 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 		return append(dst, "null"...)
 	}
 	dst = append(dst, `{"address":`...)
-	dst = hexutil.AppendQuoted(dst, l.Address[:])
+	dst = appendQuotedHex(dst, l.Address[:])
 
 	dst = append(dst, `,"topics":`...)
 	if l.Topics == nil {
@@ -69,21 +77,21 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 			if i > 0 {
 				dst = append(dst, ',')
 			}
-			dst = hexutil.AppendQuoted(dst, l.Topics[i][:])
+			dst = appendQuotedHex(dst, l.Topics[i][:])
 		}
 		dst = append(dst, ']')
 	}
 
 	dst = append(dst, `,"data":`...)
-	dst = hexutil.AppendQuoted(dst, l.Data)
+	dst = appendQuotedHex(dst, l.Data)
 	dst = append(dst, `,"blockNumber":`...)
 	dst = appendQuotedUint64(dst, l.BlockNumber)
 	dst = append(dst, `,"transactionHash":`...)
-	dst = hexutil.AppendQuoted(dst, l.TxHash[:])
+	dst = appendQuotedHex(dst, l.TxHash[:])
 	dst = append(dst, `,"transactionIndex":`...)
 	dst = appendQuotedUint64(dst, hexutil.Uint64(l.TxIndex))
 	dst = append(dst, `,"blockHash":`...)
-	dst = hexutil.AppendQuoted(dst, l.BlockHash[:])
+	dst = appendQuotedHex(dst, l.BlockHash[:])
 	dst = append(dst, `,"logIndex":`...)
 	dst = appendQuotedUint64(dst, hexutil.Uint64(l.Index))
 	dst = strconv.AppendBool(append(dst, `,"removed":`...), l.Removed)
