@@ -59,7 +59,7 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusInvalidated          atomic.Bool
 	BlockProcessingVal                    bool
 	ResolveHeadPayloadStatusFn            func(common.Hash) (cltypes.PayloadStatus, bool)
-	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, error)
+	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
@@ -715,7 +715,7 @@ func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (clty
 		return f.ResolveHeadPayloadStatusFn(root)
 	}
 	if f.GetHeadNodeFn != nil {
-		head, err := f.GetHeadNodeFn()
+		head, _, err := f.GetHeadNodeFn()
 		if err != nil || head.Root != root {
 			return cltypes.PayloadStatusPending, false
 		}
@@ -730,15 +730,11 @@ func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (clty
 	return f.HeadPayloadStatusVal, true
 }
 
-func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
-	return f.HeadPayloadStatusVal
-}
-
-func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
+func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
 	if f.GetHeadNodeFn != nil {
 		return f.GetHeadNodeFn()
 	}
-	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, nil
+	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, f.HeadSlotVal, nil
 }
 
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {

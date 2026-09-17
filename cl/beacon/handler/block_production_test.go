@@ -1054,6 +1054,7 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 	targetSlot := postState.Slot() + 1
 	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
 	maxBlobs := handler.beaconChainCfg.GetBlobParameters(targetSlot / handler.beaconChainCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	expectedPrevRandao := common.Hash(postState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch))
 
 	for _, tc := range []struct {
 		name    string
@@ -1116,7 +1117,7 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 			mutate: func(header *builder.ExecutionHeader) {
 				header.Data.Message.Header.PrevRandao[0] ^= 0xff
 			},
-			wantErr: "prev randao",
+			wantErr: fmt.Sprintf("does not match expected %s", expectedPrevRandao),
 		},
 		{
 			name: "wrong timestamp",
@@ -4053,7 +4054,7 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 
 	// Before Gloas the expectation is computed from the head state itself, and the list is present
 	// even when empty: the execution layer rejects a nil one after Shanghai.
-	withdrawals, err := a.expectedWithdrawals(capellaState, nil, clparams.CapellaVersion, 0)
+	withdrawals, err := a.expectedWithdrawals(capellaState, capellaState, 0)
 	require.NoError(t, err)
 	require.NotNil(t, withdrawals)
 	require.Empty(t, withdrawals)
@@ -4070,7 +4071,7 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	pending.Append(&cltypes.BuilderPendingWithdrawal{FeeRecipient: common.Address{0xbb}, Amount: 12, BuilderIndex: 3})
 	withParentPayload.SetBuilderPendingWithdrawals(pending)
 
-	withdrawals, err = a.expectedWithdrawals(gloasState, withParentPayload, clparams.GloasVersion, 0)
+	withdrawals, err = a.expectedWithdrawals(gloasState, withParentPayload, 0)
 	require.NoError(t, err)
 	require.Equal(t, []*types.Withdrawal{{
 		Index:     0,
@@ -4081,14 +4082,14 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 
 	// An EMPTY Gloas head uses the expectation the state already cached rather than computing a
 	// fresh one, so what it returns is whatever was cached.
-	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, 0)
 	require.NoError(t, err)
 	require.Empty(t, withdrawals)
 
 	cached := solid.NewDynamicListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload))
 	cached.Append(&cltypes.Withdrawal{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9})
 	gloasState.SetPayloadExpectedWithdrawals(cached)
-	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, []*types.Withdrawal{
 		{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9},

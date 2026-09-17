@@ -79,7 +79,7 @@ func TestOnBlockFromForwardSyncExpandsEmbeddedPtcVotesForDuplicateValidator(t *t
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
-	head, err := store.GetHeadNode()
+	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotesForUniqueValidators(t *tes
 	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
-	head, err := store.GetHeadNode()
+	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
@@ -354,12 +354,13 @@ func TestGetHeadNodeCachesHeaderOnlyAnchorFallback(t *testing.T) {
 	}
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
 
-	node, err := store.GetHeadNode()
+	node, slot, err := store.GetHeadNode()
 	require.NoError(t, err)
 	require.Equal(t, anchorRoot, node.Root)
 	require.Equal(t, cltypes.PayloadStatusPending, node.PayloadStatus)
 	require.Equal(t, anchorRoot, store.headHash)
 	require.Equal(t, uint64(42), store.headSlot)
+	require.Equal(t, uint64(42), slot)
 }
 
 func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
@@ -370,7 +371,7 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 	}
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
 	require.NoError(t, func() error {
-		_, err := store.GetHeadNode()
+		_, _, err := store.GetHeadNode()
 		return err
 	}())
 
@@ -397,10 +398,62 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 	})
 
 	for range 1_000 {
-		node, err := store.GetHeadNode()
+		node, slot, err := store.GetHeadNode()
 		require.NoError(t, err)
 		require.Equal(t, anchorRoot, node.Root)
+		require.Equal(t, uint64(42), slot)
 	}
+}
+
+func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {
+	store := &ForkChoiceStore{}
+	require.False(t, store.BlockProcessing())
+	draining := make(chan struct{})
+	resume := make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	store.queuedEmits = []func(){func() {
+		close(draining)
+		<-resume
+	}}
+	store.mu.Lock()
+	unlock := sync.OnceFunc(store.mu.Unlock)
+	results := make(chan error, 2)
+	var imports sync.WaitGroup
+	t.Cleanup(func() {
+		unlock()
+		release()
+		imports.Wait()
+	})
+	for range 2 {
+		imports.Go(func() {
+			results <- store.OnBlock(t.Context(), nil, false, false, false)
+		})
+	}
+
+	require.Eventually(t, func() bool { return store.blocksProcessing.Load() == 2 }, 5*time.Second, time.Millisecond)
+	require.True(t, store.BlockProcessing(), "imports waiting for the store lock must be visible")
+	unlock()
+	select {
+	case <-draining:
+	case <-time.After(5 * time.Second):
+		t.Fatal("import did not drain its queued work")
+	}
+	select {
+	case err := <-results:
+		require.ErrorContains(t, err, "missing beacon block")
+	case <-time.After(5 * time.Second):
+		t.Fatal("overlapping import did not finish")
+	}
+	require.True(t, store.BlockProcessing(), "one completed import must not hide another active import")
+
+	release()
+	select {
+	case err := <-results:
+		require.ErrorContains(t, err, "missing beacon block")
+	case <-time.After(5 * time.Second):
+		t.Fatal("import did not finish after its queued work")
+	}
+	require.False(t, store.BlockProcessing(), "early returns must release the import count")
 }
 
 func TestGetFinalizedExecutionHash(t *testing.T) {

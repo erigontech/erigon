@@ -601,7 +601,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if err != nil {
 		return key, fmt.Errorf("prepare payload: derive withdrawals state: %w", err)
 	}
-	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
+	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, targetSlot)
 	if err != nil {
 		return key, err
 	}
@@ -781,7 +781,7 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	stateVersion clparams.StateVersion,
 ) executionPayloadSource {
 	if stateVersion.Before(clparams.GloasVersion) {
-		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash}
+		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}
 	}
 	parentBid := baseState.GetLatestExecutionPayloadBid()
 	if parentBid == nil {

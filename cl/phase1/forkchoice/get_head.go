@@ -176,12 +176,6 @@ func (f *ForkChoiceStore) ResolveHeadPayloadStatus(root common.Hash) (cltypes.Pa
 	return head.PayloadStatus, true
 }
 
-func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.headPayloadStatus
-}
-
 func (f *ForkChoiceStore) shouldLogHeadResolutionFailure(now time.Time) bool {
 	nowNanos := now.UnixNano()
 	for {
@@ -207,9 +201,10 @@ func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.Pay
 	return f.headPayloadStatus, true, true
 }
 
-func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, error) {
-	head, _, err := f.getHeadNode(nil)
-	return head, err
+// GetHeadNode returns the root, payload status, and slot from one head snapshot.
+// Reading the status separately could pair the root with another head's status or a cache invalidation's PENDING value.
+func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
+	return f.getHeadNode(nil)
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.

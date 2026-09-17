@@ -1714,6 +1714,68 @@ func TestPostExecutionPayloadEnvelopeMissingBlockRequiresRetry(t *testing.T) {
 	require.Equal(t, http.StatusOK, post().Code)
 }
 
+type invalidatingFullHeadStore struct {
+	*forkchoice_mock.ForkChoiceStorageMock
+	reads           int
+	invalidateAfter int
+}
+
+func (s *invalidatingFullHeadStore) readHead() (forkchoice.ForkChoiceNode, uint64, error) {
+	s.reads++
+	s.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	head := forkchoice.ForkChoiceNode{Root: s.HeadVal, PayloadStatus: s.HeadPayloadStatusVal}
+	if s.reads == s.invalidateAfter {
+		s.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	}
+	return head, s.HeadSlotVal, nil
+}
+
+func (s *invalidatingFullHeadStore) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
+	head, slot, err := s.readHead()
+	return head.Root, slot, err
+}
+
+func (s *invalidatingFullHeadStore) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	return s.readHead()
+}
+
+func TestEmitFullHeadV2KeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		invalidateAfter int
+	}{
+		{name: "initial snapshot", invalidateAfter: 1},
+		{name: "publication recheck", invalidateAfter: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			store := &invalidatingFullHeadStore{ForkChoiceStorageMock: fcu, invalidateAfter: test.invalidateAfter}
+			handler.forkchoiceStore = store
+			handler.emitters = beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := handler.emitters.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			root := common.Hash{2}
+			block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+			block.Block.Slot = 1
+			headState := state.New(handler.beaconChainCfg)
+			headState.SetVersion(clparams.GloasVersion)
+			require.NoError(t, headState.SetSlot(1))
+			require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+			fcu.HeadVal, fcu.HeadSlotVal = root, 1
+			fcu.StateAtBlockRootVal[root] = headState
+
+			handler.emitFullHeadV2(block, root)
+
+			require.Len(t, events, 1, "cache invalidation must not drop a matching FULL head event")
+			require.Equal(t, 2, store.reads)
+			event := <-events
+			require.Equal(t, beaconevents.StateHeadV2, event.Event)
+			require.Equal(t, "full", event.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+		})
+	}
+}
+
 func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
@@ -2410,12 +2472,12 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		},
 	})
 	var headSnapshots atomic.Int32
-	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		status := cltypes.PayloadStatusEmpty
 		if headSnapshots.Add(1) > 1 {
 			status = cltypes.PayloadStatusFull
 		}
-		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: status}, nil
+		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: status}, forkchoiceStore.HeadSlotVal, nil
 	}
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)

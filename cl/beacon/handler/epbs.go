@@ -1141,28 +1141,26 @@ func signedExecutionPayloadEnvelopesEqual(left, right *cltypes.SignedExecutionPa
 }
 
 func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
-	headRoot, headSlot, err := a.forkchoiceStore.GetHead(nil)
-	if err != nil || headRoot != blockRoot || a.beaconChainCfg.SlotsPerEpoch == 0 {
+	head, headSlot, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil || head.Root != blockRoot || a.beaconChainCfg.SlotsPerEpoch == 0 {
 		return
 	}
-	payloadStatus := a.forkchoiceStore.GetHeadPayloadStatus()
-	if payloadStatus != cltypes.PayloadStatusFull {
+	if head.PayloadStatus != cltypes.PayloadStatusFull {
 		return
 	}
 	optimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	var event *beaconevents.HeadV2Data
 	err = a.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
-		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", optimistic)
+		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, head.Root, block.Block.StateRoot, "full", optimistic)
 		return err
 	})
 	if err != nil || event == nil {
 		return
 	}
 	a.emitters.WithHeadEventLock(func() {
-		currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
-		if err != nil || currentRoot != headRoot || currentSlot != headSlot ||
-			a.forkchoiceStore.GetHeadPayloadStatus() != payloadStatus ||
-			a.forkchoiceStore.IsRootOptimistic(currentRoot) != optimistic {
+		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
+		if err != nil || currentHead != head || currentSlot != headSlot ||
+			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
 			return
 		}
 		a.emitters.State().SendHeadV2(event)
@@ -1562,7 +1560,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, slot, clparams.GloasVersion)
 	// Resolution can select a different beacon head and return the old parent's
 	// EMPTY fallback. Check the beacon head afterwards, even if the execution parent matches.
-	latestHeadNode, err := a.forkchoiceStore.GetHeadNode()
+	latestHeadNode, _, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
 		return nil, err
 	}

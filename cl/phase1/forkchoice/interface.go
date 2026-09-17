@@ -48,7 +48,7 @@ type ForkChoiceStorageReader interface {
 	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
-	GetHeadNode() (ForkChoiceNode, error)
+	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
 	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
@@ -97,7 +97,6 @@ type ForkChoiceStorageReader interface {
 	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ResolveHeadPayloadStatus resolves root against the current Gloas head.
 	ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool)
-	GetHeadPayloadStatus() cltypes.PayloadStatus
 	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool

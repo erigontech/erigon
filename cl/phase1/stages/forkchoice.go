@@ -215,26 +215,26 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 }
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
-func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
+func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	stateRoot, err := headState.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("failed to hash ssz: %w", err)
 	}
-	currentHeadRoot, currentHeadSlot, err := cfg.forkChoice.GetHead(nil)
+	currentHead, currentHeadSlot, err := store.GetHeadNode()
 	if err != nil {
 		return fmt.Errorf("failed to revalidate head event: %w", err)
 	}
-	if currentHeadRoot != headRoot || currentHeadSlot != headSlot {
+	if currentHead.Root != headRoot || currentHeadSlot != headSlot {
 		return nil
 	}
 	isGloas := headState.Version() >= clparams.GloasVersion
 	payloadStatus := "full"
 	if isGloas {
-		payloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+		payloadStatus = beaconevents.PayloadStatusName(currentHead.PayloadStatus)
 	}
-	executionOptimistic := cfg.forkChoice.IsRootOptimistic(headRoot)
+	executionOptimistic := store.IsRootOptimistic(headRoot)
 	headEvent, err := beaconevents.BuildHeadV2Data(
-		cfg.beaconCfg,
+		beaconCfg,
 		headState,
 		headSlot,
 		headRoot,
@@ -245,13 +245,13 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	if err != nil {
 		return err
 	}
-	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
-		root, slot, err := cfg.forkChoice.GetHead(nil)
+	return emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
+		head, slot, err := store.GetHeadNode()
 		currentPayloadStatus := "full"
 		if isGloas {
-			currentPayloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+			currentPayloadStatus = beaconevents.PayloadStatusName(head.PayloadStatus)
 		}
-		return root, slot, currentPayloadStatus, cfg.forkChoice.IsRootOptimistic(root), err
+		return head.Root, slot, currentPayloadStatus, store.IsRootOptimistic(head.Root), err
 	})
 }
 
@@ -446,7 +446,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	if err := emitHeadEvent(cfg, headSlot, headRoot, headState); err != nil {
+	if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
 		logger.Warn("failed to emit head event", "err", err)
 	}
 	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {

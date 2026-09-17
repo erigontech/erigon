@@ -289,20 +289,15 @@ func payloadAttributes(
 	return attrs
 }
 
-// expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas, FULL and
-// pre-fork parents compute them from the supplied state; EMPTY parents use the cached expectation.
+// expectedWithdrawals computes a fresh sweep when computationState is present.
+// Otherwise it uses the cached expectation for a Gloas EMPTY parent.
 func (a *ApiHandler) expectedWithdrawals(
 	baseState, computationState *state.CachingBeaconState,
-	stateVersion clparams.StateVersion,
 	targetSlot uint64,
 ) ([]*types.Withdrawal, error) {
 	epoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	if stateVersion.Before(clparams.GloasVersion) || computationState != nil {
-		source := baseState
-		if computationState != nil {
-			source = computationState
-		}
-		clWithdrawals, err := state.GetExpectedWithdrawals(source, epoch)
+	if computationState != nil {
+		clWithdrawals, err := state.GetExpectedWithdrawals(computationState, epoch)
 		if err != nil {
 			return nil, err
 		}
@@ -1439,7 +1434,7 @@ func (a *ApiHandler) getBuilderPayload(
 	// A relay bid must describe the payload requested for this slot. Reject mismatches
 	// before bid selection so production can keep the valid local payload.
 	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	expectedPrevRandao := baseState.GetRandaoMixes(targetEpoch)
+	expectedPrevRandao := common.Hash(baseState.GetRandaoMixes(targetEpoch))
 	if message.Header.PrevRandao != expectedPrevRandao {
 		return nil, nil, fmt.Errorf(
 			"builder payload prev randao %s does not match expected %s",
@@ -1462,15 +1457,11 @@ func (a *ApiHandler) getBuilderPayload(
 		return nil, nil, errors.New("missing execution requests")
 	}
 	message.Header.SetVersion(baseState.Version())
-	// The response type carries commitments on every fork, and later code copies them
-	// without a version check. Validate each element before applying fork-specific limits.
+	// A non-nil commitment list can still contain nil entries, including before Deneb.
 	for i := 0; i < message.BlobKzgCommitments.Len(); i++ {
 		c := message.BlobKzgCommitments.Get(i)
 		if c == nil {
 			return nil, nil, errors.New("nil blob kzg commitment")
-		}
-		if len(c) != length.Bytes48 {
-			return nil, nil, errors.New("invalid blob kzg commitment length")
 		}
 	}
 	// Blob schedules can change the limit without changing the state version.
@@ -1610,7 +1601,7 @@ func (a *ApiHandler) produceBeaconBody(
 		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
 			feeRecipient = *options.payloadFeeRecipient
 		}
-		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
+		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, targetSlot)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
 			return
