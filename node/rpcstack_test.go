@@ -293,6 +293,24 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 	return resp
 }
 
+// A batch is answered through the codec, not the stream, so the gzip wrapper must not get a zero Content-Length.
+func TestGzipBatchKeepsBody(t *testing.T) {
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, 1000, true))
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}]`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"id":1`)
+}
+
 func TestHTTP2H2C(t *testing.T) {
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
