@@ -179,3 +179,5 @@ func (c *iavlMerkleProofValidateNano) RequiredGas(input []byte) uint64 {
 func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err error) {
 	return nil, fmt.Errorf("suspend")
 }
+
+func (c *iavlMerkleProofValidateNano) Name() string { return "IAVLMerkleProofValidateNano" }

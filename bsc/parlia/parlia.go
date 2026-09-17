@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	bscchain "github.com/erigontech/erigon/bsc/chain"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -170,7 +171,18 @@ func (p *Parlia) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc { retur
 func (p *Parlia) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
-	return nil
+	if chainConfig.IsNano(header.Number.Uint64()) {
+		for _, tx := range txns {
+			if tx.GetTo() == nil {
+				continue
+			}
+			_, ok := bscchain.NanoBlackList[*tx.GetTo()]
+			if ok {
+				return fmt.Errorf("block blacklist account")
+			}
+		}
+	}
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (p *Parlia) Close() error { return nil }
