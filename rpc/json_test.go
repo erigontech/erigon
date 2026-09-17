@@ -547,13 +547,6 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type streamedJSON string
-
-func (a streamedJSON) MarshalFastJSONTo(w hexutil.JSONWriter) error {
-	w.WriteRawBytes([]byte(a))
-	return nil
-}
-
 func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
@@ -565,8 +558,10 @@ func TestResponseNilJSONWriterEmitsNull(t *testing.T) {
 }
 
 func TestResponseWritesJSONToStream(t *testing.T) {
-	large := streamedJSON(`"` + strings.Repeat("x", 2*jsonstream.FlushThreshold) + `"`)
-	for _, result := range []streamedJSON{`"first-and-longer"`, `"2nd"`, large, `"after-large"`} {
+	large := bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold)
+	for _, result := range []hexutil.Bytes{[]byte("first-and-longer"), []byte("2nd"), large, []byte("after-large")} {
+		want, err := json.Marshal(result)
+		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
 			s := jsonstream.Get(out)
 			respond(s, json.RawMessage(`7`), result)
@@ -575,7 +570,7 @@ func TestResponseWritesJSONToStream(t *testing.T) {
 			if b, ok := out.(*bytes.Buffer); ok {
 				got = b.Bytes()
 			}
-			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(result)+`}`, string(got))
+			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
 			jsonstream.Put(s)
 		}
 	}
