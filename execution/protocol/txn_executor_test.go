@@ -963,8 +963,8 @@ func TestGasChargingHook_ErrorAbortsTx(t *testing.T) {
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
 		L2: &evmtypes.L2{
-			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
-				return gasRemaining, accounts.NilAddress, wantErr
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
+				return gasRemaining, mdgas.MdGasUsage{}, accounts.NilAddress, wantErr
 			},
 		},
 	}
@@ -1032,9 +1032,9 @@ func TestGasChargingHook_ChargeIsBilledToTheTransaction(t *testing.T) {
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
 		L2: &evmtypes.L2{
-			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
 				gasRemaining.Execution -= hookCharge
-				return gasRemaining, accounts.NilAddress, nil
+				return gasRemaining, mdgas.MdGasUsage{Execution: hookCharge}, accounts.NilAddress, nil
 			},
 		},
 	}
@@ -1068,8 +1068,8 @@ func TestGasChargingHook_RedirectKeepsBlockCoinbaseWarm(t *testing.T) {
 		GasLimit:    blockGasLimit,
 		Coinbase:    coinbase,
 		L2: &evmtypes.L2{
-			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
-				return gasRemaining, tipRecipient, nil
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
+				return gasRemaining, mdgas.MdGasUsage{}, tipRecipient, nil
 			},
 		},
 	}
@@ -1115,8 +1115,8 @@ func TestGasChargingHook_TipRedirectRejectedUnderDelayedFees(t *testing.T) {
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
 		L2: &evmtypes.L2{
-			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
-				return gasRemaining, tipRecipient, nil
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
+				return gasRemaining, mdgas.MdGasUsage{}, tipRecipient, nil
 			},
 		},
 	}
@@ -1152,9 +1152,9 @@ func TestGasChargingHook_StateChargeIsBilledUnderAmsterdam(t *testing.T) {
 		}
 		if charge > 0 {
 			blockCtx.L2 = &evmtypes.L2{
-				GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+				GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
 					gasRemaining.State -= charge
-					return gasRemaining, accounts.NilAddress, nil
+					return gasRemaining, mdgas.MdGasUsage{State: int64(charge)}, accounts.NilAddress, nil
 				},
 			}
 		}
@@ -1174,6 +1174,49 @@ func TestGasChargingHook_StateChargeIsBilledUnderAmsterdam(t *testing.T) {
 		"state gas the hook charged must be billed to the tx, not handed back")
 	require.Equal(t, base.BlockExecutionGasUsed, charged.BlockExecutionGasUsed,
 		"a state-dimension charge must not move execution gas")
+}
+
+func TestGasChargingHook_StateChargeSpillStaysStateGas(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	const stateReservoir = 5_000
+	const hookStateCharge = 10_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	run := func(charge uint64) *evmtypes.ExecutionResult {
+		t.Helper()
+		ibs := state.New(state.NewNoopReader())
+		blockCtx := evmtypes.BlockContext{
+			CanTransfer: CanTransfer,
+			Transfer:    misc.Transfer,
+			GasLimit:    blockGasLimit,
+		}
+		if charge > 0 {
+			blockCtx.L2 = &evmtypes.L2{
+				GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
+					var used mdgas.MdGasUsage
+					require.True(t, mdgas.Consume(&gasRemaining, &used, charge, mdgas.StateGas))
+					require.Equal(t, uint64(charge-stateReservoir), used.StateSpill, "the charge must exceed the reservoir for this scenario to bite")
+					return gasRemaining, used, accounts.NilAddress, nil
+				},
+			}
+		}
+		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+stateReservoir, true)
+		st := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, blockGasLimit))
+		result, err := st.Execute(true, false)
+		require.NoError(t, err)
+		return result
+	}
+
+	base := run(0)
+	charged := run(hookStateCharge)
+	require.Equal(t, uint64(hookStateCharge), charged.BlockStateGasUsed,
+		"a state charge that spills into the execution reservoir is still state gas")
+	require.Equal(t, base.BlockExecutionGasUsed, charged.BlockExecutionGasUsed,
+		"the spilled portion must not be billed as execution gas")
 }
 
 // TestNilHooks_GoldenPathUnchanged pins the existing EIP-7825 golden-path
@@ -1243,10 +1286,10 @@ func TestGasChargingHook_RaisesGasAboveBudgetIsError(t *testing.T) {
 		Transfer:    misc.Transfer,
 		GasLimit:    blockGasLimit,
 		L2: &evmtypes.L2{
-			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+			GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, mdgas.MdGasUsage, accounts.Address, error) {
 				raised := gasRemaining
 				raised.Execution += 1_000_000
-				return raised, accounts.NilAddress, nil
+				return raised, mdgas.MdGasUsage{}, accounts.NilAddress, nil
 			},
 		},
 	}

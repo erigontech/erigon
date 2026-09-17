@@ -636,17 +636,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 
-	var hookChargedExecution, hookChargedState uint64
+	var hookCharged mdgas.MdGasUsage
 	if l2 := st.evm.Context.L2; l2 != nil && l2.GasCharging != nil {
-		adjustedGasRemaining, tipRecipient, hookErr := l2.GasCharging(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
+		adjustedGasRemaining, charged, tipRecipient, hookErr := l2.GasCharging(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
 		if hookErr != nil {
 			return nil, hookErr
 		}
 		if adjustedGasRemaining.Execution > st.gasRemaining.Execution || adjustedGasRemaining.State > st.gasRemaining.State {
 			return nil, fmt.Errorf("%w: GasCharging hook raised gas above the tx budget (execution %d->%d, state %d->%d)", ErrTxnExecutionFailed, st.gasRemaining.Execution, adjustedGasRemaining.Execution, st.gasRemaining.State, adjustedGasRemaining.State)
 		}
-		hookChargedExecution = st.gasRemaining.Execution - adjustedGasRemaining.Execution
-		hookChargedState = st.gasRemaining.State - adjustedGasRemaining.State
+		drained := (st.gasRemaining.Execution - adjustedGasRemaining.Execution) + (st.gasRemaining.State - adjustedGasRemaining.State)
+		if charged.Total() != drained {
+			return nil, fmt.Errorf("%w: GasCharging hook reported %d gas charged but drained %d from the tx budget", ErrTxnExecutionFailed, charged.Total(), drained)
+		}
+		hookCharged = charged
 		st.gasRemaining = adjustedGasRemaining
 		if !tipRecipient.IsNil() {
 			if st.noFeeBurnAndTip {
@@ -734,8 +737,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	totalGasUsed := gasUsed.total()
-	totalGasUsed.Execution += hookChargedExecution
-	totalGasUsed.State += int64(hookChargedState)
+	totalGasUsed.Execution += hookCharged.Execution
+	totalGasUsed.State += hookCharged.State
+	totalGasUsed.StateSpill += hookCharged.StateSpill
 	switch {
 	case refunds && !gasBailout:
 		if l2 := st.evm.Context.L2; l2 != nil && l2.ComputeRefund != nil {

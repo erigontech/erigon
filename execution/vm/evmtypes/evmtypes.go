@@ -145,7 +145,7 @@ type (
 
 	StartTxFunc func(ibs IntraBlockState, msg Message) (done bool, result *ExecutionResult, err error)
 
-	GasChargingFunc func(ibs IntraBlockState, msg Message, gasRemaining mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult) (adjustedGasRemaining mdgas.MdGas, tipRecipient accounts.Address, err error)
+	GasChargingFunc func(ibs IntraBlockState, msg Message, gasRemaining mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult) (adjustedGasRemaining mdgas.MdGas, charged mdgas.MdGasUsage, tipRecipient accounts.Address, err error)
 
 	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, intrinsicGas uint64, intrinsicGasResult mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
 )
