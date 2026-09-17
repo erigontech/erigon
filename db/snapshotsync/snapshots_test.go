@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"github.com/tidwall/btree"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1126,4 +1127,24 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].from)
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+
+// A segment can hold an open index with no decompressor, and the close must release both: on
+// Windows a still-mapped .idx cannot be unlinked, which fails every test that builds segments in
+// t.TempDir().
+func TestCloseSegmentsNotInListReleasesIndexesWithoutADecompressor(t *testing.T) {
+	tree := btree.NewBTreeG[*DirtySegment](func(a, b *DirtySegment) bool { return a.From() < b.From() })
+
+	withIdx := &DirtySegment{
+		Range:   Range{from: 0, to: 10},
+		segType: snaptype2.Headers,
+		version: snaptype2.Headers.Versions().Current,
+		indexes: []*recsplit.Index{nil},
+	}
+	tree.Set(withIdx)
+
+	CloseSegmentsNotInList(tree, map[string]struct{}{})
+
+	require.Nil(t, withIdx.indexes, "close must release the index even when Decompressor is nil")
+	require.Zero(t, tree.Len(), "the closed segment must be dropped from the tree")
 }

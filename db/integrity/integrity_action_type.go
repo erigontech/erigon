@@ -125,6 +125,9 @@ const (
 	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
 	// but for receipt roots instead of state roots.
 	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
+
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
@@ -135,7 +138,7 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
+var SlowChecks = []Check{CaplinBlobSidecars, StateVerify}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome

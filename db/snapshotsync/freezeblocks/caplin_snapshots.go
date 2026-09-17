@@ -334,48 +334,36 @@ func (s *CaplinSnapshots) OpenFolder() error {
 	return s.OpenList(list, false)
 }
 
+// MissingBeaconSnapshotRanges returns beacon gaps and the overlap-normalized raw horizon.
+func (s *CaplinSnapshots) MissingBeaconSnapshotRanges() ([]snapshotsync.Range, uint64, error) {
+	_, missing, err := snapshotsync.SegmentsCaplin(s.dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	files, err := snaptype.Segments(s.dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	beaconFiles := make([]snaptype.FileInfo, 0, len(files))
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			beaconFiles = append(beaconFiles, file)
+		}
+	}
+	var beaconTo uint64
+	for _, file := range snapshotsync.NoOverlaps(beaconFiles) {
+		beaconTo = max(beaconTo, file.To)
+	}
+	return missing, beaconTo, nil
+}
+
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 	protectFiles := make(map[string]struct{}, len(l))
 	for _, fName := range l {
 		protectFiles[fName] = struct{}{}
 	}
-	toClose := make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BeaconBlocks.Enum()].Delete(sn)
-	}
-
-	toClose = make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BlobSidecars.Enum()].Delete(sn)
-	}
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BeaconBlocks.Enum()], protectFiles)
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BlobSidecars.Enum()], protectFiles)
 }
 
 type CaplinView struct {
@@ -397,6 +385,26 @@ func (s *CaplinSnapshots) View() *CaplinView {
 		v.BlobSidecarRotx = s.visible[snaptype.BlobSidecars.Enum()].BeginRo()
 	}
 	return v
+}
+
+// WalkDirtySegments visits dirty segments of one type, lowest range first, until f returns false.
+// The callback must not open, close, or republish files because dirtyLock is held.
+func (s *CaplinSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*snapshotsync.DirtySegment) bool) {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+
+	dirty := s.dirty[segtype]
+	if dirty == nil {
+		return
+	}
+	dirty.Walk(func(segments []*snapshotsync.DirtySegment) bool {
+		for _, segment := range segments {
+			if !f(segment) {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func (v *CaplinView) Close() {
@@ -676,6 +684,43 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	}
 
 	return s.OpenFolder()
+}
+
+// ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
+func (s *CaplinSnapshots) ReadFrozenBeaconBlockBodyForIntegrity(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	view := s.View()
+	defer view.Close()
+
+	segment, ok := view.BeaconBlocksSegment(slot)
+	if !ok {
+		return nil, nil
+	}
+
+	idx := segment.Src().Index()
+	if idx == nil {
+		return nil, nil
+	}
+	if slot < idx.BaseDataID() {
+		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idx.BaseDataID())
+	}
+	getter := segment.Src().MakeGetter()
+	getter.Reset(idx.OrdinalLookup(slot - idx.BaseDataID()))
+	if !getter.HasNext() {
+		return nil, nil
+	}
+	buf, _ := getter.Next(nil)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+	buffer.Write(buf)
+	reader := decompressorPool.Get().(*zstd.Decoder)
+	defer decompressorPool.Put(reader)
+	reader.Reset(buffer)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshotForIntegrity(reader, s.beaconCfg)
 }
 
 func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
