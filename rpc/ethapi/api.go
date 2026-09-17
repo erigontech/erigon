@@ -544,7 +544,7 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 			m[k] = nullVal
 		}
 	}
-	// A transaction that was only signed has no gas price yet, not even a fee cap.
+	// A dynamic-fee transaction that was only filled has no effective gas price yet.
 	if r.Tx.MaxFeePerGas != nil {
 		m["gasPrice"] = nullVal
 	}

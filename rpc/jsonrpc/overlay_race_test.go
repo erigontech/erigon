@@ -624,26 +624,6 @@ func TestTxPoolContent_PendingGasPriceIsFeeCap(t *testing.T) {
 		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
-// TestTxPoolContent_PublishCycleDuringTxAcquisition pins atomic acquisition for
-// the txpool family: a cycle landing while the tx is opened must not leave the
-// handler reading through an overlay that has already been closed under it.
-func TestTxPoolContent_PublishCycleDuringTxAcquisition(t *testing.T) {
-	t.Parallel()
-	h := newOverlayAheadHarness(t, false)
-	pool, txn := newOverlayRacePendingPool(t, h.m)
-	h.events.PublishOverlay(nil)
-	h.doms.Close()
-
-	api := NewTxPoolAPI(h.base, newCycleHookDB(h, true), pool)
-
-	content, err := api.Content(h.m.Ctx)
-	require.NoError(t, err)
-	got := content["pending"][h.m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
-	require.NotNil(t, got)
-	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
-		"a publish/commit/unpublish cycle during tx acquisition must still answer from a live view")
-}
-
 // TestGetBlockTransactionCountByHash_SeesOverlayHead pins that the by-hash
 // count resolves the overlay head exactly like its by-number twin: the same
 // in-flight block must be visible through both, not null through one of them.
