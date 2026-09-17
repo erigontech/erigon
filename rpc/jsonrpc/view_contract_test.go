@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -260,4 +261,24 @@ func requireOverlayAheadOfCommitted(t *testing.T, base *BaseAPI, m *execmodulete
 	overlaid, _, _, err := rpchelper.GetCanonicalBlockNumber(m.Ctx, latest, base.filters.WithOverlay(tx), m.BlockReader)
 	require.NoError(t, err)
 	require.Equal(t, overlayNum, overlaid)
+}
+
+// TestCallManyResolvesTheOverlayHead covers the replay shape that takes the
+// block from one layer and its parent state from the layer below: the block may
+// only exist in the overlay, so the request has to resolve it there even though
+// the state it reads is committed.
+func TestCallManyResolvesTheOverlayHead(t *testing.T) {
+	h := newOverlayAheadHarness(t, false)
+	overlayNum := h.overlayHeader.Number.Uint64()
+	require.NoError(t, stages.SaveStageProgress(h.doms.BlockOverlay(), stages.Execution, overlayNum))
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+
+	from := h.m.Address
+	bundles := []Bundle{{Transactions: []ethapi2.CallArgs{{
+		From: &from, To: &from, GasPrice: (*hexutil.U256)(uint256.NewInt(1_000_000)),
+	}}}}
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayNum))}
+
+	_, err := api.CallMany(h.m.Ctx, bundles, stateCtx, nil, nil)
+	require.NoError(t, err)
 }

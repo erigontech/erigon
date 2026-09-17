@@ -99,7 +99,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		overrideBlockHash  map[uint64]common.Hash
 	)
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
