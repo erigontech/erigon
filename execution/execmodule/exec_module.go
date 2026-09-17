@@ -887,9 +887,6 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		return err
 	}
 	newHash := sealed.Hash()
-	if newHash == oldHash {
-		return nil // already sealed in place
-	}
 
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -905,6 +902,18 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		return fmt.Errorf("IngestSealedFlashblock: no block overlay for %x", oldHash)
 	}
 	ov.UpdateTxn(roTx)
+	if newHash == oldHash {
+		// Already sealed in place: nothing to re-key, but its ids are still unsettled until here.
+		bfs, rerr := rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, oldHash))
+		if rerr != nil || bfs == nil {
+			return fmt.Errorf("IngestSealedFlashblock: read in-place body: %v", rerr)
+		}
+		if err := sealPreExecBodyIds(ov, bfs); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: %w", err)
+		}
+		traceBodyIds(e.logger, "seal", ov, newHash, number, bfs.BaseTxnID.U64(), true)
+		return nil
+	}
 	// Pre-exec space only. The canonical path gets the sealed block when newPayload hands it over.
 	targets := []kv.RwTx{ov}
 
@@ -934,15 +943,15 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	// already wrote — one record write instead of a full body rewrite per block.
 	bfs, rerr := rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, oldHash))
 	if rerr != nil || bfs == nil || bfs.TxCount != types.TxCountToTxAmount(len(body.Transactions)) {
-		// No in-progress record to re-key (or it disagrees with the sealed body) — write one. This is the
-		// allocating path above, so it is the fallback, not the norm, and it runs ONCE: into the generation, whose
-		// record every target then takes.
-		seqBefore, _ := ov.ReadSequence(kv.EthTx)
-		allocated, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body)
+		// No in-progress record to re-key (or it disagrees with the sealed body) — write one, at the same base the
+		// rounds use: the sequence has not been advanced yet, and is advanced once below.
+		base, err := ov.ReadSequence(kv.EthTx)
 		if err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: read txn id sequence: %w", err)
+		}
+		if err := writePreExecBody(ov, newHash, number, body, base); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
 		}
-		traceBodyIds(e.logger, "seal-fallback", ov, newHash, number, seqBefore, allocated)
 		if bfs, rerr = rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, newHash)); rerr != nil || bfs == nil {
 			return fmt.Errorf("IngestSealedFlashblock: read back written body: %v", rerr)
 		}
@@ -951,12 +960,13 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		if err := rawdb.WriteBodyForStorage(t, newHash, number, bfs); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
-		// The body is final here, so this is where its txnum→txhash mapping is settled.
-		traceBodyIds(e.logger, "seal", t, newHash, number, 0, false)
-		if err := clearSystemSlotRows(t, bfs); err != nil {
-			return fmt.Errorf("IngestSealedFlashblock: %w", err)
-		}
 	}
+	// The body is final: advance the txn id sequence once, past its end system slot, and drop anything a dropped
+	// round left at or above that slot. Only the generation's overlay carries the sequence the successor seeds from.
+	if err := sealPreExecBodyIds(ov, bfs); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: %w", err)
+	}
+	traceBodyIds(e.logger, "seal", ov, newHash, number, bfs.BaseTxnID.U64(), true)
 	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a
 	// normal newPayload: exactly ONE block at this height (the sealed H1). The deferred ibHash is a scratch
 	// artifact of the flashblock accumulation — leaving it would strand an orphan header/body/TD at height N.

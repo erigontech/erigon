@@ -133,12 +133,45 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	if err := rawdb.WriteTd(tx, header.Hash(), number, td); err != nil {
 		return fmt.Errorf("write TD: %w", err)
 	}
-	seqBefore, _ := tx.ReadSequence(kv.EthTx)
-	allocated, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body)
+	// The block's ids start at the sequence as it stands when the block is open: nothing advances it until the
+	// seal, so every round writes the same range.
+	base, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
+		return fmt.Errorf("read txn id sequence: %w", err)
+	}
+	if err := writePreExecBody(tx, header.Hash(), number, block.Body, base); err != nil {
 		return fmt.Errorf("write body: %w", err)
 	}
-	traceBodyIds(e.logger, "preexec-round", tx, header.Hash(), number, seqBefore, allocated)
+	traceBodyIds(e.logger, "preexec-round", tx, header.Hash(), number, base, false)
+	return nil
+}
+
+// writePreExecBody stores an in-progress block's body at a FIXED base id without advancing the kv.EthTx sequence.
+//
+// A block's ids are its start system slot at base, its transactions at base+1.., and its end system slot after
+// them — nil entries that only consume a txnum. WriteRawBody allocates that range with IncrementSequence, which is
+// right for a block written once. A pre-exec block is written every round under a new header hash, so allocating
+// each time gave it a fresh range per round and left the earlier ones behind, still holding transactions, where
+// they could land on a later block's system slot. Writing every round at the same base, in place, and advancing the
+// sequence once at the seal gives exactly the ids InsertBlocks would.
+func writePreExecBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody, base uint64) error {
+	bfs := types.BodyForStorage{
+		BaseTxnID:   types.BaseTxnID(base),
+		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
+		Uncles:      body.Uncles,
+		Withdrawals: body.Withdrawals,
+	}
+	if err := rawdb.WriteBodyForStorage(tx, hash, number, &bfs); err != nil {
+		return err
+	}
+	for i, txn := range body.Transactions {
+		id := make([]byte, 8)
+		binary.BigEndian.PutUint64(id, bfs.BaseTxnID.At(i))
+		// Put, not Append: a later round rewrites the ids an earlier one wrote.
+		if err := tx.Put(kv.EthTx, id, txn); err != nil {
+			return fmt.Errorf("txn %d at id %d: %w", i, bfs.BaseTxnID.At(i), err)
+		}
+	}
 	return nil
 }
 
@@ -171,30 +204,44 @@ func traceBodyIds(logger log.Logger, when string, tx kv.Getter, hash common.Hash
 		"startSlotTaken", startTaken, "endSlotTaken", endTaken)
 }
 
-// clearSystemSlotRows makes the SEALED body's txnum→txhash mapping correct by emptying its two
-// system-transaction slots.
+// sealPreExecBodyIds settles a sealed pre-exec block's ids: it advances the kv.EthTx sequence ONCE, by the final
+// TxCount, and removes any row at or above the block's end system slot.
 //
-// Block-start and block-end are executed by the executor, not stored: WriteRawTransactions only ever writes
-// At(i) = BaseTxnID+1+i, so the ids at each end of the range must hold nothing, and the transactions index
-// then keys them off the txnum (pad32) rather than a transaction hash. A one-pass chain produces exactly
-// that — dev-L1: 2000 system slots over 1000 blocks, every one empty, zero duplicate keys.
-//
-// Multi-round construction does not, because a successor takes its id range while its parent is still
-// accumulating. The parent grows over that range, the successor is re-allocated higher, and its earlier rows
-// are left behind — one landing on the successor's own BaseTxnID. The block-start txnum then maps to a user
-// transaction's hash: the wrong mapping, and a duplicate key that no salt can index (measured: 3 blocks per
-// 1000 on trading, 0 on dev-L1).
-//
-// The seal is the right moment. During the rounds the block overlay is SHARED (BorrowBlockOverlay), so a
-// deletion by a round that is later dropped still persists and can strand the block with no body at all.
-// Here the body is final, and no live transaction can occupy these two ids.
-func clearSystemSlotRows(tx kv.RwTx, bfs *types.BodyForStorage) error {
-	var id [8]byte
-	for _, txnID := range [...]uint64{bfs.BaseTxnID.U64(), bfs.BaseTxnID.LastSystemTx(bfs.TxCount)} {
-		binary.BigEndian.PutUint64(id[:], txnID)
-		if err := tx.Delete(kv.EthTx, id[:]); err != nil {
-			return fmt.Errorf("clear system slot %d: %w", txnID, err)
+// Rounds write at a fixed base without advancing the sequence (writePreExecBody), so the sequence still stands at
+// this block's base and the advance must return exactly that; anything else means some other write moved it and
+// the successor would be handed overlapping ids. Rows above the final transactions come from a round that wrote a
+// longer body and was then dropped: the block overlay is shared across rounds, so its rows persist although the
+// body was rolled back. Ids above the base are unallocated until this advance, so every such row is stale — and the
+// lowest of them is the end system slot, a nil entry that must hold nothing.
+func sealPreExecBodyIds(tx kv.RwTx, bfs *types.BodyForStorage) error {
+	endSlot := bfs.BaseTxnID.LastSystemTx(bfs.TxCount)
+	from := make([]byte, 8)
+	binary.BigEndian.PutUint64(from, endSlot)
+	c, err := tx.Cursor(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	var stale [][]byte
+	for k, _, cerr := c.Seek(from); k != nil; k, _, cerr = c.Next() {
+		if cerr != nil {
+			c.Close()
+			return cerr
 		}
+		stale = append(stale, common.Copy(k))
+	}
+	c.Close()
+	for _, k := range stale {
+		if err := tx.Delete(kv.EthTx, k); err != nil {
+			return fmt.Errorf("delete stale txn id %d: %w", binary.BigEndian.Uint64(k), err)
+		}
+	}
+	base, err := tx.IncrementSequence(kv.EthTx, uint64(bfs.TxCount))
+	if err != nil {
+		return err
+	}
+	if base != bfs.BaseTxnID.U64() {
+		return fmt.Errorf("txn id sequence at %d, expected the block's base %d: something advanced it before the seal",
+			base, bfs.BaseTxnID.U64())
 	}
 	return nil
 }
