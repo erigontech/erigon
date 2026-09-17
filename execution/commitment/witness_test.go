@@ -375,14 +375,14 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 	fullTrie, err := trie.RLPDecode(full)
 	require.NoError(t, err)
 	writes := ms.putBranches
-	_, _, err = hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	_, _, _, err = hph.WitnessesByHash(context.Background(), touchUpdates(proven, provenSlots), false)
 	require.Error(t, err, "pending deferred updates would be flushed by the fold")
 	require.Equal(t, writes, ms.putBranches)
 
 	require.NoError(t, hph.branchEncoder.ApplyDeferredUpdates(16, ms.PutBranch))
 	hph.branchEncoder.ClearDeferred()
 	writes = ms.putBranches
-	byHash, rootRO, err := hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	byHash, _, rootRO, err := hph.WitnessesByHash(context.Background(), touchUpdates(proven, provenSlots), false)
 	require.NoError(t, err)
 	require.Equal(t, root, rootRO)
 	require.Equal(t, writes, ms.putBranches, "a read-only fold writes no branch")

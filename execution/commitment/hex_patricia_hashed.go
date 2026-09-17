@@ -2527,12 +2527,6 @@ func (hph *HexPatriciaHashed) WitnessesByHash(ctx context.Context, updates *Upda
 	return set.byHash, provedKeys, rootHash, nil
 }
 
-// WitnessNodesByHash folds read-only: the set holds only the proven paths, off-path nodes are referenced by hash.
-func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
-	byHash, _, rootHash, err := hph.WitnessesByHash(ctx, updates, false)
-	return byHash, rootHash, err
-}
-
 func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updates, produceExclusionProofs bool) (set *witnessNodeSet, provedKeys [][]byte, rootHash []byte, err error) {
 	memoizationOff := hph.memoizationOff
 	hph.memoizationOff = true

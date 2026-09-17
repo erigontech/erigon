@@ -334,7 +334,8 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Contex
 	if !ok {
 		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 	}
-	return hexPatriciaHashed.WitnessNodesByHash(ctx, sdc.updates)
+	byHash, _, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, false)
+	return byHash, rootHash, err
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
