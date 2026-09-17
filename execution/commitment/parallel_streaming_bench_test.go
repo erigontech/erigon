@@ -55,6 +55,16 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 }
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers,
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} })
+}
+
+func runCollectingParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory)
+}
+
+func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
+	newFactory func(*MockState) (TrieContextFactory, func())) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed
@@ -68,11 +78,12 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		ms := NewMockState(b)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
+		factory, drain := newFactory(ms)
 		if pph == nil {
-			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph = NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.SetTrieContextFactory(factory)
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
@@ -84,6 +95,7 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		b.StopTimer()
 		require.NoError(b, err)
 		upds.Close()
+		drain()
 		b.StartTimer()
 	}
 }
@@ -118,6 +130,7 @@ func Benchmark_Commitment_1MWhales(b *testing.B) {
 	for _, w := range workers {
 		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
 	}
+	b.Run(fmt.Sprintf("collecting-w%d", ncpu), func(b *testing.B) { runCollectingParallelBench(b, pk, updates, ncpu) })
 }
 
 func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
@@ -145,6 +158,9 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 				runParallelBench(b, pk, updates, w)
 			})
 		}
+		b.Run(fmt.Sprintf("collecting-w%d", runtime.NumCPU()), func(b *testing.B) {
+			runCollectingParallelBench(b, pk, updates, runtime.NumCPU())
+		})
 	})
 }
 
