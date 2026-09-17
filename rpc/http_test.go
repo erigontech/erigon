@@ -504,3 +504,36 @@ func TestHTTPSingleRequestRunsOnServingGoroutine(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, goroutineID(), resp.Result)
 }
+
+func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
+	logger := log.New()
+	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, false /* disableStreaming */, logger, 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("test", new(testService)))
+	require.NoError(t, srv.RegisterName("mid", largeRespService{8 * 1024}))
+	require.NoError(t, srv.RegisterName("big", largeRespService{4 * jsonstream.FlushThreshold}))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	post := func(body string) (contentLength int64, transferEncoding []string, answer string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.ContentLength, resp.TransferEncoding, string(raw)
+	}
+
+	// Above net/http's 2KB auto-buffer and below FlushThreshold, so only this change can set the length.
+	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"mid_largeResp"}`)
+	require.Greater(t, length, int64(8*1024))
+	require.Empty(t, encoding)
+	require.Equal(t, int(length), len(answer))
+
+	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
+	require.Equal(t, int64(-1), length)
+	require.Equal(t, []string{"chunked"}, encoding)
+}
