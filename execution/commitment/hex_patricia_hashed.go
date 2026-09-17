@@ -2512,7 +2512,8 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
-// WitnessesByHash is Witnesses with the captured nodes left indexed by their hash.
+// WitnessesByHash is Witnesses folded read-only, with the captured nodes left indexed by their hash: it writes no
+// branch and fails while deferred branch updates are pending.
 func (hph *HexPatriciaHashed) WitnessesByHash(ctx context.Context, updates *Updates, produceExclusionProofs bool) (byHash map[string][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	if len(hph.branchEncoder.deferred) > 0 {
 		return nil, nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
