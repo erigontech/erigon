@@ -20,6 +20,7 @@ package hexutil_test
 
 import (
 	"encoding/json/v2"
+	"io"
 	"slices"
 	"testing"
 
@@ -111,14 +112,13 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 	})
 
 	b.Run("fast_v2_stream", func(b *testing.B) {
-		stream := jsonstream.Get(nil)
+		stream := jsonstream.Get(io.Discard)
 		defer jsonstream.Put(stream)
 
-		var w discardJSONWriter
 		b.SetBytes(size)
 		b.ReportAllocs()
 		for b.Loop() {
-			if err := code.MarshalFastJSONTo(&w); err != nil {
+			if err := code.MarshalFastJSONTo(stream); err != nil {
 				b.Fatal(err)
 			}
 		}
