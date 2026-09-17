@@ -139,6 +139,53 @@ func TestApplyValidatedPayloadAttestationInvalidatesGloasHeadCache(t *testing.T)
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
+func TestApplyValidatedPayloadAttestationKeepsHeadSnapshotConsistent(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	f := &ForkChoiceStore{
+		headHash:          root,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+	oldVotes := [clparams.PtcSize]int8{7: 1}
+	f.payloadTimelinessVote.Store(root, oldVotes)
+	f.payloadDataAvailabilityVote.Store(root, oldVotes)
+
+	f.mu.RLock()
+	releaseHeadView := sync.OnceFunc(f.mu.RUnlock)
+	done := make(chan struct{})
+	var applyErr error
+	go func() {
+		defer close(done)
+		applyErr = f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{}, root, false)
+	}()
+	t.Cleanup(func() {
+		releaseHeadView()
+		<-done
+	})
+
+	// A queued writer blocks new readers. Wait for that point while the current
+	// head view stays open, so the vote update cannot race past these checks.
+	require.Eventually(t, func() bool {
+		if !f.mu.TryRLock() {
+			return true
+		}
+		f.mu.RUnlock()
+		return false
+	}, 5*time.Second, time.Millisecond, "payload vote update did not reach the store lock")
+	require.Equal(t, oldVotes, f.payloadTimelinessVoteValue(root))
+	require.Equal(t, oldVotes, f.payloadDataAvailabilityVoteValue(root))
+	require.Equal(t, root, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+
+	releaseHeadView()
+	<-done
+	require.NoError(t, applyErr)
+	newVotes := [clparams.PtcSize]int8{7: -1}
+	require.Equal(t, newVotes, f.payloadTimelinessVoteValue(root))
+	require.Equal(t, newVotes, f.payloadDataAvailabilityVoteValue(root))
+	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
 func TestApplyValidatedPayloadAttestationFromBlockOverwritesGossipVote(t *testing.T) {
 	f := &ForkChoiceStore{}
 	root := common.HexToHash("0x1234")

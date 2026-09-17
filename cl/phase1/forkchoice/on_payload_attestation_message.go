@@ -70,15 +70,17 @@ func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
 	blockRoot common.Hash,
 	isFromBlock bool,
 ) error {
+	// Keep the votes and cached head decision consistent for head readers.
+	// The lock order is f.mu before ptcVoteMu.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, isFromBlock); err != nil {
 		return err
 	}
 
-	// Do not hold ptcVoteMu while taking f.mu: block import takes them in the opposite order.
-	f.mu.Lock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.mu.Unlock()
 	return nil
 }
 
