@@ -23,6 +23,7 @@ import (
 	"weak"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/maypok86/otter/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -43,10 +44,10 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 }
 
 func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
-	dropped := func() weak.Pointer[ByteLRU[[]byte]] {
+	dropped := func() weak.Pointer[otter.Cache[uint64, []byte]] {
 		b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
 		b.Add(1, make([]byte, 64))
-		return weak.Make(b)
+		return weak.Make(b.c)
 	}()
 	for range 3 {
 		runtime.GC()
