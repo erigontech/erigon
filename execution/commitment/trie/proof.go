@@ -727,13 +727,7 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 		case 17:
 			rest := elems
 			if len(path) == 0 {
-				for range 16 {
-					if _, _, rest, err = rlp.Split(rest); err != nil {
-						return nil, nil, err
-					}
-				}
-				value, _, err = rlp.SplitString(rest)
-				return proof, value, err
+				return nil, nil, errors.New("key ends at a branch node")
 			}
 			for range path[0] {
 				if _, _, rest, err = rlp.Split(rest); err != nil {
