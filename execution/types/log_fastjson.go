@@ -92,10 +92,6 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.AppendJSON(make([]byte, 0, l.JSONLen())), nil
-}
-
 func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteValue(l)
 	return nil

@@ -560,8 +560,7 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 			for _, l := range logs {
 				want, err := json.Marshal(l)
 				require.NoError(t, err)
-				got, err := l.MarshalFastJSON()
-				require.NoError(t, err)
+				got := l.AppendJSON(nil)
 				require.Equal(t, string(want), string(got))
 				require.LessOrEqual(t, len(got), l.JSONLen())
 			}
