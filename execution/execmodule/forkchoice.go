@@ -558,7 +558,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
-			// Send forkchoice early (We already know the fork is valid)
+			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if !valid {
+				sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					Status: ExecutionStatusInvalidForkchoice,
+				}, false)
+				return nil
+			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: blockHash,
 				Status:          ExecutionStatusSuccess,

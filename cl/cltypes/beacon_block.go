@@ -1115,3 +1115,8 @@ func (b *DenebSignedBeaconBlock) Static() bool {
 	// it's variable size
 	return false
 }
+
+// BlockSignature implements ColumnSyncableSignedBlock.
+func (b *SignedBeaconBlock) BlockSignature() common.Bytes96 {
+	return b.Signature
+}

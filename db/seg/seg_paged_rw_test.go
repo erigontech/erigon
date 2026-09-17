@@ -681,3 +681,53 @@ func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
 	require.Equal(second, string(k)+"|"+string(v),
 		"re-seeking the current page rewound it, so the caller re-reads a consumed entry")
 }
+
+// A fresh reader sits at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderResetLoadsFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	require.True(g.HasNextOnPage(), "Reset must leave the page of that offset loaded")
+}
+
+// Get must not depend on where iteration left the page cursor: a reader keeps its page across seeks to the
+// same offset, so lookups and iteration share one decoded page.
+func TestPageGetIsCursorIndependent(t *testing.T) {
+	sampling := 2
+	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
+	w := NewPagedWriter(t.Context(), buf, false, 1)
+	for i := range sampling {
+		require.NoError(w.Add([]byte(fmt.Sprintf("k %d", i)), []byte(fmt.Sprintf("v %d", i))))
+	}
+	require.NoError(w.Flush())
+
+	p := &Page{}
+	p.Reset(buf.Bytes()[0], false)
+	p.Next()
+
+	v, ok := p.Get([]byte("k 0"))
+	require.True(ok)
+	require.Equal("v 0", string(v))
+	v, ok = p.Get([]byte("k 1"))
+	require.True(ok)
+	require.Equal("v 1", string(v))
+	_, ok = p.Get([]byte("k 9"))
+	require.False(ok)
+	require.True(p.HasNext(), "Get left the iteration cursor alone")
+}
+
+// A fresh reader starts at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderGetOnFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	v, err := g.GetFromPage([]byte("key 0"))
+	require.NoError(err)
+	require.Equal("lorem 0", string(v))
+}
