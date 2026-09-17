@@ -968,7 +968,9 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // must be written.
 func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
 	ss := sd.stepSize
-	if ss == 0 {
+	// Exec-only mode never advances commitment, so there is no unfrozen step edge to
+	// trigger commitment work on.
+	if ss == 0 || dbg.DiscardCommitment() {
 		return false
 	}
 	if (txNum+1)%ss != 0 {

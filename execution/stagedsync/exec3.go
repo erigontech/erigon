@@ -177,15 +177,20 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
-	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
-	doms.SetDeferCommitmentUpdates(false)
-	// Deferred commitment updates batch commitment to block boundaries rather than
-	// per-transaction, cutting re-org validation overhead.
-	if isForkValidation || isApplyingBlocks {
-		doms.SetDeferCommitmentUpdates(true)
+	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup
+	// entirely: EnableParaTrieDB after the witness seed's DomainPut touches would
+	// panic on the dropped sequential-buffer keys.
+	if !dbg.DiscardCommitment() {
+		doms.EnableParaTrieDB(cfg.db)
+		doms.EnableTrieWarmup(true)
+		doms.SetDeferCommitmentUpdates(false)
+		// Deferred commitment updates batch commitment to block boundaries rather than
+		// per-transaction, cutting re-org validation overhead.
+		if isForkValidation || isApplyingBlocks {
+			doms.SetDeferCommitmentUpdates(true)
+		}
+		defer doms.SetDeferCommitmentUpdates(false)
 	}
-	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -289,13 +294,16 @@ func execV3Serial(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
-	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
-	doms.SetDeferCommitmentUpdates(false)
-	if isForkValidation {
-		doms.SetDeferCommitmentUpdates(true)
+	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
+	if !dbg.DiscardCommitment() {
+		doms.EnableParaTrieDB(cfg.db)
+		doms.EnableTrieWarmup(true)
+		doms.SetDeferCommitmentUpdates(false)
+		if isForkValidation {
+			doms.SetDeferCommitmentUpdates(true)
+		}
+		defer doms.SetDeferCommitmentUpdates(false)
 	}
-	defer doms.SetDeferCommitmentUpdates(false)
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
 
