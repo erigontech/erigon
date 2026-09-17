@@ -79,17 +79,20 @@ func (n *Notifications) SubscribeSyncState(tx kv.Getter, frozenBlocks uint64) (c
 // the publish path may move it, since polls read unordered tx views.
 func (n *Notifications) repinStartingBlock(reply *remoteproto.SyncingReply) {
 	if reply.Syncing && (n.lastSyncState == nil || !n.lastSyncState.Syncing) {
-		n.startingBlock.Store(reply.CurrentBlock)
+		reply.StartingBlock = reply.CurrentBlock
 	}
-	n.withStartingBlock(reply)
-	n.startingBlock.Store(reply.StartingBlock)
+	pin := reply.StartingBlock
+	n.startingBlock.Store(&pin)
 }
 
 // withStartingBlock reports the pin clamped to the current block: an unwind can
 // take execution below the pin, and a starting block above the current one
 // makes the progress ratio negative.
 func (n *Notifications) withStartingBlock(reply *remoteproto.SyncingReply) *remoteproto.SyncingReply {
-	reply.StartingBlock = min(n.startingBlock.Load(), reply.CurrentBlock)
+	reply.StartingBlock = reply.CurrentBlock
+	if pin := n.startingBlock.Load(); pin != nil {
+		reply.StartingBlock = min(*pin, reply.CurrentBlock)
+	}
 	return reply
 }
 

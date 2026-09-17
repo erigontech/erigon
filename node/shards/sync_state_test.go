@@ -448,3 +448,25 @@ func TestSyncingReplyStartingBlockPinsReportedDownloadProgress(t *testing.T) {
 	require.Equal(t, uint64(8_000_000), reply.CurrentBlock)
 	require.Equal(t, uint64(8_000_000), reply.StartingBlock)
 }
+
+// The private gRPC server serves eth_syncing before the stage loop's first
+// publish, so a reply built then must not report progress from genesis.
+func TestSyncingReplyBeforeFirstPublishStartsAtTheCurrentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), reply.StartingBlock)
+}
+
+func TestSyncingReplyKeepsAGenesisStartingBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 200))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), reply.StartingBlock, "a session started at genesis keeps a zero pin")
+}
