@@ -697,3 +697,15 @@ func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiptJSONBlockNumber(t *testing.T) {
+	enc, err := json.Marshal(&Receipt{BlockNumber: uint256.NewInt(0x1234)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x1234"`)
+	enc, err = json.Marshal(&Receipt{BlockNumber: new(uint256.Int)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x0"`)
+	enc, err = json.Marshal(&Receipt{})
+	require.NoError(t, err)
+	require.NotContains(t, string(enc), "blockNumber")
+}
