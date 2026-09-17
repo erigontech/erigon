@@ -94,6 +94,13 @@ type BranchCache struct {
 
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
+	lastPublishedRootHits     atomic.Uint64
+	lastPublishedRootMisses   atomic.Uint64
+	lastPublishedTrunkHits    atomic.Uint64
+	lastPublishedTrunkMisses  atomic.Uint64
+	lastPublishedTailHits     atomic.Uint64
+	lastPublishedTailMisses   atomic.Uint64
+	lastPublishedStaleEvicted atomic.Uint64
 
 	putStripes [256]sync.Mutex
 
@@ -1017,6 +1024,13 @@ func (c *BranchCache) Clear() {
 	c.pinnedMisses.Store(0)
 	c.lastPublishedPinnedHits.Store(0)
 	c.lastPublishedPinnedMisses.Store(0)
+	c.lastPublishedRootHits.Store(0)
+	c.lastPublishedRootMisses.Store(0)
+	c.lastPublishedTrunkHits.Store(0)
+	c.lastPublishedTrunkMisses.Store(0)
+	c.lastPublishedTailHits.Store(0)
+	c.lastPublishedTailMisses.Store(0)
+	c.lastPublishedStaleEvicted.Store(0)
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -27,6 +28,14 @@ var (
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
 	mxPinnedEntries = metrics.GetOrCreateGauge("commitment_branchcache_pinned_entries")
+
+	mxRootHits     = metrics.GetOrCreateCounter("commitment_branchcache_root_hits_total")
+	mxRootMisses   = metrics.GetOrCreateCounter("commitment_branchcache_root_misses_total")
+	mxTrunkHits    = metrics.GetOrCreateCounter("commitment_branchcache_trunk_hits_total")
+	mxTrunkMisses  = metrics.GetOrCreateCounter("commitment_branchcache_trunk_misses_total")
+	mxTailHits     = metrics.GetOrCreateCounter("commitment_branchcache_tail_hits_total")
+	mxTailMisses   = metrics.GetOrCreateCounter("commitment_branchcache_tail_misses_total")
+	mxStaleEvicted = metrics.GetOrCreateCounter("commitment_branchcache_stale_evicted_total")
 
 	mxAdaptivePromoted = metrics.GetOrCreateCounter("commitment_adaptive_pin_promoted_total")
 	mxAdaptiveExtended = metrics.GetOrCreateCounter("commitment_adaptive_pin_extended_total")
@@ -44,14 +53,29 @@ func recordPreload(started time.Time, bytesPinned int) {
 	}
 }
 
+func publishCounterDelta(cur, last *atomic.Uint64, m metrics.Counter) {
+	v := cur.Load()
+	for {
+		prev := last.Load()
+		if v <= prev {
+			return
+		}
+		if last.CompareAndSwap(prev, v) {
+			m.AddUint64(v - prev)
+			return
+		}
+	}
+}
+
 func (c *BranchCache) PublishMetrics() {
-	hits := c.pinnedHits.Load()
-	misses := c.pinnedMisses.Load()
-	if delta := hits - c.lastPublishedPinnedHits.Swap(hits); delta > 0 {
-		mxPinnedHits.AddUint64(delta)
-	}
-	if delta := misses - c.lastPublishedPinnedMisses.Swap(misses); delta > 0 {
-		mxPinnedMisses.AddUint64(delta)
-	}
+	publishCounterDelta(&c.rootHits, &c.lastPublishedRootHits, mxRootHits)
+	publishCounterDelta(&c.rootMisses, &c.lastPublishedRootMisses, mxRootMisses)
+	publishCounterDelta(&c.trunkHits, &c.lastPublishedTrunkHits, mxTrunkHits)
+	publishCounterDelta(&c.trunkMisses, &c.lastPublishedTrunkMisses, mxTrunkMisses)
+	publishCounterDelta(&c.pinnedHits, &c.lastPublishedPinnedHits, mxPinnedHits)
+	publishCounterDelta(&c.pinnedMisses, &c.lastPublishedPinnedMisses, mxPinnedMisses)
+	publishCounterDelta(&c.tailHits, &c.lastPublishedTailHits, mxTailHits)
+	publishCounterDelta(&c.tailMisses, &c.lastPublishedTailMisses, mxTailMisses)
+	publishCounterDelta(&c.staleEvicted, &c.lastPublishedStaleEvicted, mxStaleEvicted)
 	mxPinnedEntries.SetUint64(uint64(c.pinnedEntries.Load()))
 }

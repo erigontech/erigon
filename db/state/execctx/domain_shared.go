@@ -1345,6 +1345,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 		}
 	}
+	if sd.branchCache != nil {
+		sd.branchCache.PublishMetrics()
+	}
 	if sd.stateCache != nil {
 		if sd.cacheUnwind.pending {
 			sd.cacheApplier.PublishUnwind(sourceStateVersion, committedStateVersion, sd.cacheUnwind.toTxNum, pendingState)
