@@ -21,6 +21,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"weak"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
@@ -44,10 +45,9 @@ type ByteLRU[V any] struct {
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
-	// Separate from b so otter's OnDeletion never reaches b.c: otter's runtime cleanup
-	// would then keep the cache alive forever. Close clears onEvict for the same reason.
-	onEvict  *atomic.Pointer[func(uint64, V)]
-	resident *atomic.Int64
+	onEvict atomic.Pointer[func(uint64, V)]
+
+	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
@@ -73,7 +73,7 @@ const (
 )
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), onEvict: new(atomic.Pointer[func(uint64, V)]), resident: new(atomic.Int64)}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -88,7 +88,7 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 // NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
 // from the start and needs no Close, for owners that have no teardown.
 func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), onEvict: new(atomic.Pointer[func(uint64, V)]), resident: new(atomic.Int64), unbudgeted: true}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
 	b.c = b.newOtter(b.maxBytes, weigh)
@@ -96,13 +96,17 @@ func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) 
 }
 
 func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
-	resident, onEvict := b.resident, b.onEvict
+	owner := weak.Make(b) // otter's runtime cleanup keeps OnDeletion reachable, so a strong b would never be collected
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
 		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
-			resident.Add(-weigh(e.Key, e.Value))
-			if fn := onEvict.Load(); fn != nil {
+			l := owner.Value()
+			if l == nil {
+				return
+			}
+			l.resident.Add(-weigh(e.Key, e.Value))
+			if fn := l.onEvict.Load(); fn != nil {
 				(*fn)(e.Key, e.Value)
 			}
 		},
