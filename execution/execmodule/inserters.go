@@ -195,8 +195,11 @@ func traceBodyIds(logger log.Logger, when string, tx kv.Getter, hash common.Hash
 		return gerr == nil && v != nil
 	}
 	startTaken, endTaken := taken(first), taken(last)
+	// Only a SETTLED body must have both slots empty. During rounds a body that shrank still overlaps rows a longer
+	// one wrote; the seal removes them (sealPreExecBodyIds), so a taken slot there is expected and not a defect.
+	inProgress := when == "preexec-round" || when == "execute-into"
 	record := logger.Debug
-	if startTaken || endTaken {
+	if (startTaken || endTaken) && !inProgress {
 		record = logger.Warn
 	}
 	record("[TXID-TRACE] body ids", "when", when, "block", number, "hash", hash,
