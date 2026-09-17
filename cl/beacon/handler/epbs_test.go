@@ -2435,15 +2435,17 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 
 func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 	for _, test := range []struct {
-		name            string
-		recoverEnvelope bool
-		changeHead      bool
-		wantStatus      int
-		wantError       string
+		name                       string
+		recoverEnvelope            bool
+		changeHead                 bool
+		changeHeadDuringResolution bool
+		wantStatus                 int
+		wantError                  string
 	}{
 		{name: "unreadable FULL envelope", wantStatus: http.StatusOK},
 		{name: "FULL envelope becomes readable", recoverEnvelope: true, wantStatus: http.StatusNotFound, wantError: "execution parent changed"},
 		{name: "beacon head changes", changeHead: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
+		{name: "beacon head changes during parent resolution", changeHeadDuringResolution: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -2471,6 +2473,12 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 					if test.changeHead {
 						forkchoiceStore.HeadVal = common.Hash{0x99}
 					}
+					if test.changeHeadDuringResolution {
+						forkchoiceStore.ResolveHeadPayloadStatusFn = func(common.Hash) (cltypes.PayloadStatus, bool) {
+							forkchoiceStore.HeadVal = common.Hash{0x99}
+							return cltypes.PayloadStatusPending, false
+						}
+					}
 					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
 				})
 			handler.engine = engine
@@ -2483,6 +2491,7 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
 			if test.wantError != "" {
 				require.Contains(t, recorder.Body.String(), test.wantError)
+				require.Empty(t, handler.pendingBuilderPayloads.entries)
 				return
 			}
 			var response struct {

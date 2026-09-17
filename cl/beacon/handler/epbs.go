@@ -1549,6 +1549,12 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
 	}
+	bid := beaconBody.SignedExecutionPayloadBid.Message
+	// HasEnvelope can stay true after a transient read error. Revalidate with the
+	// same resolver as production so an unreadable FULL parent still permits EMPTY.
+	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, slot, clparams.GloasVersion)
+	// Resolution can select a different beacon head and return the old parent's
+	// EMPTY fallback. Check the beacon head afterwards, even if the execution parent matches.
 	latestHeadNode, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
 		return nil, err
@@ -1557,10 +1563,6 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("execution payload bid is unavailable because the head changed"))
 	}
-	bid := beaconBody.SignedExecutionPayloadBid.Message
-	// HasEnvelope can stay true after a transient read error. Revalidate with the
-	// same resolver as production so an unreadable FULL parent still permits EMPTY.
-	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, slot, clparams.GloasVersion)
 	if bid.ParentBlockHash != payloadSource.head {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			errors.New("execution payload bid is unavailable because the execution parent changed"))
