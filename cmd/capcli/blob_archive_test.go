@@ -17,6 +17,9 @@
 package main
 
 import (
+	"encoding/json"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -153,4 +156,53 @@ func TestArchiveSourceCountsItsRequests(t *testing.T) {
 	_, _, err = s.getRetry(t.Context(), srv.URL, "text/plain")
 	require.NoError(t, err)
 	require.Equal(t, 2, s.requests, "each attempt must be counted")
+}
+
+// Major public beacon endpoints answer /eth/v2/beacon/blocks with JSON whatever the Accept
+// header says, so an SSZ-only decoder cannot use them and archive mode has no free source of
+// full blocks.
+func TestFullBlockDecodesAJSONAnswer(t *testing.T) {
+	const slot = uint64(14_300_002)
+	cfg := clparams.MainnetBeaconConfig
+	v := cfg.GetCurrentStateVersion(slot / cfg.SlotsPerEpoch)
+
+	want := cltypes.NewSignedBeaconBlock(&cfg, v)
+	want.Block.Slot = slot
+	data, err := json.Marshal(want)
+	require.NoError(t, err)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"version":"fulu","data":` + string(data) + `}`))
+	}))
+	defer srv.Close()
+
+	s := newArchiveSource([]string{srv.URL}, srv.URL, 2, 0)
+	got, err := s.fullBlock(t.Context(), slot, &cfg)
+	require.NoError(t, err, "a JSON block must be accepted")
+	require.NotNil(t, got)
+	require.Equal(t, slot, got.Block.Slot)
+}
+
+// An endpoint answering for the wrong slot must still be rejected on the JSON path, or the run
+// would silently attribute one block's blobs to another slot.
+func TestFullBlockRejectsAJSONAnswerForTheWrongSlot(t *testing.T) {
+	const asked = uint64(14_300_002)
+	cfg := clparams.MainnetBeaconConfig
+	v := cfg.GetCurrentStateVersion(asked / cfg.SlotsPerEpoch)
+
+	other := cltypes.NewSignedBeaconBlock(&cfg, v)
+	other.Block.Slot = asked + 1
+	data, err := json.Marshal(other)
+	require.NoError(t, err)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"version":"fulu","data":` + string(data) + `}`))
+	}))
+	defer srv.Close()
+
+	s := newArchiveSource([]string{srv.URL}, srv.URL, 2, 0)
+	_, err = s.fullBlock(t.Context(), asked, &cfg)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "answered slot")
 }

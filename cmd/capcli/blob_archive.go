@@ -17,9 +17,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,19 +170,33 @@ func (s *archiveSource) fullBlock(ctx context.Context, slot uint64, beaconCfg *c
 		if !found {
 			continue
 		}
-		if len(raw) < 108 {
-			lastErr = fmt.Errorf("block response too short: %d bytes", len(raw))
-			continue
-		}
-		gotSlot := binary.LittleEndian.Uint64(raw[100:108])
-		if gotSlot != slot {
-			lastErr = fmt.Errorf("endpoint answered slot %d for %d", gotSlot, slot)
-			continue
-		}
 		v := beaconCfg.GetCurrentStateVersion(slot / beaconCfg.SlotsPerEpoch)
 		block := cltypes.NewSignedBeaconBlock(beaconCfg, v)
-		if err := block.DecodeSSZ(raw, int(v)); err != nil {
-			lastErr = fmt.Errorf("decode block: %w", err)
+		// Major public endpoints answer with JSON whatever the Accept header asks for.
+		if body := bytes.TrimSpace(raw); len(body) > 0 && body[0] == '{' {
+			var envelope struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil {
+				lastErr = fmt.Errorf("decode block envelope: %w", err)
+				continue
+			}
+			if err := json.Unmarshal(envelope.Data, block); err != nil {
+				lastErr = fmt.Errorf("decode block json: %w", err)
+				continue
+			}
+		} else {
+			if len(raw) < 108 {
+				lastErr = fmt.Errorf("block response too short: %d bytes", len(raw))
+				continue
+			}
+			if err := block.DecodeSSZ(raw, int(v)); err != nil {
+				lastErr = fmt.Errorf("decode block: %w", err)
+				continue
+			}
+		}
+		if block.Block.Slot != slot {
+			lastErr = fmt.Errorf("endpoint answered slot %d for %d", block.Block.Slot, slot)
 			continue
 		}
 		return block, nil
