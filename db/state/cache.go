@@ -33,9 +33,8 @@ type domainGetFromFileCacheItem struct {
 }
 
 var (
-	domainGetFromFileCacheSize    = dbg.EnvDataSize("D_LRU_SIZE", 64*datasize.MB)
-	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
-	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
+	domainGetFromFileCacheSize  = dbg.EnvDataSize("D_LRU_SIZE", 64*datasize.MB)
+	domainGetFromFileCacheTrace = dbg.EnvBool("D_LRU_TRACE", false)
 
 	domainGetFromFileCacheHits, domainGetFromFileCacheMisses [kv.DomainLen]atomic.Uint64
 )
@@ -72,7 +71,7 @@ func countDomainGetFromFileCache(d kv.Domain, hit bool) {
 // and those files stay open while any tx can reach the set.
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{name: name, files: files}
-	if domainGetFromFileCacheEnabled && domainGetFromFileCacheSize > 0 {
+	if domainGetFromFileCacheSize > 0 {
 		d.cache = cache.NewByteLRU(domainGetFromFileCacheSize, func(_ uint64, it domainGetFromFileCacheItem) int64 {
 			return int64(len(it.v)) + cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
 		})
