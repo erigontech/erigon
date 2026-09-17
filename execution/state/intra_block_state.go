@@ -2318,10 +2318,13 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	}
 	balSource, balVersion := StorageRead, UnknownVersion
+	var balCell uint256.Int
+	balCellKnown := false
 	if sdb.versionMap != nil {
-		if _, res, ok := sdb.versionMap.ReadBalance(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
+		if v, res, ok := sdb.versionMap.ReadBalance(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			balCell, balCellKnown = v, true
 		}
 	}
 	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
@@ -2392,7 +2395,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
 		if vr, seen := sdb.versionedReads.GetBalance(addr); !seen {
-			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+			balRead := newObj.Balance()
+			if balCellKnown && !carryBalanceValid {
+				balRead = balCell
+			}
+			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, balRead})
 		} else if vr.internal {
 			vr.internal = false
 			sdb.versionedReads.SetBalance(addr, vr)

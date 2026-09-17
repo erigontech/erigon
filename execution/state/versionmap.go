@@ -1382,10 +1382,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				if matchesLive() {
 					valid = VersionValid
 				} else if valid == VersionValid && path == BalancePath {
-					if _, resurrected := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex, txIndex, true); !resurrected {
-						valid = VersionInvalid
-						invReason = "done-balance"
-					}
+					valid = VersionInvalid
+					invReason = "done-balance"
 				}
 			}
 			if valid == VersionInvalid && invReason == "" {
