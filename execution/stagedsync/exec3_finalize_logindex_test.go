@@ -29,7 +29,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -87,9 +89,7 @@ func newParallelLogIndexTestExec(db kv.TemporalRwDB, domains *execctx.SharedDoma
 	}
 }
 
-func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx) {
-	t.Helper()
-	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+func newLogIndexTestBlock(tasks []exec.Task) *blockExecutor {
 	be := newBlockExec(newParallelTestBlockFromTasks(tasks), new(protocol.GasPool).AddGas(tasks[0].BlockGasLimit()),
 		nil, make(chan applyResult, 4), nil, false, nil)
 	be.tasks = make([]*execTask, len(tasks))
@@ -97,6 +97,13 @@ func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.Temp
 	for i, task := range tasks {
 		be.tasks[i] = &execTask{Task: task, index: i}
 	}
+	return be
+}
+
+func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx) {
+	t.Helper()
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	be := newLogIndexTestBlock(tasks)
 	for i, task := range be.tasks {
 		be.execTasks.setInProgress(i)
 		version := task.Version()
@@ -155,6 +162,67 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 	runParallelLogIndexTestBlock(t, pe, rwTx)
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
+}
+
+// The final virtual transaction clears the latest receipt-cache value, while
+// history preserves the last regular receipt. Indexing block-end system-call
+// logs must leave that receipt readable at its original transaction number.
+func TestParallelBlockEndLogsPreserveReceiptHistory(t *testing.T) {
+	savedRCache := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
+
+	db := newResumeTestDB(t)
+	seedLogEmittingContract(t, db, logIndexContract)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 1)
+	pe.rs = state.NewStateV3Buffered(state.NewStateV3(domains, true, pe.logger))
+
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, pe.cfg.chainConfig, 0)}
+	for i, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.TxIndex = i
+		txTask.Txs = txs
+	}
+	be := newLogIndexTestBlock(tasks)
+	regularTask, finalTask := be.tasks[0], be.tasks[1]
+	regularVersion := regularTask.Version()
+	regularVersion.Incarnation = 1
+	be.execTasks.setInProgress(0)
+	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: regularTask, version: regularVersion},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed:        21_000,
+			BlockExecutionGasUsed: 21_000,
+		},
+	}, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, res)
+	cachedReceipt, _, err := domains.GetLatest(kv.RCacheDomain, rwTx, rawtemporaldb.ReceiptCacheKey)
+	require.NoError(t, err)
+	require.NotEmpty(t, cachedReceipt)
+
+	finalVersion := finalTask.Version()
+	finalVersion.Incarnation = 1
+	be.execTasks.setInProgress(1)
+	res, err = be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: finalTask, version: finalVersion},
+	}, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NoError(t, res.Err)
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+
+	priorReceipt, ok, err := rwTx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, regularVersion.TxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, cachedReceipt, priorReceipt)
+	latestReceipt, _, err := rwTx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, latestReceipt)
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
