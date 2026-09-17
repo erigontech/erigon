@@ -167,13 +167,15 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		BlockNumber:       hexutil.Uint64(protoReceipt.BlockNumber),
 		TransactionHash:   txHash,
 		TransactionIndex:  hexutil.Uint64(protoReceipt.TransactionIndex),
-		From:              common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From)),
 		To:                nonZeroAddress(protoReceipt.To),
 		Type:              hexutil.Uint(protoReceipt.Type),
 		GasUsed:           hexutil.Uint64(protoReceipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(protoReceipt.CumulativeGasUsed),
 		ContractAddress:   nonZeroAddress(protoReceipt.ContractAddress),
 		Status:            &status,
+	}
+	if protoReceipt.From != nil {
+		result.From = common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From))
 	}
 	if n := len(protoReceipt.LogsBloom); n == types.BloomByteLength {
 		bloom := types.BytesToBloom(protoReceipt.LogsBloom)

@@ -97,7 +97,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		db:                    db,
 		blockReader:           blockReader,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
-		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events, chainConfig),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,

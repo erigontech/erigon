@@ -83,7 +83,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), m.ChainConfig)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	subscriptionReadyWg := sync.WaitGroup{}

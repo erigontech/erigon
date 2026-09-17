@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -36,6 +37,7 @@ type ReceiptsFilterAggregator struct {
 	receiptsFilterLock sync.Mutex
 	nextFilterId       uint64
 	events             *shards.Events
+	signer             *types.Signer
 }
 
 type ReceiptsFilter struct {
@@ -44,7 +46,11 @@ type ReceiptsFilter struct {
 	sender      remoteproto.ETHBACKEND_SubscribeReceiptsServer
 }
 
-func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregator {
+func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Config) *ReceiptsFilterAggregator {
+	signer := &types.Signer{}
+	if chainConfig != nil {
+		signer = types.LatestSigner(chainConfig)
+	}
 	return &ReceiptsFilterAggregator{
 		aggReceiptsFilter: ReceiptsFilter{
 			txHashes: make(map[common.Hash]int),
@@ -52,6 +58,7 @@ func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregato
 		receiptsFilters: make(map[uint64]*ReceiptsFilter),
 		nextFilterId:    0,
 		events:          events,
+		signer:          signer,
 	}
 }
 
@@ -160,7 +167,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 				}
 			}
 			if proto == nil {
-				proto = receiptNotificationToProto(rn)
+				proto = a.receiptNotificationToProto(rn)
 			}
 			if err := filter.sender.Send(proto); err != nil {
 				filtersToDelete[filterId] = filter
@@ -174,7 +181,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 }
 
 // receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.
-func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
+func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
 	receipt := rn.Receipt
 	blockNum := receipt.BlockNumber.Uint64()
 	var blockTimestamp uint64
@@ -213,8 +220,7 @@ func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remotepr
 
 	// Add transaction data (from/to)
 	if rn.Tx != nil {
-		signer := types.MakeSigner(nil, blockNum, 0)
-		if sender, err := rn.Tx.Sender(*signer); err == nil {
+		if sender, err := rn.Tx.Sender(*a.signer); err == nil {
 			protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
 		}
 		if to := rn.Tx.GetTo(); to != nil {
