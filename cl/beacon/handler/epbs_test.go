@@ -2882,53 +2882,125 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 		{name: "different validator", change: func(p *cltypes.SignedProposerPreferences) { p.Message.ValidatorIndex++ }, wantStatus: http.StatusBadRequest},
 		{name: "different signature", change: func(p *cltypes.SignedProposerPreferences) { p.Signature[0]++ }, wantStatus: http.StatusBadRequest},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		for _, withService := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/service=%t", test.name, withService), func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				config := clparams.MainnetBeaconConfig
+				// Keep the request well inside the valid time window without sleeping.
+				config.SecondsPerSlot = uint64(time.Hour / time.Second)
+				stored := &cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot: 96, ValidatorIndex: 42, DependentRoot: common.Hash{0x11},
+						FeeRecipient: common.Address{0x22}, TargetGasLimit: 30_000_000,
+					},
+					Signature: common.Bytes96{0x33},
+				}
+				epbsPool := pool.NewEpbsPool()
+				epbsPool.AddProposerPreference(stored)
+				generation := epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot)
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
+				clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
+				clock.EXPECT().GetCurrentSlot().Return(stored.Message.ProposalSlot - 1).AnyTimes()
+				clock.EXPECT().GetCurrentEpoch().Return((stored.Message.ProposalSlot - 1) / config.SlotsPerEpoch).AnyTimes()
+				handler := &ApiHandler{
+					epbsPool:       epbsPool,
+					beaconChainCfg: &config,
+					ethClock:       clock,
+					gossipManager:  gossip_mock.NewMockGossip(ctrl),
+					sentinel:       &nonNilSentinelClient{},
+				}
+				if withService {
+					handler.proposerPreferencesService = services.NewProposerPreferencesService(nil, nil, clock, &config, epbsPool, nil)
+				}
+				retry := stored.Clone().(*cltypes.SignedProposerPreferences)
+				submitted := stored.Clone().(*cltypes.SignedProposerPreferences)
+				if test.change != nil {
+					test.change(submitted)
+				}
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+				handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{retry, submitted})
+
+				require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
+				if test.wantStatus != http.StatusOK {
+					var response poolingError
+					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+					require.Len(t, response.Failures, 1)
+					require.Equal(t, 1, response.Failures[0].Index)
+				}
+				retained, ok := epbsPool.GetPreference(stored.Message.ProposalSlot, stored.Message.DependentRoot)
+				require.True(t, ok)
+				require.Same(t, stored, retained)
+				require.Equal(t, retry, retained)
+				require.Equal(t, generation, epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot))
+			})
+		}
+	}
+}
+
+func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
+	for _, conflicting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("conflicting=%t", conflicting), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			config := clparams.MainnetBeaconConfig
-			// Keep the request well inside the valid time window without sleeping.
-			config.SecondsPerSlot = uint64(time.Hour / time.Second)
-			stored := &cltypes.SignedProposerPreferences{
-				Message: &cltypes.ProposerPreferences{
-					ProposalSlot: 96, ValidatorIndex: 42, DependentRoot: common.Hash{0x11},
-					FeeRecipient: common.Address{0x22}, TargetGasLimit: 30_000_000,
-				},
-				Signature: common.Bytes96{0x33},
-			}
-			epbsPool := pool.NewEpbsPool()
-			epbsPool.AddProposerPreference(stored)
-			generation := epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot)
 			clock := eth_clock.NewMockEthereumClock(ctrl)
-			genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
-			clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
-			service := services.NewProposerPreferencesService(nil, nil, clock, &config, epbsPool, nil)
+			clock.EXPECT().GetCurrentSlot().Return(uint64(95)).AnyTimes()
+			clock.EXPECT().GetCurrentEpoch().Return(uint64(2)).AnyTimes()
+			epbsPool := pool.NewEpbsPool()
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			var gossipCalls atomic.Uint32
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameProposerPreferences, gomock.Any()).
+				DoAndReturn(func(context.Context, string, []byte) error {
+					gossipCalls.Add(1)
+					return nil
+				}).AnyTimes()
 			handler := &ApiHandler{
-				epbsPool:                   epbsPool,
-				proposerPreferencesService: service,
-				gossipManager:              gossip_mock.NewMockGossip(ctrl),
-				sentinel:                   &nonNilSentinelClient{},
+				epbsPool:       epbsPool,
+				beaconChainCfg: &config,
+				ethClock:       clock,
+				gossipManager:  gossipManager,
+				sentinel:       &nonNilSentinelClient{},
 			}
-			retry := stored.Clone().(*cltypes.SignedProposerPreferences)
-			submitted := stored.Clone().(*cltypes.SignedProposerPreferences)
-			if test.change != nil {
-				test.change(submitted)
+			const requests = 16
+			preferences := make([]*cltypes.SignedProposerPreferences, requests)
+			recorders := make([]*httptest.ResponseRecorder, requests)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for i := range requests {
+				preference := &cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot: 96, ValidatorIndex: 42, DependentRoot: common.Hash{0x11},
+						FeeRecipient: common.Address{0x22}, TargetGasLimit: 30_000_000,
+					},
+					Signature: common.Bytes96{0x33},
+				}
+				if conflicting {
+					preference.Message.TargetGasLimit += uint64(i)
+				}
+				preferences[i] = preference
+				recorders[i] = httptest.NewRecorder()
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+				wg.Go(func() {
+					<-start
+					handler.postProposerPreferences(recorders[i], request, []*cltypes.SignedProposerPreferences{preference})
+				})
 			}
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+			close(start)
+			wg.Wait()
 
-			handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{retry, submitted})
-
-			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
-			if test.wantStatus != http.StatusOK {
-				var response poolingError
-				require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-				require.Len(t, response.Failures, 1)
-				require.Equal(t, 1, response.Failures[0].Index)
-			}
-			retained, ok := epbsPool.GetPreference(stored.Message.ProposalSlot, stored.Message.DependentRoot)
+			stored, ok := epbsPool.GetPreference(96, common.Hash{0x11})
 			require.True(t, ok)
-			require.Same(t, stored, retained)
-			require.Equal(t, retry, retained)
-			require.Equal(t, generation, epbsPool.ProposerPreferencesGeneration(stored.Message.ProposalSlot))
+			for i, preference := range preferences {
+				wantStatus := http.StatusOK
+				if preference.Message.TargetGasLimit != stored.Message.TargetGasLimit {
+					wantStatus = http.StatusBadRequest
+				}
+				require.Equal(t, wantStatus, recorders[i].Code, recorders[i].Body.String())
+			}
+			require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(96))
+			require.Equal(t, uint32(1), gossipCalls.Load())
 		})
 	}
 }

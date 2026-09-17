@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -30,6 +31,10 @@ func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
 func (m *slotMap[K, V]) Add(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.add(key, value)
+}
+
+func (m *slotMap[K, V]) add(key K, value V) {
 	m.values[key] = value
 	slot := m.slotFor(key)
 	if m.bySlot[slot] == nil {
@@ -237,6 +242,23 @@ func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPrefe
 		Slot:          slot,
 		DependentRoot: preference.Message.DependentRoot,
 	}, preference)
+}
+
+// InsertProposerPreference keeps the first preference for a slot and dependent root.
+// It returns false without mutation for an identical signed retry, or an error for a conflict.
+func (p *EpbsPool) InsertProposerPreference(preference *cltypes.SignedProposerPreferences) (inserted bool, err error) {
+	preferences := p.ProposerPreferences
+	preferences.mu.Lock()
+	defer preferences.mu.Unlock()
+	key := ProposerPreferencesKey{Slot: preference.Message.ProposalSlot, DependentRoot: preference.Message.DependentRoot}
+	if stored, ok := preferences.values[key]; ok {
+		if stored != nil && stored.Message != nil && *stored.Message == *preference.Message && stored.Signature == preference.Signature {
+			return false, nil
+		}
+		return false, errors.New("different proposer preferences already stored for this slot and dependent root")
+	}
+	preferences.add(key, preference)
+	return true, nil
 }
 
 // ProposerPreferencesGeneration returns the current generation for one proposal slot.

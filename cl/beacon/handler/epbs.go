@@ -750,7 +750,14 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
 				continue
 			}
-			a.epbsPool.AddProposerPreference(req)
+			inserted, err := a.epbsPool.InsertProposerPreference(req)
+			if err != nil {
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
+			}
+			if !inserted {
+				continue
+			}
 		}
 
 		if a.sentinel != nil {
