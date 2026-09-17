@@ -69,7 +69,7 @@ func Get(out io.Writer) *StackStream {
 // Put returns a stream to the pool. The caller must hold no view of Buffer()
 // afterwards, and must not write to the stream again.
 func Put(ss *StackStream) {
-	if cap(ss.stream.Buffer()) > maxPooledBufferSize || cap(ss.large) > maxPooledBufferSize {
+	if cap(ss.stream.Buffer()) > maxPooledBufferSize {
 		return
 	}
 	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
