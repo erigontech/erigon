@@ -1845,10 +1845,10 @@ func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.
 	return nil, nil
 }
 
-// putLogEmittingContract writes `LOG0` bytecode at addr so that every system
+// putLogEmittingContract writes `LOG1` bytecode at addr so that every system
 // call to it appends exactly one log to the caller's IntraBlockState.
 func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
-	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
+	code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
 	acc := accounts.NewAccount()
 	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {

@@ -73,6 +73,8 @@ func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
 
 	require.Equal(t, []uint64{task.TxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	topic := common.Hash{31: 0x42}
+	require.Equal(t, []uint64{task.TxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, topic[:]))
 }
 
 func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
@@ -128,4 +130,6 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 
 	require.Equal(t, []uint64{txTask.TxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	topic := common.Hash{31: 0x42}
+	require.Equal(t, []uint64{txTask.TxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, topic[:]))
 }
