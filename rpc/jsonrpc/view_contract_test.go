@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -281,4 +282,31 @@ func TestCallManyResolvesTheOverlayHead(t *testing.T) {
 
 	_, err := api.CallMany(h.m.Ctx, bundles, stateCtx, nil, nil)
 	require.NoError(t, err)
+}
+
+// TestCallBundleRejectsNonCanonicalBlockHash pins the pairing between the
+// parent header and the state: the header is read by the resolved hash while
+// the state is canonical history at that height, so a side-chain selector has
+// to be rejected rather than mixed with canonical state.
+func TestCallBundleRejectsNonCanonicalBlockHash(t *testing.T) {
+	api, m, pendingNum := pendingTestAPIs(t, false)
+	tip := pendingNum - 1
+
+	var txHash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		hash, ok, err := m.BlockReader.CanonicalHash(m.Ctx, tx, tip)
+		require.NoError(t, err)
+		require.True(t, ok)
+		block, _, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, tip)
+		require.NoError(t, err)
+		require.NotEmpty(t, block.Transactions())
+		txHash = block.Transactions()[0].Hash()
+		return nil
+	}))
+
+	sideHeader := writeNonCanonicalTestBlock(t, m)
+	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+
+	_, err := api.CallBundle(m.Ctx, []common.Hash{txHash}, selector, nil)
+	require.ErrorContains(t, err, "is not currently canonical")
 }

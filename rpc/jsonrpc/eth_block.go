@@ -88,7 +88,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader)
+	stateBlockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
