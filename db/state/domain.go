@@ -472,8 +472,6 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		name:      dt.d.Name,
-		tmpdir:    tmpdir,
-		logger:    dt.d.logger,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	return w
@@ -482,8 +480,6 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 type DomainBufferedWriter struct {
 	values *etl.Collector
 	name   kv.Domain
-	tmpdir string
-	logger log.Logger
 
 	discard bool
 
@@ -552,7 +548,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (w *DomainBufferedWriter) valsCollector() *etl.Collector {
 	if w.values == nil {
-		w.values = newWriterCollector(w.name.String()+"domain.flush", w.tmpdir, w.logger)
+		w.values = newWriterCollector(w.name.String()+"domain.flush", w.h.ii.tmpdir, w.h.ii.logger)
 	}
 	return w.values
 }
