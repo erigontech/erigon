@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"strconv"
 
@@ -217,7 +218,14 @@ func (b Uint64) MarshalText() ([]byte, error) {
 
 // AppendText implements encoding.TextAppender (alloc-free MarshalText).
 func (b Uint64) AppendText(dst []byte) ([]byte, error) {
-	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
+	dst = append(dst, HexPrefix...)
+	if b == 0 {
+		return append(dst, '0'), nil
+	}
+	for shift := (bits.Len64(uint64(b))+3)/4*4 - 4; shift >= 0; shift -= 4 {
+		dst = append(dst, "0123456789abcdef"[b>>uint(shift)&0xf])
+	}
+	return dst, nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
