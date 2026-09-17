@@ -97,6 +97,7 @@ func BenchmarkBtreeIndexGetValSizeCompressedCode(b *testing.B) {
 		}
 	}
 }
+
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
 	if testing.Short() {

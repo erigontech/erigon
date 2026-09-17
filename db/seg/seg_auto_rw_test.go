@@ -45,6 +45,7 @@ func writeKVFile(t *testing.T, compression FileCompression, words [][]byte) stri
 	require.NoError(t, c.Compress())
 	return file
 }
+
 func TestReaderPeekSizePreservesPosition(t *testing.T) {
 	words := [][]byte{
 		[]byte("key-0"), bytes.Repeat([]byte("pattern-"), 8192),

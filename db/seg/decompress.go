@@ -1043,6 +1043,7 @@ func (g *Getter) PeekSize() int {
 	g.dataP, g.dataBit = dataP, dataBit
 	return int(wordLen)
 }
+
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
