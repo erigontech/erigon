@@ -760,7 +760,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt, dstDir)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
 	defer wal.Close()
 	if err != nil {
 		return err

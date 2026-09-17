@@ -304,6 +304,19 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	}
 }
 
+func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
+	t.Parallel()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	batch := &TemporalMemBatch{}
+	batch.domainWriters[d.Name] = writer
+	require.NoError(t, d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir(), false))
+}
+
 // TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
 // dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
 // directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
