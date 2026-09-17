@@ -22,7 +22,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http/httptest"
-	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -68,12 +67,6 @@ func BenchmarkUnmarshalUint64(b *testing.B) {
 		_ = v.UnmarshalJSON(input)
 	}
 }
-
-// discardJSONWriter reuses one buffer, as a response stream does.
-type discardJSONWriter struct{ buf []byte }
-
-func (w *discardJSONWriter) AvailableBuffer(n int) []byte { return slices.Grow(w.buf[:0], n) }
-func (w *discardJSONWriter) WriteRawBytes(v []byte)       { w.buf = v[:0] }
 
 // BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs MarshalFastJSONTo.
 func BenchmarkBytesMarshalJSON(b *testing.B) {
