@@ -231,7 +231,7 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
-// rpcMarshalHeader aliases the header it is given: the U256 quantities, the
+// RPCMarshalHeader aliases the header it is given: the U256 quantities, the
 // extraData slice and the fields callers may null out all point straight at it.
 // RPCMarshalBlock must therefore hand it a copy — the result is mutable and
 // exported, and the block keeps its memoized hash, so a caller writing through
