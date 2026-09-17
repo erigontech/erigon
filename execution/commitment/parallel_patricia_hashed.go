@@ -316,6 +316,8 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		}
 	}()
 
+	// This path calls PutBranch directly rather than through a BranchEncoder,
+	// so it is the only place the parallel engine's branch writes get counted.
 	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
 	var claimed, written, bytesOut atomic.Int64
 	var g errgroup.Group
