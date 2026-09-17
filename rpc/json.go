@@ -139,9 +139,8 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 	return nil
 }
 
-// responseWriter receives json.Encoder or MarshalFastJSONTo output. Encode writes once, after the whole
-// value has encoded, and MarshalFastJSONTo returns any error before its first write, so a result that
-// fails leaves the stream untouched.
+// responseWriter receives json.Encoder output. Encode writes once, and only after the whole
+// value has encoded, so a result that fails leaves the stream untouched.
 type responseWriter struct {
 	stream jsonstream.Stream
 	id     json.RawMessage
