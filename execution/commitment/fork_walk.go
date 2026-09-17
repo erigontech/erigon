@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -75,6 +76,15 @@ func (p *ctxLeasePool) acquire(ctx context.Context) (*ctxLease, error) {
 
 func (p *ctxLeasePool) release(l *ctxLease) { p.free <- l }
 
+func (p *ctxLeasePool) tryAcquire() *ctxLease {
+	select {
+	case l := <-p.free:
+		return l
+	default:
+		return nil
+	}
+}
+
 func (p *ctxLeasePool) context(l *ctxLease) PatriciaContext {
 	if !l.made {
 		l.ctx, l.cleanup = p.factory(p.round)
@@ -107,6 +117,7 @@ type forkWalk struct {
 	traceW        io.Writer
 	grain         uint32
 	forks         atomic.Uint64
+	helpers       atomic.Uint64
 }
 
 func (fw *forkWalk) attach(ctx context.Context, wk *walker) error {
@@ -204,7 +215,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	fw.forks.Add(1)
 
 	cells := &w.stitchScratch
-	var touched, present [16]bool
+	var touched, present atomic.Uint32
 	var nibs [16]byte
 	n := 0
 	for bm := node.bitmap; bm != 0; {
@@ -214,48 +225,88 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		bm &^= uint16(1) << nib
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
-	fw.detach(wk)
-	var claimed atomic.Int32
-	for range min(n, len(fw.leases.entries)) {
-		g.Go(func() error {
-			l, aerr := fw.leases.acquire(gctx)
-			if aerr != nil {
-				return aerr
-			}
-			held := &walker{lease: l, bindsCtx: true}
-			defer func() {
-				if held.lease != nil {
-					fw.leases.release(held.lease)
-				}
-			}()
-			for {
-				i := int(claimed.Add(1)) - 1
-				if i >= n {
-					return nil
-				}
-				if cerr := fw.runChild(gctx, w, held, node, i, int(nibs[i]), path, cells, &touched, &present); cerr != nil {
-					return cerr
-				}
-			}
+	cctx, cancel := context.WithCancel(ctx)
+	var g errgroup.Group
+	defer func() {
+		cancel()
+		_ = g.Wait()
+	}()
+	var (
+		claimed  atomic.Int32
+		failOnce sync.Once
+		firstErr error
+	)
+	fail := func(err error) {
+		failOnce.Do(func() {
+			firstErr = err
+			cancel()
 		})
 	}
+	next := func() int { return int(claimed.Add(1)) - 1 }
+	run := func(cw *walker, i int) error {
+		return fw.runChild(cctx, w, cw, node, i, int(nibs[i]), path, cells, &touched, &present)
+	}
 
-	if werr := g.Wait(); werr != nil {
-		return werr
+	own := &walker{lease: wk.lease, bindsCtx: true}
+	if wk.bindsCtx {
+		w.ResetContext(nil)
 	}
-	if aerr := fw.attach(ctx, wk); aerr != nil {
-		return aerr
-	}
-	var touchedBits, presentBits uint16
-	for nib := range 16 {
-		if touched[nib] {
-			touchedBits |= uint16(1) << nib
+	wk.lease = nil
+	started := 0
+	for {
+		for started < n-1 && int(claimed.Load()) < n-1 {
+			l := fw.leases.tryAcquire()
+			if l == nil {
+				break
+			}
+			started++
+			fw.helpers.Add(1)
+			g.Go(func() error {
+				held := &walker{lease: l, bindsCtx: true}
+				defer func() {
+					if held.lease != nil {
+						fw.leases.release(held.lease)
+					}
+				}()
+				for i := next(); i < n; i = next() {
+					if err := run(held, i); err != nil {
+						fail(err)
+						return nil
+					}
+				}
+				return nil
+			})
 		}
-		if present[nib] {
-			presentBits |= uint16(1) << nib
+		i := next()
+		if i >= n {
+			break
+		}
+		if err := run(own, i); err != nil {
+			fail(err)
+			break
 		}
 	}
+
+	if started > 0 && own.lease != nil {
+		fw.leases.release(own.lease)
+		own.lease = nil
+	}
+	_ = g.Wait()
+	if firstErr != nil {
+		wk.lease = own.lease
+		return firstErr
+	}
+	if started > 0 {
+		if err := fw.attach(ctx, wk); err != nil {
+			return err
+		}
+	} else {
+		wk.lease = own.lease
+		if wk.bindsCtx {
+			w.ResetContext(fw.leases.context(wk.lease))
+		}
+	}
+	touchedBits, presentBits := uint16(touched.Load()), uint16(present.Load())
 	stitchSplitCells(w, cells, touchedBits, presentBits)
 	if passNib >= 0 && int(nibs[0]) == passNib {
 		bit := uint16(1) << passNib
@@ -270,7 +321,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 }
 
 func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
-	idx, nib int, path []byte, cells *[16]cell, touched, present *[16]bool) error {
+	idx, nib int, path []byte, cells *[16]cell, touched, present *atomic.Uint32) error {
 	child := node.children[idx]
 	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
 	childPath = append(childPath, path...)
@@ -290,9 +341,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if merr := PremergeDeferredUpdates(cw.trie.branchEncoder.deferred); merr != nil {
 		return fmt.Errorf("fork[%x]: child %x premerge: %w", path, nib, merr)
 	}
-	bit := uint16(1) << nib
-	touched[nib] = cw.trie.touchMap[0]&bit != 0
-	present[nib] = cw.trie.afterMap[0]&bit != 0
+	bit := uint32(1) << nib
+	touched.Or(uint32(cw.trie.touchMap[0]) & bit)
+	present.Or(uint32(cw.trie.afterMap[0]) & bit)
 	cells[nib] = c
 	return nil
 }
@@ -317,6 +368,9 @@ func (fw *forkWalk) checkin(wk *walker) {
 	wk.trie = nil
 	w.ResetContext(nil)
 	fw.metrics.Merge(w.metrics)
-	fw.pu.appendDeferred(w.TakeDeferredUpdates())
+	recs := w.branchEncoder.deferred
+	fw.pu.appendDeferred(recs)
+	clear(recs)
+	w.branchEncoder.deferred = recs[:0]
 	w.Release()
 }

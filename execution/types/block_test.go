@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -121,7 +120,7 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := BlockAccessList{{Address: common.Address{1}}}
 	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
 	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
 		t.Errorf("BAL mismatch: got %v want %v", got, bal)
@@ -173,7 +172,7 @@ func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
 	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
 	block.size.Store(123)
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 
 	withSidecar := block.WithBlockAccessListSidecar(sidecar)
@@ -801,4 +800,20 @@ func TestBodyDecodeRejectsWrappedLegacyTransaction(t *testing.T) {
 	var body Body
 	err = rlp.DecodeBytes(bodyRLP, &body)
 	require.ErrorIs(t, err, ErrInvalidTxType)
+}
+
+func TestHeaderMarshalJSONQuantities(t *testing.T) {
+	h := &Header{Number: *uint256.NewInt(0x18c5467), Difficulty: *uint256.NewInt(0), BaseFee: uint256.NewInt(1_000_000_000)}
+	enc, err := json.Marshal(h)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(enc, &got))
+	require.Equal(t, "0x18c5467", got["number"])
+	require.Equal(t, "0x0", got["difficulty"])
+	require.Equal(t, "0x3b9aca00", got["baseFeePerGas"])
+
+	h.BaseFee = nil
+	enc, err = json.Marshal(h)
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"baseFeePerGas":null`)
 }

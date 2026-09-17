@@ -263,10 +263,17 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	saved := snapshotBase(p.template)
+	savedRoot, savedTouched := p.template.root, p.template.rootTouched
+	savedChecked, savedPresent := p.template.rootChecked, p.template.rootPresent
+	restoreTemplate := func() {
+		p.template.branchEncoder.ClearDeferred()
+		p.template.root, p.template.rootTouched = savedRoot, savedTouched
+		p.template.rootChecked, p.template.rootPresent = savedChecked, savedPresent
+		p.template.activeRows, p.template.currentKeyLen = 0, 0
+	}
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
-		saved.restore(p.template)
+		restoreTemplate()
 		pu.drainDeferred()
 		return nil, mErr
 	}
@@ -277,7 +284,7 @@ func (p *ParallelPatriciaHashed) Process(
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
 	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
-		saved.restore(p.template)
+		restoreTemplate()
 		return nil, aErr
 	}
 

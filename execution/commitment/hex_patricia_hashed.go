@@ -2851,28 +2851,18 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		rootFlags |= stateRootTouched
 	}
 
-	ee := bytes.NewBuffer(buf)
-	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
-		return nil, fmt.Errorf("encode rootFlags: %w", err)
+	buf = slices.Grow(buf, 3+len(s.Root)+len(s.Depths)+2*len(s.TouchMap)+2*len(s.AfterMap)+16)
+	buf = append(buf, byte(rootFlags))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(s.Root)))
+	buf = append(buf, s.Root...)
+	for _, d := range s.Depths[:] {
+		buf = append(buf, byte(d))
 	}
-	if err := binary.Write(ee, binary.BigEndian, uint16(len(s.Root))); err != nil {
-		return nil, fmt.Errorf("encode root len: %w", err)
+	for _, m := range s.TouchMap[:] {
+		buf = binary.BigEndian.AppendUint16(buf, m)
 	}
-	if n, err := ee.Write(s.Root); err != nil || n != len(s.Root) {
-		return nil, fmt.Errorf("encode root: %w", err)
-	}
-	d := make([]byte, len(s.Depths))
-	for i := range len(s.Depths) {
-		d[i] = byte(s.Depths[i])
-	}
-	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
-		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
-		return nil, fmt.Errorf("encode afterMap: %w", err)
+	for _, m := range s.AfterMap[:] {
+		buf = binary.BigEndian.AppendUint16(buf, m)
 	}
 
 	var before1, before2 uint64
@@ -2886,13 +2876,8 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 			before2 |= 1 << j
 		}
 	}
-	if err := binary.Write(ee, binary.BigEndian, before1); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_1: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, before2); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_2: %w", err)
-	}
-	return ee.Bytes(), nil
+	buf = binary.BigEndian.AppendUint64(buf, before1)
+	return binary.BigEndian.AppendUint64(buf, before2), nil
 }
 
 func (s *state) Decode(buf []byte) error {

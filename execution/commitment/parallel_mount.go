@@ -85,29 +85,3 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	pu.appendDeferred(base.TakeDeferredUpdates())
 	return base.RootHash()
 }
-
-type baseSnapshot struct {
-	root        cell
-	rootTouched bool
-	rootChecked bool
-	rootPresent bool
-}
-
-func snapshotBase(base *HexPatriciaHashed) baseSnapshot {
-	return baseSnapshot{
-		root:        base.root,
-		rootTouched: base.rootTouched,
-		rootChecked: base.rootChecked,
-		rootPresent: base.rootPresent,
-	}
-}
-
-func (s baseSnapshot) restore(base *HexPatriciaHashed) {
-	base.branchEncoder.ClearDeferred()
-	base.root = s.root
-	base.rootTouched = s.rootTouched
-	base.rootChecked = s.rootChecked
-	base.rootPresent = s.rootPresent
-	base.activeRows = 0
-	base.currentKeyLen = 0
-}

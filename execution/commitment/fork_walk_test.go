@@ -20,8 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"math/rand"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -312,7 +315,7 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 		defer func() {
 			require.Equal(t, "injected account panic", recover(), "the child must panic inside the walk")
 		}()
-		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, &[16]bool{}, &[16]bool{})
+		_ = fw.runChild(ctx, base, held, node, 0, 0, make([]byte, 63), &cells, new(atomic.Uint32), new(atomic.Uint32))
 	}()
 
 	require.Nil(t, held.trie, "checkin must return the child trie even when the walk panics")
@@ -322,6 +325,179 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 	require.Empty(t, pool.free, "the lease is still held")
 	pool.release(held.lease)
 	require.Len(t, pool.free, 1, "exactly one lease returns to the pool, so a panic neither leaks nor double-releases")
+}
+
+func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
+	pool := newCtxLeasePool(context.Background(), func(context.Context) (PatriciaContext, func()) {
+		return &noopPatriciaContext{}, nil
+	}, 1)
+	defer pool.close()
+	pu := &parallelUpdate{}
+	fw := &forkWalk{
+		leases:        pool,
+		accountKeyLen: length.Addr,
+		cfg:           DefaultTrieConfig(),
+		pu:            pu,
+		metrics:       NewMetrics(""),
+		grain:         ForkGrainNever,
+	}
+	l, err := pool.acquire(context.Background())
+	require.NoError(t, err)
+	defer pool.release(l)
+	wk := &walker{lease: l, bindsCtx: true}
+
+	fw.checkout(wk, nil)
+	w := wk.trie
+	upd := &DeferredBranchUpdate{encoded: BranchData{1}}
+	w.branchEncoder.deferred = append(w.branchEncoder.deferred, upd)
+	collected := w.branchEncoder.deferred
+	fw.checkin(wk)
+
+	require.Equal(t, []*DeferredBranchUpdate{upd}, pu.deferredCombined, "checkin must hand the collected records to the round")
+	require.NotNil(t, upd.encoded, "checkin must not return a record the round owns to the update pool")
+	require.Empty(t, w.branchEncoder.deferred, "the released trie must hold none of the records the round now owns")
+	require.Same(t, &collected[:1][0], &w.branchEncoder.deferred[:1][0], "the released trie must keep the slice it collected into")
+}
+
+func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
+	keys, upds := buildMixedCorpus(20260915, 64)
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	helpers := func(busy int) uint64 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		leases := newCtxLeasePool(ctx, mockTrieCtxFactory(ms), 4)
+		defer leases.close()
+		busyLeases := make([]*ctxLease, 0, busy)
+		for range busy {
+			l, err := leases.acquire(ctx)
+			require.NoError(t, err)
+			busyLeases = append(busyLeases, l)
+		}
+		defer func() {
+			for _, l := range busyLeases {
+				leases.release(l)
+			}
+		}()
+		base := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		defer base.Release()
+		base.branchEncoder.setDeferUpdates(true)
+		base.SetLeaveDeferredForCaller(true)
+		fw := &forkWalk{
+			leases:        leases,
+			accountKeyLen: length.Addr,
+			cfg:           DefaultTrieConfig(),
+			pu:            ut.parallel,
+			metrics:       NewMetrics(""),
+			grain:         1,
+		}
+		bw := &walker{trie: base}
+		require.NoError(t, fw.attach(ctx, bw))
+		root := ut.parallel.trie.root
+		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
+		fw.detach(bw)
+		require.NoError(t, err)
+		require.Positive(t, fw.forks.Load(), "the corpus must fork at grain 1")
+		return fw.helpers.Load()
+	}
+
+	require.Zero(t, helpers(3), "with every other lease busy, a fork must walk its children on its own lease instead of starting helpers that can only wait")
+	require.Positive(t, helpers(0), "with idle leases, a fork must hand children to helpers")
+}
+
+var errInjectedHelperRead = errors.New("injected helper read error")
+
+type failingAccountContext struct {
+	PatriciaContext
+	failed chan struct{}
+}
+
+func (c *failingAccountContext) Account([]byte) (*Update, error) {
+	select {
+	case <-c.failed:
+	default:
+		close(c.failed)
+	}
+	return nil, errInjectedHelperRead
+}
+
+type accountAfterFailureContext struct {
+	PatriciaContext
+	failed chan struct{}
+}
+
+func (c *accountAfterFailureContext) Account(key []byte) (*Update, error) {
+	select {
+	case <-c.failed:
+	case <-time.After(5 * time.Second):
+	}
+	time.Sleep(100 * time.Millisecond)
+	return c.PatriciaContext.Account(key)
+}
+
+func TestForkWalk_HelperErrorIsNotMaskedByCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	keys, upds := buildMixedCorpus(20260915, 64)
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	failed := make(chan struct{})
+	contexts := []PatriciaContext{
+		&accountAfterFailureContext{PatriciaContext: ms, failed: failed},
+		&failingAccountContext{PatriciaContext: ms, failed: failed},
+	}
+	made := 0
+	leases := newCtxLeasePool(ctx, func(context.Context) (PatriciaContext, func()) {
+		c := contexts[made]
+		made++
+		return c, nil
+	}, len(contexts))
+	defer leases.close()
+	first, err := leases.acquire(ctx)
+	require.NoError(t, err)
+	second, err := leases.acquire(ctx)
+	require.NoError(t, err)
+	leases.context(first)
+	leases.context(second)
+	leases.release(first)
+	leases.release(second)
+
+	base := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer base.Release()
+	base.branchEncoder.setDeferUpdates(true)
+	base.SetLeaveDeferredForCaller(true)
+
+	fw := &forkWalk{
+		leases:        leases,
+		accountKeyLen: length.Addr,
+		cfg:           DefaultTrieConfig(),
+		pu:            ut.parallel,
+		metrics:       NewMetrics(""),
+		grain:         1,
+	}
+	bw := &walker{trie: base}
+	require.NoError(t, fw.attach(ctx, bw))
+	require.Same(t, first, bw.lease, "the forking walker must hold the lease whose reads wait for the helper to fail")
+	root := ut.parallel.trie.root
+	err = fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
+	fw.detach(bw)
+
+	require.ErrorIs(t, err, errInjectedHelperRead, "a helper's read error must surface, not the cancellation it causes on the forking walker")
 }
 
 func TestForkWalk_KeyedSurvivorCorpusShape(t *testing.T) {
