@@ -39,11 +39,14 @@ SETHEAD_CALL_TIMEOUT_SEC="${SETHEAD_CALL_TIMEOUT_SEC:-1800}" # 30 min per curl c
 
 # Log lines that abort an iteration. The first group is a wedged or
 # halted node; "append with gap" is the txnum index refusing a head that
-# skips blocks, which spins without ever recovering. The last three are
+# skips blocks, which spins without ever recovering. The next three are
 # snapshot files whose content does not match the range their name
 # claims — corruption that retire/merge reports but recovers from, so
-# head keeps advancing and no other gate would notice.
-FORBIDDEN_PATTERNS="parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment|append with gap|negative txs count|sparse in requested range|unexpected amount after segments merge"
+# head keeps advancing and no other gate would notice. The last two are
+# a recovery stuck on a block it cannot fetch, and the txNums append
+# refusing to pretend it made progress — either one freezes the head for
+# good, so fail the cycle at once instead of burning the whole timeout.
+FORBIDDEN_PATTERNS="parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment|append with gap|negative txs count|sparse in requested range|unexpected amount after segments merge|exec blocks error: nil block|txNums stuck at"
 
 # recovery_timeout_for_depth scales the scenario-3 recovery window with
 # unwind depth. Empirically (2026-06-28 hoodi soaks) the post-setHead
