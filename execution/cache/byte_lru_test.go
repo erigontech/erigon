@@ -17,8 +17,10 @@
 package cache
 
 import (
+	"runtime"
 	"sync/atomic"
 	"testing"
+	"weak"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -38,6 +40,18 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
 	require.Equal(t, used, cachebudget.Global.Used())
+}
+
+func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
+	dropped := func() weak.Pointer[ByteLRU[[]byte]] {
+		b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+		b.Add(1, make([]byte, 64))
+		return weak.Make(b)
+	}()
+	for range 3 {
+		runtime.GC()
+	}
+	require.Nil(t, dropped.Value(), "an unbudgeted cache dropped without Close must be collected")
 }
 
 func TestHashByteLRUMissesForeignHash(t *testing.T) {
