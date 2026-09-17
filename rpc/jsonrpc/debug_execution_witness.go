@@ -753,7 +753,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -1331,7 +1331,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}

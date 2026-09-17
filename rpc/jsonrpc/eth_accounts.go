@@ -37,16 +37,18 @@ import (
 // all addresses in a single eth_getStorageValues request.
 const maxGetStorageSlots = 1024
 
-// stateReaderAt opens a temporal read transaction, resolves the canonical block number,
-// checks prune history and block execution, and creates a state reader.
+// stateReaderAt opens an overlay-aware read transaction, resolves the canonical
+// block number, checks prune history and block execution, and creates a state
+// reader — all on that one transaction, so the block a request resolves and the
+// state it reads back cannot come from different overlay generations.
 // The caller must defer tx.Rollback() on the returned tx.
 func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
-	tx, err := api.db.BeginTemporalRo(ctx) //nolint:gocritic
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		tx.Rollback()
 		return nil, nil, err
@@ -57,13 +59,12 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNumber); err != nil {
+	if err = rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		tx.Rollback()
 		return nil, nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		tx.Rollback()
 		return nil, nil, err
@@ -159,14 +160,14 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, &rpc.InvalidParamsError{Message: "empty request"}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash.RequireCanonical = true
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -176,13 +177,12 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	err = rpchelper.CheckBlockExecuted(stateTx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

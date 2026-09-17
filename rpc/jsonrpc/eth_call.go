@@ -55,6 +55,7 @@ import (
 
 var (
 	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	latestExecutedNumOrHash     = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 	errPendingStateNotSupported = errors.New("pending state is not supported")
 )
 
@@ -125,7 +126,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +155,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args = *argsOrNil
 	}
 
-	dbtx, err := api.db.BeginTemporalRo(ctx)
+	dbtx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
@@ -164,6 +165,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if blockNrOrHash == nil {
 		blockNrOrHash = &latestNumOrHash
 	}
+	// There is no queryable pending state, so estimate against the newest state
+	// the node can serve rather than against a header it cannot back.
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		blockNrOrHash = &latestExecutedNumOrHash
+	}
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -171,23 +177,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	header, isLatest, err := api.headerByNumberOrHash(ctx, dbtx, *blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, dbtx, *blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
-
-	// try to check if it is a pending block
-	if header == nil {
-		b := api.filters.LastPendingBlock()
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return 0, err
-		}
-		if b != nil && blockNum == b.NumberU64() {
-			header = b.HeaderNoCopy()
-		}
-	}
-
 	if header == nil {
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
@@ -203,13 +196,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(dbtx)
-	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -459,7 +451,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +668,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -933,7 +925,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	header, latest, err := api.headerByNumberOrHash(ctx, tx, bNrOrHash)
+	header, latest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -956,7 +948,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}

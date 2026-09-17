@@ -116,7 +116,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	blockNum, _, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), creationData.Tx)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +155,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 
 				// try to recompute the state
-				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.filters, api.stateCache, api._txNumReader)
+				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.stateCache, api._txNumReader)
 				if err != nil {
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
@@ -442,12 +442,12 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	overrideBlockHash = make(map[uint64]common.Hash)
 
 	blockNumber := rpc.BlockNumber(blockNum)
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil || block == nil {
 		return nil, err
 	}

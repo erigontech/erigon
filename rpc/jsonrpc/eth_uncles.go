@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -37,7 +38,11 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	if number == rpc.PendingBlockNumber {
+		return api.pendingUncleByIndex(ctx, tx, index)
+	}
+
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -74,7 +79,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader)
 	if err != nil {
 		return nil, nil
 	}
@@ -111,7 +116,11 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	if number == rpc.PendingBlockNumber {
+		return api.pendingUncleCount(ctx, tx)
+	}
+
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		return &n, err
 	}
@@ -162,5 +171,29 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	n = hexutil.Uint(len(block.Uncles()))
+	return &n, nil
+}
+
+// pendingUncleByIndex and pendingUncleCount serve the "pending" selector from
+// the in-memory pending block, which the block tables never hold.
+func (api *APIImpl) pendingUncleByIndex(ctx context.Context, tx kv.Tx, index hexutil.Uint) (*ethapi.RPCBlock, error) {
+	block, err := api.blockByNumber(ctx, rpc.PendingBlockNumber, tx)
+	if err != nil || block == nil {
+		return nil, err
+	}
+	uncles := block.Uncles()
+	if uint64(index) >= uint64(len(uncles)) {
+		return nil, nil
+	}
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
+	return ethapi.RPCMarshalBlock(uncle, false, false), nil
+}
+
+func (api *APIImpl) pendingUncleCount(ctx context.Context, tx kv.Tx) (*hexutil.Uint, error) {
+	block, err := api.blockByNumber(ctx, rpc.PendingBlockNumber, tx)
+	if err != nil || block == nil {
+		return nil, err
+	}
+	n := hexutil.Uint(len(block.Uncles()))
 	return &n, nil
 }
