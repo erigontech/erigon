@@ -508,17 +508,40 @@ func (s *beaconAPISource) sidecars(ctx context.Context, slot uint64, blockRoot c
 	return nil, nil
 }
 
+const maxBackoff = 60 * time.Second
+
+// backoffDelay grows the wait so it outlasts a throttle that persists for minutes, and defers
+// to the endpoint's own Retry-After when it sends one.
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if attempt <= 1 {
+		return 0
+	}
+	if retryAfter > 0 {
+		return min(retryAfter, maxBackoff)
+	}
+	return min(time.Duration(1<<(attempt-2))*time.Second, maxBackoff)
+}
+
+func parseRetryAfter(header string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
 // get reports ok=false for a 404, and an error for anything else that is not a 200, so
 // "this endpoint does not have it" is never confused with "this endpoint is broken".
 func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, error) {
 	attempts := max(s.maxAttempts, 1)
 	var lastErr error
+	var retryAfter time.Duration
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if attempt > 1 {
+		if d := backoffDelay(attempt, retryAfter); d > 0 {
 			select {
 			case <-ctx.Done():
 				return false, ctx.Err()
-			case <-time.After(time.Duration(attempt-1) * 500 * time.Millisecond):
+			case <-time.After(d):
 			}
 		}
 		s.requests++
@@ -537,6 +560,7 @@ func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, e
 			return false, nil
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("bad status %d", resp.StatusCode)
 			log.Warn("Endpoint throttled or erroring, backing off",
