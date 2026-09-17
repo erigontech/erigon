@@ -36,3 +36,67 @@ type StorProofResult struct {
 	Value *hexutil.U256   `json:"value"`
 	Proof []hexutil.Bytes `json:"proof"`
 }
+
+// MarshalFastJSONTo writes json.Marshal's output without reflection: every value but the key is hex.
+func (r *AccProofResult) MarshalFastJSONTo(w hexutil.JSONWriter) error {
+	w.WriteRaw(`{"address":`)
+	w.WriteHex(r.Address[:])
+	w.WriteRaw(`,"accountProof":`)
+	writeHexArray(w, r.AccountProof)
+	w.WriteRaw(`,"balance":`)
+	writeU256(w, r.Balance)
+	w.WriteRaw(`,"codeHash":`)
+	w.WriteHex(r.CodeHash[:])
+	w.WriteRaw(`,"nonce":`)
+	var buf [20]byte
+	nonce, _ := r.Nonce.AppendText(append(buf[:0], '"'))
+	w.WriteRawBytes(append(nonce, '"'))
+	w.WriteRaw(`,"storageHash":`)
+	w.WriteHex(r.StorageHash[:])
+	w.WriteRaw(`,"storageProof":`)
+	if r.StorageProof == nil {
+		w.WriteRaw(`null}`)
+		return nil
+	}
+	w.WriteRaw(`[`)
+	for i := range r.StorageProof {
+		sp := &r.StorageProof[i]
+		if i > 0 {
+			w.WriteRaw(`,`)
+		}
+		w.WriteRaw(`{"key":`)
+		w.WriteString(sp.Key)
+		w.WriteRaw(`,"value":`)
+		writeU256(w, sp.Value)
+		w.WriteRaw(`,"proof":`)
+		writeHexArray(w, sp.Proof)
+		w.WriteRaw(`}`)
+	}
+	w.WriteRaw(`]}`)
+	return nil
+}
+
+func writeHexArray(w hexutil.JSONWriter, items []hexutil.Bytes) {
+	if items == nil {
+		w.WriteRaw(`null`)
+		return
+	}
+	w.WriteRaw(`[`)
+	for i, item := range items {
+		if i > 0 {
+			w.WriteRaw(`,`)
+		}
+		w.WriteHex(item)
+	}
+	w.WriteRaw(`]`)
+}
+
+func writeU256(w hexutil.JSONWriter, v *hexutil.U256) {
+	if v == nil {
+		w.WriteRaw(`null`)
+		return
+	}
+	var buf [68]byte
+	enc, _ := v.AppendText(append(buf[:0], '"'))
+	w.WriteRawBytes(append(enc, '"'))
+}

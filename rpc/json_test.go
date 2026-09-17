@@ -26,10 +26,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -574,6 +577,43 @@ func TestResponseWritesJSONToStream(t *testing.T) {
 			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
 			jsonstream.Put(s)
 		}
+	}
+}
+
+func TestResponseWritesAccProofResultToStream(t *testing.T) {
+	proof := func(n int) []hexutil.Bytes {
+		nodes := make([]hexutil.Bytes, n)
+		for i := range nodes {
+			nodes[i] = bytes.Repeat([]byte{byte(i + 1)}, 532)
+		}
+		return nodes
+	}
+	for name, result := range map[string]*accounts.AccProofResult{
+		"no storage":    {Address: common.HexToAddress("0x01"), AccountProof: proof(3), Balance: (*hexutil.U256)(uint256.NewInt(7)), Nonce: 3},
+		"empty storage": {AccountProof: []hexutil.Bytes{}, Balance: new(hexutil.U256), StorageProof: []accounts.StorProofResult{}},
+		"slots": {AccountProof: proof(8), Balance: (*hexutil.U256)(uint256.NewInt(1 << 40)), CodeHash: common.HexToHash("0xc0de"), StorageHash: common.HexToHash("0x5707"),
+			StorageProof: []accounts.StorProofResult{
+				{Key: "0x01", Value: (*hexutil.U256)(uint256.NewInt(42)), Proof: proof(5)},
+				{Key: "0x02", Value: new(hexutil.U256), Proof: []hexutil.Bytes{}},
+				{Key: "0x03", Proof: proof(1)},
+			}},
+		"large": {AccountProof: proof(2 * jsonstream.FlushThreshold / 532), Balance: new(hexutil.U256)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(result)
+			require.NoError(t, err)
+			for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+				s := jsonstream.Get(out)
+				respond(s, json.RawMessage(`7`), fastJSONMarshalerTo(result))
+				require.NoError(t, s.Flush())
+				got := s.Buffer()
+				if b, ok := out.(*bytes.Buffer); ok {
+					got = b.Bytes()
+				}
+				require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
+				jsonstream.Put(s)
+			}
+		})
 	}
 }
 

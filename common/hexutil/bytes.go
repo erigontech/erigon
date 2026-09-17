@@ -50,6 +50,11 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	// WriteRaw and WriteRawBytes write already-encoded JSON.
+	WriteRaw(s string)
+	WriteRawBytes(b []byte)
+	// WriteString writes s as a JSON string, escaped.
+	WriteString(s string)
 }
 
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.

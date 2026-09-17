@@ -126,6 +126,9 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 		if err := fm.MarshalFastJSONTo(w); err != nil {
 			return msg.errorResponse(err)
 		}
+		if !w.opened {
+			w.writeResult(nil)
+		}
 	} else if fm, ok := result.(fastJSONResult); ok {
 		enc, err := fm.MarshalFastJSON()
 		if err != nil {
@@ -145,6 +148,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 type responseWriter struct {
 	stream jsonstream.Stream
 	id     json.RawMessage
+	opened bool
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
@@ -152,16 +156,23 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (w *responseWriter) WriteHex(b []byte) {
-	w.writeResultField()
-	w.stream.WriteHex(b)
+func (w *responseWriter) WriteHex(b []byte)      { w.open(); w.stream.WriteHex(b) }
+func (w *responseWriter) WriteRaw(s string)      { w.open(); w.stream.WriteRaw(s) }
+func (w *responseWriter) WriteRawBytes(b []byte) { w.open(); w.stream.WriteRawBytes(b) }
+func (w *responseWriter) WriteString(s string)   { w.open(); w.stream.WriteString(s) }
+
+func (w *responseWriter) open() {
+	if !w.opened {
+		w.opened = true
+		w.writeResultField()
+	}
 }
 
 func (w *responseWriter) writeResult(enc []byte) {
 	if len(enc) == 0 {
 		enc = null
 	}
-	w.writeResultField()
+	w.open()
 	w.stream.WriteRawBytes(enc)
 }
 
