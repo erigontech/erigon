@@ -121,8 +121,8 @@ type fastJSONMarshalerTo interface {
 // If result does not encode, nothing is written and the error response is returned instead.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *jsonrpcMessage {
+	w := &responseWriter{stream: stream, id: msg.ID}
 	if fm, ok := result.(fastJSONMarshalerTo); ok && !isNilPointer(result) {
-		w := &responseWriter{stream: stream, id: msg.ID}
 		if err := fm.MarshalFastJSONTo(w); err != nil {
 			return msg.errorResponse(err)
 		}
@@ -131,63 +131,55 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) *
 		if err != nil {
 			return msg.errorResponse(err)
 		}
-		writeResult(stream, msg.ID, enc)
-	} else if err := json.NewEncoder(&responseWriter{stream: stream, id: msg.ID}).Encode(result); err != nil {
+		w.writeResult(enc)
+	} else if err := json.NewEncoder(w).Encode(result); err != nil {
 		return msg.errorResponse(err)
 	}
 	stream.WriteObjectEnd()
 	return nil
 }
 
-// responseWriter receives json.Encoder or MarshalFastJSONTo output and opens the result field on the
-// first write. Encode writes once, and only after the whole value has encoded, so a result that fails
-// leaves the stream untouched.
+// responseWriter receives json.Encoder or MarshalFastJSONTo output. Encode writes once, after the whole
+// value has encoded, and MarshalFastJSONTo returns any error before its first write, so a result that
+// fails leaves the stream untouched.
 type responseWriter struct {
 	stream jsonstream.Stream
 	id     json.RawMessage
-	opened bool
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
-	writeResult(w.stream, w.id, bytes.TrimSuffix(b, []byte{'\n'}))
+	w.writeResult(bytes.TrimSuffix(b, []byte{'\n'}))
 	return len(b), nil
 }
 
-func (w *responseWriter) open() {
-	if !w.opened {
-		w.opened = true
-		writeResultField(w.stream, w.id)
-	}
+func (w *responseWriter) WriteHex(b []byte) {
+	w.writeResultField()
+	w.stream.WriteHex(b)
 }
 
-func (w *responseWriter) WriteHex(b []byte) {
-	w.open()
-	w.stream.WriteHex(b)
+func (w *responseWriter) writeResult(enc []byte) {
+	if len(enc) == 0 {
+		enc = null
+	}
+	w.writeResultField()
+	w.stream.WriteRawBytes(enc)
+}
+
+func (w *responseWriter) writeResultField() {
+	w.stream.WriteObjectStart()
+	w.stream.WriteObjectField("jsonrpc")
+	w.stream.WriteString(vsn)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("id")
+	w.stream.WriteRawBytes(w.id)
+	w.stream.WriteMore()
+	w.stream.WriteObjectField("result")
 }
 
 // isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
 func isNilPointer(v any) bool {
 	rv := reflect.ValueOf(v)
 	return rv.Kind() == reflect.Pointer && rv.IsNil()
-}
-
-func writeResult(stream jsonstream.Stream, id json.RawMessage, enc []byte) {
-	if len(enc) == 0 {
-		enc = null
-	}
-	writeResultField(stream, id)
-	stream.WriteRawBytes(enc)
-}
-
-func writeResultField(stream jsonstream.Stream, id json.RawMessage) {
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString(vsn)
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteRawBytes(id)
-	stream.WriteMore()
-	stream.WriteObjectField("result")
 }
 
 func errorMessage(err error) *jsonrpcMessage {
