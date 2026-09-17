@@ -783,15 +783,26 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if stateVersion.Before(clparams.GloasVersion) {
 		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}
 	}
+	path := gloasPayloadPathPreFork
+	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
+		path = a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
+	}
+	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+}
+
+func (a *ApiHandler) executionPayloadSourceForGloasPath(
+	baseState *state.CachingBeaconState,
+	baseBlockRoot common.Hash,
+	path gloasPayloadPath,
+) executionPayloadSource {
 	parentBid := baseState.GetLatestExecutionPayloadBid()
 	if parentBid == nil {
 		return executionPayloadSource{head: baseState.GetLatestBlockHash(), gloasPath: gloasPayloadPathEmpty}
 	}
-	if a.isPreGloasParent(baseState) {
+	if path == gloasPayloadPathPreFork {
 		return executionPayloadSource{head: parentBid.BlockHash, gloasPath: gloasPayloadPathPreFork}
 	}
 
-	path := a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}
 	}
@@ -829,17 +840,20 @@ func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSl
 	if !matchesHead {
 		return gloasPayloadPathPending
 	}
-	switch status {
+	return a.gloasPayloadPathForHead(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}, targetSlot)
+}
+
+func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {
+	switch head.PayloadStatus {
 	case cltypes.PayloadStatusPending:
 		return gloasPayloadPathPending
 	case cltypes.PayloadStatusEmpty:
 		return gloasPayloadPathEmpty
 	case cltypes.PayloadStatusFull:
-		head := forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}
 		if !a.forkchoiceStore.ShouldBuildOnFull(head, targetSlot) {
 			return gloasPayloadPathReorgToEmpty
 		}
-		if !a.forkchoiceStore.HasEnvelope(baseBlockRoot) {
+		if !a.forkchoiceStore.HasEnvelope(head.Root) {
 			return gloasPayloadPathPending
 		}
 		return gloasPayloadPathFull

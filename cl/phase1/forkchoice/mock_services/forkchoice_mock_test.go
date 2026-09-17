@@ -42,36 +42,6 @@ func TestResolveHeadPayloadStatusRequiresMatchingHead(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, status)
 }
 
-func TestResolveHeadPayloadStatusRefreshIsConcurrentSafe(t *testing.T) {
-	root := common.Hash{0x41}
-	store := &ForkChoiceStorageMock{
-		HeadVal:              root,
-		HeadPayloadStatusVal: cltypes.PayloadStatusFull,
-	}
-	store.HeadPayloadStatusInvalidated.Store(true)
-
-	var calls sync.WaitGroup
-	results := make(chan struct {
-		status  cltypes.PayloadStatus
-		matches bool
-	}, 32)
-	for range 32 {
-		calls.Go(func() {
-			status, matches := store.ResolveHeadPayloadStatus(root)
-			results <- struct {
-				status  cltypes.PayloadStatus
-				matches bool
-			}{status: status, matches: matches}
-		})
-	}
-	calls.Wait()
-	close(results)
-	for result := range results {
-		require.True(t, result.matches)
-		require.Equal(t, cltypes.PayloadStatusFull, result.status)
-	}
-}
-
 func TestForkChoiceStorageMockStoresEnvelopeWithNilMap(t *testing.T) {
 	mock := &ForkChoiceStorageMock{}
 	root := common.HexToHash("0x1234")

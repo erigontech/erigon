@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,7 +55,6 @@ type ForkChoiceStorageMock struct {
 	HeadVal                               common.Hash
 	HeadSlotVal                           uint64
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
-	HeadPayloadStatusInvalidated          atomic.Bool
 	BlockProcessingVal                    bool
 	ResolveHeadPayloadStatusFn            func(common.Hash) (cltypes.PayloadStatus, bool)
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
@@ -307,7 +305,6 @@ func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) 
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
-	f.HeadPayloadStatusInvalidated.Store(false)
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
@@ -720,9 +717,6 @@ func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (clty
 			return cltypes.PayloadStatusPending, false
 		}
 		return head.PayloadStatus, true
-	}
-	if f.HeadPayloadStatusInvalidated.Load() {
-		_, _, _ = f.GetHead(nil)
 	}
 	if f.HeadVal != root {
 		return cltypes.PayloadStatusPending, false

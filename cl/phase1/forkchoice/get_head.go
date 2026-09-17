@@ -220,6 +220,12 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 
+			// Another reader may have filled the cache while this call waited.
+			if f.headHash != (common.Hash{}) {
+				head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
+				f.publishSelectedHead(head.Root, f.headSlot)
+				return head, f.headSlot, true, nil
+			}
 			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
 				return ForkChoiceNode{}, 0, false, nil
 			}

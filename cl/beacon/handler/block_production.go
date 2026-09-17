@@ -1284,11 +1284,10 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 		return nil
 	}
 	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
-	defaultGasLimit := parentBid.GasLimit
-	if latestParentBid := baseState.GetLatestExecutionPayloadBid(); latestParentBid != nil {
-		defaultGasLimit = latestParentBid.GasLimit
+	targetGasLimit := parentBid.GasLimit
+	if configured, _ := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
+		targetGasLimit = uint64(*configured)
 	}
-	targetGasLimit := a.proposalTargetGasLimit(baseState, targetSlot, proposerIndex, defaultGasLimit)
 	timeout := time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -1358,28 +1357,6 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 		})
 	}
 	return candidates
-}
-
-func (a *ApiHandler) proposalTargetGasLimit(
-	baseState *state.CachingBeaconState,
-	targetSlot uint64,
-	proposerIndex uint64,
-	defaultGasLimit uint64,
-) uint64 {
-	if a.epbsPool == nil {
-		return defaultGasLimit
-	}
-	proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
-	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
-	if err != nil {
-		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-		return defaultGasLimit
-	}
-	pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot)
-	if !ok || pref.Message == nil || pref.Message.ValidatorIndex != proposerIndex {
-		return defaultGasLimit
-	}
-	return pref.Message.TargetGasLimit
 }
 
 func (a *ApiHandler) getBuilderPayload(
@@ -1597,9 +1574,11 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
-		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+		var feeRecipient common.Address
 		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
 			feeRecipient = *options.payloadFeeRecipient
+		} else {
+			feeRecipient = a.feeRecipientForProposal(proposerIndex, targetSlot)
 		}
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, targetSlot)
 		if err != nil {

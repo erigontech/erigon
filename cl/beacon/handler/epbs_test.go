@@ -2424,6 +2424,7 @@ func setupExecutionPayloadBidTest(t *testing.T, ctrl *gomock.Controller) (*ApiHa
 func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+	logs := captureAllProductionLogs(t)
 	slot := payload.SlotNumber
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	var gotFeeRecipient common.Address
@@ -2493,6 +2494,41 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
+	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
+}
+
+func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+	baseRoot := forkchoiceStore.HeadVal
+	forkchoiceStore.SetEnvelope(baseRoot, &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		},
+	})
+	// Model an EMPTY decision followed by a FULL snapshot of the same root.
+	// Revalidation must derive the execution parent from the snapshot it checks.
+	forkchoiceStore.ResolveHeadPayloadStatusFn = func(common.Hash) (cltypes.PayloadStatus, bool) {
+		return cltypes.PayloadStatusEmpty, true
+	}
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: cltypes.PayloadStatusFull}, forkchoiceStore.HeadSlotVal, nil
+	}
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil)
+	handler.engine = engine
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", payload.SlotNumber), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "execution parent changed")
+	require.Empty(t, handler.pendingBuilderPayloads.entries)
 }
 
 func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
@@ -2507,7 +2543,7 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 		{name: "unreadable FULL envelope", wantStatus: http.StatusOK},
 		{name: "FULL envelope becomes readable", recoverEnvelope: true, wantStatus: http.StatusNotFound, wantError: "execution parent changed"},
 		{name: "beacon head changes", changeHead: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
-		{name: "beacon head changes during parent resolution", changeHeadDuringResolution: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
+		{name: "beacon head changes during head resolution", changeHeadDuringResolution: true, wantStatus: http.StatusNotFound, wantError: "head changed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -2536,9 +2572,9 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 						forkchoiceStore.HeadVal = common.Hash{0x99}
 					}
 					if test.changeHeadDuringResolution {
-						forkchoiceStore.ResolveHeadPayloadStatusFn = func(common.Hash) (cltypes.PayloadStatus, bool) {
+						forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 							forkchoiceStore.HeadVal = common.Hash{0x99}
-							return cltypes.PayloadStatusPending, false
+							return forkchoice.ForkChoiceNode{Root: forkchoiceStore.HeadVal, PayloadStatus: cltypes.PayloadStatusPending}, forkchoiceStore.HeadSlotVal, nil
 						}
 					}
 					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil

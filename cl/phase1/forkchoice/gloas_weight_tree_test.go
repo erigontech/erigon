@@ -19,6 +19,8 @@ package forkchoice
 import (
 	"encoding/binary"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,13 +223,9 @@ func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
-	recomputedHead, recomputedSlot, err := store.getHeadGloas()
-	require.NoError(t, err)
-	require.Equal(t, selectedRoot, recomputedHead.Root)
-	require.Equal(t, selectedSlot, recomputedSlot)
 	expectedStatus, matchesHead := store.ResolveHeadPayloadStatus(root)
 	require.True(t, matchesHead)
-	require.Equal(t, expectedStatus, recomputedHead.PayloadStatus)
+	require.Equal(t, cltypes.PayloadStatusEmpty, expectedStatus)
 
 	store.mu.Lock()
 	store.headHash = common.Hash{}
@@ -237,6 +235,104 @@ func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	status, matchesHead := store.ResolveHeadPayloadStatus(root)
 	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
 	require.Equal(t, expectedStatus, status)
+
+	// A recomputation may select a different root. The old root must not inherit
+	// the new head's status, and the published selection must advance with it.
+	childRoot := common.Hash{0xbb}
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = 11
+	child.Block.ParentRoot = root
+	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+	graph.blocks[childRoot] = child
+	store.updateChildren(10, root, childRoot)
+	store.OnTick(12 * cfg.SecondsPerSlot)
+
+	status, matchesHead = store.ResolveHeadPayloadStatus(root)
+	require.False(t, matchesHead)
+	require.Equal(t, cltypes.PayloadStatusPending, status)
+	publishedRoot, publishedSlot, ok = manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, childRoot, publishedRoot)
+	require.Equal(t, uint64(11), publishedSlot)
+	status, matchesHead = store.ResolveHeadPayloadStatus(childRoot)
+	require.True(t, matchesHead)
+	require.Equal(t, cltypes.PayloadStatusEmpty, status)
+}
+
+type countingHeadForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	leafVisits atomic.Int32
+}
+
+func (g *countingHeadForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	g.leafVisits.Add(1)
+	return g.getFinalizedExecutionHashForkGraph.GetCurrentJustifiedCheckpoint(root)
+}
+
+func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
+	const readers = 8
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &countingHeadForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 10}},
+		currentJustified: checkpoint,
+		getStateStarted:  make(chan common.Hash, readers),
+		getStateRelease:  make(chan struct{}),
+	}}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+
+	var wg sync.WaitGroup
+	release := sync.OnceFunc(func() { close(graph.getStateRelease) })
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+	})
+	results := make(chan ForkChoiceNode, readers)
+	for i := range readers {
+		wg.Go(func() {
+			if i%2 == 0 {
+				head, _, _ := store.GetHeadNode()
+				results <- head
+				return
+			}
+			status, matches := store.ResolveHeadPayloadStatus(root)
+			if !matches {
+				results <- ForkChoiceNode{}
+				return
+			}
+			results <- ForkChoiceNode{Root: root, PayloadStatus: status}
+		})
+	}
+	// Park every reader after its cache miss. Once released, only the first
+	// reader needs to walk the tree; the others must reuse that result.
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for range readers {
+		select {
+		case <-graph.getStateStarted:
+		case <-timeout.C:
+			t.Fatal("head readers did not reach checkpoint lookup")
+		}
+	}
+	release()
+	wg.Wait()
+	for range readers {
+		require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, <-results)
+	}
+	require.Equal(t, int32(1), graph.leafVisits.Load(), "one cache invalidation must cause only one tree walk")
 }
 
 func TestResolveHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {

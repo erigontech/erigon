@@ -41,6 +41,7 @@ import (
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
@@ -625,18 +626,17 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 
 func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 	for _, test := range []struct {
-		name            string
-		elapsed         time.Duration
-		staleHead       bool
-		invalidatedHead bool
-		fullHead        bool
-		reorgToEmpty    bool
-		timeout         time.Duration
-		shouldPrepare   bool
+		name          string
+		elapsed       time.Duration
+		staleHead     bool
+		fullHead      bool
+		reorgToEmpty  bool
+		timeout       time.Duration
+		shouldPrepare bool
 	}{
 		{name: "older head after empty-slot deadline", elapsed: 4 * time.Second, staleHead: true, shouldPrepare: true},
 		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
-		{name: "invalidated head after PTC deadline", elapsed: 9100 * time.Millisecond, invalidatedHead: true, shouldPrepare: true},
+		{name: "EMPTY head after PTC deadline", elapsed: 9100 * time.Millisecond, shouldPrepare: true},
 		{name: "FULL head", elapsed: 9100 * time.Millisecond, fullHead: true},
 		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
 	} {
@@ -655,7 +655,6 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 				Slot:            currentSlot,
 			})
 			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
-			forkchoiceStore.HeadPayloadStatusInvalidated.Store(test.invalidatedHead)
 			if test.fullHead {
 				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 				forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
@@ -708,7 +707,9 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 	}{
 		{name: "current Fulu head", elapsed: 8 * time.Second, selectedCurrent: true, shouldPrepare: true},
 		{name: "stale Fulu head before Fulu deadline", elapsed: 4 * time.Second},
+		{name: "stale Fulu head between Gloas and Fulu deadlines", elapsed: 7 * time.Second},
 		{name: "Fulu head in first Gloas slot", elapsed: 8 * time.Second, currentInGloas: true, shouldPrepare: true},
+		{name: "Fulu head after Gloas deadline but before Fulu deadline", elapsed: 7 * time.Second, currentInGloas: true, shouldPrepare: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -1663,7 +1664,7 @@ func TestExecutionPayloadSourceFallsBackToEmptyWhenForkChoiceHeadMoves(t *testin
 	require.Nil(t, source.parentExecutionRequests)
 }
 
-func TestExecutionPayloadSourceRefreshesInvalidatedGloasHead(t *testing.T) {
+func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
@@ -1674,8 +1675,10 @@ func TestExecutionPayloadSourceRefreshesInvalidatedGloasHead(t *testing.T) {
 		Slot:            postState.Slot(),
 	})
 	forkchoiceStore.HeadVal = baseBlockRoot
-	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
-	forkchoiceStore.HeadPayloadStatusInvalidated.Store(true)
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}, postState.Slot(), nil
+	}
 	forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),

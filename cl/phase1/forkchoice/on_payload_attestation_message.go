@@ -79,8 +79,12 @@ func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
 		return err
 	}
 
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	// Current-slot votes affect the next slot's head tiebreaker. OnTick invalidates
+	// the cache at that boundary; votes arriving after it must invalidate it here.
+	if data.Slot < f.Slot() {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+	}
 	return nil
 }
 
