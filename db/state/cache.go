@@ -24,7 +24,7 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 // nolint
 type domainGetFromFileCacheItem struct {
 	found bool
-	lvl   uint32
+	lvl   uint8
 	lo    uint64
 	v     []byte
 }

@@ -1534,7 +1534,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		}
 
 		if useCache {
-			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{found: true, lvl: uint32(i), lo: lo, v: v})
+			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{found: true, lvl: uint8(i), lo: lo, v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
