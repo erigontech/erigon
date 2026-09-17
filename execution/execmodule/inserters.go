@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -131,6 +132,34 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	}
 	if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), number, block.Body); err != nil {
 		return fmt.Errorf("write body: %w", err)
+	}
+	return nil
+}
+
+// clearSystemSlotRows makes the SEALED body's txnum→txhash mapping correct by emptying its two
+// system-transaction slots.
+//
+// Block-start and block-end are executed by the executor, not stored: WriteRawTransactions only ever writes
+// At(i) = BaseTxnID+1+i, so the ids at each end of the range must hold nothing, and the transactions index
+// then keys them off the txnum (pad32) rather than a transaction hash. A one-pass chain produces exactly
+// that — dev-L1: 2000 system slots over 1000 blocks, every one empty, zero duplicate keys.
+//
+// Multi-round construction does not, because a successor takes its id range while its parent is still
+// accumulating. The parent grows over that range, the successor is re-allocated higher, and its earlier rows
+// are left behind — one landing on the successor's own BaseTxnID. The block-start txnum then maps to a user
+// transaction's hash: the wrong mapping, and a duplicate key that no salt can index (measured: 3 blocks per
+// 1000 on trading, 0 on dev-L1).
+//
+// The seal is the right moment. During the rounds the block overlay is SHARED (BorrowBlockOverlay), so a
+// deletion by a round that is later dropped still persists and can strand the block with no body at all.
+// Here the body is final, and no live transaction can occupy these two ids.
+func clearSystemSlotRows(tx kv.RwTx, bfs *types.BodyForStorage) error {
+	var id [8]byte
+	for _, txnID := range [...]uint64{bfs.BaseTxnID.U64(), bfs.BaseTxnID.LastSystemTx(bfs.TxCount)} {
+		binary.BigEndian.PutUint64(id[:], txnID)
+		if err := tx.Delete(kv.EthTx, id[:]); err != nil {
+			return fmt.Errorf("clear system slot %d: %w", txnID, err)
+		}
 	}
 	return nil
 }

@@ -948,6 +948,10 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		if err := rawdb.WriteBodyForStorage(t, newHash, number, bfs); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
 		}
+		// The body is final here, so this is where its txnum→txhash mapping is settled.
+		if err := clearSystemSlotRows(t, bfs); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: %w", err)
+		}
 	}
 	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a
 	// normal newPayload: exactly ONE block at this height (the sealed H1). The deferred ibHash is a scratch
