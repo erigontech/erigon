@@ -83,6 +83,7 @@ type sliceJSONWriter []byte
 
 func (w *sliceJSONWriter) AvailableBuffer(n int) []byte { return make([]byte, 0, n) }
 func (w *sliceJSONWriter) WriteRawBytes(v []byte)       { *w = append(*w, v...) }
+func (w *sliceJSONWriter) WriteHex(v []byte)            { *w = AppendQuoted(*w, v) }
 
 func TestMarshalFastJSONArrayTo(t *testing.T) {
 	for _, items := range [][]Bytes{nil, {}, {nil}, {{}, {0x01}}, {make(Bytes, 70000), {0xde, 0xad}}} {

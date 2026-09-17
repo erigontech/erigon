@@ -34,6 +34,8 @@ type hintedJSONWriter struct {
 
 func (w *hintedJSONWriter) AvailableBuffer(n int) []byte { w.hint = n; return make([]byte, 0, n) }
 
+func (w *hintedJSONWriter) WriteHex(v []byte) { w.out = hexutil.AppendQuoted(w.out, v) }
+
 func (w *hintedJSONWriter) WriteRawBytes(v []byte) {
 	w.overrun = w.overrun || len(v) > w.hint
 	w.out = append(w.out, v...)

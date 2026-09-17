@@ -30,6 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func (s *StackStream) closeAllPendingElements() error {
@@ -1163,7 +1165,7 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteString("pending")
 	Put(s)
 
@@ -1175,13 +1177,55 @@ func TestPutReleasesWriterAndBytes(t *testing.T) {
 // A response above the bound is dropped rather than pooled, so one outsized
 // value cannot pin its peak per goroutine.
 func TestPutDropsOversizedBuffer(t *testing.T) {
-	s := Get(nil).(*StackStream)
+	s := Get(nil)
 	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
 
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
-	require.NotSame(t, s, Get(nil).(*StackStream))
+	require.NotSame(t, s, Get(nil))
+}
+
+// WriteHex matches json.Marshal of hexutil.Bytes inside a container, whether the value
+// stays buffered or is written through.
+func TestWriteHex(t *testing.T) {
+	t.Parallel()
+	for name, b := range map[string][]byte{
+		"nil":             nil,
+		"empty":           {},
+		"one":             {0xab},
+		"below-threshold": bytes.Repeat([]byte{0x5a}, FlushThreshold/2-3),
+		"at-threshold":    bytes.Repeat([]byte{0x5a}, FlushThreshold/2-2),
+		"far-above":       bytes.Repeat([]byte{0x5a}, 4*FlushThreshold),
+	} {
+		want, err := json.Marshal(hexutil.Bytes(b))
+		require.NoError(t, err)
+		for _, out := range []*bytes.Buffer{new(bytes.Buffer), nil} {
+			t.Run(fmt.Sprintf("%s/writer=%t", name, out != nil), func(t *testing.T) {
+				var s Stream
+				if out != nil {
+					s = New(out)
+				} else {
+					s = New(nil)
+				}
+				s.WriteObjectStart()
+				s.WriteObjectField("result")
+				s.WriteArrayStart()
+				s.WriteHex(b)
+				s.WriteMore()
+				s.WriteHex(b)
+				s.WriteArrayEnd()
+				s.WriteObjectEnd()
+				require.NoError(t, s.Flush())
+
+				got := s.Buffer()
+				if out != nil {
+					got = out.Bytes()
+				}
+				require.Equal(t, `{"result":[`+string(want)+`,`+string(want)+`]}`, string(got))
+			})
+		}
+	}
 }
 
 // A raw payload at or above FlushThreshold goes to the writer instead of being
@@ -1244,7 +1288,7 @@ func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
 // buffer, so the stream survives Put instead of being dropped by the size check.
 func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteObjectStart()
 	s.WriteObjectField("result")
 	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))

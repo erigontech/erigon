@@ -72,6 +72,9 @@ type Stream interface {
 	// which is then passed to WriteRawBytes. A value that fits the stream's buffer is not copied.
 	AvailableBuffer(sizeHint int) []byte
 
+	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
+	WriteHex(b []byte)
+
 	// Utility methods
 
 	WriteEmptyArray()

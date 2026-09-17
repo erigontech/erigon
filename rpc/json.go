@@ -170,6 +170,11 @@ func (w *responseWriter) WriteRawBytes(b []byte) {
 	w.stream.WriteRawBytes(b)
 }
 
+func (w *responseWriter) WriteHex(b []byte) {
+	w.open()
+	w.stream.WriteHex(b)
+}
+
 // isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
 func isNilPointer(v any) bool {
 	rv := reflect.ValueOf(v)

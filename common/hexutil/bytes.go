@@ -52,6 +52,8 @@ type JSONWriter interface {
 	// append one value and pass it to WriteRawBytes.
 	AvailableBuffer(sizeHint int) []byte
 	WriteRawBytes([]byte)
+	// WriteHex writes b as a 0x-prefixed hex string.
+	WriteHex(b []byte)
 }
 
 // WriteRawJSON writes already-encoded JSON.
@@ -88,7 +90,7 @@ func MarshalFastJSONElemsTo[T any](w JSONWriter, items []T, jsonLen func(T) int,
 
 // MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
 func (b Bytes) MarshalFastJSONTo(w JSONWriter) error {
-	w.WriteRawBytes(AppendQuoted(w.AvailableBuffer(QuotedLen(len(b))), b))
+	w.WriteHex(b)
 	return nil
 }
 

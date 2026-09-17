@@ -89,6 +89,7 @@ func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.inner.WriteFlo
 func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteString(v) }
 func (s *LazyFieldStream) WriteRaw(v string)      { s.ensure(); s.inner.WriteRaw(v) }
 func (s *LazyFieldStream) WriteRawBytes(v []byte) { s.ensure(); s.inner.WriteRawBytes(v) }
+func (s *LazyFieldStream) WriteHex(v []byte)      { s.ensure(); s.inner.WriteHex(v) }
 func (s *LazyFieldStream) WriteObjectStart()      { s.ensure(); s.inner.WriteObjectStart() }
 func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArrayStart() }
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
