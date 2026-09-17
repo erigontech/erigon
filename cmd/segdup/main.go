@@ -76,6 +76,14 @@ func main() {
 			num++
 		}
 	}
+	// SEGDUP_SPANS=1 dumps every block's id range, so it can be joined against the txNum the executor
+	// actually ran the block at. Both counters accumulate TxCount per block from zero, so they must agree.
+	if os.Getenv("SEGDUP_SPANS") != "" {
+		for _, s := range spans {
+			fmt.Printf("SPAN %d %d %d\n", s.num, s.first, s.last)
+		}
+	}
+
 	blockOf := func(txnID uint64) uint64 {
 		lo, hi := 0, len(spans)-1
 		for lo <= hi {
