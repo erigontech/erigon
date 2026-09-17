@@ -761,17 +761,6 @@ func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, trac
 	})
 }
 
-func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
-	vm.assertUnsealed(txIdx, addr, path, key)
-	e := vm.load(addr)
-	if e == nil {
-		panic(fmt.Errorf("markFlag: no entry for addr %x, path %s, txIdx %d", addr, path, txIdx))
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	markFlag(e, addr, path, key, txIdx, -1, FlagEstimate)
-}
-
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
 // no values (each cell must already hold the write's value at its incarnation). It is the
 // commit-boundary check enforcing one-value-per-version — a mismatch panics.

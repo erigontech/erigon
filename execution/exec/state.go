@@ -181,8 +181,6 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 	return w
 }
 
-func (rw *WorkerContext) LogLRUStats() {}
-
 func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()

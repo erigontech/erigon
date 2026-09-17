@@ -206,16 +206,26 @@ func TestLowerIncarnation(t *testing.T) {
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 5}, valueFor(AddressPath, 1, 5), true)
 }
 
-func TestMarkEstimate(t *testing.T) {
+func TestIncompleteWriteReadsAsEstimate(t *testing.T) {
 	t.Parallel()
 
 	ap1 := getAddress(1)
 
 	mvh := NewVersionMap(nil)
 
-	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 2}, valueFor(AddressPath, 7, 2), true)
-	mvh.MarkEstimate(ap1, AddressPath, accounts.NilKey, 7)
+	// A speculative (incomplete) write is born ESTIMATE: a later read observes it
+	// as a dependency at incarnation -1 until the writer completes.
+	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 2}, valueFor(AddressPath, 7, 2), false)
+	_, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 9)
+	require.Equal(t, 7, res.depIdx)
+	require.Equal(t, -1, res.incarnation, "an incomplete write is an estimate dependency")
+
+	// Completing the write at a higher incarnation promotes it to a concrete value.
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 4}, valueFor(AddressPath, 7, 4), true)
+	resVal, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 9)
+	require.Equal(t, 7, res.depIdx)
+	require.Equal(t, 4, res.incarnation, "a completed write is a concrete dependency")
+	require.Equal(t, valueFor(AddressPath, 7, 4), resVal)
 }
 
 func TestMVHashMapBasics(t *testing.T) {
@@ -263,13 +273,6 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, 8, res.depIdx)
 	require.Equal(t, 3, res.incarnation)
 	require.Equal(t, valueFor(AddressPath, 8, 3), resVal)
-
-	// Mark the entry written by 10 as an estimate.
-	mvh.MarkEstimate(ap1, AddressPath, accounts.NilKey, 10)
-
-	_, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 11)
-	require.Equal(t, 10, res.depIdx)
-	require.Equal(t, -1, res.incarnation, "dep at tx 10 is now an estimate")
 
 	// Delete the entry written by 10, write to a different ap.
 	mvh.Delete(ap1, AddressPath, accounts.NilKey, 10, true)
