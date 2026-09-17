@@ -1200,14 +1200,9 @@ func TestWriteHex(t *testing.T) {
 	} {
 		want, err := json.Marshal(hexutil.Bytes(b))
 		require.NoError(t, err)
-		for _, out := range []*bytes.Buffer{new(bytes.Buffer), nil} {
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
 			t.Run(fmt.Sprintf("%s/writer=%t", name, out != nil), func(t *testing.T) {
-				var s Stream
-				if out != nil {
-					s = New(out)
-				} else {
-					s = New(nil)
-				}
+				s := New(out)
 				s.WriteObjectStart()
 				s.WriteObjectField("result")
 				s.WriteArrayStart()
@@ -1219,8 +1214,8 @@ func TestWriteHex(t *testing.T) {
 				require.NoError(t, s.Flush())
 
 				got := s.Buffer()
-				if out != nil {
-					got = out.Bytes()
+				if b, ok := out.(*bytes.Buffer); ok {
+					got = b.Bytes()
 				}
 				require.Equal(t, `{"result":[`+string(want)+`,`+string(want)+`]}`, string(got))
 			})
