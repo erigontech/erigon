@@ -21,11 +21,17 @@ package hexutil
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 )
 
 var _ json.MarshalerTo = Bytes(nil)
 
-// MarshalJSONTo lets json/v2 append the hex string into the encoder's buffer instead of copying AppendText output.
+// MarshalJSONTo appends the hex string into the encoder's buffer. A value that does not fit falls back
+// to AppendText, so a one-shot Marshal does not grow a second buffer.
 func (b Bytes) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return enc.WriteValue(AppendQuoted(enc.AvailableBuffer(), b))
+	buf := enc.AvailableBuffer()
+	if cap(buf) < QuotedLen(len(b)) {
+		return errors.ErrUnsupported
+	}
+	return enc.WriteValue(AppendQuoted(buf, b))
 }
