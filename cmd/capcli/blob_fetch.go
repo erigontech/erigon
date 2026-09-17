@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -534,8 +535,9 @@ func (s *beaconAPISource) get(ctx context.Context, url string, out any) (bool, e
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
+			detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return false, fmt.Errorf("bad status %d", resp.StatusCode)
+			return false, fmt.Errorf("bad status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
 		}
 		err = json.NewDecoder(resp.Body).Decode(out)
 		resp.Body.Close()

@@ -404,3 +404,19 @@ func TestWriteRemainingSlotsDeduplicates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "14300001\n14300002\n", string(raw))
 }
+
+// A bare status code cannot be diagnosed: endpoints explain a 400 in the body, and without it
+// the only way to find out is to reproduce the request by hand.
+func TestBeaconAPIGetIncludesTheResponseBodyInTheError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"code":400,"message":"Invalid block ID: expected hex or slot"}`))
+	}))
+	defer srv.Close()
+
+	src := &beaconAPISource{endpoints: []string{srv.URL}, client: srv.Client(), maxAttempts: 3}
+	_, err := src.get(t.Context(), srv.URL, &struct{}{})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "400")
+	require.ErrorContains(t, err, "Invalid block ID", "the endpoint's explanation must survive")
+}
