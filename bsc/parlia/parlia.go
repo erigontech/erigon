@@ -172,11 +172,20 @@ func (p *Parlia) ValidateBlockPostExecution(chainConfig *chain.Config, header *t
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
 	if chainConfig.IsNano(header.Number.Uint64()) {
-		for _, tx := range txns {
+		for i, tx := range txns {
 			if tx.GetTo() == nil {
 				continue
 			}
 			_, ok := bscchain.NanoBlackList[*tx.GetTo()]
+			if ok {
+				return fmt.Errorf("block blacklist account")
+			}
+			sender, ok := tx.GetSender()
+			if !ok {
+				logger.Warn("tx %d has no sender", i)
+				continue
+			}
+			_, ok = bscchain.NanoBlackList[sender.Value()]
 			if ok {
 				return fmt.Errorf("block blacklist account")
 			}
