@@ -71,4 +71,12 @@ func TestVerifyStorageProofRejectsValueForAbsentKey(t *testing.T) {
 	require.NoError(t, prove(present, 0x2a))
 	require.NoError(t, prove(absent, 0))
 	require.Error(t, prove(absent, 0x2a))
+
+	nodes, err := tr.Prove(absent, 0, false)
+	require.NoError(t, err)
+	var noValue accounts.StorProofResult
+	for _, n := range nodes {
+		noValue.Proof = append(noValue.Proof, n)
+	}
+	require.NoError(t, VerifyStorageProofByHash(root, common.BytesToHash(absent), noValue), "a missing value is zero")
 }
