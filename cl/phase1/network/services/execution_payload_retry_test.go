@@ -67,7 +67,7 @@ func TestExecutionPayloadServicePendingRetriesLocalFailure(t *testing.T) {
 			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
 			service.pending.processPending(t.Context())
 			require.Zero(t, calls)
-			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.Blocks[root] = newTestGloasBlock(100, 1)
 			ownedBytes := uint64(envelope.EncodingSizeSSZ())
 			for attempt := 1; attempt <= 2; attempt++ {
 				service.pending.processPending(t.Context())
@@ -91,7 +91,7 @@ func TestExecutionPayloadServicePendingDropsTerminalResults(t *testing.T) {
 			service, fcu := newPendingEnvelopeTestService(t)
 			root := common.Hash{1}
 			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, root, 1)), ErrIgnore)
-			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.Blocks[root] = newTestGloasBlock(100, 1)
 			calls := 0
 			fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 				calls++
@@ -118,7 +118,7 @@ func TestExecutionPayloadServicePendingRetryPreservesExpiry(t *testing.T) {
 	require.True(t, ok)
 	job := stored.(*pendingJob[*pendingEnvelopeJob])
 	created := job.creationTime
-	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
 	calls := 0
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		calls++
@@ -143,7 +143,7 @@ func TestExecutionPayloadServicePendingSerializesRetries(t *testing.T) {
 	root := common.Hash{1}
 	envelope := newTestSignedEnvelope(100, root, 1)
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
 	entered, resume, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	release := sync.OnceFunc(func() { close(resume) })
 	defer release()
@@ -194,7 +194,7 @@ func TestExecutionPayloadServiceExpiredAttemptCannotRemoveReplacement(t *testing
 			stored, ok := service.pending.jobs.Load(key)
 			require.True(t, ok)
 			job := stored.(*pendingJob[*pendingEnvelopeJob])
-			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.Blocks[root] = newTestGloasBlock(100, 1)
 			entered, resume, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			release := sync.OnceFunc(func() { close(resume) })
 			defer release()
@@ -249,7 +249,7 @@ func TestExecutionPayloadServicePendingRetainsDisappearingBlock(t *testing.T) {
 	root := common.Hash{1}
 	envelope := newTestSignedEnvelope(100, root, 1)
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
 	service.forkchoiceStore = &disappearingEnvelopeBlockStore{ForkChoiceStorage: fcu}
 	calls := 0
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {

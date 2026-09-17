@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -46,7 +45,7 @@ func init() {
 type state = map[accounts.Address]*account
 
 type account struct {
-	Balance *hexutil.Big `json:"balance,omitempty"`
+	Balance *hexutil.U256 `json:"balance,omitempty"`
 	// Code is a pointer so omitempty can omit unchanged code (nil) while
 	// still emitting "0x" when code is cleared (e.g. EIP-7702 deauth).
 	Code     *hexutil.Bytes              `json:"code,omitempty"`
@@ -60,7 +59,7 @@ type account struct {
 }
 
 func (a *account) exists() bool {
-	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && (*big.Int)(a.Balance).Sign() != 0)
+	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && !(*uint256.Int)(a.Balance).IsZero())
 }
 
 type prestateTracer struct {
@@ -279,10 +278,9 @@ func (t *prestateTracer) processDiffState() {
 		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
 		newCodeHash := codeHash.Value()
 
-		newBalanceBig := newBalance.ToBig()
-		if newBalanceBig.Cmp((*big.Int)(state.Balance)) != 0 {
+		if newBalance != uint256.Int(*state.Balance) {
 			modified = true
-			postAccount.Balance = (*hexutil.Big)(newBalanceBig)
+			postAccount.Balance = (*hexutil.U256)(&newBalance)
 		}
 		if newNonce != state.Nonce {
 			modified = true
@@ -377,7 +375,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	code, _ := t.env.IntraBlockState.GetCode(addr)
 
 	acc := &account{
-		Balance: (*hexutil.Big)(balance.ToBig()),
+		Balance: (*hexutil.U256)(&balance),
 		Nonce:   nonce,
 	}
 
