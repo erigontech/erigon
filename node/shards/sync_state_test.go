@@ -470,3 +470,19 @@ func TestSyncingReplyKeepsAGenesisStartingBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), reply.StartingBlock, "a session started at genesis keeps a zero pin")
 }
+
+// The lowered pin outlives the unwind: once execution restarts from below it,
+// progress is measured from where the restart happened.
+func TestSyncingReplyStartingBlockStaysDownAfterAnUnwind(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 50))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 150))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(50), reply.StartingBlock)
+}

@@ -249,7 +249,8 @@ type SyncingReply struct {
 	CurrentBlock     uint64                        `protobuf:"varint,3,opt,name=current_block,json=currentBlock,proto3" json:"current_block,omitempty"`
 	Syncing          bool                          `protobuf:"varint,4,opt,name=syncing,proto3" json:"syncing,omitempty"`
 	Stages           []*SyncingReply_StageProgress `protobuf:"bytes,5,rep,name=stages,proto3" json:"stages,omitempty"`
-	// Block this sync session started from; pinned until the node is synced again.
+	// Block this sync session started from. Held for the session, lowered when an
+	// unwind takes execution below it.
 	StartingBlock uint64 `protobuf:"varint,6,opt,name=starting_block,json=startingBlock,proto3" json:"starting_block,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
