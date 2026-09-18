@@ -36,6 +36,7 @@ curl_args=(
 
 deadline=$((SECONDS + poll_timeout))
 scan_incomplete=false
+scan_incomplete_near_head_404_only=false
 head_fetch_unavailable=false
 
 wait_for_next_poll() {
@@ -121,22 +122,26 @@ while ((SECONDS < deadline)); do
   head_fetch_unavailable=false
   last_head_slot=$head_slot
   pass_incomplete=false
+  pass_near_head_404_only=true
   first_unresolved_slot=0
 
   if [ "$scan_incomplete" = true ] && ((next_slot > head_slot)); then
     pass_incomplete=true
+    pass_near_head_404_only=$scan_incomplete_near_head_404_only
     first_unresolved_slot=$next_slot
   fi
 
   for ((slot = next_slot; slot <= head_slot; slot++)); do
     if ((SECONDS >= deadline)); then
       scan_incomplete=true
+      scan_incomplete_near_head_404_only=false
       break 2
     fi
 
     remaining=$((deadline - SECONDS))
     request_timeout=$((remaining < 15 ? remaining : 15))
     slot_unresolved=false
+    slot_near_head_404=false
     if candidate_http_code=$(curl "${curl_args[@]}" \
       --max-time "$request_timeout" \
       --write-out '%{http_code}' \
@@ -144,12 +149,15 @@ while ((SECONDS < deadline)); do
       --output "$api_tmp_dir/candidate.json"); then
       if ((SECONDS >= deadline)); then
         scan_incomplete=true
+        scan_incomplete_near_head_404_only=false
         break 2
       fi
 
       case "$candidate_http_code" in
         200)
-          if ! jq -se '
+          if ! payload_available=$(jq -sr \
+            --arg requested_slot "$slot" \
+            --arg attestation_slot "$((slot - 1))" '
             def canonical_decimal:
               type == "string" and
               length > 0 and
@@ -157,60 +165,54 @@ while ((SECONDS < deadline)); do
               (. == "0" or (startswith("0") | not));
             select(length == 1) |
             .[0] |
-            (.version | type == "string") and
-            (.data | type == "object") and
-            (.data.message | type == "object") and
-            (.data.message.slot | canonical_decimal) and
-            (.data.message.parent_root | type == "string") and
-            (.data.message.parent_root | test("^0x[0-9a-fA-F]{64}\\z")) and
-            (.data.message.body | type == "object") and
-            (.data.message.body.payload_attestations | type == "array") and
-            all(.data.message.body.payload_attestations[];
-              (. | type == "object") and
-              (.aggregation_bits | type == "string") and
-              (.signature | type == "string") and
+            .data.message.parent_root as $parent_root |
+            (
+              (.version | type == "string") and
+              (.version == "gloas") and
               (.data | type == "object") and
-              (.data.beacon_block_root | type == "string") and
-              (.data.beacon_block_root | test("^0x[0-9a-fA-F]{64}\\z")) and
-              (.data.slot | canonical_decimal) and
-              (.data.payload_present | type == "boolean") and
-              (.data.blob_data_available | type == "boolean")
+              (.data.message | type == "object") and
+              (.data.message.slot | canonical_decimal) and
+              (.data.message.slot == $requested_slot) and
+              (.data.message.parent_root | type == "string") and
+              (.data.message.parent_root | test("^0x[0-9a-fA-F]{64}\\z")) and
+              (.data.message.body | type == "object") and
+              (.data.message.body.payload_attestations | type == "array") and
+              all(.data.message.body.payload_attestations[];
+                (. | type == "object") and
+                (.aggregation_bits | type == "string") and
+                (.signature | type == "string") and
+                (.data | type == "object") and
+                (.data.beacon_block_root | type == "string") and
+                (.data.beacon_block_root | test("^0x[0-9a-fA-F]{64}\\z")) and
+                (.data.slot | canonical_decimal) and
+                (.data.slot == $attestation_slot) and
+                (.data.payload_present | type == "boolean") and
+                (.data.blob_data_available | type == "boolean") and
+                (.data.beacon_block_root | ascii_downcase) == ($parent_root | ascii_downcase) and
+                (.aggregation_bits |
+                  test("^0x[0-9a-fA-F]{128}\\z") and
+                  (test("^0x0+\\z"; "i") | not)
+                ) and
+                (.signature |
+                  test("^0x[0-9a-fA-F]{192}\\z") and
+                  (test("^0x0+\\z"; "i") | not)
+                )
+              )
+            ) as $valid |
+            select($valid) |
+            any(.data.message.body.payload_attestations[];
+              .data.payload_present == true
             )
-          ' "$api_tmp_dir/candidate.json"; then
+          ' "$api_tmp_dir/candidate.json"); then
             echo "Candidate block response for slot $slot was invalid; retrying"
             slot_unresolved=true
-          elif ! jq -e \
-            --arg requested_slot "$slot" \
-            --arg attestation_slot "$((slot - 1))" '
-            .data.message.parent_root as $parent_root |
-            .version == "gloas" and
-            .data.message.slot == $requested_slot and
-            all(.data.message.body.payload_attestations[];
-              .data.slot == $attestation_slot and
-              (.data.beacon_block_root | ascii_downcase) == ($parent_root | ascii_downcase) and
-              (.aggregation_bits |
-                test("^0x[0-9a-fA-F]{128}\\z") and
-                (test("^0x0+\\z"; "i") | not)
-              ) and
-              (.signature |
-                test("^0x[0-9a-fA-F]{192}\\z") and
-                (test("^0x0+\\z"; "i") | not)
-              )
-            )
-          ' "$api_tmp_dir/candidate.json"; then
+          elif [[ "$payload_available" != true && "$payload_available" != false ]]; then
             echo "Candidate block response for slot $slot was invalid; retrying"
             slot_unresolved=true
           else
-            payload_available=false
-            if jq -e '
-              any(.data.message.body.payload_attestations[];
-                .data.payload_present == true
-              )
-            ' "$api_tmp_dir/candidate.json" >/dev/null; then
-              payload_available=true
-            fi
             if ((SECONDS >= deadline)); then
               scan_incomplete=true
+              scan_incomplete_near_head_404_only=false
               break 2
             fi
             if [ "$payload_available" = true ]; then
@@ -222,6 +224,7 @@ while ((SECONDS < deadline)); do
         404)
           if ((slot + 1 >= head_slot)); then
             slot_unresolved=true
+            slot_near_head_404=true
           fi
           ;;
         *)
@@ -236,6 +239,9 @@ while ((SECONDS < deadline)); do
 
     if [ "$slot_unresolved" = true ]; then
       pass_incomplete=true
+      if [ "$slot_near_head_404" = false ]; then
+        pass_near_head_404_only=false
+      fi
       if ((first_unresolved_slot == 0)); then
         first_unresolved_slot=$slot
       fi
@@ -245,6 +251,7 @@ while ((SECONDS < deadline)); do
   done
 
   scan_incomplete=$pass_incomplete
+  scan_incomplete_near_head_404_only=$pass_near_head_404_only
   if [ "$scan_incomplete" = true ]; then
     next_slot=$first_unresolved_slot
     wait_for_next_poll || break
@@ -257,7 +264,13 @@ while ((SECONDS < deadline)); do
   wait_for_next_poll || break
 done
 
-if [ "$scan_incomplete" = true ]; then
+if [ "$scan_incomplete" = true ] && [ "$head_fetch_unavailable" = true ]; then
+  echo "::error::Payload-attestation scan incomplete before the deadline; last head slot $last_head_slot, next unverified slot $next_slot"
+  echo "::error::Head polling was incomplete before the deadline; last observed head slot $last_head_slot"
+elif [ "$scan_incomplete" = true ] && [ "$scan_incomplete_near_head_404_only" = true ] && \
+  [ "$head_fetch_unavailable" = false ] && ((last_head_slot < target_head_slot)); then
+  echo "::error::Chain liveness failure: head only advanced from slot $initial_head_slot to $last_head_slot before the deadline"
+elif [ "$scan_incomplete" = true ]; then
   echo "::error::Payload-attestation scan incomplete before the deadline; last head slot $last_head_slot, next unverified slot $next_slot"
 elif [ "$head_fetch_unavailable" = true ]; then
   echo "::error::Head polling was incomplete before the deadline; last observed head slot $last_head_slot"

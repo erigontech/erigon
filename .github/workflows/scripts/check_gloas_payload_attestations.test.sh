@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 poll_script="$script_dir/check_gloas_payload_attestations.sh"
@@ -51,11 +51,13 @@ if [[ "$url" == */head ]]; then
   count_file="$GLOAS_TEST_STATE_DIR/head-count"
   count=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
   echo "$count" >"$count_file"
-  if [[ "$GLOAS_TEST_SCENARIO" == initial_deadline && "$max_time" -gt "$GLOAS_POLL_TIMEOUT_SECONDS" ]]; then
-    exit 87
-  fi
-  if [[ "$GLOAS_TEST_SCENARIO" == initial_deadline && "$max_filesize" -ne 8388608 ]]; then
-    exit 88
+  if [[ "$GLOAS_TEST_SCENARIO" == initial_deadline ]]; then
+    if [[ -z "$max_time" ]] || ((max_time > GLOAS_POLL_TIMEOUT_SECONDS)); then
+      exit 87
+    fi
+    if [[ -z "$max_filesize" ]] || ((max_filesize != 8388608)); then
+      exit 88
+    fi
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == initial_retry && "$count" -eq 1 ]]; then
     exit 7
@@ -64,12 +66,16 @@ if [[ "$url" == */head ]]; then
     exit 7
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == initial_late_response && "$count" -eq 1 ]]; then
-    sleep 3
+    sleep 5
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == head_retry_recovery ]] && ((count == 2)); then
     exit 7
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == terminal_head_failure ]] && ((count > 1)); then
+    exit 7
+  fi
+  if [[ "$GLOAS_TEST_SCENARIO" == api_hole_then_head_failure ||
+    "$GLOAS_TEST_SCENARIO" == near_head_404_then_head_failure ]] && ((count > 2)); then
     exit 7
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == malformed_head ]] && ((count == 2)); then
@@ -93,7 +99,7 @@ if [[ "$url" == */head ]]; then
     exit 0
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == multi_document_head ]] && ((count == 2)); then
-    printf '{}\n{"data":{"message":{"slot":"1"}}}\n' >"$output"
+    printf '{"data":{"message":{"slot":"1"}}}\n{}\n' >"$output"
     exit 0
   fi
   if [[ "$GLOAS_TEST_SCENARIO" == invalid_head_roots ]]; then
@@ -112,6 +118,18 @@ if [[ "$url" == */head ]]; then
       ;;
     near_head_404)
       slot=$((count == 1 ? 0 : count == 2 ? 1 : 2))
+      ;;
+    stalled_near_head_404)
+      slot=$((count == 1 ? 0 : 2))
+      ;;
+    api_hole)
+      slot=$((count == 1 ? 0 : 2))
+      ;;
+    api_hole_then_head_failure)
+      slot=$((count == 1 ? 0 : 2))
+      ;;
+    near_head_404_then_head_failure)
+      slot=$((count == 1 ? 0 : 2))
       ;;
     initial_retry)
       slot=$((count == 2 ? 0 : 1))
@@ -163,13 +181,18 @@ if [[ "$GLOAS_TEST_SCENARIO" == retry_empty ]]; then
   exit 0
 fi
 
-if [[ "$GLOAS_TEST_SCENARIO" == permanent_then_later && "$candidate_slot" == 1 ]]; then
+if { [[ "$GLOAS_TEST_SCENARIO" == permanent_then_later ]] ||
+  [[ "$GLOAS_TEST_SCENARIO" == api_hole ]] ||
+  [[ "$GLOAS_TEST_SCENARIO" == api_hole_then_head_failure ]]; } &&
+  [[ "$candidate_slot" == 1 ]]; then
   : >"$output"
   $write_out && printf '500'
   exit 0
 fi
 
-if [[ "$GLOAS_TEST_SCENARIO" == near_head_404 && "$candidate_slot" == 1 ]]; then
+if [[ "$GLOAS_TEST_SCENARIO" == near_head_404 && "$candidate_slot" == 1 ]] ||
+  [[ "$GLOAS_TEST_SCENARIO" == stalled_near_head_404 && "$candidate_slot" == 1 ]] ||
+  [[ "$GLOAS_TEST_SCENARIO" == near_head_404_then_head_failure && "$candidate_slot" == 1 ]]; then
   : >"$output"
   $write_out && printf '404'
   exit 0
@@ -183,8 +206,10 @@ fi
 
 if [[ "$GLOAS_TEST_SCENARIO" == multi_document_candidate ]] && ((slot_count == 1)); then
   signature=$(printf '01%.0s' {1..96})
-  printf '{}\n{"version":"gloas","data":{"message":{"slot":"1","body":{"payload_attestations":[{"aggregation_bits":"0x01","data":{"slot":"0","payload_present":true},"signature":"0x%s"}]}}}}\n' \
-    "$signature" >"$output"
+  aggregation_bits=$(printf '01%.0s' {1..64})
+  root=$(printf 'ab%.0s' {1..32})
+  printf '{"version":"gloas","data":{"message":{"slot":"1","parent_root":"0x%s","body":{"payload_attestations":[{"aggregation_bits":"0x%s","data":{"slot":"0","beacon_block_root":"0x%s","payload_present":true,"blob_data_available":true},"signature":"0x%s"}]}}}}\n{}\n' \
+    "$root" "$aggregation_bits" "$root" "$signature" >"$output"
   $write_out && printf '200'
   exit 0
 fi
@@ -242,6 +267,12 @@ payload_present=true
 if [[ "$GLOAS_TEST_SCENARIO" == late_empty_candidate_parse ]] && ((slot_count == 1)); then
   payload_present=false
 fi
+if [[ "$GLOAS_TEST_SCENARIO" == api_hole ||
+  "$GLOAS_TEST_SCENARIO" == api_hole_then_head_failure ||
+  "$GLOAS_TEST_SCENARIO" == stalled_near_head_404 ||
+  "$GLOAS_TEST_SCENARIO" == near_head_404_then_head_failure ]]; then
+  payload_present=false
+fi
 beacon_block_root_field=",\"beacon_block_root\":\"0x$beacon_block_root\""
 blob_data_available_field=',"blob_data_available":true'
 if [[ "$GLOAS_TEST_SCENARIO" == missing_attestation_fields ]] && ((slot_count == 1)); then
@@ -263,14 +294,14 @@ last_arg=${!#}
 if [[ "$GLOAS_TEST_SCENARIO" == late_candidate_parse || "$GLOAS_TEST_SCENARIO" == late_empty_candidate_parse ]] && \
   [[ "$last_arg" == */candidate.json && ! -e "$GLOAS_TEST_STATE_DIR/jq-delayed" ]]; then
   touch "$GLOAS_TEST_STATE_DIR/jq-delayed"
-  sleep 3
+  sleep 5
 fi
 if [[ "$GLOAS_TEST_SCENARIO" == late_head_parse && "$last_arg" == */head.json ]]; then
   count_file="$GLOAS_TEST_STATE_DIR/jq-head-count"
   count=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
   echo "$count" >"$count_file"
   if ((count == 2)); then
-    sleep 3
+    sleep 5
   fi
 fi
 exec "$GLOAS_TEST_REAL_JQ" "$@"
@@ -285,330 +316,189 @@ cleanup() {
 original_path=$PATH
 export GLOAS_TEST_REAL_JQ
 GLOAS_TEST_REAL_JQ=$(command -v jq)
-trap cleanup EXIT
+pass=0
+fail=0
 
-new_fixture
-export GLOAS_TEST_SCENARIO=deadline
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected deadline scenario to fail" >&2
-  exit 1
-fi
-grep -q "Payload-attestation scan incomplete" <<<"$output"
-if grep -Eq "Chain liveness failure|No canonical Gloas block" <<<"$output"; then
-  echo "deadline scenario used a misleading diagnosis: $output" >&2
-  exit 1
-fi
+# run_scenario <name> <scenario> <exit> <want-regex|-> <reject-regex|->
+#              <timeout> <target-advance> <poll-sleep> [<count-file> <eq|ge> <value> ...]
+run_scenario() {
+  local name=$1 scenario=$2 want_exit=$3 want_re=$4 reject_re=$5
+  local timeout=$6 target_advance=$7 poll_sleep=$8
+  local output status why= file comparison expected actual
+  shift 8
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=retry
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-count")" -eq 2
+  export GLOAS_TEST_SCENARIO=$scenario
+  cleanup
+  if ! new_fixture; then
+    printf 'FAIL - %s: fixture setup failed\n' "$name"
+    fail=$((fail + 1))
+    return
+  fi
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=permanent_then_later
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=2 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 2" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 1
-test "$(cat "$fixture_dir/candidate-2-count")" -eq 1
+  output=$(GLOAS_POLL_TIMEOUT_SECONDS=$timeout \
+    GLOAS_POLL_TARGET_ADVANCE=$target_advance \
+    GLOAS_POLL_SLEEP_SECONDS=$poll_sleep \
+    "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
+  status=$?
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=near_head_404
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=2 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 2" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
+  if ((status != want_exit)); then
+    why="want exit $want_exit, got $status"
+  elif [[ "$want_re" != - ]] && ! grep -Eq "$want_re" <<<"$output"; then
+    why="output missing /$want_re/"
+  elif [[ "$reject_re" != - ]] && grep -Eq "$reject_re" <<<"$output"; then
+    why="output unexpectedly matched /$reject_re/"
+  fi
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=multi_document_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
+  while [[ -z "$why" && $# -gt 0 ]]; do
+    file=$1
+    comparison=$2
+    expected=$3
+    shift 3
+    if [[ "$file" == output ]]; then
+      case "$comparison" in
+        matches) grep -Eq "$expected" <<<"$output" || why="output missing /$expected/" ;;
+        rejects) grep -Eq "$expected" <<<"$output" && why="output unexpectedly matched /$expected/" ;;
+        *) why="unknown output comparison $comparison" ;;
+      esac
+      continue
+    fi
+    if [[ ! -f "$fixture_dir/$file" ]]; then
+      why="missing count file $file"
+      break
+    fi
+    actual=$(<"$fixture_dir/$file")
+    case "$comparison" in
+      eq) ((actual == expected)) || why="$file: want $expected, got $actual" ;;
+      ge) ((actual >= expected)) || why="$file: want >= $expected, got $actual" ;;
+      *) why="unknown count comparison $comparison" ;;
+    esac
+  done
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=invalid_head_roots
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 5
+  if [[ -z "$why" ]]; then
+    printf 'ok   - %s\n' "$name"
+    pass=$((pass + 1))
+  else
+    printf 'FAIL - %s: %s\n' "$name" "$why"
+    printf '%s\n' "$output" | sed 's/^/       | /'
+    fail=$((fail + 1))
+  fi
+}
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=multi_document_candidate
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
+run_scenario "deadline exhaustion reports incomplete scan" deadline 1 \
+  'Payload-attestation scan incomplete' 'Chain liveness failure|No canonical Gloas block' 4 1 0
+run_scenario "candidate transport failure retries" retry 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-count eq 2
+run_scenario "later candidate progress survives an earlier hole" permanent_then_later 0 \
+  'Found available payload attestations in Gloas block at slot 2' - 30 2 0 \
+  candidate-1-count eq 1 candidate-2-count eq 1
+run_scenario "near-head 404 is revisited" near_head_404 0 \
+  'Found available payload attestations in Gloas block at slot 2' - 30 2 0 \
+  candidate-1-count eq 2
+run_scenario "stalled chain with near-head 404 reports liveness" stalled_near_head_404 1 \
+  'Chain liveness failure' 'Payload-attestation scan incomplete' 4 8 4
+run_scenario "stalled chain with API hole reports incomplete scan" api_hole 1 \
+  'Payload-attestation scan incomplete' 'Chain liveness failure' 4 8 4
+run_scenario "candidate hole remains primary after head polling fails" api_hole_then_head_failure 1 \
+  'Payload-attestation scan incomplete' - 4 8 0 \
+  output matches 'Head polling was incomplete'
+run_scenario "near-head 404 remains incomplete after head polling fails" near_head_404_then_head_failure 1 \
+  'Payload-attestation scan incomplete' 'Chain liveness failure' 4 8 0 \
+  output matches 'Head polling was incomplete'
+run_scenario "multi-document head response is rejected" multi_document_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "invalid head JSON roots are rejected" invalid_head_roots 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 5
+run_scenario "multi-document candidate response is rejected" multi_document_candidate 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "invalid candidate JSON roots are rejected" invalid_candidate_roots 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 4
+run_scenario "initial request obeys the poll deadline" initial_deadline 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 4 1 0
+run_scenario "fractional head slot is rejected" fractional_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "exponent head slot is rejected" exponent_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "fractional candidate slot is rejected" noncanonical_slot 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "leading-zero candidate slot is rejected" leading_zero_slot 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "exponent attestation slot is rejected" exponent_attestation 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
 
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=invalid_candidate_roots
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 4
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=initial_deadline
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=fractional_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=exponent_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=noncanonical_slot
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=leading_zero_slot
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=exponent_attestation
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=terminal_head_failure
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected terminal head failure scenario to fail" >&2
-  exit 1
-fi
-grep -q "Head polling was incomplete before the deadline; last observed head slot 0" <<<"$output"
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=late_head_parse
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected head parsed after the deadline to fail" >&2
-  exit 1
-fi
-grep -q "Head polling was incomplete before the deadline; last observed head slot 0" <<<"$output"
-if grep -q "Chain liveness failure" <<<"$output"; then
-  echo "late head parsing was misclassified as a liveness failure: $output" >&2
-  exit 1
-fi
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=initial_retry
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=terminal_initial_failure
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected initial head failure scenario to fail" >&2
-  exit 1
-fi
-grep -q "no valid head slot was observed" <<<"$output"
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=late_candidate_parse
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected candidate parsed after the deadline to fail" >&2
-  exit 1
-fi
-grep -q "Payload-attestation scan incomplete before the deadline" <<<"$output"
-if grep -q "Found available payload attestations" <<<"$output"; then
-  echo "candidate parsed after the deadline was reported as successful: $output" >&2
-  exit 1
-fi
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=late_empty_candidate_parse
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected empty candidate parsed after the deadline to fail" >&2
-  exit 1
-fi
-grep -q "Payload-attestation scan incomplete before the deadline" <<<"$output"
-if grep -q "No canonical Gloas block" <<<"$output"; then
-  echo "empty candidate parsed after the deadline was treated as a complete scan: $output" >&2
-  exit 1
-fi
+run_scenario "terminal head failure reports polling" terminal_head_failure 1 \
+  'Head polling was incomplete before the deadline; last observed head slot 0' - 4 1 0
+run_scenario "late head parse reports polling" late_head_parse 1 \
+  'Head polling was incomplete before the deadline; last observed head slot 0' \
+  'Chain liveness failure' 4 1 0
+run_scenario "initial head transport failure retries" initial_retry 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "terminal initial failure reports no head" terminal_initial_failure 1 \
+  'no valid head slot was observed' - 4 1 0
+run_scenario "late candidate parse reports incomplete scan" late_candidate_parse 1 \
+  'Payload-attestation scan incomplete before the deadline' \
+  'Found available payload attestations' 4 1 0
+run_scenario "late empty candidate parse reports incomplete scan" late_empty_candidate_parse 1 \
+  'Payload-attestation scan incomplete before the deadline' \
+  'No canonical Gloas block' 4 1 0
+run_scenario "late initial head response misses deadline" initial_late_response 1 \
+  'no valid head slot was observed' - 4 1 0
+run_scenario "noncanonical head slot is rejected" noncanonical_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 4
+run_scenario "overflow head slot is rejected" overflow_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "noncanonical attestation slot is rejected" noncanonical_attestation 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "malformed head response retries" malformed_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "head transport failure recovers" head_retry_recovery 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "stalled head reports liveness" head_retry_liveness 1 \
+  'Chain liveness failure' 'Payload-attestation scan incomplete' 4 1 4
+run_scenario "wrong candidate slot is rejected" wrong_slot 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "invalid signature is rejected" invalid_attestation 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "missing attestation fields are rejected" missing_attestation_fields 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 3
+run_scenario "short aggregation bits are rejected" short_aggregation_bits 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "newline-tainted fixed-width fields are rejected" trailing_newline_fields 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 4
+run_scenario "mismatched attestation root is rejected" mismatched_attestation_root 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "case-variant matching root is accepted" case_variant_matching_root 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 1
+run_scenario "malformed candidate response retries" malformed 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "complete scan without payload reports absence" retry_empty 1 \
+  'No canonical Gloas block exposed a payload attestation' - 30 1 0 \
+  candidate-count eq 2
 
 cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=initial_late_response
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected late initial head response to miss the deadline" >&2
-  exit 1
-fi
-grep -q "no valid head slot was observed" <<<"$output"
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=noncanonical_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 4
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=overflow_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=noncanonical_attestation
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=malformed_head
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=head_retry_recovery
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/head-count")" -ge 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=head_retry_liveness
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=2 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=2 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected stalled head scenario to fail" >&2
-  exit 1
-fi
-grep -q "Chain liveness failure" <<<"$output"
-if grep -q "Payload-attestation scan incomplete" <<<"$output"; then
-  echo "head retry polluted candidate scan state: $output" >&2
-  exit 1
-fi
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=wrong_slot
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=invalid_attestation
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=missing_attestation_fields
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 3
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=short_aggregation_bits
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=trailing_newline_fields
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 4
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=mismatched_attestation_root
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=case_variant_matching_root
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 1
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=malformed
-output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1)
-grep -q "Found available payload attestations in Gloas block at slot 1" <<<"$output"
-test "$(cat "$fixture_dir/candidate-1-count")" -eq 2
-
-cleanup
-new_fixture
-export GLOAS_TEST_SCENARIO=retry_empty
-if output=$(GLOAS_POLL_TIMEOUT_SECONDS=30 GLOAS_POLL_TARGET_ADVANCE=1 GLOAS_POLL_SLEEP_SECONDS=0 \
-  "$poll_script" http://beacon.test "$fixture_dir/api" 2>&1); then
-  echo "expected scan without an attestation to fail" >&2
-  exit 1
-fi
-grep -q "No canonical Gloas block exposed a payload attestation" <<<"$output"
-test "$(cat "$fixture_dir/candidate-count")" -eq 2
+echo "----"
+printf '%d passed, %d failed\n' "$pass" "$fail"
+[[ "$fail" -eq 0 ]]
