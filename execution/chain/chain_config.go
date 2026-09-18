@@ -704,6 +704,18 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
+		{name: "keplerTime", what: "Kepler fork timestamp", timestamp: c.KeplerTime, outOfOrder: true},
+		{name: "feynmanTime", what: "Feynman fork timestamp", timestamp: c.FeynmanTime, outOfOrder: true},
+		{name: "feynmanFixTime", what: "FeynmanFix fork timestamp", timestamp: c.FeynmanFixTime, outOfOrder: true},
+		{name: "haberTime", what: "Haber fork timestamp", timestamp: c.HaberTime, outOfOrder: true},
+		{name: "haberFixTime", what: "HaberFix fork timestamp", timestamp: c.HaberFixTime, outOfOrder: true},
+		{name: "bohrTime", what: "Bohr fork timestamp", timestamp: c.BohrTime, outOfOrder: true},
+		{name: "pascalTime", what: "Pascal fork timestamp", timestamp: c.PascalTime, outOfOrder: true},
+		{name: "lorentzTime", what: "Lorentz fork timestamp", timestamp: c.LorentzTime, outOfOrder: true},
+		{name: "maxwellTime", what: "Maxwell fork timestamp", timestamp: c.MaxwellTime, outOfOrder: true},
+		{name: "fermiTime", what: "Fermi fork timestamp", timestamp: c.FermiTime, outOfOrder: true},
+		{name: "mendelTime", what: "Mendel fork timestamp", timestamp: c.MendelTime, outOfOrder: true},
+		{name: "pasteurTime", what: "Pasteur fork timestamp", timestamp: c.PasteurTime, outOfOrder: true},
 	}
 }
 
