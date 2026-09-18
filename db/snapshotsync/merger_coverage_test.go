@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	dbg "github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -193,4 +194,43 @@ func TestIntegrateMergedDirtyFiles_FrozenOutputRetiresOnlyContainedSegments(t *t
 	for _, sub := range inside {
 		require.False(t, dirty[sub], "sub-segment [%d,%d) inside the merged range must be retired", sub.from, sub.to)
 	}
+}
+
+// TestFindMergeRanges_HoldsRangesNearFrontier pins the propagation window on
+// the block side, mirroring the state side's MergeMinAgeSteps clamp in
+// Aggregator.mergeLoop: ranges within the window of the frontier are not
+// merge candidates, so a peer that fetched the manifest can still find the
+// files it is downloading. Without it a publisher consolidated freshly
+// advertised 1k segments three minutes later and deleted them; consumers then
+// waited forever for metadata of files that existed nowhere.
+func TestFindMergeRanges_HoldsRangesNearFrontier(t *testing.T) {
+	old := dbg.MergeMinAgeSteps
+	dbg.MergeMinAgeSteps = 6
+	t.Cleanup(func() { dbg.MergeMinAgeSteps = old })
+
+	m := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, log.New())
+	var ranges []Range
+	for from := uint64(3_600_000); from < 3_610_000; from += 1_000 {
+		ranges = append(ranges, NewRange(from, from+1_000))
+	}
+
+	require.Empty(t, m.FindMergeRanges(ranges, 3_610_000),
+		"[3600000, 3610000) ends at the frontier — peers may still be pulling those segments")
+	require.NotEmpty(t, m.FindMergeRanges(ranges, 3_610_000+6_000),
+		"once the frontier has moved a full window past the range, it merges as before")
+}
+
+// TestFindMergeRanges_WindowOffMergesAtFrontier is the control: with the
+// window disabled the frontier does not restrict merging.
+func TestFindMergeRanges_WindowOffMergesAtFrontier(t *testing.T) {
+	old := dbg.MergeMinAgeSteps
+	dbg.MergeMinAgeSteps = 0
+	t.Cleanup(func() { dbg.MergeMinAgeSteps = old })
+
+	m := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, log.New())
+	var ranges []Range
+	for from := uint64(3_600_000); from < 3_610_000; from += 1_000 {
+		ranges = append(ranges, NewRange(from, from+1_000))
+	}
+	require.NotEmpty(t, m.FindMergeRanges(ranges, 3_610_000))
 }

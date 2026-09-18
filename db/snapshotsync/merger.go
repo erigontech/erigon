@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -41,6 +42,21 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	cfg := m.snCfg
 
+	// Ranges within MergeMinAgeSteps of the frontier are held back so peers
+	// can finish downloading them before they are consolidated away,
+	// mirroring the state-side clamp in Aggregator.mergeLoop; block files
+	// age in min-segment units where state ages in steps. Off by default
+	// because maxBlockNum is advisory for callers that pass a value
+	// unrelated to the frontier.
+	holdNearFrontier := dbg.MergeMinAgeSteps > 0
+	var mergeCeiling uint64
+	if holdNearFrontier {
+		clamp := uint64(dbg.MergeMinAgeSteps) * snaptype.Erigon2MinSegmentSize
+		if maxBlockNum > clamp {
+			mergeCeiling = maxBlockNum - clamp
+		}
+	}
+
 	// v4-pair positive detection: a v4 pair is two adjacent ranges
 	// whose union tiles a min-segment-size chunk with a non-aligned
 	// internal boundary — the two-v4-then-merge lifecycle output on
@@ -65,11 +81,17 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 		if b.To()-a.From() != snaptype.Erigon2MinSegmentSize {
 			continue
 		}
+		if holdNearFrontier && b.To() > mergeCeiling {
+			continue
+		}
 		toMerge = append(toMerge, NewRange(a.From(), b.To()))
 	}
 
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
+		if holdNearFrontier && r.To() > mergeCeiling {
+			continue
+		}
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
 		if r.To()-r.From() >= mergeLimit {
 			continue
