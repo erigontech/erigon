@@ -800,10 +800,10 @@ func withdrawalsStateForExecutionPayloadSource(
 	return withdrawalsState, nil
 }
 
-// resolveExecutionPayloadSource is shared by preparation and production so both choose the same
-// execution parent and FULL-parent requests. A changed beacon head is an error: choosing EMPTY
-// cannot repair a stale beacon parent. On a matching head, a pending or unreadable FULL path
-// returns its EMPTY-parent fallback; preparation waits instead of priming that fallback.
+// resolveExecutionPayloadSource selects the execution parent and FULL-parent requests.
+// Gloas requires a verified, matching beacon head, including at the fork transition.
+// Only unresolved payload status or an unreadable FULL envelope on that head permits an
+// EMPTY fallback; preparation waits instead of priming that fallback.
 func (a *ApiHandler) resolveExecutionPayloadSource(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
@@ -813,19 +813,15 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if stateVersion.Before(clparams.GloasVersion) {
 		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash, gloasPath: gloasPayloadPathPreFork}, nil
 	}
+	head, err := a.resolveProposalHead(baseBlockRoot)
+	if err != nil {
+		return executionPayloadSource{}, err
+	}
 	path := gloasPayloadPathPreFork
-	var pathErr error
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
-		path, pathErr = a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
-		if errors.Is(pathErr, errForkChoiceHeadChanged) {
-			return executionPayloadSource{}, pathErr
-		}
+		path = a.gloasPayloadPathForHead(head, targetSlot)
 	}
-	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
-	if pathErr != nil {
-		source.fallbackCause = pathErr
-	}
-	return source, nil
+	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path), nil
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
@@ -871,13 +867,21 @@ func (a *ApiHandler) isPreGloasParent(baseState *state.CachingBeaconState) bool 
 	return a.beaconChainCfg.GetCurrentStateVersion(parentSlot / a.beaconChainCfg.SlotsPerEpoch).Before(clparams.GloasVersion)
 }
 
-func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) (gloasPayloadPath, error) {
+func (a *ApiHandler) resolveProposalHead(baseBlockRoot common.Hash) (forkchoice.ForkChoiceNode, error) {
 	head, _, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
-		return gloasPayloadPathPending, fmt.Errorf("%w: resolve fork choice head: %w", errGloasPayloadPending, err)
+		return forkchoice.ForkChoiceNode{}, fmt.Errorf("resolve fork choice head: %w", err)
 	}
 	if head.Root != baseBlockRoot {
-		return gloasPayloadPathPending, fmt.Errorf("%w: proposal parent %s, current head %s", errForkChoiceHeadChanged, baseBlockRoot, head.Root)
+		return forkchoice.ForkChoiceNode{}, fmt.Errorf("%w: proposal parent %s, current head %s", errForkChoiceHeadChanged, baseBlockRoot, head.Root)
+	}
+	return head, nil
+}
+
+func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) (gloasPayloadPath, error) {
+	head, err := a.resolveProposalHead(baseBlockRoot)
+	if err != nil {
+		return gloasPayloadPathPending, err
 	}
 	return a.gloasPayloadPathForHead(head, targetSlot), nil
 }

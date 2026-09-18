@@ -1314,31 +1314,52 @@ func TestGetMEVBoostPayloadRejectsNilBlobCommitmentBeforeDeneb(t *testing.T) {
 	require.ErrorContains(t, err, "nil blob kzg commitment")
 }
 
-func TestGetMEVBoostPayloadAcceptsScheduledBlobLimitAndReturnsParsedValue(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	targetSlot := postState.Slot() + 1
-	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
-	header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
-	targetEpoch := targetSlot / handler.beaconChainCfg.SlotsPerEpoch
-	handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{{
-		Epoch:            targetEpoch,
-		MaxBlobsPerBlock: handler.beaconChainCfg.MaxBlobsPerBlockElectra + 2,
-	}}
-	maxBlobs := handler.beaconChainCfg.GetBlobParameters(targetSlot / handler.beaconChainCfg.SlotsPerEpoch).MaxBlobsPerBlock
-	for range maxBlobs {
-		header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			if version == clparams.FuluVersion {
+				require.NoError(t, postState.UpgradeToFulu())
+			}
+			targetSlot := postState.Slot() + 1
+			parentHash := postState.LatestExecutionPayloadHeader().BlockHash
+			targetEpoch := targetSlot / handler.beaconChainCfg.SlotsPerEpoch
+			maxBlobs := handler.beaconChainCfg.MaxBlobsPerBlockElectra
+			handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{{
+				Epoch:            targetEpoch,
+				MaxBlobsPerBlock: maxBlobs + 2,
+			}}
+			if version == clparams.FuluVersion {
+				maxBlobs += 2
+			}
+
+			for _, excess := range []uint64{0, 1} {
+				t.Run(fmt.Sprintf("excess_%d", excess), func(t *testing.T) {
+					ctrl := gomock.NewController(t)
+					header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+					for range maxBlobs + excess {
+						header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+					}
+					header.Data.Message.Value = new(big.Int).Lsh(big.NewInt(1), 128).String()
+					builderClient := builder_mock.NewMockBuilderClient(ctrl)
+					builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+					handler.builderClient = builderClient
+
+					payload, value, err := handler.getBuilderPayload(t.Context(), postState, targetSlot)
+
+					if excess != 0 {
+						require.ErrorContains(t, err, "too many blob kzg commitments")
+						require.Nil(t, payload)
+						require.Nil(t, value)
+						return
+					}
+					require.NoError(t, err)
+					require.Same(t, header, payload)
+					require.Equal(t, header.Data.Message.Value, value.String())
+				})
+			}
+		})
 	}
-	header.Data.Message.Value = new(big.Int).Lsh(big.NewInt(1), 128).String()
-	builderClient := builder_mock.NewMockBuilderClient(ctrl)
-	builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
-	handler.builderClient = builderClient
-
-	payload, value, err := handler.getBuilderPayload(t.Context(), postState, targetSlot)
-
-	require.NoError(t, err)
-	require.Same(t, header, payload)
-	require.Equal(t, header.Data.Message.Value, value.String())
 }
 
 func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {

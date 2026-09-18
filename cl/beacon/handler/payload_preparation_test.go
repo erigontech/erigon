@@ -995,7 +995,7 @@ func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
 
 func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
+	_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
 	)
 	preForkHead := common.Hash{0xa1}
@@ -1024,6 +1024,8 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(
 	require.False(t, found)
 
 	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
 		func(view synced_data.ViewHeadStateWithIdentityFn) error {
@@ -1054,11 +1056,36 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(
 	require.Equal(t, baseBlockRoot, result.headRoot)
 }
 
+func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	baseBlockRoot := common.Hash{0x41}
+	_, baseState, currentSlot, targetSlot, _ := setupFirstGloasPayloadStates(t, handler, postState, common.Hash{0xa1}, 30_000_000)
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	engineCalled := false
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			engineCalled = true
+			return nil, errors.New("unexpected execution work on a stale parent")
+		}).AnyTimes()
+	handler.engine = engine
+
+	_, _, err := handler.produceBeaconBody(t.Context(), 1, currentSlot, baseBlockRoot, baseState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.False(t, engineCalled, "the fork transition must not bypass the beacon-parent check")
+}
+
 func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, validatorParams := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
 	)
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
 	preForkHead := common.Hash{0xa1}
 	_, baseState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
 		t, handler, postState, preForkHead, 30_000_000,
@@ -1083,7 +1110,7 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	handler.engine = engine
 
 	_, _, err = handler.produceBeaconBody(
-		t.Context(), 3, currentSlot, common.Hash{0x41}, baseState, targetSlot,
+		t.Context(), 3, currentSlot, baseBlockRoot, baseState, targetSlot,
 		common.Bytes96{}, common.Hash{},
 	)
 
@@ -1886,6 +1913,20 @@ func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
 
 	require.Equal(t, fullHash, source.head)
 	require.Equal(t, gloasPayloadPathFull, source.gloasPath)
+}
+
+func TestExecutionPayloadSourceRejectsHeadLookupFailure(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	baseBlockRoot := common.Hash{0x41}
+	headErr := errors.New("fork choice unavailable")
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{}, 0, headErr
+	}
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
+
+	require.ErrorIs(t, err, headErr)
+	require.Zero(t, source, "a failed head lookup must not yield an EMPTY fallback")
 }
 
 func setupGloasPreparationTest(t *testing.T) (

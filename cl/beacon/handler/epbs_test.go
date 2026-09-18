@@ -2498,6 +2498,22 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
 }
 
+func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	handler.engine = execution_client.NewMockExecutionEngine(ctrl)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", payload.SlotNumber), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "head changed")
+	require.Empty(t, handler.pendingBuilderPayloads.entries)
+}
+
 func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)

@@ -1460,7 +1460,7 @@ func (a *ApiHandler) getBuilderPayload(
 	// Blob schedules can change the limit without changing the state version.
 	if baseState.Version() >= clparams.DenebVersion {
 		maxBlobs := a.beaconChainCfg.MaxBlobsPerBlockByVersion(baseState.Version())
-		if baseState.Version() >= clparams.ElectraVersion {
+		if baseState.Version() >= clparams.FuluVersion {
 			maxBlobs = a.beaconChainCfg.GetBlobParameters(targetEpoch).MaxBlobsPerBlock
 		}
 		if uint64(message.BlobKzgCommitments.Len()) > maxBlobs {

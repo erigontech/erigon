@@ -1540,6 +1540,9 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		ctx, 4, baseBlockSlot, baseBlockRoot, baseState, slot, common.Bytes96{}, common.Hash{},
 	)
 	if err != nil {
+		if errors.Is(err, errForkChoiceHeadChanged) {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, err)
+		}
 		return nil, err
 	}
 	if beaconBody == nil || beaconBody.SignedExecutionPayloadBid == nil || beaconBody.SignedExecutionPayloadBid.Message == nil {
