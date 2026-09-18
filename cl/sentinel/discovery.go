@@ -489,12 +489,12 @@ func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
 func (s *Sentinel) listenForPeers() {
 	multiAddresses := make([]multiaddr.Multiaddr, 0, len(s.cfg.NetworkConfig.StaticPeers))
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
-		addr, err := p2p.ParseStaticPeer(node)
+		addrs, err := p2p.ParseStaticPeerAddrs(node)
 		if err != nil {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 			continue
 		}
-		multiAddresses = append(multiAddresses, addr)
+		multiAddresses = append(multiAddresses, addrs...)
 	}
 	log.Info("CL Sentinel static peers", "len", len(multiAddresses))
 	if len(multiAddresses) > 0 {

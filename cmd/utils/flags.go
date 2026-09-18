@@ -903,7 +903,7 @@ var (
 	}
 	CaplinDiscoveryTCPPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.tcpport",
-		Usage: "TCP Port for Caplin DISCV5 protocol",
+		Usage: "TCP and QUIC port for Caplin libp2p",
 		Value: 4001,
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{

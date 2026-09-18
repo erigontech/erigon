@@ -38,3 +38,11 @@ func TestHostTCPPortReturnsBoundPort(t *testing.T) {
 	require.NoError(t, err)
 	conn.Close()
 }
+
+func TestHostQUICPortReturnsBoundPort(t *testing.T) {
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"))
+	require.NoError(t, err)
+	defer host.Close()
+
+	require.NotZero(t, hostQUICPort(host))
+}

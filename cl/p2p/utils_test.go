@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const (
@@ -76,7 +77,7 @@ func TestParseBootstrapNodesAcceptsEmptyInput(t *testing.T) {
 	require.Empty(t, unsupportedPeers)
 }
 
-func TestParseBootstrapNodesClassifiesUnsupportedTransport(t *testing.T) {
+func TestParseBootstrapNodesClassifiesQUICMultiaddrAsDirectPeer(t *testing.T) {
 	t.Parallel()
 
 	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
@@ -86,19 +87,19 @@ func TestParseBootstrapNodesClassifiesUnsupportedTransport(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, discoveryNodes)
-	require.Equal(t, []string{publicNodeChiadoMultiaddr}, directPeers)
-	require.Equal(t, []string{quicPeer}, unsupportedPeers)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr, quicPeer}, directPeers)
+	require.Empty(t, unsupportedPeers)
 }
 
-func TestParseBootstrapNodesRejectsOnlyUnsupportedTransport(t *testing.T) {
+func TestParseBootstrapNodesAcceptsOnlyQUICTransport(t *testing.T) {
 	t.Parallel()
 
 	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
 	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{quicPeer})
-	require.Error(t, err)
-	require.Nil(t, discoveryNodes)
-	require.Nil(t, directPeers)
-	require.Nil(t, unsupportedPeers)
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Equal(t, []string{quicPeer}, directPeers)
+	require.Empty(t, unsupportedPeers)
 }
 
 func TestParseBootstrapNodesRejectsMalformedMixedInput(t *testing.T) {
@@ -135,7 +136,6 @@ func TestParseStaticPeerRejectsUnsupportedTransports(t *testing.T) {
 	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
 	for _, input := range []string{
 		"/ip4/192.0.2.1/p2p/" + peerID,
-		"/ip4/192.0.2.1/udp/9000/quic-v1/p2p/" + peerID,
 		"/ip4/192.0.2.1/tcp/9000/ws/p2p/" + peerID,
 		"/ip4/192.0.2.1/tcp/9000/p2p/" + peerID + "/p2p-circuit/p2p/" + peerID,
 	} {
@@ -150,8 +150,11 @@ func TestParseStaticPeerRejectsNonDialableTCPAddresses(t *testing.T) {
 	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
 	for _, input := range []string{
 		"/ip4/192.0.2.1/tcp/0/p2p/" + peerID,
+		"/ip4/192.0.2.1/udp/0/quic-v1/p2p/" + peerID,
 		"/ip4/0.0.0.0/tcp/9000/p2p/" + peerID,
+		"/ip4/0.0.0.0/udp/9001/quic-v1/p2p/" + peerID,
 		"/ip6/::/tcp/9000/p2p/" + peerID,
+		"/ip6/::/udp/9001/quic-v1/p2p/" + peerID,
 	} {
 		_, err := ParseStaticPeer(input)
 		require.Error(t, err)
@@ -173,16 +176,87 @@ func TestParseStaticPeerAcceptsSupportedTCPAddresses(t *testing.T) {
 	}
 }
 
-func TestConvertToSingleMultiAddrRejectsNodeWithoutTcpPort(t *testing.T) {
+func TestParseStaticPeerAcceptsSupportedQUICAddresses(t *testing.T) {
+	t.Parallel()
+
+	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
+	for _, input := range []string{
+		"/ip4/192.0.2.1/udp/9001/quic-v1/p2p/" + peerID,
+		"/ip6/2001:db8::1/udp/9001/quic-v1/p2p/" + peerID,
+		"/dns4/chiado.example/udp/9001/quic-v1/p2p/" + peerID,
+		"/dns6/chiado.example/udp/9001/quic-v1/p2p/" + peerID,
+	} {
+		parsed, err := ParseStaticPeer(input)
+		require.NoError(t, err)
+		require.Equal(t, input, parsed.String())
+	}
+}
+
+func TestConvertToAddrInfoPrefersQUICAndRetainsTCPFallback(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	noTcp := enode.NewV4(&key.PublicKey, net.ParseIP("192.0.2.2"), 0, 30301)
 
-	_, err = ConvertToSingleMultiAddr(noTcp)
+	var record enr.Record
+	record.Set(enr.IP(net.ParseIP("192.0.2.1")))
+	record.Set(enr.TCP(9000))
+	record.Set(enr.QUIC(9001))
+	require.NoError(t, enode.SignV4(&record, key))
+	node, err := enode.New(enode.ValidSchemes, &record)
+	require.NoError(t, err)
+
+	info, preferred, err := ConvertToAddrInfo(node)
+	require.NoError(t, err)
+	require.Contains(t, preferred.String(), "/udp/9001/quic-v1/")
+	require.Len(t, info.Addrs, 2)
+	require.Equal(t, "/ip4/192.0.2.1/udp/9001/quic-v1", info.Addrs[0].String())
+	require.Equal(t, "/ip4/192.0.2.1/tcp/9000", info.Addrs[1].String())
+}
+
+func TestParseStaticPeerAddrsRetainsENRFallback(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	var record enr.Record
+	record.Set(enr.IP(net.ParseIP("192.0.2.1")))
+	record.Set(enr.TCP(9000))
+	record.Set(enr.QUIC(9001))
+	require.NoError(t, enode.SignV4(&record, key))
+	node, err := enode.New(enode.ValidSchemes, &record)
+	require.NoError(t, err)
+
+	addrs, err := ParseStaticPeerAddrs(node.String())
+	require.NoError(t, err)
+	require.Len(t, addrs, 2)
+	require.Contains(t, addrs[0].String(), "/udp/9001/quic-v1/")
+	require.Contains(t, addrs[1].String(), "/tcp/9000/")
+}
+
+func TestConvertToSingleMultiAddrAcceptsQUICOnlyNode(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	var record enr.Record
+	record.Set(enr.IP(net.ParseIP("192.0.2.1")))
+	record.Set(enr.QUIC(9001))
+	require.NoError(t, enode.SignV4(&record, key))
+	node, err := enode.New(enode.ValidSchemes, &record)
+	require.NoError(t, err)
+
+	addr, err := ConvertToSingleMultiAddr(node)
+	require.NoError(t, err)
+	require.Contains(t, addr.String(), "/udp/9001/quic-v1/")
+}
+
+func TestConvertToSingleMultiAddrRejectsNodeWithoutTransportPort(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	noTransport := enode.NewV4(&key.PublicKey, net.ParseIP("192.0.2.2"), 0, 30301)
+
+	_, err = ConvertToSingleMultiAddr(noTransport)
 	require.Error(t, err)
 }
 
-func TestConvertToMultiAddrSkipsNodesWithoutTcpPort(t *testing.T) {
+func TestConvertToMultiAddrSkipsNodesWithoutTransportPort(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	withTcp := enode.NewV4(&key.PublicKey, net.ParseIP("192.0.2.1"), 30303, 30301)

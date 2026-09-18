@@ -48,7 +48,7 @@ var (
 	}
 	SentinelTcpPort = cli.UintFlag{
 		Name:  "sentinel.tcp.port",
-		Usage: "sets lightclient tcp port",
+		Usage: "sets lightclient TCP and QUIC port",
 		Value: 4001,
 	}
 	SentinelServerPort = cli.IntFlag{
@@ -73,13 +73,13 @@ var (
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: "",
 	}
 
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: "",
 	}
 )
