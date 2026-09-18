@@ -39,6 +39,19 @@ const lockScopeTimeout = 5 * time.Second
 
 func noDerivedHash() (common.Hash, bool) { return common.Hash{}, false }
 
+// selfConsistentPayload makes the payload name its own derived hash, which is what a
+// caller must do before any invalid verdict for it can be cached.
+func selfConsistentPayload(t *testing.T, block *cltypes.SignedBeaconBlock) func() (common.Hash, bool) {
+	t.Helper()
+	payload := block.Block.Body.ExecutionPayload
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Extra = solid.NewExtraData()
+	executionHash, err := payload.ComputeBlockHash(&block.Block.ParentRoot, common.Hash{}, nil)
+	require.NoError(t, err)
+	payload.BlockHash = executionHash
+	return func() (common.Hash, bool) { return executionHash, true }
+}
+
 // blockingEngine returns a mock whose NewPayload signals entry and then blocks until
 // the returned release channel is closed, so a test can hold OnBlock inside the EL call.
 func blockingEngine(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
@@ -308,13 +321,14 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 	store, block := buildExAnteStorePendingLast(t, engine)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
+	derived := selfConsistentPayload(t, block)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			blockRoot, func() error { return nil }, noDerivedHash,
+			blockRoot, func() error { return nil }, derived,
 			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
@@ -418,12 +432,8 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, errors.New("bad block"))
 	store, block := buildExAnteStorePendingLast(t, engine)
 	payload := block.Block.Body.ExecutionPayload
-	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
-	payload.Extra = solid.NewExtraData()
-	executionHash, err := payload.ComputeBlockHash(&block.Block.ParentRoot, common.Hash{}, nil)
-	require.NoError(t, err)
-	payload.BlockHash = executionHash
-	derived := func() (common.Hash, bool) { return executionHash, true }
+	derived := selfConsistentPayload(t, block)
+	executionHash := payload.BlockHash
 
 	done := make(chan struct{})
 	go func() {
@@ -499,6 +509,45 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 	<-store.payloadValidationAdmission
 	awaitSignal(t, checked, "admission to be checked after the token was acquired")
 	awaitSignal(t, done, "the caller to finish")
+}
+
+// A payload whose claimed hash does not match its contents is rejected for naming the
+// wrong payload. That verdict says nothing about either identity, so repeating the
+// submission must keep reaching the EL and must never blacklist the claimed hash.
+func TestOnBlockMalformedHashIsNotCachedAgainstTheClaimedHash(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(2).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			return execution_client.PayloadStatusInvalidated, errors.New("mismatching hash")
+		})
+	store, block := buildExAnteStorePendingLast(t, engine)
+	payload := block.Block.Body.ExecutionPayload
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Extra = solid.NewExtraData()
+	claimed := payload.BlockHash
+	derivedHash, err := payload.ComputeBlockHash(&block.Block.ParentRoot, common.Hash{}, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, claimed, derivedHash, "the payload must not name its own hash")
+
+	for range 2 {
+		require.ErrorContains(t, store.OnBlock(context.Background(), block, true, true, false),
+			"invalid execution payload hash")
+	}
+
+	_, cached := store.GetRecentExecutionPayloadStatus(claimed)
+	require.False(t, cached, "a hash the payload never owned must not be blacklisted")
+	require.False(t, store.executionHashMarkedInvalid(claimed))
+	require.False(t, store.rootMarkedInvalid(common.Hash(mustRoot(t, block))))
+}
+
+func mustRoot(t *testing.T, block *cltypes.SignedBeaconBlock) common.Hash {
+	t.Helper()
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return root
 }
 
 // A caller that wins admission only after someone else validated the same payload

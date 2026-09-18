@@ -467,15 +467,20 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 		case execution_client.PayloadStatusInvalidated:
+			// Cache nothing unless the request named its own payload. A mismatched hash is
+			// rejected for naming the wrong payload, which says nothing about the content
+			// of either one, and a root verdict cached here is later promoted to the
+			// claimed hash by the caller's early invalid branch.
+			executionHash, derived := derivedExecutionHash()
+			if !derived || executionHash != payload.BlockHash {
+				break
+			}
 			// Both clients report INVALID with the reason attached, so this cannot be
 			// gated on err.
 			if f.payloadStatusByRoot != nil {
 				f.payloadStatusByRoot.Add(blockRoot, status)
 			}
-			// Cache the verdict against the payload itself only when the request was
-			// self-consistent. A claimed hash that does not match the derived one is
-			// rejected for naming the wrong payload, which says nothing about its content.
-			if executionHash, ok := derivedExecutionHash(); ok && executionHash == payload.BlockHash && f.executionPayloadStatus != nil {
+			if f.executionPayloadStatus != nil {
 				f.executionPayloadStatus.Add(executionHash, status)
 			}
 		}
