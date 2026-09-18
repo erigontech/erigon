@@ -17,9 +17,8 @@
 package jsonstream
 
 import (
-	"io"
-
 	"encoding"
+	"io"
 )
 
 var (

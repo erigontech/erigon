@@ -56,27 +56,26 @@ func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		writeField(w, "storageProof")
 		if r.StorageProof == nil {
 			w.WriteNil()
-			w.WriteObjectEnd()
-			return nil
-		}
-		w.WriteArrayStart()
-		for i := range r.StorageProof {
-			if i > 0 {
-				w.WriteMore()
+		} else {
+			w.WriteArrayStart()
+			for i := range r.StorageProof {
+				if i > 0 {
+					w.WriteMore()
+				}
+				sp := &r.StorageProof[i]
+				w.WriteObjectStart()
+				{
+					w.WriteObjectField("key")
+					w.WriteString(sp.Key)
+					writeField(w, "value")
+					writeU256(w, sp.Value)
+					writeField(w, "proof")
+					writeHexArray(w, sp.Proof)
+				}
+				w.WriteObjectEnd()
 			}
-			sp := &r.StorageProof[i]
-			w.WriteObjectStart()
-			{
-				w.WriteObjectField("key")
-				w.WriteString(sp.Key)
-				writeField(w, "value")
-				writeU256(w, sp.Value)
-				writeField(w, "proof")
-				writeHexArray(w, sp.Proof)
-			}
-			w.WriteObjectEnd()
+			w.WriteArrayEnd()
 		}
-		w.WriteArrayEnd()
 	}
 	w.WriteObjectEnd()
 	return nil
