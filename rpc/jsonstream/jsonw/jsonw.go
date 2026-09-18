@@ -25,7 +25,7 @@ type JSONWriter interface {
 	// WriteHexUint64 writes v as a 0x-prefixed hex quantity, without leading zeros.
 	WriteHexUint64(v uint64)
 	// WriteHexU256 writes v as a 0x-prefixed hex quantity, without leading zeros.
-	WriteHexU256(v *uint256.Int)
+	WriteHexU256(v uint256.Int)
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
 	WriteNil()

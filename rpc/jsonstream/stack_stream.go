@@ -112,7 +112,7 @@ func (s *StackStream) WriteHexUint64(v uint64) {
 
 // WriteHexU256 writes a number the way JSON-RPC quantities are encoded: no leading zero digits,
 // and "0x0" for zero.
-func (s *StackStream) WriteHexU256(v *uint256.Int) {
+func (s *StackStream) WriteHexU256(v uint256.Int) {
 	be := v.Bytes32()
 	trimmed := be[:]
 	for len(trimmed) > 1 && trimmed[0] == 0 {

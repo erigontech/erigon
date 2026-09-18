@@ -73,7 +73,7 @@ type Stream interface {
 	WriteHex(b []byte)
 	// WriteHexUint64 and WriteHexQuantity write JSON-RPC quantities: 0x-prefixed hex without leading zeros.
 	WriteHexUint64(v uint64)
-	WriteHexU256(v *uint256.Int)
+	WriteHexU256(v uint256.Int)
 
 	// Utility methods
 

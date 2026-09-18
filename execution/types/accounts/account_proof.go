@@ -105,5 +105,5 @@ func writeU256(w jsonw.JSONWriter, v *hexutil.U256) {
 		w.WriteNil()
 		return
 	}
-	w.WriteHexU256((*uint256.Int)(v))
+	w.WriteHexU256(uint256.Int(*v))
 }
