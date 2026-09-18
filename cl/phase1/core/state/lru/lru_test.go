@@ -547,12 +547,12 @@ func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
 	require.Equal(t, uint64(1), v)
 }
 
-// TestCacheWithTTLSweepCoversCacheInChunks pins the pacing: one tick inspects at most sweepChunk
-// entries and then drops the lock, and the ticks that follow resume where the last one stopped
-// instead of restarting, so a cache larger than a chunk is still covered in full.
-func TestCacheWithTTLSweepCoversCacheInChunks(t *testing.T) {
-	const entries = 3*sweepChunk - 36
-	c := NewWithTTL[uint64, uint64]("sweep_covers_in_chunks", entries, time.Hour)
+// TestCacheWithTTLSweepReclaimsWholeCacheWithinOneTick pins the reclamation window: every entry
+// past its deadline is gone after one sweep, however large the cache. This is the 100,000-entry,
+// 30-minute case from review, at which the chunked walk had left 97,440 expired entries behind.
+func TestCacheWithTTLSweepReclaimsWholeCacheWithinOneTick(t *testing.T) {
+	const entries = 100_000
+	c := NewWithTTL[uint64, uint64]("sweep_whole_cache_one_tick", entries, 30*time.Minute)
 	t.Cleanup(c.Close)
 
 	for i := range entries {
@@ -560,83 +560,123 @@ func TestCacheWithTTLSweepCoversCacheInChunks(t *testing.T) {
 	}
 	require.Equal(t, entries, c.Len())
 
-	past := time.Now().Add(2 * time.Hour)
-
-	c.removeExpired(past)
-	require.Equal(t, entries-sweepChunk, c.Len(), "one tick must inspect no more than a chunk")
-
-	c.removeExpired(past)
-	require.Equal(t, entries-2*sweepChunk, c.Len(), "the next tick must resume, not restart")
-
-	c.removeExpired(past)
-	require.Equal(t, 0, c.Len(), "the walk must reach every entry across consecutive ticks")
+	c.removeExpired(time.Now().Add(31*time.Minute + 30*time.Second))
+	require.Equal(t, 0, c.Len(), "one sweep must reclaim every expired entry, not a chunk of them")
 }
 
-// TestCacheWithTTLSweepResumesAfterCursorRemoved pins the boundary the resume point has: the key a
-// walk stopped at can be evicted or removed before the next tick, and the walk then has no cursor
-// to find. Restarting from the oldest entry repeats work already done but must never leave an
-// expired entry behind.
-func TestCacheWithTTLSweepResumesAfterCursorRemoved(t *testing.T) {
-	const entries = 2 * sweepChunk
-	c := NewWithTTL[uint64, uint64]("sweep_resumes_after_cursor_removed", entries, time.Hour)
+// TestCacheWithTTLSweepIgnoresPromotion pins that a Get between sweeps cannot hide an expired
+// entry. Reclamation follows insertion order, which a Get does not change, so what a Get does to
+// the eviction list is irrelevant to what the sweep visits.
+func TestCacheWithTTLSweepIgnoresPromotion(t *testing.T) {
+	const entries = 1025
+	c := NewWithTTL[uint64, uint64]("sweep_ignores_promotion", entries, time.Hour)
+	t.Cleanup(c.Close)
+
+	// Key 0 is the oldest by a clear margin, so it is the only entry due at first+1ms.
+	c.Add(0, 0)
+	c.mu.Lock()
+	first := c.expiry[0].expiresAt
+	c.mu.Unlock()
+	time.Sleep(2 * time.Millisecond)
+	for i := 1; i < entries; i++ {
+		c.Add(uint64(i), uint64(i))
+	}
+
+	// A reader promotes a live key in the eviction list between two sweeps.
+	_, ok := c.Get(512)
+	require.True(t, ok)
+
+	c.removeExpired(first.Add(time.Millisecond))
+	require.False(t, held(c, 0), "the oldest entry must be reclaimed whatever a Get did to the eviction order")
+	require.Equal(t, entries-1, c.Len())
+	require.True(t, held(c, 512))
+	require.True(t, held(c, entries-1))
+}
+
+// TestCacheWithTTLAddRenewsAndSkipsStaleRecord pins a renewal: the entry lives to its new deadline,
+// and the record the first Add left behind is consumed at its own deadline without touching the
+// entry, because the deadline it carries no longer matches.
+func TestCacheWithTTLAddRenewsAndSkipsStaleRecord(t *testing.T) {
+	c := NewWithTTL[string, int]("readd_renews", 8, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add("k", 1)
+	c.mu.Lock()
+	first := c.expiry[0].expiresAt
+	c.mu.Unlock()
+
+	time.Sleep(2 * time.Millisecond)
+	c.Add("k", 2)
+	c.mu.Lock()
+	require.Len(t, c.expiry, 2, "a renewal appends a record; it does not rewrite the old one")
+	second := c.expiry[1].expiresAt
+	c.mu.Unlock()
+	require.True(t, second.After(first))
+
+	c.removeExpired(first.Add(time.Millisecond))
+	v, ok := c.Get("k")
+	require.True(t, ok, "the stale record must not reclaim a renewed entry")
+	require.Equal(t, 2, v)
+	c.mu.Lock()
+	require.Len(t, c.expiry, 1, "the stale record is consumed once its deadline passes")
+	c.mu.Unlock()
+
+	c.removeExpired(second.Add(time.Nanosecond))
+	require.False(t, held(c, "k"))
+}
+
+// TestCacheWithTTLSweepBoundsLockHold pins the pacing that remains: one lock hold reclaims at most
+// sweepChunk records, and removeExpired keeps taking the lock until nothing due is left, so a large
+// burst of expiries is reclaimed in full at this tick without holding readers off for all of it.
+func TestCacheWithTTLSweepBoundsLockHold(t *testing.T) {
+	const entries = 3*sweepChunk - 36
+	c := NewWithTTL[uint64, uint64]("sweep_bounds_lock_hold", entries, time.Hour)
 	t.Cleanup(c.Close)
 
 	for i := range entries {
 		c.Add(uint64(i), uint64(i))
 	}
-
 	past := time.Now().Add(2 * time.Hour)
 
-	c.removeExpired(past)
-	require.Equal(t, sweepChunk, c.Len())
-
-	// The walk stopped at the oldest surviving entry. Remove exactly that key, so the next tick
-	// cannot find its cursor.
-	c.mu.Lock()
-	cursor := c.sweepCursor
-	require.True(t, c.sweeping, "a walk that stopped short must have left a cursor")
-	c.mu.Unlock()
-	require.True(t, c.Remove(cursor))
-
-	c.removeExpired(past)
-	require.Equal(t, 0, c.Len(), "a walk whose cursor key is gone must still reclaim the rest")
+	require.True(t, c.removeExpiredUpTo(past, sweepChunk), "a full chunk with more due must report more")
+	require.Equal(t, entries-sweepChunk, c.Len())
+	require.True(t, c.removeExpiredUpTo(past, sweepChunk))
+	require.Equal(t, entries-2*sweepChunk, c.Len())
+	require.False(t, c.removeExpiredUpTo(past, sweepChunk), "the last hold finds nothing further due")
+	require.Equal(t, 0, c.Len())
+	require.False(t, c.removeExpiredUpTo(past, sweepChunk), "an empty queue reports nothing to do")
 }
 
-// TestCacheWithTTLSweepKeepsLiveEntriesAcrossChunks pins that pacing the walk does not cost
-// precision: over a cache wider than a chunk, every entry past its deadline goes and every entry
-// within its deadline stays, whichever chunk it falls in.
-func TestCacheWithTTLSweepKeepsLiveEntriesAcrossChunks(t *testing.T) {
-	const entries = 2 * sweepChunk
-	c := NewWithTTL[uint64, uint64]("sweep_keeps_live_across_chunks", entries, time.Hour)
+// TestCacheWithTTLExpiryQueueCompacts pins that consumed records release their memory: after
+// churning far more entries than the cache holds, a drained queue is not still backed by an array
+// sized to everything ever added.
+func TestCacheWithTTLExpiryQueueCompacts(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("expiry_queue_compacts", 64, time.Hour)
 	t.Cleanup(c.Close)
 
-	for i := range entries {
+	for i := range 10_000 {
 		c.Add(uint64(i), uint64(i))
 	}
+	c.removeExpired(time.Now().Add(2 * time.Hour))
 
-	// Every even key is expired, every odd key is not. Interleaving them puts both kinds in
-	// every chunk the walk takes.
-	cutoff := time.Now()
 	c.mu.Lock()
-	for i := range entries {
-		k := uint64(i)
-		e, ok := c.cache.Peek(k)
-		require.True(t, ok)
-		if i%2 == 0 {
-			e.expiresAt = cutoff.Add(-time.Hour)
-		} else {
-			e.expiresAt = cutoff.Add(time.Hour)
-		}
-		c.cache.Add(k, e)
-	}
+	n, capacity := len(c.expiry), cap(c.expiry)
 	c.mu.Unlock()
+	require.Equal(t, 0, n)
+	require.LessOrEqual(t, capacity, expiryCompactMin, "a drained queue must not keep a 10,000-record backing array")
+}
 
-	for range entries/sweepChunk + 1 {
-		c.removeExpired(cutoff)
+// TestCacheWithTTLNoTTLKeepsNoRecords pins that a cache without a ttl, which runs no sweep, also
+// keeps no expiry queue: nothing is recorded, so nothing can ever be reclaimed by time.
+func TestCacheWithTTLNoTTLKeepsNoRecords(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("no_ttl_no_records", 8, 0)
+	t.Cleanup(c.Close)
+	for i := range 8 {
+		c.Add(uint64(i), uint64(i))
 	}
-
-	require.Equal(t, entries/2, c.Len())
-	for i := range entries {
-		require.Equal(t, i%2 == 1, held(c, uint64(i)), "key %d survived the wrong way", i)
-	}
+	c.mu.Lock()
+	require.Empty(t, c.expiry)
+	c.mu.Unlock()
+	c.removeExpired(time.Now().Add(100 * 365 * 24 * time.Hour))
+	require.Equal(t, 8, c.Len())
 }

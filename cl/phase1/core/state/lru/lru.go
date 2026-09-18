@@ -64,11 +64,15 @@ const sweepsPerTTL = 100
 // minSweepInterval keeps a very short ttl from producing a non-positive ticker interval.
 const minSweepInterval = time.Millisecond
 
-// sweepChunk caps how many entries one tick inspects before dropping the lock, so the sweep never
-// blocks readers for a whole walk. A cache larger than this is covered across consecutive ticks:
-// the walk resumes where it stopped rather than restarting, so every entry is still reached.
+// sweepChunk caps how many expired entries one lock hold reclaims. A sweep keeps taking the lock
+// until nothing due is left, so the cap bounds how long readers wait, not how much a tick reclaims.
 const sweepChunk = 512
 
+// expiryCompactMin is the queue capacity below which spent records are not worth reclaiming.
+const expiryCompactMin = 1024
+
+// ttlEntry is what the cache stores. expiresAt is set by Add and by nothing else: the expiry queue
+// records the same deadline, and the two are compared to tell a live record from a stale one.
 type ttlEntry[V any] struct {
 	value     V
 	expiresAt time.Time
@@ -78,8 +82,14 @@ func (e ttlEntry[V]) expired(now time.Time) bool {
 	return !e.expiresAt.IsZero() && now.After(e.expiresAt)
 }
 
+// expiryRecord is one Add, in the order it happened.
+type expiryRecord[K comparable] struct {
+	key       K
+	expiresAt time.Time
+}
+
 // CacheWithTTL is a size- and time-bounded cache whose expiry sweep can be stopped. The sweep runs
-// on a goroutine owned by the cache, and Close stops it and waits for it to finish. A cache that
+// on a goroutine owned by the cache; Close stops it and waits for it to finish. A cache that
 // outlives the process needs no Close; one built per request, per peer or per test does.
 type CacheWithTTL[K comparable, V any] struct {
 	// The cache is built without a ttl of its own: the cleanup goroutine the dependency starts
@@ -91,10 +101,15 @@ type CacheWithTTL[K comparable, V any] struct {
 	metricTTLHit, metricTTLMiss metrics.Counter
 
 	mu sync.Mutex
-	// sweepCursor is the key the next chunk resumes from, and holds only between the ticks of one
-	// walk. It is read and written under mu.
-	sweepCursor K
-	sweeping    bool
+	// expiry holds one record per Add, oldest first. Every entry shares the one ttl and Add stamps
+	// its deadline under mu, so deadlines are non-decreasing along the queue and the head is always
+	// the entry due soonest. A sweep pops from the head until it meets a deadline still in the
+	// future and never looks past it: its cost is the number of entries due, not the size of the
+	// cache, and a Get, which moves an entry in the eviction list but not here, cannot hide one.
+	// A record outlives its entry when the key is renewed, removed or evicted by size; it is then
+	// skipped when its deadline comes, since the entry it described is gone or carries a later
+	// deadline. If entries ever get individual ttls this must become a heap.
+	expiry []expiryRecord[K]
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -127,8 +142,9 @@ func sweepInterval(ttl time.Duration) time.Duration {
 	return minSweepInterval
 }
 
-// Close stops the expiry sweep and waits for it to finish, so no entry is reclaimed once Close has
-// returned. It is safe to call more than once and from several goroutines at once.
+// Close stops the background sweep and waits for it to finish, so the sweep reclaims nothing once
+// Close has returned. Get still treats an entry past its deadline as a miss and drops it; only the
+// sweep stops. Close is safe to call more than once and from several goroutines at once.
 func (c *CacheWithTTL[K, V]) Close() {
 	c.closeOnce.Do(func() { close(c.done) })
 	<-c.stopped
@@ -139,9 +155,11 @@ func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
 	defer c.mu.Unlock()
 	// The deadline is taken under the lock: time spent waiting for it would otherwise be charged
 	// to the entry's ttl, and a long enough wait would store a value that is already expired.
+	// Taking it under the lock is also what keeps the expiry queue ordered.
 	e := ttlEntry[V]{value: v}
 	if c.ttl > 0 {
 		e.expiresAt = time.Now().Add(c.ttl)
+		c.expiry = append(c.expiry, expiryRecord[K]{key: k, expiresAt: e.expiresAt})
 	}
 	return c.cache.Add(k, e)
 }
@@ -191,42 +209,47 @@ func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
 	}
 }
 
-// removeExpired drops entries past their deadline, inspecting at most sweepChunk of them. Deadlines
-// are not ordered by position: a Get moves an entry to the front of the eviction list without
-// renewing it, so an expired entry can sit anywhere and the whole key set has to be covered. A
-// cache too large for one chunk is covered over the ticks that follow, each resuming from the key
-// the last one stopped at.
+// removeExpired reclaims every entry past its deadline as of now. The work is done in lock holds of
+// at most sweepChunk records each, so a large burst of expiries is reclaimed in full at this tick
+// without holding readers off for the whole burst.
 func (c *CacheWithTTL[K, V]) removeExpired(now time.Time) {
+	for c.removeExpiredUpTo(now, sweepChunk) {
+	}
+}
+
+// removeExpiredUpTo pops up to limit due records off the expiry queue under one lock hold and drops
+// the entries they still describe. It reports whether it stopped at the limit with more still due.
+func (c *CacheWithTTL[K, V]) removeExpiredUpTo(now time.Time, limit int) (more bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Keys is a snapshot, oldest first, so removing while walking it is safe.
-	keys := c.cache.Keys()
-	start := 0
-	if c.sweeping {
-		// Resume at the cursor. If the key it named is gone the walk restarts, which costs a
-		// repeat of entries already inspected this pass, never a missed one.
-		for i, k := range keys {
-			if k == c.sweepCursor {
-				start = i
-				break
-			}
+	i := 0
+	for i < len(c.expiry) && i < limit {
+		rec := c.expiry[i]
+		if !now.After(rec.expiresAt) {
+			// The head is not due, and nothing behind it is either.
+			break
+		}
+		i++
+		// Peek reads an entry without moving it, so a sweep does not make anything look recently
+		// used and size eviction still reaches the genuinely oldest entry. A deadline that differs
+		// from the record's means the key was renewed after this record was written: the newer
+		// record, later in the queue, owns it now.
+		if e, ok := c.cache.Peek(rec.key); ok && e.expiresAt.Equal(rec.expiresAt) {
+			c.cache.Remove(rec.key)
 		}
 	}
-
-	end := min(start+sweepChunk, len(keys))
-	for _, k := range keys[start:end] {
-		// Peek reads an entry without moving it, so a sweep does not make anything look
-		// recently used and size eviction still reaches the genuinely oldest entry.
-		if e, ok := c.cache.Peek(k); ok && e.expired(now) {
-			c.cache.Remove(k)
-		}
+	if i == 0 {
+		return false
 	}
+	more = i == limit && i < len(c.expiry) && now.After(c.expiry[i].expiresAt)
 
-	if end < len(keys) {
-		c.sweepCursor, c.sweeping = keys[end], true
-		return
+	// Release the consumed prefix. Re-slicing is O(1) but keeps the backing array; once most of it
+	// is spent, copy the live tail into a right-sized array so a drained queue does not hold the
+	// memory of everything ever added.
+	c.expiry = c.expiry[i:]
+	if cap(c.expiry) > 2*len(c.expiry)+expiryCompactMin {
+		c.expiry = append(make([]expiryRecord[K], 0, len(c.expiry)), c.expiry...)
 	}
-	var zero K
-	c.sweepCursor, c.sweeping = zero, false
+	return more
 }
