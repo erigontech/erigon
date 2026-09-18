@@ -43,7 +43,11 @@ make rpcdaemon
 ./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
-If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
+If the components run on different devices, `localhost` is no longer the right address on either side.
+
+On the Erigon host, bind the internal gRPC endpoint to an interface the other components can reach — `--private.api.addr=<erigon_lan_ip>:9090` — since it defaults to `127.0.0.1:9090`. Bind it to a private interface, never `0.0.0.0`: the endpoint serves the remote database interface and is not authenticated by default, so it must not be reachable from a public network.
+
+On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` follow the same rule for whichever host runs those components.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
