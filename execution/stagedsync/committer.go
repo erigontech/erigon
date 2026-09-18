@@ -200,6 +200,14 @@ func newCommitmentCalculator(
 	// batches.
 	roTx, err := db.BeginTemporalRo(workCtx) //nolint:gocritic
 	if err != nil {
+		// A cancellation here often carries a richer cause (why the batch aborted);
+		// surface it instead of the bare context.Canceled so setup failures stay
+		// attributable.
+		if errors.Is(err, context.Canceled) {
+			if cause := context.Cause(workCtx); cause != nil && !errors.Is(cause, context.Canceled) {
+				return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", cause)
+			}
+		}
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
 

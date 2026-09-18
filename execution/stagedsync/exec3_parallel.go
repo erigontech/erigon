@@ -270,6 +270,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
+	// Deterministic bug-injection faults for this batch (chaos_monkey.WithFaults on the
+	// run context). Read once here; every injection site additionally gates on
+	// enableChaosMonkey, and incarnation-scoped faults fire only at the last valid
+	// incarnation (the seal path) so induced failures are deterministic and traceable.
+	pe.chaosFaults = chaos_monkey.FaultsFromContext(ctx)
+
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
 	// and cannot be shared with the execLoop goroutine, which opens its own roTx.
 
@@ -413,6 +419,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
 		}()
+
+		if pe.enableChaosMonkey && pe.chaosFaults.ApplyLoopPanic != nil {
+			panic(pe.chaosFaults.ApplyLoopPanic)
+		}
 
 		// Open a thread-local read-only tx for domain operations. The apply loop
 		// must not use the rwTx for domain reads — rwTx is thread-bound to the
@@ -976,6 +986,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	var npWait, npProc time.Duration
 	var npWaitStart, npProcStart time.Time
 
+	if pe.enableChaosMonkey && pe.chaosFaults.ExecLoopPanic != nil {
+		panic(pe.chaosFaults.ExecLoopPanic)
+	}
+
 	for {
 		if applyTx, err = pe.refreshApplyTx(ctx, applyTx); err != nil {
 			return err
@@ -1460,14 +1474,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 // processSingleResult routes one worker result to its block executor's
 // nextResult.
 func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.TemporalTx, txResult *exec.TxResult) (*blockResult, error) {
-	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
-		chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
-		if chaosErr != nil {
-			log.Warn("Monkey in consensus")
-			return nil, chaosErr
-		}
-	}
-
 	pe.RLock()
 	blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
 	pe.RUnlock()
@@ -1517,6 +1523,13 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
+	}
+
+	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
+	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
+	// channels. Deterministic — the fault is decided here, not in a speculative worker.
+	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
+		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
 	pe.execLoopGroup.Go(func() error {
@@ -2725,6 +2738,21 @@ func (be *blockExecutor) operationalBlockResult(err error) *blockResult {
 // rejected; (nil, nil) on success.
 func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.TemporalTx, tx int, txTask exec.Task, txResult *execResult, txVersion state.Version, stateReader *state.StateReader) (*blockResult, error) {
 	be.finalizedResults[tx] = txResult
+
+	// Chaos injection fires here, at the in-order finalize of the last valid
+	// incarnation — never on a speculative execution that Block-STM may discard — so
+	// an induced failure is deterministic and attributable rather than lost in
+	// re-execution churn. A task panic is an executor fault, routed operationally
+	// (not a block verdict); the random consensus fault is a block-invalid verdict.
+	if pe.enableChaosMonkey && pe.chaosFaults.TaskPanic != nil {
+		return be.operationalBlockResult(fmt.Errorf("exec task panic: %w", pe.chaosFaults.TaskPanic)), nil
+	}
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		if chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txVersion.TxIndex, pe.cfg.badBlockHalt, txResult.Err); chaosErr != nil {
+			pe.logger.Warn("[" + pe.logPrefix + "] monkey in consensus")
+			return be.invalidBlockResult(chaosErr), nil
+		}
+	}
 
 	var cumulativeGasUsed uint64
 	var firstLogIndex uint32

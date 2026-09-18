@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -477,6 +478,10 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	// chaosFaults carries deterministic bug-injection faults from the run context
+	// (chaos_monkey.WithFaults). Only active when enableChaosMonkey is set. Populated
+	// once per batch in execImpl.
+	chaosFaults chaos_monkey.Faults
 }
 
 // A wrong root under fork validation means a payload the CL offered was rejected,
@@ -647,6 +652,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// race this send select and panic on "send on closed channel".
 		if blockRequests != nil {
 			defer close(blockRequests)
+		}
+
+		if chaosErr := te.chaosFaults.PreExecutionError; te.enableChaosMonkey && chaosErr != nil {
+			return chaosErr
 		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
