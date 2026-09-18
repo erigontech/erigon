@@ -1085,15 +1085,6 @@ func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteS
 	}
 }
 
-// DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
-// addr, leaving storage/code/self-destruct intact.
-func (s *WriteSet) DeleteAccountFields(addr accounts.Address) {
-	delete(s.balance, addr)
-	delete(s.nonce, addr)
-	delete(s.incarnation, addr)
-	delete(s.codeHash, addr)
-}
-
 // Count is the total number of writes across all paths.
 func (s *WriteSet) Count() int {
 	if s == nil {

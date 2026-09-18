@@ -2524,7 +2524,13 @@ func (sdb *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		if !bal.IsZero() || nonce != 0 || !codeHash.IsEmpty() {
 			continue
 		}
-		writes.DeleteAccountFields(addr)
+		// Clear the whole account footprint, not just the fields: a surviving
+		// AddressPath (or code/incarnation) write at this tx index alongside the
+		// SelfDestruct is the exact cell layout of a same-tx SD+CREATE2 recreate, so
+		// AccountLifecycleAt would read the removed account as Revived. deleteAddr
+		// drops address/code/codeSize/createContract/storage too, leaving only the
+		// SelfDestruct+Balance delete markers re-added below.
+		writes.deleteAddr(addr)
 		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
 			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: sdb.Version()},
 			Val:         true,
