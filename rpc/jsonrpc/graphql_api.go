@@ -319,7 +319,7 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -375,7 +375,7 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
