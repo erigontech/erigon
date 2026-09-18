@@ -21,7 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -88,14 +89,14 @@ func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) 
 	return Methods.ETHEstimateGas, fmt.Sprintf(template, Methods.ETHEstimateGas, callArgs, blockRef, req.reqID)
 }
 
-func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
-	var result hexutil.Big
+func (reqGen *requestGenerator) GasPrice() (*uint256.Int, error) {
+	var result hexutil.U256
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGasPrice); err != nil {
 		return nil, err
 	}
 
-	return result.ToInt(), nil
+	return (*uint256.Int)(&result), nil
 }
 
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
