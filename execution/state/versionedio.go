@@ -167,38 +167,6 @@ func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr 
 	inner[key] = tr
 }
 
-// ReadsAccount reports any account-level read of addr (used for the coinbase total-order fallback).
-func (s *ReadSet) ReadsAccount(addr accounts.Address) bool {
-	if _, ok := s.address[addr]; ok {
-		return true
-	}
-	if _, ok := s.balance[addr]; ok {
-		return true
-	}
-	if _, ok := s.nonce[addr]; ok {
-		return true
-	}
-	if _, ok := s.incarnation[addr]; ok {
-		return true
-	}
-	if _, ok := s.codeHash[addr]; ok {
-		return true
-	}
-	if _, ok := s.code[addr]; ok {
-		return true
-	}
-	if _, ok := s.codeSize[addr]; ok {
-		return true
-	}
-	if _, ok := s.selfDestruct[addr]; ok {
-		return true
-	}
-	if _, ok := s.createContract[addr]; ok {
-		return true
-	}
-	return false
-}
-
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	tr, ok := s.address[addr]
 	return tr, ok

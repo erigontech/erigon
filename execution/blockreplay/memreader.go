@@ -253,7 +253,6 @@ func (r *memBlockReader) FrozenBorBlocks(align bool) uint64         { return 0 }
 func (r *memBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { return ethconfig.BlocksFreezing{} }
 func (r *memBlockReader) CanPruneTo(currentBlockInDB uint64) uint64 { return 0 }
 func (r *memBlockReader) Snapshots() dbservices.BlockSnapshots      { return nil }
-func (r *memBlockReader) BorSnapshots() dbservices.BlockSnapshots   { return nil }
 func (r *memBlockReader) AllTypes() []snaptype.Type                 { return nil }
 func (r *memBlockReader) TxnumReader() rawdbv3.TxNumsReader         { return rawdbv3.TxNums }
 

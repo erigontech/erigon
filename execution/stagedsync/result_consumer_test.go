@@ -17,8 +17,8 @@ func TestResultStream_PublishFansOutToAll(t *testing.T) {
 	apply := make(chan applyResult, 1)
 	commit := make(chan applyResult, 1)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 
 	if err := s.publish(context.Background(), "r", false); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -35,8 +35,8 @@ func TestResultStream_PublishSkipsNilSink(t *testing.T) {
 	t.Parallel()
 	apply := make(chan applyResult, 1)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", nil, false) // DiscardCommitment path
+	s.register("applyResults", apply)
+	s.register("commitResults", nil) // DiscardCommitment path
 
 	if err := s.publish(context.Background(), "r", false); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -51,8 +51,8 @@ func TestResultStream_MustDeliverBlocksUntilDrained(t *testing.T) {
 	apply := make(chan applyResult) // unbuffered
 	commit := make(chan applyResult)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 
 	done := make(chan error, 1)
 	go func() { done <- s.publish(context.Background(), "r", true) }()
@@ -74,7 +74,7 @@ func TestResultStream_PublishHonoursCtxDoneWhenFull(t *testing.T) {
 	t.Parallel()
 	apply := make(chan applyResult) // unbuffered, no receiver → full
 	s := newResultStream()
-	s.register("applyResults", apply, true)
+	s.register("applyResults", apply)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -88,8 +88,8 @@ func TestResultStream_CloseOrderCommitBeforeApply(t *testing.T) {
 	apply := make(chan applyResult)
 	commit := make(chan applyResult)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 
 	order := s.close()
 	if len(order) != 2 || order[0] != "commitResults" || order[1] != "applyResults" {
@@ -108,8 +108,8 @@ func TestResultStream_CloseIsIdempotent(t *testing.T) {
 	apply := make(chan applyResult)
 	commit := make(chan applyResult)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 
 	_ = s.close()
 	if order := s.close(); len(order) != 0 {
@@ -122,8 +122,8 @@ func TestResultStream_CloseRecoversExternalDoubleClose(t *testing.T) {
 	apply := make(chan applyResult)
 	commit := make(chan applyResult)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 	// A racing shutdown path closed them first.
 	close(apply)
 	close(commit)
@@ -138,7 +138,7 @@ func TestResultStream_PublishOnClosedIsCanceled(t *testing.T) {
 	t.Parallel()
 	apply := make(chan applyResult, 1)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
+	s.register("applyResults", apply)
 	_ = s.close()
 
 	if err := s.publish(context.Background(), "r", false); !errors.Is(err, context.Canceled) {
@@ -151,8 +151,8 @@ func TestResultStream_SendControlTargetsOneSink(t *testing.T) {
 	apply := make(chan applyResult, 1)
 	commit := make(chan applyResult, 1)
 	s := newResultStream()
-	s.register("applyResults", apply, true)
-	s.register("commitResults", commit, false)
+	s.register("applyResults", apply)
+	s.register("commitResults", commit)
 
 	s.sendControl("commitResults", "ctrl")
 	if got := <-commit; got != "ctrl" {
@@ -169,7 +169,7 @@ func TestResultStream_SendControlOnClosedIsDropped(t *testing.T) {
 	t.Parallel()
 	commit := make(chan applyResult, 1)
 	s := newResultStream()
-	s.register("commitResults", commit, false)
+	s.register("commitResults", commit)
 	_ = s.close()
 	// Must not panic — a closed target during shutdown drops the control message.
 	s.sendControl("commitResults", "ctrl")

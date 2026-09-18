@@ -11,10 +11,6 @@ type ExecutionStat struct {
 	TxIdx       int
 	Incarnation int
 	Duration    time.Duration
-	// StartNanos/EndNanos are absolute wall timestamps (UnixNano) of the
-	// committed incarnation's execute call. Zero when profiling is off.
-	StartNanos int64
-	EndNanos   int64
 }
 
 // complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions

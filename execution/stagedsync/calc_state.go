@@ -463,13 +463,6 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 	}
 }
 
-// SelfDestructedSubtrees returns the addresses self-destructed this block, whose
-// persisted commitment storage subtree the committer must GC. Valid until
-// ResetBlockFlags.
-func (cs *calcState) SelfDestructedSubtrees() map[accounts.Address]bool {
-	return cs.sdSubtree
-}
-
 // ResetBlockFlags clears the per-block dirty flags while keeping the accumulated
 // state values, preparing for the next block.
 func (cs *calcState) ResetBlockFlags() {

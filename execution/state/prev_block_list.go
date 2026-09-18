@@ -13,7 +13,6 @@ type PrevBlockList struct {
 	mu   sync.Mutex
 	head *prevBlockNode // newest finished block
 	tail *prevBlockNode // oldest not-yet-committed block
-	n    int
 }
 
 type prevBlockNode struct {
@@ -50,7 +49,6 @@ func (l *PrevBlockList) PushHead(blockNum, endTxNum uint64, vm *VersionMap) {
 		l.tail = node
 	}
 	l.head = node
-	l.n++
 }
 
 // RemoveTail drops the oldest block once its writes are committed to the shared
@@ -68,7 +66,6 @@ func (l *PrevBlockList) RemoveTail() {
 	} else {
 		l.head = nil
 	}
-	l.n--
 }
 
 // Before returns the versionMaps of blocks earlier than blockNum, tail→head
@@ -100,11 +97,4 @@ func (l *PrevBlockList) BeforeTxNum(txNum uint64) []*VersionMap {
 		}
 	}
 	return out
-}
-
-// Len is the current window length (exec-ahead-of-commit). Test/metric use.
-func (l *PrevBlockList) Len() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.n
 }

@@ -120,16 +120,6 @@ type TxResult struct {
 	// adjustments folded in during finalize.
 	CollectorWrites *state.WriteSet
 
-	// WorkerValidated: the worker walked TxIn against the versionMap right after
-	// executing and recorded the verdict here (dep-order fast path). WorkerBlocker
-	// is the highest mismatched writer's TxIndex when the verdict is invalid, so
-	// the exec loop can register it as the true dependency without re-walking.
-	// WorkerVerdictSet distinguishes a real verdict from the zero value
-	// (VersionValid == iota 0), so an unvalidated result is not trusted as valid.
-	WorkerValidated  state.VersionValidity
-	WorkerBlocker    int
-	WorkerVerdictSet bool
-
 	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
 	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
 	// tx's reads were not against a single settled snapshot — an intra-tx

@@ -34,37 +34,16 @@ func TestPrevBlockList_RemoveTailDropsOldest(t *testing.T) {
 	l := NewPrevBlockList()
 	l.PushHead(10, 10, mapWithBalance(addr, 10))
 	l.PushHead(11, 11, mapWithBalance(addr, 11))
-	require.Equal(t, 2, l.Len())
 
 	l.RemoveTail() // block 10 committed to the shared domain
-	assert.Equal(t, 1, l.Len())
 	got := l.Before(12)
 	require.Len(t, got, 1)
 	b, _, _ := got[0].ReadBalance(addr, finalTxIdx)
 	assert.Equal(t, uint64(11), b.Uint64(), "only block 11 remains")
 
 	l.RemoveTail()
-	assert.Equal(t, 0, l.Len())
 	assert.Nil(t, l.Before(12))
 	l.RemoveTail() // empty list: no-op, no panic
-}
-
-func TestPrevBlockList_LengthStaysBounded(t *testing.T) {
-	t.Parallel()
-	addr := getAddress(3)
-	l := NewPrevBlockList()
-	// 5000 blocks, commit staying at most 2 behind: push N, remove-tail once N>=2.
-	maxLen := 0
-	for n := uint64(1); n <= 5000; n++ {
-		l.PushHead(n, n, mapWithBalance(addr, n))
-		if n >= 2 {
-			l.RemoveTail()
-		}
-		if l.Len() > maxLen {
-			maxLen = l.Len()
-		}
-	}
-	assert.LessOrEqual(t, maxLen, 2, "list length is the exec-ahead window, not O(blocks)")
 }
 
 func TestPrevBlockList_EmptyAndNoEarlier(t *testing.T) {

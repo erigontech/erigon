@@ -121,7 +121,6 @@ type execRange struct {
 // rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
 // stale); the failed* fields name the block implicated in a bad-block unwind.
 type execV3Outcome struct {
-	lastHeader            *types.Header
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
 	failedBlock           uint64
@@ -234,7 +233,6 @@ func ExecV3(ctx context.Context,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 	out = execV3Outcome{
-		lastHeader:            lastHeader,
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
 		failedBlock:           pe.failedBlock,

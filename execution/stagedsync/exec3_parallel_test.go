@@ -567,7 +567,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 // consuming the result stream.
 func discardConsumers(buf int) *resultStream {
 	s := newResultStream()
-	s.register("applyResults", make(chan applyResult, buf), true)
+	s.register("applyResults", make(chan applyResult, buf))
 	return s
 }
 
@@ -582,7 +582,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 	applyResults := make(chan applyResult, 1000)
 	consumers := newResultStream()
-	consumers.register("applyResults", applyResults, true)
+	consumers.register("applyResults", applyResults)
 
 	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
 

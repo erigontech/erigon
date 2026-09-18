@@ -547,8 +547,8 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 	commit := make(chan applyResult)
 	apply := make(chan applyResult)
 	pe := &parallelExecutor{consumers: newResultStream()}
-	pe.consumers.register("applyResults", apply, true)
-	pe.consumers.register("commitResults", commit, false)
+	pe.consumers.register("applyResults", apply)
+	pe.consumers.register("commitResults", commit)
 
 	// closeApplyChannels' return value records the close sequence
 	// inline as each close() succeeds — no goroutine wakeup races.
@@ -585,8 +585,8 @@ func TestCloseApplyChannelsDoubleCloseRecovers(t *testing.T) {
 	commit := make(chan applyResult)
 	apply := make(chan applyResult)
 	pe := &parallelExecutor{consumers: newResultStream()}
-	pe.consumers.register("applyResults", apply, true)
-	pe.consumers.register("commitResults", commit, false)
+	pe.consumers.register("applyResults", apply)
+	pe.consumers.register("commitResults", commit)
 	close(commit) // pre-closed by the racing path
 	close(apply)
 

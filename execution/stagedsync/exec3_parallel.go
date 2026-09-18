@@ -357,8 +357,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// apply). blockRequests is not registered — it is closed by its sole sender (the
 	// executeBlocks dispatch goroutine), not by execLoop.
 	pe.consumers = newResultStream()
-	pe.consumers.register("applyResults", applyResults, true)
-	pe.consumers.register("commitResults", commitResults, false)
+	pe.consumers.register("applyResults", applyResults)
+	pe.consumers.register("commitResults", commitResults)
 	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE the exec
@@ -397,10 +397,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
 	var hasLoggedExecution bool
-	var hasLoggedCommittments atomic.Bool
-	var commitStart time.Time
-
-	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
@@ -822,10 +818,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
-
-	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(0, stepsInDb, lastProgress)
-	}
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
@@ -1611,7 +1603,6 @@ type blockResult struct {
 	BlockNum         uint64
 	BlockTime        uint64
 	BlockHash        common.Hash
-	ParentHash       common.Hash
 	StateRoot        common.Hash
 	Err              error
 	Operational      bool // Err is an infrastructure failure, not a block-validity verdict
@@ -1899,9 +1890,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return
 			}
 			if v, _, _ := be.selfLoopEvaluate(tv, result); v {
-				result.WorkerValidated = state.VersionValid
-				result.WorkerBlocker = -1
-				result.WorkerVerdictSet = true
 				send(result)
 				// Stay alive rather than exit: the committed-dependent re-check signals
 				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
@@ -2446,8 +2434,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 			TxIdx:       ev.version.TxIndex,
 			Incarnation: ev.version.Incarnation,
 			Duration:    end.Sub(start),
-			StartNanos:  start.UnixNano(),
-			EndNanos:    end.UnixNano(),
 		}
 		ev.statsMutex.Unlock()
 	}
@@ -2537,7 +2523,7 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntTotalValidations, cntValidationFail, cntFinalized int
+	cntExec, cntSpecExec, cntValidationFail int
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -2564,9 +2550,6 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
-
-	finRevalChecks int64
-	finRevalFires  int64
 
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
@@ -2866,7 +2849,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				be.finRevalChecks++
 				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 					func(rv, wv state.Version) state.VersionValidity {
 						if rv != wv {
@@ -2877,7 +2859,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
-					be.finRevalFires++
 					be.validateTasks.clearComplete(tx)
 					be.signalSelfLoopReexec(tx)
 					break
@@ -3118,7 +3099,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 		})
 
 		for _, tx := range toValidate {
-			be.cntTotalValidations++
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
@@ -3126,7 +3106,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// predecessor may have changed or sealed since (including an in-flight
 			// Validated cell the reader early-broke on), so trusting the stale verdict
 			// would commit against a value that has moved.
-			txResult.WorkerVerdictSet = false
 			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(rv, wv state.Version) state.VersionValidity {
 					if rv != wv {
@@ -3318,7 +3297,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
-			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 			// Published: the re-check no longer considers tx, so its parked worker can
 			// never be re-signalled — release it. Closing earlier (at finalize) would
@@ -3494,7 +3472,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			BlockNum:         be.blockNum,
 			BlockTime:        txTask.BlockTime(),
 			BlockHash:        txTask.BlockHash(),
-			ParentHash:       txTask.ParentHash(),
 			StateRoot:        txTask.BlockRoot(),
 			BlockGasUsed:     be.blockGasUsed,
 			BlobGasUsed:      be.blobGasUsed,

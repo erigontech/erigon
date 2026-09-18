@@ -8,12 +8,10 @@ import (
 )
 
 // resultSink is one fan-out destination for the exec loop's result stream.
-// feedsReadBase marks a consumer whose output gates the next block's read base.
 type resultSink struct {
-	name          string
-	ch            chan applyResult
-	feedsReadBase bool
-	closed        bool // touched only by resultStream.close; publish never reads it
+	name   string
+	ch     chan applyResult
+	closed bool // touched only by resultStream.close; publish never reads it
 }
 
 // resultStream is the exec loop's fan-out registry, owning result delivery to
@@ -30,8 +28,8 @@ func newResultStream() *resultStream { return &resultStream{} }
 // register adds a consumer's channel to the fan-out. A nil channel registers a
 // disabled sink (skipped by publish/close/sendControl) so callers keep their
 // wiring when a consumer is switched off.
-func (s *resultStream) register(name string, ch chan applyResult, feedsReadBase bool) {
-	s.sinks = append(s.sinks, &resultSink{name: name, ch: ch, feedsReadBase: feedsReadBase})
+func (s *resultStream) register(name string, ch chan applyResult) {
+	s.sinks = append(s.sinks, &resultSink{name: name, ch: ch})
 }
 
 // publish fans a result out to every registered consumer. With mustDeliver it

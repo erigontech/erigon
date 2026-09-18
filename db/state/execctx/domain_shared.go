@@ -1909,13 +1909,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	return sd.computeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress, false)
 }
 
-// ComputeCommitmentLocked is ComputeCommitment for callers (the parallel
-// commitment calculator) that already hold changesetMu; the pending-updates
-// flush uses the *Locked internal path so it doesn't self-deadlock.
-func (sd *SharedDomains) ComputeCommitmentLocked(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
-	return sd.computeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress, true)
-}
-
 func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), lockHeld bool) (rootHash []byte, err error) {
 	// Flush the previous block's pending deferred updates into its own changeset
 	// (hash-aware lookup) so its branch writes can be reverted on unwind.
