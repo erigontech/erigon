@@ -355,19 +355,19 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	}
 	ac.StorageReads = reads
 
-	tmpBalances, err := decodeBalanceChanges(s)
+	tmpBalances, err := decodeChangeList[BalanceChange](s, maxIndexedChangesPerAccount, "balance change")
 	if err != nil {
 		return fmt.Errorf("read BalanceChanges: %w", err)
 	}
 	ac.BalanceChanges = tmpBalances
 
-	nonces, err := decodeNonceChanges(s)
+	nonces, err := decodeChangeList[NonceChange](s, maxIndexedChangesPerAccount, "nonce change")
 	if err != nil {
 		return fmt.Errorf("read NonceChanges: %w", err)
 	}
 	ac.NonceChanges = nonces
 
-	codes, err := decodeCodeChanges(s)
+	codes, err := decodeChangeList[CodeChange](s, maxIndexedChangesPerAccount, "code change")
 	if err != nil {
 		return fmt.Errorf("read CodeChanges: %w", err)
 	}
@@ -442,7 +442,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Slot: %w", err)
 	}
 	sc.Slot = accounts.InternKey(slot)
-	changes, err := decodeStorageChanges(s)
+	changes, err := decodeChangeList[StorageChange](s, maxStorageChangesPerSlot, "storage change")
 	if err != nil {
 		return fmt.Errorf("read Changes: %w", err)
 	}
@@ -825,82 +825,22 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	return out, nil
 }
 
-func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
+func decodeChangeList[T any, P interface {
+	*T
+	DecodeRLP(*rlp.Stream) error
+}](s *rlp.Stream, maxEntries int, name string) ([]*T, error) {
 	if _, err := s.List(); err != nil {
 		return nil, err
 	}
-	var out []*StorageChange
+	var out []*T
 	for s.MoreDataInList() {
-		change := new(StorageChange)
-		if err := change.DecodeRLP(s); err != nil {
+		change := new(T)
+		if err := P(change).DecodeRLP(s); err != nil {
 			return nil, err
 		}
 		out = append(out, change)
-		if len(out) > maxStorageChangesPerSlot {
-			return nil, fmt.Errorf("storage change list exceeds maximum entries (%d)", maxStorageChangesPerSlot)
-		}
-	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
-	if _, err := s.List(); err != nil {
-		return nil, err
-	}
-	var out []*BalanceChange
-	for s.MoreDataInList() {
-		change := new(BalanceChange)
-		if err := change.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		out = append(out, change)
-		if len(out) > maxIndexedChangesPerAccount {
-			return nil, fmt.Errorf("balance change list exceeds maximum entries (%d)", maxIndexedChangesPerAccount)
-		}
-	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
-	if _, err := s.List(); err != nil {
-		return nil, err
-	}
-	var out []*NonceChange
-	for s.MoreDataInList() {
-		change := new(NonceChange)
-		if err := change.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		out = append(out, change)
-		if len(out) > maxIndexedChangesPerAccount {
-			return nil, fmt.Errorf("nonce change list exceeds maximum entries (%d)", maxIndexedChangesPerAccount)
-		}
-	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
-	if _, err := s.List(); err != nil {
-		return nil, err
-	}
-	var out []*CodeChange
-	for s.MoreDataInList() {
-		change := new(CodeChange)
-		if err := change.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		out = append(out, change)
-		if len(out) > maxIndexedChangesPerAccount {
-			return nil, fmt.Errorf("code change list exceeds maximum entries (%d)", maxIndexedChangesPerAccount)
+		if len(out) > maxEntries {
+			return nil, fmt.Errorf("%s list exceeds maximum entries (%d)", name, maxEntries)
 		}
 	}
 	if err := s.ListEnd(); err != nil {
