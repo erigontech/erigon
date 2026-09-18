@@ -190,12 +190,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRUBytes := 200 * datasize.MB
-	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !conf.SingleNodeMode {
-		blocksLRUBytes *= 5
-	}
-	blocksLRU := cache.NewHashByteLRU(blocksLRUBytes, blockHeapSize)
+	// A mainnet block costs ~331KB of heap, so this holds ~1600 of them, about 5 hours of chain.
+	blocksLRU := cache.NewHashByteLRU(512*datasize.MB, blockHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
