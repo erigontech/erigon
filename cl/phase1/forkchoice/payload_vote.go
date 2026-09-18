@@ -355,6 +355,9 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 	if head.PayloadStatus == cltypes.PayloadStatusPending {
 		return false
 	}
+	// The vote arrays form one decision; separate sync.Map loads are not a snapshot.
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 	if f.payloadDataAvailability(head.Root, false) {
 		return false
 	}

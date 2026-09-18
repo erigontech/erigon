@@ -23,9 +23,13 @@ type ptcVoteForkGraph struct {
 	envelopes        map[common.Hash]bool
 	blocks           map[common.Hash]*cltypes.SignedBeaconBlock
 	acceptedPayloads map[common.Hash]bool
+	onHasEnvelope    func()
 }
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.onHasEnvelope != nil {
+		g.onHasEnvelope()
+	}
 	return g.envelopes[root]
 }
 
@@ -336,6 +340,51 @@ func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
 	}, f.Slot()))
+}
+
+func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
+	root := common.HexToHash("0x09")
+	f := newPtcVoteTestStore(root)
+	head := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+	threshold := ptcVoteThreshold()
+	f.payloadTimelinessVote.Store(root, ptcVotes(0, threshold+1))
+	availability := ptcVotes(0, threshold)
+	availability[threshold] = 1
+	f.payloadDataAvailabilityVote.Store(root, availability)
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
+
+	// Replacing this vote switches the EMPTY reason from lateness to unavailable data.
+	// Combining old availability with new timeliness must not allow FULL.
+	replaceVote := func() {
+		f.applyPayloadAttestationVotes([]int{threshold}, &cltypes.PayloadAttestationData{
+			PayloadPresent:    true,
+			BlobDataAvailable: false,
+		}, root)
+	}
+	graph := f.forkGraph.(ptcVoteForkGraph)
+	attempted := false
+	graph.onHasEnvelope = func() {
+		if attempted {
+			return
+		}
+		attempted = true
+		// This callback runs after the availability array is loaded. TryLock makes
+		// the replacement deterministic without blocking a reader that holds the mutex.
+		if f.ptcVoteMu.TryLock() {
+			f.ptcVoteMu.Unlock()
+			replaceVote()
+		}
+	}
+	f.forkGraph = graph
+
+	buildOnFull := f.ShouldBuildOnFull(head, f.Slot())
+
+	require.True(t, attempted, "the read must reach the vote-snapshot check")
+	require.False(t, buildOnFull, "both complete vote snapshots require EMPTY")
+	graph.onHasEnvelope = nil
+	f.forkGraph = graph
+	replaceVote()
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
 }
 
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
