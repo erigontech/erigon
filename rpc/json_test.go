@@ -480,7 +480,6 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-// respond mirrors answerInto: the success response, or the error response if the result does not encode.
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
 	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }

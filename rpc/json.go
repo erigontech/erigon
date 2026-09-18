@@ -132,18 +132,17 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
 	return writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
-		if isNilPointer(result) {
-			return json.NewEncoder(encoderWriter{rs}).Encode(result)
-		}
-		if fm, ok := result.(fastJSONMarshalerTo); ok {
-			return fm.MarshalFastJSONTo(rs)
-		}
-		if fm, ok := result.(fastJSONResult); ok {
-			enc, err := fm.MarshalFastJSON()
-			if err == nil && len(enc) > 0 {
-				rs.WriteRawBytes(enc)
+		if !isNilPointer(result) {
+			if fm, ok := result.(fastJSONMarshalerTo); ok {
+				return fm.MarshalFastJSONTo(rs)
 			}
-			return err
+			if fm, ok := result.(fastJSONResult); ok {
+				enc, err := fm.MarshalFastJSON()
+				if err == nil && len(enc) > 0 {
+					rs.WriteRawBytes(enc)
+				}
+				return err
+			}
 		}
 		return json.NewEncoder(encoderWriter{rs}).Encode(result)
 	})

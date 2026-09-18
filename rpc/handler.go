@@ -540,14 +540,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			}
 		}
 
-		if answered != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
-			h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
-		}
-		if resp != nil && resp.Error != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
-			if resp.Error.Data != nil {
+		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
+			switch {
+			case answered != nil:
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
-			} else {
+			case resp != nil && resp.Error != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
