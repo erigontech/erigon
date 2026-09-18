@@ -184,7 +184,7 @@ func TestPendingTagKeepsExplicitEndpointsIntact(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.call()
 			require.NoError(t, err)
-			require.Empty(t, got, "the raw debug family returns null for a published pending block")
+			require.Nil(t, got, "the raw debug family returns null for a published pending block")
 		})
 	}
 }
@@ -222,27 +222,31 @@ func TestStateEndpointsPinTheOverlayOnce(t *testing.T) {
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	addr := common.Address{1}
 
-	t.Run("eth_getBalance", func(t *testing.T) {
-		base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
-		overlayNum := overlayHeader.Number.Uint64()
-		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
-		requireOverlayAheadOfCommitted(t, base, m, overlayNum)
-		api := newEthApiForTest(base, m.DB, nil, nil)
+	for _, tc := range []struct {
+		name string
+		call func(*APIImpl, *execmoduletester.ExecModuleTester) error
+	}{
+		{"eth_getBalance", func(api *APIImpl, m *execmoduletester.ExecModuleTester) error {
+			_, err := api.GetBalance(m.Ctx, addr, &latest)
+			return err
+		}},
+		{"eth_estimateGas", func(api *APIImpl, m *execmoduletester.ExecModuleTester) error {
+			_, err := api.EstimateGas(m.Ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &latest, nil, nil)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+			overlayNum := overlayHeader.Number.Uint64()
+			require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
+			requireOverlayAheadOfCommitted(t, base, m, overlayNum)
 
-		_, err := api.GetBalance(m.Ctx, addr, &latest)
-		require.NoError(t, err, "the overlay unpublished mid-resolution must not split the view")
-	})
-
-	t.Run("eth_estimateGas", func(t *testing.T) {
-		base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
-		overlayNum := overlayHeader.Number.Uint64()
-		require.NoError(t, stages.SaveStageProgress(base.filters.LatestSD().BlockOverlay(), stages.Execution, overlayNum))
-		requireOverlayAheadOfCommitted(t, base, m, overlayNum)
-		api := newEthApiForTest(base, m.DB, nil, nil)
-
-		_, err := api.EstimateGas(m.Ctx, &ethapi2.CallArgs{From: &addr, To: &addr}, &latest, nil, nil)
-		require.NoError(t, err, "the overlay unpublished mid-resolution must not split the view")
-	})
+			require.NoError(t, tc.call(newEthApiForTest(base, m.DB, nil, nil), m),
+				"the overlay unpublished mid-resolution must not split the view")
+			require.True(t, base.filters.LatestSD() == nil,
+				"the request must resolve the overlay head, which is what trips the unpublish")
+		})
+	}
 }
 
 // requireOverlayAheadOfCommitted asserts the published overlay really does
