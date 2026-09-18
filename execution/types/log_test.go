@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -526,9 +527,8 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
-// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
-// so the bound is checked directly as well.
+// The fast encoders replace json.Marshal for these results, so they must match it byte for byte and
+// stay within JSONLen.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
 	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
@@ -562,20 +562,17 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			got, err := logs.MarshalFastJSON()
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got))
-			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
-				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
-			}
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, logs.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
 				require.NoError(t, err)
-				got, err := l.MarshalFastJSON()
-				require.NoError(t, err)
+				got := l.AppendJSON(nil)
 				require.Equal(t, string(want), string(got))
-				require.LessOrEqual(t, len(got), l.fastJSONLen())
+				require.LessOrEqual(t, len(got), l.JSONLen())
 			}
 		})
 	}

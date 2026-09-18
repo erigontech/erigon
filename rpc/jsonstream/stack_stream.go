@@ -25,6 +25,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -90,15 +91,12 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 }
 
 func (s *StackStream) WriteHex(b []byte) {
-	buf := s.stream.Buffer()
-	start := len(buf)
-	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
+	s.stream.SetBuffer(hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))), b))
+	s.popCommaOrField()
+}
+
+func (s *StackStream) WriteValue(v jsonw.JSONAppender) {
+	s.stream.SetBuffer(v.AppendJSON(slices.Grow(s.stream.Buffer(), v.JSONLen())))
 	s.popCommaOrField()
 }
 
