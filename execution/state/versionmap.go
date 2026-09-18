@@ -174,8 +174,7 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 type VersionMap struct {
 	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
 	s      sync.Map // accounts.Address -> *AddressEntry
-	trace  bool
-	HasBAL bool // When true, all significant writes are pre-populated from BAL
+	HasBAL bool     // When true, all significant writes are pre-populated from BAL
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
@@ -216,10 +215,6 @@ func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 		return e.(*AddressEntry)
 	}
 	return nil
-}
-
-func (vm *VersionMap) SetTrace(trace bool) {
-	vm.trace = trace
 }
 
 // StorageKeys returns every storage slot key recorded for addr. Used by Normalize to
@@ -1259,7 +1254,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		panic(fmt.Errorf("undefined vm read status: %v", rr.Status()))
 	}
 
-	if vm.trace || (traceInvalid && valid == VersionInvalid) {
+	if traceInvalid && valid == VersionInvalid {
 		if len(tracePrefix) > 0 {
 			tracePrefix += "  RD"
 		} else {

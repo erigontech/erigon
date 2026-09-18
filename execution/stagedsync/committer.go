@@ -370,9 +370,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.state.ResetBlockFlags()
 			}
 		case cc.perBlockCompute(r.BlockNum):
-			if dbg.EnvBool("PARTIAL_TRACE", false) {
-				cc.logger.Warn("[partial-trace] perBlockCompute", "blk", r.BlockNum, "isPartial", r.isPartial, "lastComputedBlock", cc.lastComputedBlock, "lastTxNum", r.lastTxNum)
-			}
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block resumed mid-block: compute (as serial does) to save
 				// trie state without checking the root.

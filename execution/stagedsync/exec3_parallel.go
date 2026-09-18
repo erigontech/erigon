@@ -331,9 +331,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		return nil, rwTx, err
 	}
 
-	if err := pe.resetWorkers(ctx, pe.rs, rwTx); err != nil {
-		return nil, rwTx, err
-	}
+	pe.resetWorkers(pe.rs)
 
 	// Disable inline TouchKey — the commitment calculator accumulates touches
 	// via its own Updates buffer.
@@ -492,10 +490,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// so the block's own exec verdict can supersede it — except when exec has
 		// already applied the block (an incremental, not fold-ahead, wrong-root): then
 		// finalize and cancel eagerly rather than keep building on known-wrong state.
-		processCommit := func(cr commitmentResult) error {
+		processCommit := func(cr commitmentResult) {
 			err := handleCommitResult(cr)
 			if err == nil {
-				return nil
+				return
 			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if !errors.Is(err, ErrWrongTrieRoot) {
@@ -504,13 +502,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				// Record + cancel + keep draining; fail.err surfaces at channel close.
 				finalized = true
 				deliberateCancel()
-				return nil
+				return
 			}
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
 			}
-			return nil
 		}
 
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop. Do NOT
@@ -526,9 +523,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// (ranging a nil channel hangs forever).
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := processCommit(cr); err != nil {
-								return err
-							}
+							processCommit(cr)
 						}
 					}
 					if lastBlockResult.BlockNum > 0 {
@@ -784,9 +779,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					rootResultsClosed = true
 					continue
 				}
-				if err := processCommit(cr); err != nil {
-					return err
-				}
+				processCommit(cr)
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
@@ -877,7 +870,7 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	}
 }
 
-func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, _ kv.TemporalTx) error {
+func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 	pe.Lock()
 	defer pe.Unlock()
 
@@ -886,8 +879,6 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 		_ = worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
 		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
-
-	return nil
 }
 
 // newExecWorker mints an extra WorkerContext when the runSem pool is empty
@@ -1531,7 +1522,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.execLoopGroup.Go(func() error {
-		_ = pe.resetWorkers(workersCtx, pe.rs, nil)
+		pe.resetWorkers(pe.rs)
 		// Hand the reset worker contexts to the dispatcher as a semaphore. The buffer
 		// is oversized so the pool can grow elastically (acquireWorker mints extras
 		// when workers park mid-EVM) and return without blocking.
@@ -3001,7 +2992,7 @@ func (be *blockExecutor) releaseSelfLoop() {
 // commitment). A dependent is any committed tx reading a key in changedTx's OLD ∪
 // NEW write-set — NEW for added/revalued keys, OLD for dropped ones. oldWrites is
 // nil for a validation failure (no prior incarnation).
-func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) *blockResult {
+func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) {
 	// be.tasks / status lists are keyed by task index; be.blockIO by block-level
 	// TxIndex. They differ by the block's leading system tx, so blockIO reads map
 	// through be.tasks[i].Task.Version().TxIndex.
@@ -3047,7 +3038,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		default:
 		}
 	}
-	return nil
 }
 
 // revalCandidates returns the task indices > changedTx to re-check: the readers the
@@ -3113,9 +3103,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					}
 					return state.VersionValid
 				}, false, "") == state.VersionValid
-			if dbg.TraceTransactionIO {
-				be.versionMap.SetTrace(false)
-			}
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3141,18 +3128,14 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				if ok {
 					delete(be.writeChangedPrev, tx)
 				}
-				if r := be.revalidateCommittedDependents(tx, prev); r != nil {
-					return r, nil
-				}
+				be.revalidateCommittedDependents(tx, prev)
 				continue
 			}
 
 			be.cntValidationFail++
 			be.execFailed[tx]++
 			be.validateTasks.clearInProgress(tx)
-			if r := be.revalidateCommittedDependents(tx, nil); r != nil {
-				return r, nil
-			}
+			be.revalidateCommittedDependents(tx, nil)
 			// Signal the parked worker whose stale verdict we rejected to re-exec in
 			// place; leave execTasks complete so the re-sent result re-validates
 			// without going through the dispatch path.
