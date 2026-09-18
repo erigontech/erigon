@@ -7,7 +7,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // An account with no address returns a wrapped rlp.EOL. Treating it as the end
@@ -24,7 +23,7 @@ func TestBlockAccessListRejectsAddresslessAccount(t *testing.T) {
 func TestBlockAccessListRejectsMissingCodeChanges(t *testing.T) {
 	t.Parallel()
 	canonical := BlockAccessList{{
-		Address:      accounts.InternAddress(common.HexToAddress("0xaa")),
+		Address:      common.HexToAddress("0xaa"),
 		NonceChanges: []*NonceChange{{Index: 1, Value: 7}},
 	}}
 	encoded, err := EncodeBlockAccessListBytes(canonical)
