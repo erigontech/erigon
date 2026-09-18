@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -71,6 +72,10 @@ type Provider struct {
 	bus        event.EventBus
 	busCtx     context.Context
 	busHandler func(flow.DownloadRequested)
+
+	// downloadStallTimeout bounds how long a bus-driven download may go
+	// without a byte landing on disk. Zero means defaultDownloadStallTimeout.
+	downloadStallTimeout time.Duration
 
 	// peerManifestInflight deduplicates FetchPeerManifestV2 calls by
 	// infohash. Multiple peers advertising the same chain.toml.v2 all

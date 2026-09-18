@@ -45,19 +45,49 @@ type fakeClient struct {
 	downloadErr  error
 	writeSize    int64
 	rootDir      string
+	blockForever bool
+	growSteps    int
+	growInterval time.Duration
 	downloadArgs []*downloaderproto.DownloadRequest
 }
 
-func (c *fakeClient) Download(_ context.Context, req *downloaderproto.DownloadRequest) error {
+func (c *fakeClient) Download(ctx context.Context, req *downloaderproto.DownloadRequest) error {
 	c.mu.Lock()
 	c.downloadArgs = append(c.downloadArgs, req)
 	err := c.downloadErr
 	writeSize := c.writeSize
 	rootDir := c.rootDir
+	block := c.blockForever
+	growSteps := c.growSteps
+	growInterval := c.growInterval
 	c.mu.Unlock()
+
+	if block {
+		// A torrent whose metainfo never arrives: the call never returns
+		// on its own, only when the caller gives up.
+		<-ctx.Done()
+		return ctx.Err()
+	}
 
 	if err != nil {
 		return err
+	}
+	if growSteps > 0 {
+		target := filepath.Join(rootDir, req.Items[0].Path)
+		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
+			return mkErr
+		}
+		for step := 1; step <= growSteps; step++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(growInterval):
+			}
+			if wErr := os.WriteFile(target, make([]byte, step*1024), 0o644); wErr != nil {
+				return wErr
+			}
+		}
+		return nil
 	}
 	if writeSize > 0 {
 		for _, item := range req.Items {
@@ -258,4 +288,74 @@ func TestUnbindBusIdempotent(t *testing.T) {
 	env.bus.WaitAsync()
 	env.pool.wg.Wait()
 	require.Equal(t, 0, env.client.callCount())
+}
+
+// TestBindBusDownloadStallsToFailure pins that a download which never
+// delivers a byte ends as DownloadFailed instead of blocking for ever.
+// Unbounded, an awaited file that exists nowhere holds every gate that
+// waits on it shut; the orchestrator's onDownloadFailed path can only
+// settle the awaited set once the failure is published.
+func TestBindBusDownloadStallsToFailure(t *testing.T) {
+	env := newBusTestEnv(t, &fakeClient{blockForever: true})
+	defer env.close(t)
+	env.p.downloadStallTimeout = 300 * time.Millisecond
+
+	var failures []flow.DownloadFailed
+	var mu sync.Mutex
+	require.NoError(t, env.bus.Subscribe(func(e flow.DownloadFailed) {
+		mu.Lock()
+		failures = append(failures, e)
+		mu.Unlock()
+	}))
+
+	require.NoError(t, env.p.BindBus(context.Background(), env.bus))
+	env.bus.Publish(flow.DownloadRequested{FileName: "v2.0-003622-003623-transactions.idx"})
+
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(failures) == 1
+	}, 10*time.Second, "DownloadFailed after the download stalled")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, "v2.0-003622-003623-transactions.idx", failures[0].FileName)
+	require.Contains(t, failures[0].Reason, "no progress")
+}
+
+// TestBindBusSlowDownloadIsNotCancelled pins that the bound is on a lack
+// of progress, not on elapsed time: a transfer that keeps delivering
+// bytes runs to completion however long it takes.
+func TestBindBusSlowDownloadIsNotCancelled(t *testing.T) {
+	env := newBusTestEnv(t, &fakeClient{growSteps: 6, growInterval: 150 * time.Millisecond})
+	defer env.close(t)
+	env.p.downloadStallTimeout = 300 * time.Millisecond
+
+	var completed []flow.DownloadComplete
+	var failed []flow.DownloadFailed
+	var mu sync.Mutex
+	require.NoError(t, env.bus.Subscribe(func(e flow.DownloadComplete) {
+		mu.Lock()
+		completed = append(completed, e)
+		mu.Unlock()
+	}))
+	require.NoError(t, env.bus.Subscribe(func(e flow.DownloadFailed) {
+		mu.Lock()
+		failed = append(failed, e)
+		mu.Unlock()
+	}))
+
+	require.NoError(t, env.p.BindBus(context.Background(), env.bus))
+	env.bus.Publish(flow.DownloadRequested{FileName: "v2.0-003622-003623-transactions.idx"})
+
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(completed)+len(failed) == 1
+	}, 10*time.Second, "download settled")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Empty(t, failed, "a download that kept making progress was cancelled")
+	require.Len(t, completed, 1)
 }

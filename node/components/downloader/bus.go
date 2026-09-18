@@ -341,7 +341,7 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 		LogTarget: "snapshot-flow",
 	}
 
-	if err := p.Client.Download(p.busCtx, protoReq); err != nil {
+	if err := p.downloadUntilStalled(req.FileName, protoReq); err != nil {
 		if p.logger != nil {
 			p.logger.Warn("[downloader-bus] Client.Download failed", "file", req.FileName, "err", err)
 		}
@@ -380,4 +380,53 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 		LocalPath: localPath,
 		Size:      fi.Size(),
 	})
+}
+
+// A download makes no progress either because the transfer is genuinely
+// slow to start or because the file is gone — merged away by the
+// publisher between advertising it and this request. Only the second
+// case is recoverable, and only once the failure is published, so the
+// bound is on a lack of progress rather than on total duration: a large
+// segment may take arbitrarily long as long as bytes keep arriving.
+const defaultDownloadStallTimeout = 20 * time.Minute
+
+func (p *Provider) downloadUntilStalled(fileName string, protoReq *downloaderproto.DownloadRequest) error {
+	stallTimeout := p.downloadStallTimeout
+	if stallTimeout <= 0 {
+		stallTimeout = defaultDownloadStallTimeout
+	}
+
+	ctx, cancel := context.WithCancel(p.busCtx)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.Client.Download(ctx, protoReq) }()
+
+	localPath := filepath.Join(p.dirs.Snap, fileName)
+	ticker := time.NewTicker(stallTimeout / 10)
+	defer ticker.Stop()
+
+	var lastSize int64
+	lastProgress := time.Now()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			size := int64(0)
+			if fi, err := os.Stat(localPath); err == nil {
+				size = fi.Size()
+			}
+			if size > lastSize {
+				lastSize, lastProgress = size, time.Now()
+				continue
+			}
+			if time.Since(lastProgress) < stallTimeout {
+				continue
+			}
+			cancel()
+			<-done
+			return fmt.Errorf("no progress for %s (%d bytes)", stallTimeout, lastSize)
+		}
+	}
 }
