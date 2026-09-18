@@ -362,15 +362,13 @@ func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
 		}, root)
 	}
 	graph := f.forkGraph.(ptcVoteForkGraph)
-	attempted := false
+	lockedReads := make([]bool, 0, 2)
 	graph.onHasEnvelope = func() {
-		if attempted {
-			return
-		}
-		attempted = true
-		// This callback runs after the availability array is loaded. TryLock makes
-		// the replacement deterministic without blocking a reader that holds the mutex.
-		if f.ptcVoteMu.TryLock() {
+		// Each vote-array read reaches this callback. TryLock detects an unprotected
+		// read without blocking when the reader correctly holds the mutex.
+		acquired := f.ptcVoteMu.TryLock()
+		lockedReads = append(lockedReads, !acquired)
+		if acquired {
 			f.ptcVoteMu.Unlock()
 			replaceVote()
 		}
@@ -379,7 +377,7 @@ func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
 
 	buildOnFull := f.ShouldBuildOnFull(head, f.Slot())
 
-	require.True(t, attempted, "the read must reach the vote-snapshot check")
+	require.Equal(t, []bool{true, true}, lockedReads, "both vote reads must exclude concurrent updates")
 	require.False(t, buildOnFull, "both complete vote snapshots require EMPTY")
 	graph.onHasEnvelope = nil
 	f.forkGraph = graph

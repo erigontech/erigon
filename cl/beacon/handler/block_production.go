@@ -1429,8 +1429,7 @@ func (a *ApiHandler) getBuilderPayload(
 		)
 	}
 	if baseState.Version().AfterOrEqual(clparams.CapellaVersion) {
-		// Blinded block processing applies expected withdrawals without checking the header's root.
-		// Validate it before a relay bid can replace the local payload.
+		// Withdrawals are fixed by the beacon state; the relay cannot choose a different list.
 		expected, err := state.GetExpectedWithdrawals(baseState, targetEpoch)
 		if err != nil {
 			return nil, nil, err

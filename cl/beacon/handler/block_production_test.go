@@ -59,6 +59,7 @@ import (
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -1020,14 +1021,51 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 	})
 }
 
+func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
+	var header *builder.ExecutionHeader
+	block := produceBlockWithBuilderForTest(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
+		require.Equal(t, targetSlot, postState.Slot())
+		expected, err := state.GetExpectedWithdrawals(postState, state.Epoch(postState))
+		require.NoError(t, err)
+		require.NotEmpty(t, expected.Withdrawals)
+		header = validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+		header.Data.Message.Value = "1000000"
+		builderClient := builder_mock.NewMockBuilderClient(ctrl)
+		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+		handler.builderClient = builderClient
+	})
+
+	require.True(t, block.IsBlinded())
+	require.Nil(t, block.BeaconBody)
+	require.NotNil(t, block.BlindedBeaconBody)
+	require.Equal(t, header.Data.Message.Header, block.BlindedBeaconBody.ExecutionPayload)
+	require.Equal(t, header.Data.Message.Value, block.ExecutionValue.String())
+}
+
 func requireProductionUsesLocalPayload(
 	t *testing.T,
 	configureBuilder func(*gomock.Controller, *ApiHandler, *state.CachingBeaconState, uint64, common.Hash),
 ) {
 	t.Helper()
+	block := produceBlockWithBuilderForTest(t, configureBuilder)
+	require.NotNil(t, block.BeaconBody)
+	require.False(t, block.IsBlinded())
+	require.Equal(t, uint64(7), block.ExecutionValue.Uint64())
+}
+
+func produceBlockWithBuilderForTest(
+	t *testing.T,
+	configureBuilder func(*gomock.Controller, *ApiHandler, *state.CachingBeaconState, uint64, common.Hash),
+) *cltypes.BlindOrExecutionBeaconBlock {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	targetSlot := postState.Slot() + 1
+	configuredState := state.New(handler.beaconChainCfg)
+	require.NoError(t, postState.CopyInto(configuredState))
+	postState = configuredState
+	baseBlockSlot := postState.Slot()
+	targetSlot := baseBlockSlot + 1
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(postState, targetSlot))
 	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
@@ -1036,7 +1074,9 @@ func requireProductionUsesLocalPayload(
 
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	payload := cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg)
-	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	expected, err := state.GetExpectedWithdrawals(postState, state.Epoch(postState))
+	require.NoError(t, err)
+	payload.Withdrawals = solid.NewStaticListSSZFromList(expected.Withdrawals, int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(payloadID, nil)
@@ -1057,7 +1097,7 @@ func requireProductionUsesLocalPayload(
 	block, err := handler.produceBlock(
 		t.Context(),
 		1,
-		postState.Slot(),
+		baseBlockSlot,
 		common.Hash{0x41},
 		postState,
 		targetSlot,
@@ -1066,9 +1106,7 @@ func requireProductionUsesLocalPayload(
 	)
 
 	require.NoError(t, err)
-	require.NotNil(t, block.BeaconBody)
-	require.False(t, block.IsBlinded())
-	require.Equal(t, uint64(7), block.ExecutionValue.Uint64())
+	return block
 }
 
 func validBuilderHeaderForTest(
@@ -1108,25 +1146,27 @@ func validBuilderHeaderForTest(
 func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.ElectraVersion} {
 		t.Run(version.String(), func(t *testing.T) {
-			var baseState *state.CachingBeaconState
+			var fixtureState *state.CachingBeaconState
 			switch version {
 			case clparams.BellatrixVersion:
-				_, _, baseState = tests.GetBellatrixRandom()
+				_, _, fixtureState = tests.GetBellatrixRandom()
 			case clparams.CapellaVersion:
-				_, _, baseState = tests.GetCapellaRandom()
+				_, _, fixtureState = tests.GetCapellaRandom()
 			case clparams.ElectraVersion:
-				_, _, baseState = tests.GetElectraRandom()
-				baseState.GetPendingPartialWithdrawals().Clear()
+				_, _, fixtureState = tests.GetElectraRandom()
+				fixtureState.GetPendingPartialWithdrawals().Clear()
 			}
-			for i := 0; i < baseState.ValidatorLength(); i++ {
-				require.NoError(t, baseState.SetWithdrawalCredentialForValidatorAtIndex(i, common.Hash{}))
+			for i := 0; i < fixtureState.ValidatorLength(); i++ {
+				require.NoError(t, fixtureState.SetWithdrawalCredentialForValidatorAtIndex(i, common.Hash{}))
 			}
-			baseState.SetNextWithdrawalValidatorIndex(0)
-			targetSlot := baseState.Slot()
-			parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
+			fixtureState.SetNextWithdrawalValidatorIndex(0)
+			targetSlot := fixtureState.Slot()
+			parentHash := fixtureState.LatestExecutionPayloadHeader().BlockHash
 
 			for _, count := range []int{0, 1} {
 				t.Run(fmt.Sprintf("withdrawals_%d", count), func(t *testing.T) {
+					baseState, err := fixtureState.Copy()
+					require.NoError(t, err)
 					if count != 0 {
 						require.NoError(t, baseState.SetWithdrawalCredentialForValidatorAtIndex(0, common.Hash{0x01, 0x42}))
 						require.NoError(t, baseState.SetWithdrawableEpochForValidatorAtIndex(0, 0))
@@ -1177,7 +1217,7 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
-	maxBlobs := handler.beaconChainCfg.GetBlobParameters(targetSlot / handler.beaconChainCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	maxBlobs := handler.beaconChainCfg.MaxBlobsPerBlockElectra
 	expectedPrevRandao := common.Hash(postState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch))
 
 	for _, tc := range []struct {
@@ -1318,12 +1358,18 @@ func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			configuredState := state.New(handler.beaconChainCfg)
+			require.NoError(t, postState.CopyInto(configuredState))
+			postState = configuredState
 			if version == clparams.FuluVersion {
+				handler.beaconChainCfg.FuluForkEpoch = state.Epoch(postState)
+				handler.beaconChainCfg.InitializeForkSchedule()
 				require.NoError(t, postState.UpgradeToFulu())
 			}
 			targetSlot := postState.Slot() + 1
 			parentHash := postState.LatestExecutionPayloadHeader().BlockHash
 			targetEpoch := targetSlot / handler.beaconChainCfg.SlotsPerEpoch
+			require.Equal(t, version, handler.beaconChainCfg.GetCurrentStateVersion(targetEpoch))
 			maxBlobs := handler.beaconChainCfg.MaxBlobsPerBlockElectra
 			handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{{
 				Epoch:            targetEpoch,
