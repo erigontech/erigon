@@ -43,14 +43,15 @@ func nodeSet(nodes [][]byte) map[string]struct{} {
 func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
-		name                  string
-		accts, slots, touch   int
-		touchStorage, exclude bool
+		name                            string
+		accts, slots, touch             int
+		touchStorage, exclude, prefixes bool
 	}{
-		{"acct-only-legacy", 128, 4, 16, false, true},
-		{"acct+storage-legacy", 128, 4, 16, true, true},
-		{"acct+storage-canonical", 256, 8, 24, true, false},
-		{"single-touch-legacy", 64, 4, 1, true, true},
+		{"acct-only-legacy", 128, 4, 16, false, true, false},
+		{"acct+storage-legacy", 128, 4, 16, true, true, false},
+		{"acct+storage-canonical", 256, 8, 24, true, false, false},
+		{"single-touch-legacy", 64, 4, 1, true, true, false},
+		{"partial-prefixes-legacy", 128, 4, 16, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,6 +67,27 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 				touchSlots = tc.slots
 			}
 			touchAccountsSlots(toWitness, addrs[:tc.touch], touchSlots)
+			// collapse siblings reach the fold as hashed-key prefixes: one inside the account trie, one a nibble into storage
+			touchPrefixes := func(u *Updates) {
+				if !tc.prefixes {
+					return
+				}
+				for _, a := range addrs[tc.touch : tc.touch+4] {
+					u.TouchHashedKey(KeyToHexNibbleHash(a)[:3])
+					u.TouchHashedKey(KeyToHexNibbleHash(storageKey(a, slotHashBytes(0)))[:65])
+				}
+			}
+			touchPrefixes(toWitness)
+			// the read-only fold runs first: the full fold leaves deferred branch updates behind
+			indexedUpdates := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+			defer indexedUpdates.Close()
+			touchAccountsSlots(indexedUpdates, addrs[:tc.touch], touchSlots)
+			touchPrefixes(indexedUpdates)
+			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, indexedUpdates, tc.exclude)
+			require.NoError(t, err)
+			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
+			require.NoError(t, err)
+
 			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude, "")
 			require.NoError(t, err)
 
@@ -92,14 +114,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 			require.Zero(t, missing, "byHash prune missing nodes present in RLPDecode prune")
 			require.Zero(t, extra, "byHash prune has extra nodes")
 
-			again := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-			defer again.Close()
-			touchAccountsSlots(again, addrs[:tc.touch], touchSlots)
-			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, again, tc.exclude)
-			require.NoError(t, err)
-			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
-			require.NoError(t, err)
-			require.Equal(t, ws, nodeSet(indexed), "the indexed fold and prune must give the RLPDecode prune's nodes")
+			require.Equal(t, ws, nodeSet(indexed), "the read-only indexed fold and prune must give the RLPDecode prune's nodes")
 		})
 	}
 }
@@ -360,14 +375,14 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 	fullTrie, err := trie.RLPDecode(full)
 	require.NoError(t, err)
 	writes := ms.putBranches
-	_, _, err = hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	_, _, _, err = hph.WitnessesByHash(context.Background(), touchUpdates(proven, provenSlots), false)
 	require.Error(t, err, "pending deferred updates would be flushed by the fold")
 	require.Equal(t, writes, ms.putBranches)
 
 	require.NoError(t, hph.branchEncoder.ApplyDeferredUpdates(16, ms.PutBranch))
 	hph.branchEncoder.ClearDeferred()
 	writes = ms.putBranches
-	byHash, rootRO, err := hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	byHash, _, rootRO, err := hph.WitnessesByHash(context.Background(), touchUpdates(proven, provenSlots), false)
 	require.NoError(t, err)
 	require.Equal(t, root, rootRO)
 	require.Equal(t, writes, ms.putBranches, "a read-only fold writes no branch")
