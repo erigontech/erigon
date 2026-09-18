@@ -154,14 +154,14 @@ func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 
 	multiAddrs := make([]multiaddr.Multiaddr, 0, 2)
 	if endpoint, ok := node.QUICEndpoint(); ok {
-		addr, err := multiAddressBuilderWithID(endpoint.Addr().String(), uint(endpoint.Port()), id, true)
+		addr, err := quicMultiAddressBuilderWithID(endpoint.Addr().String(), uint(endpoint.Port()), id)
 		if err != nil {
 			return nil, err
 		}
 		multiAddrs = append(multiAddrs, addr)
 	}
 	if endpoint, ok := node.TCPEndpoint(); ok {
-		addr, err := multiAddressBuilderWithID(endpoint.Addr().String(), uint(endpoint.Port()), id, false)
+		addr, err := MultiAddressBuilderWithID(endpoint.Addr().String(), "tcp", uint(endpoint.Port()), id)
 		if err != nil {
 			return nil, err
 		}
@@ -174,13 +174,14 @@ func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 }
 
 func MultiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
-	if protocol != "tcp" {
-		return nil, fmt.Errorf("unsupported transport protocol: %s", protocol)
-	}
-	return multiAddressBuilderWithID(ipAddr, port, id, false)
+	return multiAddressBuilderWithTransport(ipAddr, fmt.Sprintf("%s/%d", protocol, port), id)
 }
 
-func multiAddressBuilderWithID(ipAddr string, port uint, id peer.ID, quic bool) (multiaddr.Multiaddr, error) {
+func quicMultiAddressBuilderWithID(ipAddr string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
+	return multiAddressBuilderWithTransport(ipAddr, fmt.Sprintf("udp/%d/quic-v1", port), id)
+}
+
+func multiAddressBuilderWithTransport(ipAddr, transport string, id peer.ID) (multiaddr.Multiaddr, error) {
 	parsedIP := net.ParseIP(ipAddr)
 	if parsedIP.To4() == nil && parsedIP.To16() == nil {
 		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
@@ -188,14 +189,10 @@ func multiAddressBuilderWithID(ipAddr string, port uint, id peer.ID, quic bool) 
 	if id.String() == "" {
 		return nil, errors.New("empty peer id given")
 	}
-	transport := fmt.Sprintf("/tcp/%d", port)
-	if quic {
-		transport = fmt.Sprintf("/udp/%d/quic-v1", port)
-	}
 	if parsedIP.To4() != nil {
-		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s%s/p2p/%s", ipAddr, transport, id.String()))
+		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/p2p/%s", ipAddr, transport, id.String()))
 	}
-	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s%s/p2p/%s", ipAddr, transport, id.String()))
+	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/%s/p2p/%s", ipAddr, transport, id.String()))
 }
 
 func ConvertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {

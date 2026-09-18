@@ -20,6 +20,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
@@ -190,6 +191,15 @@ func TestParseStaticPeerAcceptsSupportedQUICAddresses(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, input, parsed.String())
 	}
+}
+
+func TestMultiAddressBuilderWithIDPreservesGenericProtocolSupport(t *testing.T) {
+	peerID, err := peer.Decode("16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA")
+	require.NoError(t, err)
+
+	addr, err := MultiAddressBuilderWithID("192.0.2.1", "udp", 9000, peerID)
+	require.NoError(t, err)
+	require.Equal(t, "/ip4/192.0.2.1/udp/9000/p2p/"+peerID.String(), addr.String())
 }
 
 func TestConvertToAddrInfoPrefersQUICAndRetainsTCPFallback(t *testing.T) {
