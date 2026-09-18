@@ -2,6 +2,8 @@ package v1
 
 import (
 	"fmt"
+
+	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	"github.com/tendermint/tendermint/crypto/tmhash"
 )
@@ -82,4 +84,22 @@ func (si StoreInfo) Hash() []byte {
 		panic(err)
 	}
 	return hasher.Sum(nil)
+}
+
+func Ics23CompatibleProofRuntime() (prt *merkle.ProofRuntime) {
+	prt = merkle.NewProofRuntime()
+	prt.RegisterOpDecoder(merkle.ProofOpSimpleValue, merkle.SimpleValueOpDecoder)
+	prt.RegisterOpDecoder(iavl.ProofOpIAVLValue, iavl.IAVLValueOpDecoder)
+	prt.RegisterOpDecoder(iavl.ProofOpIAVLAbsence, iavl.IAVLAbsenceOpDecoder)
+	prt.RegisterOpDecoder(ProofOpMultiStore, MultiStoreProofOpDecoder)
+	prt.RegisterOpDecoder(ProofOpIAVLCommitment, CommitmentOpDecoder)
+	prt.RegisterOpDecoder(ProofOpSimpleMerkleCommitment, CommitmentOpDecoder)
+	return
+}
+
+func Ics23ProofRuntime() (prt *merkle.ProofRuntime) {
+	prt = merkle.NewProofRuntime()
+	prt.RegisterOpDecoder(ProofOpIAVLCommitment, CommitmentOpDecoder)
+	prt.RegisterOpDecoder(ProofOpSimpleMerkleCommitment, CommitmentOpDecoder)
+	return
 }
