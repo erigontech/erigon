@@ -81,7 +81,7 @@ func TestCacheWithTTLCloseIsIdempotent(t *testing.T) {
 // it to finish. The lock is held here for long enough that the sweep can only be waiting on it.
 func TestCacheWithTTLCloseWaitsForRunningSweep(t *testing.T) {
 	// The ttl leaves the entry live while the lock is held and expired by the time the blocked
-	// sweep gets in, so the sweep has work to do and Close cannot be racing an empty walk.
+	// sweep gets in, so the sweep has work to do and Close cannot be racing an idle sweep.
 	c := NewWithTTL[uint64, uint64]("close_waits_for_sweep", 16, 100*time.Millisecond)
 	c.Add(1, 1)
 
@@ -315,8 +315,8 @@ func TestCacheWithTTLSweepReclaimsPromotedEntry(t *testing.T) {
 }
 
 // TestCacheWithTTLSweepLeavesEvictionOrderAlone pins that a sweep which removes nothing leaves the
-// cache's choice of eviction victim where it was: the walk touches every entry it holds, and a
-// walk that counted as use would make the oldest entry look fresh and spare it from size eviction.
+// cache's choice of eviction victim where it was: the sweep reads the deadline order only and never
+// touches an entry's recency, so the oldest entry is still the one size eviction takes.
 func TestCacheWithTTLSweepLeavesEvictionOrderAlone(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("sweep_leaves_eviction_order", 2, time.Hour)
 	t.Cleanup(c.Close)
@@ -389,11 +389,10 @@ func TestSweepInterval(t *testing.T) {
 	require.Positive(t, sweepInterval(0), "the ticker interval must never be non-positive")
 }
 
-// TestCacheWithTTLSweepReclaimsInteriorEntry drives the same walk as the promoted-entry test from
-// the other side: with three entries the sweep has to keep going past a live entry, not just reach
-// the first one. A Get on the middle entry leaves the eviction order oldest-first as 1, 3, 2 while
-// the deadline order is still 1, 2, 3, so a sweep between the second and third deadlines has to
-// remove the oldest entry, step over the live one behind it and still reclaim the promoted one.
+// TestCacheWithTTLSweepReclaimsInteriorEntry pins that reclamation follows deadline order and not
+// eviction order: a Get on the middle entry leaves the eviction order oldest-first as 1, 3, 2 while
+// the deadline order is still 1, 2, 3, so a sweep between the second and third deadlines removes
+// the first two nodes of the deadline order and keeps the third, whatever the eviction order says.
 func TestCacheWithTTLSweepReclaimsInteriorEntry(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("sweep_reclaims_interior", 16, time.Hour)
 	t.Cleanup(c.Close)
@@ -420,7 +419,7 @@ func TestCacheWithTTLSweepReclaimsInteriorEntry(t *testing.T) {
 
 // TestCacheWithTTLSweepReclaimsExpiredTail is the reverse order of the case above: the newest
 // entry is the promoted one and the expired entry is the oldest, so deadline order and eviction
-// order agree. The case has to keep holding whichever way the walk runs.
+// order agree. The case has to keep holding whichever order the entries were added in.
 func TestCacheWithTTLSweepReclaimsExpiredTail(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("sweep_reclaims_tail", 16, time.Hour)
 	t.Cleanup(c.Close)
@@ -470,7 +469,7 @@ func TestCacheWithTTLShortTTLSweeps(t *testing.T) {
 
 // TestCacheWithTTLConcurrentUseDuringSweep runs readers and writers against a live sweep. Every
 // exported method takes the lock the sweep takes, so under -race this pins the locking the sweep
-// depends on, including that the key snapshot is not walked while another goroutine mutates it.
+// depends on, including that the expiry order is only ever touched under the cache's own lock.
 func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("concurrent_use_during_sweep", 128, 5*time.Millisecond)
 	t.Cleanup(c.Close)
@@ -495,9 +494,8 @@ func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
 
 // TestCacheWithTTLTickerReclaimsPromotedEntry drives the promoted-entry case through the ticker
 // rather than by calling removeExpired directly, which is the only path production code ever
-// takes: nothing outside this package calls removeExpired, so a sweep that stops at the first live
-// entry has to be caught through the goroutine NewWithTTL starts. The entries are spaced so there
-// is a full second in which the promoted entry is past its deadline and the entry behind it is not.
+// takes: nothing outside this package calls removeExpired. The entries are spaced so there is a
+// full second in which the promoted entry is past its deadline and the entry behind it is not.
 func TestCacheWithTTLTickerReclaimsPromotedEntry(t *testing.T) {
 	const ttl = 2 * time.Second
 	c := NewWithTTL[uint64, uint64]("ticker_reclaims_promoted", 16, ttl)
@@ -521,7 +519,7 @@ func TestCacheWithTTLTickerReclaimsPromotedEntry(t *testing.T) {
 }
 
 // TestCacheWithTTLCloseDuringLiveSweep races Close against the sweep goroutine it stops — the
-// ticker fires on the interval floor here, so the close lands while a walk is running or between
+// ticker fires on the interval floor here, so the close lands while a sweep is running or between
 // two of its ticks. Under -race this pins that the guarded close, the wait for the goroutine and
 // the sweep's own select do not race each other, from several callers at once.
 func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
@@ -548,8 +546,8 @@ func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
 }
 
 // TestCacheWithTTLSweepReclaimsWholeCacheWithinOneTick pins the reclamation window: every entry
-// past its deadline is gone after one sweep, however large the cache. This is the 100,000-entry,
-// 30-minute case from review, at which the chunked walk had left 97,440 expired entries behind.
+// past its deadline is gone after one sweep, however large the cache. 100,000 entries with a
+// 30-minute ttl, swept at 31m30s.
 func TestCacheWithTTLSweepReclaimsWholeCacheWithinOneTick(t *testing.T) {
 	const entries = 100_000
 	c := NewWithTTL[uint64, uint64]("sweep_whole_cache_one_tick", entries, 30*time.Minute)
@@ -645,10 +643,10 @@ func TestCacheWithTTLSweepBoundsLockHold(t *testing.T) {
 	require.False(t, c.removeExpiredUpTo(past, sweepChunk), "an empty queue reports nothing to do")
 }
 
-// TestCacheWithTTLExpiryBookkeepingBoundedByCache pins the review's first finding: the expiry
-// order holds one node per LIVE entry, whatever the rate of Add. Renewals move a node, and a
-// removal or a size eviction unlinks one, so a size-1 cache updated 100,000 times holds one record
-// and a size-64 cache fed 10,000 distinct keys holds 64.
+// TestCacheWithTTLExpiryBookkeepingBoundedByCache pins that the expiry order holds one node per
+// live entry, whatever the rate of Add: a renewal moves a node, and a removal or a size eviction
+// unlinks one, so a size-1 cache updated 100,000 times holds one node and a size-64 cache fed
+// 10,000 distinct keys holds 64.
 func TestCacheWithTTLExpiryBookkeepingBoundedByCache(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("expiry_bounded_renewal", 1, 30*time.Minute)
 	t.Cleanup(c.Close)
@@ -672,10 +670,9 @@ func TestCacheWithTTLExpiryBookkeepingBoundedByCache(t *testing.T) {
 	require.Equal(t, 63, d.expiryLen())
 }
 
-// TestCacheWithTTLDrainedQueueRetainsNothing pins the review's second finding: once every entry is
-// reclaimed, no expiry bookkeeping survives. The order is a linked list, so there is no shared
-// backing array to keep alive; each node is collectable the moment it is unlinked, and this pins
-// that none is left linked or indexed after a burst is swept.
+// TestCacheWithTTLDrainedQueueRetainsNothing pins that once every entry is reclaimed no expiry
+// bookkeeping survives: the order is a linked list with no shared backing array, each node is
+// collectable the moment it is unlinked, and none is left linked or indexed after a burst is swept.
 func TestCacheWithTTLDrainedQueueRetainsNothing(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("expiry_drained", 200_000, time.Hour)
 	t.Cleanup(c.Close)
@@ -707,9 +704,9 @@ func TestCacheWithTTLGetDropsExpiredRecord(t *testing.T) {
 	require.Equal(t, 0, c.expiryLen(), "a Get that drops an expired entry must unlink its record")
 }
 
-// TestCacheWithTTLNoRecordsAfterClose pins the review's third point: after Close nothing consumes
-// the expiry order, so it is dropped and churn records nothing. Add and Remove keep working, and a
-// Get still drops an expired entry it reads.
+// TestCacheWithTTLNoRecordsAfterClose pins that after Close nothing consumes the expiry order, so it
+// is dropped and churn records nothing, while Add and Remove keep working and a Get still drops an
+// expired entry it reads.
 func TestCacheWithTTLNoRecordsAfterClose(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("no_records_after_close", 64, 20*time.Millisecond)
 	for i := range 32 {

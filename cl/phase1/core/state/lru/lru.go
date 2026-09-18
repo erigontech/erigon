@@ -99,16 +99,10 @@ type CacheWithTTL[K comparable, V any] struct {
 	metricTTLHit, metricTTLMiss metrics.Counter
 
 	mu sync.Mutex
-	// The expiry order: one node per live entry, oldest deadline first, with an index by key.
-	// Every entry shares the one ttl and Add stamps its deadline under mu, so deadlines are
-	// non-decreasing along the list and the head is always the entry due soonest. A sweep pops
-	// from the head until it meets a deadline still in the future and never looks past it: its
-	// cost is the number of entries due, not the size of the cache, and a Get, which moves an
-	// entry in the eviction list but not here, cannot hide one.
-	//
-	// The list is bounded by the cache, not by the rate of Add: a renewal moves the key's node to
-	// the tail, and the dependency's eviction hook unlinks a node when its entry is removed or
-	// evicted by size. If entries ever get individual ttls this must become a heap.
+	// The expiry order: one node per live entry, sorted by deadline, indexed by key. Add stamps
+	// deadlines under mu with the cache's one ttl, so appending keeps the order sorted; a renewal
+	// moves the key's node to the tail; the eviction hook unlinks a node when its entry is removed
+	// or evicted by size. The sweep pops due nodes from the head and stops at the first live one.
 	expiryHead, expiryTail *expiryNode[K]
 	expiryByKey            map[K]*expiryNode[K]
 	// After Close nothing consumes the list, so it is dropped and nothing more is recorded.
@@ -129,9 +123,9 @@ func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Durat
 		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s=%q}`, "cache", metricName)),
 		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}
-	// The hook runs inside the dependency's own lock, on the goroutine that called into the
-	// cache, which already holds c.mu on every path that can evict. It touches only the expiry
-	// order and never calls back into the cache.
+	// The hook runs synchronously on the goroutine that called into the cache, which already
+	// holds c.mu on every path that can evict. It touches only the expiry order and never calls
+	// back into the cache.
 	c.cache = expirable.NewLRU[K, ttlEntry[V]](size, func(k K, _ ttlEntry[V]) { c.unlink(k) }, 0)
 	if ttl > 0 {
 		go c.sweep(sweepInterval(ttl))
