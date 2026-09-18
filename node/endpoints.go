@@ -63,8 +63,8 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
-	// Bundle the http server. Protocols stays at the default, HTTP/1 plus HTTP/2 over TLS: cleartext
-	// HTTP/2 is slower here than HTTP/1.1 and only a client that forgoes negotiation can ask for it.
+	// Bundle the http server. Server.Protocols is left nil, so the default applies: HTTP/1 plus
+	// HTTP/2 over TLS. Cleartext HTTP/2 is not served; a client that negotiates gets HTTP/1.1.
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadTimeout:       cfg.Timeouts.ReadTimeout,
