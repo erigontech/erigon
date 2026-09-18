@@ -145,6 +145,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapP2PManifestFlag,
 	&utils.SnapChainTomlURLFlag,
 	&utils.SnapDownloadToBlockFlag,
+	&utils.SyncTargetBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
 	&utils.DbWriteMapFlag,

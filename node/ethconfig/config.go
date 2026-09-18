@@ -307,12 +307,17 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+	ChaosMonkey                    bool
+	AlwaysGenerateChangesets       bool
+	MaxReorgDepth                  uint64
+	KeepExecutionProofs            bool
+	ExperimentalParallelCommitment bool
+	PersistReceiptsCacheV2         bool
+	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 
 	SlowBlockThreshold *time.Duration
+
+	// TargetBlock bounds the block-download driver: sync stops once the head
+	// reaches it. 0 = no bound.
+	TargetBlock uint64
 }

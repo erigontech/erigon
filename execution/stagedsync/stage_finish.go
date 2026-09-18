@@ -23,11 +23,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 type FinishCfg struct {
@@ -47,6 +49,14 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	var err error
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
+	}
+	if dbg.StagesOnlyBlocks {
+		// Execution never runs in blocks-only mode, so the Execution frontier
+		// stays at genesis; advance the head to the downloaded (Senders) frontier
+		// instead, otherwise the head never moves and forkchoice reports BadBlock.
+		if executionAt, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+			return err
+		}
 	}
 	if s.BlockNumber >= executionAt { // Erigon will self-heal (download missed blocks) eventually
 		return nil
