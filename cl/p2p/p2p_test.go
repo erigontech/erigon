@@ -17,12 +17,18 @@
 package p2p
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestHostTCPPortReturnsBoundPort(t *testing.T) {
@@ -45,4 +51,36 @@ func TestHostQUICPortReturnsBoundPort(t *testing.T) {
 	defer host.Close()
 
 	require.NotZero(t, hostQUICPort(host))
+}
+
+func TestNewP2PManagerClosesHostWhenDiscoveryStartupFails(t *testing.T) {
+	blockedDiscovery, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	require.NoError(t, err)
+	defer blockedDiscovery.Close()
+
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	cfg := &P2PConfig{
+		NetworkConfig: &networkConfigCopy,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		Port:          blockedDiscovery.LocalAddr().(*net.UDPAddr).Port,
+		TmpDir:        t.TempDir(),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+
+	_, err = NewP2Pmanager(context.Background(), cfg, log.Root(), clock)
+	require.Error(t, err)
+	require.NotZero(t, cfg.TCPPort)
+	require.NotZero(t, cfg.QUICPort)
+
+	var listenConfig net.ListenConfig
+	tcpListener, err := listenConfig.Listen(t.Context(), "tcp4", fmt.Sprintf("127.0.0.1:%d", cfg.TCPPort))
+	require.NoError(t, err)
+	quicListener, err := listenConfig.ListenPacket(t.Context(), "udp4", fmt.Sprintf("127.0.0.1:%d", cfg.QUICPort))
+	require.NoError(t, err)
+	require.NoError(t, quicListener.Close())
+	require.NoError(t, tcpListener.Close())
 }

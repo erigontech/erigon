@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
@@ -59,6 +60,31 @@ func quicAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) {
 	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/udp/%d/quic-v1", ipAddr, port))
 }
 
+func appendAdvertisedAddresses(addrs []multiaddr.Multiaddr, hostPrefix string) []multiaddr.Multiaddr {
+	advertised := slices.Clone(addrs)
+	for _, addr := range addrs {
+		if port, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			external, err := multiaddr.NewMultiaddr(fmt.Sprintf("%s/tcp/%s", hostPrefix, port))
+			if err == nil {
+				advertised = append(advertised, external)
+			}
+			continue
+		}
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
+			continue
+		}
+		port, err := addr.ValueForProtocol(multiaddr.P_UDP)
+		if err != nil {
+			continue
+		}
+		external, err := multiaddr.NewMultiaddr(fmt.Sprintf("%s/udp/%s/quic-v1", hostPrefix, port))
+		if err == nil {
+			advertised = append(advertised, external)
+		}
+	}
+	return advertised
+}
+
 func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
 	tcpListen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
 	if err != nil {
@@ -104,29 +130,24 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 		externalAddr = cfg.ExternalIP.String()
 	}
 	if externalAddr != "" {
+		parsedIP := net.ParseIP(externalAddr)
+		hostPrefix := ""
+		if parsedIP.To4() != nil {
+			hostPrefix = "/ip4/" + externalAddr
+		} else if parsedIP.To16() != nil {
+			hostPrefix = "/ip6/" + externalAddr
+		}
 		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			tcpExternal, err := multiAddressBuilder(externalAddr, cfg.TCPPort)
-			if err != nil {
+			if hostPrefix == "" {
 				return addrs
 			}
-			quicExternal, err := quicAddressBuilder(externalAddr, cfg.QUICPort)
-			if err != nil {
-				return addrs
-			}
-			return append(addrs, quicExternal, tcpExternal)
+			return appendAdvertisedAddresses(addrs, hostPrefix)
 		}))
 	}
 	if cfg.HostDNS != "" {
+		hostPrefix := "/dns4/" + cfg.HostDNS
 		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			quicExternal, err := multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/udp/%d/quic-v1", cfg.HostDNS, cfg.QUICPort))
-			if err != nil {
-				return nil
-			}
-			tcpExternal, err := multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%d", cfg.HostDNS, cfg.TCPPort))
-			if err != nil {
-				return nil
-			}
-			return append(addrs, quicExternal, tcpExternal)
+			return appendAdvertisedAddresses(addrs, hostPrefix)
 		}))
 	}
 	// Disable Ping Service.

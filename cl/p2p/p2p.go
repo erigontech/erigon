@@ -134,6 +134,19 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		ethClock:    ethClock,
 		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute),
 	}
+	initialized := false
+	defer func() {
+		if initialized {
+			return
+		}
+		if p.udpv5 != nil {
+			p.udpv5.Close()
+			if localNode := p.udpv5.LocalNode(); localNode != nil {
+				localNode.Database().Close()
+			}
+		}
+		host.Close()
+	}()
 
 	// pubsub
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
@@ -163,6 +176,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	go p.updateENR()
 	go p.peerMonitor(ctx)
+	initialized = true
 	return &p, nil
 }
 

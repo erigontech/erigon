@@ -222,6 +222,93 @@ func TestConvertToAddrInfoPrefersQUICAndRetainsTCPFallback(t *testing.T) {
 	require.Equal(t, "/ip4/192.0.2.1/tcp/9000", info.Addrs[1].String())
 }
 
+func TestConvertToAddrInfoRetainsTransportsAcrossIPFamilies(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		set  func(*enr.Record)
+		want []string
+	}{
+		{
+			name: "IPv6 QUIC with IPv4 TCP",
+			set: func(record *enr.Record) {
+				record.Set(enr.QUIC6(9001))
+				record.Set(enr.TCP(9000))
+			},
+			want: []string{
+				"/ip6/2001:db8::1/udp/9001/quic-v1",
+				"/ip4/192.0.2.1/tcp/9000",
+			},
+		},
+		{
+			name: "IPv4 QUIC with IPv6 TCP",
+			set: func(record *enr.Record) {
+				record.Set(enr.QUIC(9001))
+				record.Set(enr.TCP6(9000))
+			},
+			want: []string{
+				"/ip4/192.0.2.1/udp/9001/quic-v1",
+				"/ip6/2001:db8::1/tcp/9000",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var record enr.Record
+			record.Set(enr.IP(net.ParseIP("192.0.2.1")))
+			record.Set(enr.IP(net.ParseIP("2001:db8::1")))
+			test.set(&record)
+			require.NoError(t, enode.SignV4(&record, key))
+			node, err := enode.New(enode.ValidSchemes, &record)
+			require.NoError(t, err)
+
+			info, preferred, err := ConvertToAddrInfo(node)
+			require.NoError(t, err)
+			require.Contains(t, preferred.String(), test.want[0])
+			require.Len(t, info.Addrs, len(test.want))
+			for i, want := range test.want {
+				require.Equal(t, want, info.Addrs[i].String())
+			}
+		})
+	}
+}
+
+func TestConvertToSingleMultiAddrAcceptsOtherFamilyQUICOnlyNode(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	var record enr.Record
+	record.Set(enr.IP(net.ParseIP("192.0.2.1")))
+	record.Set(enr.IP(net.ParseIP("2001:db8::1")))
+	record.Set(enr.QUIC6(9001))
+	require.NoError(t, enode.SignV4(&record, key))
+	node, err := enode.New(enode.ValidSchemes, &record)
+	require.NoError(t, err)
+
+	addr, err := ConvertToSingleMultiAddr(node)
+	require.NoError(t, err)
+	require.Contains(t, addr.String(), "/ip6/2001:db8::1/udp/9001/quic-v1/")
+}
+
+func TestConvertToSingleMultiAddrPreservesIPv6TCPFallback(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	var record enr.Record
+	record.Set(enr.IP(net.ParseIP("2001:db8::1")))
+	record.Set(enr.TCP(9000))
+	require.NoError(t, enode.SignV4(&record, key))
+	node, err := enode.New(enode.ValidSchemes, &record)
+	require.NoError(t, err)
+
+	addr, err := ConvertToSingleMultiAddr(node)
+	require.NoError(t, err)
+	require.Contains(t, addr.String(), "/ip6/2001:db8::1/tcp/9000/")
+}
+
 func TestParseStaticPeerAddrsRetainsENRFallback(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)

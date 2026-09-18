@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func ConvertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -152,16 +154,51 @@ func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 		return nil, fmt.Errorf("could not get peer id: %w", err)
 	}
 
-	multiAddrs := make([]multiaddr.Multiaddr, 0, 2)
-	if endpoint, ok := node.QUICEndpoint(); ok {
-		addr, err := quicMultiAddressBuilderWithID(endpoint.Addr().String(), uint(endpoint.Port()), id)
+	var ip4, ip6 netip.Addr
+	_ = node.Load((*enr.IPv4Addr)(&ip4))
+	_ = node.Load((*enr.IPv6Addr)(&ip6))
+	var quic4 enr.QUIC
+	var quic6 enr.QUIC6
+	var tcp4 enr.TCP
+	var tcp6 enr.TCP6
+	_ = node.Load(&quic4)
+	_ = node.Load(&quic6)
+	_ = node.Load(&tcp4)
+	_ = node.Load(&tcp6)
+	if !validEndpointIP(ip4) && validEndpointIP(ip6) && tcp6 == 0 {
+		tcp6 = enr.TCP6(tcp4)
+		tcp4 = 0
+	}
+
+	type familyEndpoints struct {
+		ip   netip.Addr
+		quic uint16
+		tcp  uint16
+	}
+	families := []familyEndpoints{
+		{ip: ip4, quic: uint16(quic4), tcp: uint16(tcp4)},
+		{ip: ip6, quic: uint16(quic6), tcp: uint16(tcp6)},
+	}
+	if preferred := node.IP(); preferred != nil && preferred.To4() == nil {
+		families[0], families[1] = families[1], families[0]
+	}
+
+	multiAddrs := make([]multiaddr.Multiaddr, 0, 4)
+	for _, family := range families {
+		if !validEndpointIP(family.ip) || family.quic == 0 {
+			continue
+		}
+		addr, err := quicMultiAddressBuilderWithID(family.ip.String(), uint(family.quic), id)
 		if err != nil {
 			return nil, err
 		}
 		multiAddrs = append(multiAddrs, addr)
 	}
-	if endpoint, ok := node.TCPEndpoint(); ok {
-		addr, err := MultiAddressBuilderWithID(endpoint.Addr().String(), "tcp", uint(endpoint.Port()), id)
+	for _, family := range families {
+		if !validEndpointIP(family.ip) || family.tcp == 0 {
+			continue
+		}
+		addr, err := MultiAddressBuilderWithID(family.ip.String(), "tcp", uint(family.tcp), id)
 		if err != nil {
 			return nil, err
 		}
@@ -171,6 +208,10 @@ func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 		return nil, fmt.Errorf("node %s does not provide a QUIC or TCP port", node.ID())
 	}
 	return multiAddrs, nil
+}
+
+func validEndpointIP(ip netip.Addr) bool {
+	return ip.IsValid() && !ip.IsUnspecified() && !ip.IsMulticast()
 }
 
 func MultiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
