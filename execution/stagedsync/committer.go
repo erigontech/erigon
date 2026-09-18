@@ -106,6 +106,11 @@ type commitmentCalculator struct {
 	// hasComputed disambiguates lastComputedBlock=0 (see forcePerBlockCompute).
 	hasComputed bool
 
+	// lastForwardTxNum is the global txNum of the last mid-block forward-progress
+	// fold (dbg.CommitCadence). The next fires once txNum advances a full cadence
+	// past it; reset to each block's boundary on blockResult.
+	lastForwardTxNum uint64
+
 	// in receives the same applyResult stream as the apply loop, plus
 	// commitComputeRequest messages.
 	in chan applyResult
@@ -353,7 +358,16 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 		}
 
+		// Mid-block forward-progress fold (dbg.CommitCadence): fold the accumulated
+		// delta into the trie every cadence txs while exec runs ahead, so the
+		// block-end fold only has the tail left — overlapping exec and commitment.
+		if dbg.CommitCadence > 0 && !cc.computedAhead[r.blockNum] && r.txNum >= cc.lastForwardTxNum+uint64(dbg.CommitCadence) {
+			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "cadence ", midBlock: true, forward: true})
+			cc.lastForwardTxNum = r.txNum
+		}
+
 	case *blockResult:
+		cc.lastForwardTxNum = r.lastTxNum
 		// A rejected block: skip commitment. sd.mem may hold partial-tx writes
 		// from txs that succeeded before the failing one (root would be
 		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
@@ -704,6 +718,7 @@ func targetOf(br *blockResult) commitTarget {
 type computeMode struct {
 	label       string // error-message context, e.g. "step-boundary "
 	midBlock    bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
+	forward     bool   // mid-block forward-progress fold: reset the folded keys (block-end then folds only the delta) but still don't advance lastComputedBlock. Root-equivalent to a single block-end fold (TestIncrementalFoldEquivalence).
 	checkRoot   bool   // compare the computed root against target.stateRoot
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
@@ -732,7 +747,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.state.flushToUpdates(cc.updates)
-	if !m.midBlock {
+	if !m.midBlock || m.forward {
 		cc.state.ResetBlockFlags()
 	}
 

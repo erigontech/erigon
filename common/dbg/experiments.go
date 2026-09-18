@@ -90,6 +90,7 @@ var (
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	PerTxApply           = EnvBool("EXEC3_PER_TX_APPLY", false)
+	CommitCadence        = EnvInt("EXEC3_COMMIT_CADENCE", 0)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
