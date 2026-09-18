@@ -62,6 +62,10 @@ type Fixture struct {
 	Storage         map[[20]byte]map[[32]byte][32]byte
 	Code            map[[20]byte][]byte
 	Outputs         *Outputs // post-state the block wrote; nil until captured/backfilled
+	// CommitmentWitness holds the commitment-trie branch nodes the block's fold
+	// reads (prefix -> encoded branch), so a replay can recompute and check the
+	// state root. Empty for state-only fixtures (commitment-off replay).
+	CommitmentWitness map[string][]byte
 }
 
 // Outputs is the post-state a block's execution produced, checked against the
@@ -84,10 +88,11 @@ func newOutputs() *Outputs {
 
 func newFixture() *Fixture {
 	return &Fixture{
-		Ancestors: map[uint64][32]byte{},
-		Accounts:  map[[20]byte]acctData{},
-		Storage:   map[[20]byte]map[[32]byte][32]byte{},
-		Code:      map[[20]byte][]byte{},
+		Ancestors:         map[uint64][32]byte{},
+		Accounts:          map[[20]byte]acctData{},
+		Storage:           map[[20]byte]map[[32]byte][32]byte{},
+		Code:              map[[20]byte][]byte{},
+		CommitmentWitness: map[string][]byte{},
 	}
 }
 
