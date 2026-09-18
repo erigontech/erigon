@@ -27,7 +27,7 @@ func (r *Receipt) MarshalJSON() ([]byte, error) {
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
 		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
+		BlockNumber       *hexutil.U256  `json:"blockNumber,omitempty"`
 		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
 	}
 	var enc Receipt
@@ -42,7 +42,7 @@ func (r *Receipt) MarshalJSON() ([]byte, error) {
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
 	enc.BlockHash = r.BlockHash
 	if r.BlockNumber != nil {
-		enc.BlockNumber = (*hexutil.Big)(r.BlockNumber.ToBig())
+		enc.BlockNumber = (*hexutil.U256)(r.BlockNumber)
 	}
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
 	return json.Marshal(&enc)

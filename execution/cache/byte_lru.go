@@ -82,7 +82,12 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(floor, weigh)
+	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
+		b.resident.Add(-weigh(e.Key, e.Value))
+		if fn := b.onEvict.Load(); fn != nil {
+			(*fn)(e.Key, e.Value)
+		}
+	})
 	return b
 }
 
@@ -92,21 +97,16 @@ func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) 
 	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(b.maxBytes, weigh)
+	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
 	return b
 }
 
-func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
+func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion func(otter.DeletionEvent[uint64, V])) *otter.Cache[uint64, V] {
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
-		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
-			b.resident.Add(-weigh(e.Key, e.Value))
-			if fn := b.onEvict.Load(); fn != nil {
-				(*fn)(e.Key, e.Value)
-			}
-		},
-		Executor: func(fn func()) { fn() },
+		OnDeletion:    onDeletion,
+		Executor:      func(fn func()) { fn() },
 	})
 }
 
