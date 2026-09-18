@@ -69,6 +69,8 @@ type Stream interface {
 	WriteObjectField(fieldName string)
 	// WriteNextField writes the comma and the field name of a member that is not the first.
 	WriteNextField(name string)
+	// WriteFieldToken writes a ready-made field token such as `,"gas":`.
+	WriteFieldToken(token string)
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)

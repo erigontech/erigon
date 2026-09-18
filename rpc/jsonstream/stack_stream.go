@@ -274,7 +274,13 @@ func (s *StackStream) WriteNextField(name string) {
 	buf = append(buf, name...)
 	s.stream.SetBuffer(append(buf, '"', ':'))
 	s.push(ItemField)
-	flushIfFull(s.stream)
+}
+
+// WriteFieldToken writes a ready-made field token such as `,"blockNumber":`. The caller owns its
+// shape: it is copied as it is, like WriteRaw.
+func (s *StackStream) WriteFieldToken(token string) {
+	s.stream.SetBuffer(append(s.stream.Buffer(), token...))
+	s.push(ItemField)
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack

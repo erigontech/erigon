@@ -105,6 +105,8 @@ func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectFie
 
 func (s *LazyFieldStream) WriteNextField(name string) { s.inner.WriteNextField(name) }
 
+func (s *LazyFieldStream) WriteFieldToken(token string) { s.inner.WriteFieldToken(token) }
+
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
 func (s *LazyFieldStream) WriteArrayEnd()  { s.inner.WriteArrayEnd() }
