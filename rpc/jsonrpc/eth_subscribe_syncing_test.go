@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -27,7 +28,7 @@ import (
 // The node pins the starting block for the whole session, so a client that
 // subscribes mid-sync gets where the session began, not where it joined.
 func TestSyncingPayloadStartingBlockComesFromTheNode(t *testing.T) {
-	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: true, StartingBlock: 100, CurrentBlock: 150, LastNewBlockSeen: 210})
+	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: true, StartingBlock: proto.Uint64(100), CurrentBlock: 150, LastNewBlockSeen: 210})
 	result, ok := payload.(syncingResult)
 	require.True(t, ok)
 	require.EqualValues(t, 100, result.StartingBlock)
@@ -38,4 +39,11 @@ func TestSyncingPayloadStartingBlockComesFromTheNode(t *testing.T) {
 func TestSyncingPayloadIsFalseOnceSynced(t *testing.T) {
 	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: false, CurrentBlock: 200, LastNewBlockSeen: 200})
 	require.Equal(t, false, payload)
+}
+
+func TestSyncingPayloadWithoutAPinReportsTheCurrentBlock(t *testing.T) {
+	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 150, LastNewBlockSeen: 210})
+	result, ok := payload.(syncingResult)
+	require.True(t, ok)
+	require.EqualValues(t, 150, result.StartingBlock)
 }

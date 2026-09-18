@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -753,7 +754,7 @@ func (s syncingBackendStub) Syncing(context.Context) (*remoteproto.SyncingReply,
 func TestSyncingReportsTheStartingBlockOfTheSession(t *testing.T) {
 	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
 		Syncing:          true,
-		StartingBlock:    100,
+		StartingBlock:    proto.Uint64(100),
 		CurrentBlock:     150,
 		LastNewBlockSeen: 500,
 	}}}
@@ -765,4 +766,20 @@ func TestSyncingReportsTheStartingBlockOfTheSession(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(100), status["startingBlock"])
 	require.Equal(t, hexutil.Uint64(150), status["currentBlock"])
 	require.Equal(t, hexutil.Uint64(500), status["highestBlock"])
+}
+
+// A node predating the field sends no pin, and the version check lets it: the
+// reply must then date the session to the current block, not to genesis.
+func TestSyncingWithoutAPinReportsTheCurrentBlock(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(150), status["startingBlock"])
 }

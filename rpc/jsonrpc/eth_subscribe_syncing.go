@@ -48,6 +48,16 @@ func stagesFromReply(reply []*remoteproto.SyncingReply_StageProgress) []stagePro
 	return stages
 }
 
+// startingBlock reports the block the node pinned the sync session to. A node
+// predating the field sends none, and the interface version does not separate
+// that from a genesis pin, so an absent one falls back to the current block.
+func startingBlock(reply *remoteproto.SyncingReply) uint64 {
+	if reply.StartingBlock == nil {
+		return reply.CurrentBlock
+	}
+	return *reply.StartingBlock
+}
+
 // syncingPayload turns a SyncingReply into the client-facing payload: a
 // syncingResult while syncing, the boolean false once synced.
 func syncingPayload(reply *remoteproto.SyncingReply) any {
@@ -56,7 +66,7 @@ func syncingPayload(reply *remoteproto.SyncingReply) any {
 	}
 	return syncingResult{
 		Syncing:       true,
-		StartingBlock: hexutil.Uint64(reply.StartingBlock),
+		StartingBlock: hexutil.Uint64(startingBlock(reply)),
 		CurrentBlock:  hexutil.Uint64(reply.CurrentBlock),
 		HighestBlock:  hexutil.Uint64(reply.LastNewBlockSeen),
 		Stages:        stagesFromReply(reply.Stages),

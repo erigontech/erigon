@@ -38,11 +38,12 @@ const syncedReorgRange = 8
 func (n *Notifications) PublishSyncState(tx kv.Getter, frozenBlocks uint64) error {
 	n.syncStateLock.Lock()
 	defer n.syncStateLock.Unlock()
-	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
+	reply, committed, err := n.buildSyncingReply(tx, frozenBlocks)
 	if err != nil {
 		return err
 	}
-	n.repinStartingBlock(reply)
+	n.repinStartingBlock(reply, committed)
+	n.withStartingBlock(reply)
 	stillSynced := n.lastSyncState != nil && !n.lastSyncState.Syncing && !reply.Syncing
 	if stillSynced || proto.Equal(n.lastSyncState, reply) {
 		return nil
@@ -75,37 +76,57 @@ func (n *Notifications) SubscribeSyncState(tx kv.Getter, frozenBlocks uint64) (c
 }
 
 // repinStartingBlock moves the block the current sync session started from: up
-// when a new session begins, down when an unwind takes execution below it. Only
-// the publish path may move it, since polls read unordered tx views.
-func (n *Notifications) repinStartingBlock(reply *remoteproto.SyncingReply) {
-	if reply.Syncing && (n.lastSyncState == nil || !n.lastSyncState.Syncing) {
-		reply.StartingBlock = reply.CurrentBlock
+// when a new session begins, down when committed execution regresses below it.
+// Only the publish path may move it, since polls read unordered tx views.
+//
+// The regression is measured on committed execution, not on the reported block:
+// a snapshot download reports synthetic progress, so dropping its pin makes the
+// reported block fall back to a far lower committed one without any unwind.
+func (n *Notifications) repinStartingBlock(reply *remoteproto.SyncingReply, committed uint64) {
+	pin := n.startingBlock.Load()
+	switch {
+	case reply.Syncing && (n.lastSyncState == nil || !n.lastSyncState.Syncing):
+		pin = proto.Uint64(reply.CurrentBlock)
+	case pin != nil && committed < n.lastCommitted && committed < *pin:
+		pin = proto.Uint64(committed)
 	}
-	pin := reply.StartingBlock
-	n.startingBlock.Store(&pin)
+	n.lastCommitted = committed
+	if pin != nil {
+		n.startingBlock.Store(pin)
+	}
 }
 
 // withStartingBlock reports the pin clamped to the current block: an unwind can
 // take execution below the pin, and a starting block above the current one
 // makes the progress ratio negative.
 func (n *Notifications) withStartingBlock(reply *remoteproto.SyncingReply) *remoteproto.SyncingReply {
-	reply.StartingBlock = reply.CurrentBlock
+	start := reply.CurrentBlock
 	if pin := n.startingBlock.Load(); pin != nil {
-		reply.StartingBlock = min(*pin, reply.CurrentBlock)
+		start = min(*pin, reply.CurrentBlock)
 	}
+	reply.StartingBlock = &start
 	return reply
 }
 
 // BuildSyncingReply computes the sync status served by eth_syncing and
-// published on the SYNCING event stream. While the highest block is still
-// unknown (e.g. snapshots are downloading) it reports syncing with no stage
-// detail.
+// published on the SYNCING event stream.
 func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*remoteproto.SyncingReply, error) {
+	reply, _, err := n.buildSyncingReply(tx, frozenBlocks)
+	if err != nil {
+		return nil, err
+	}
+	return n.withStartingBlock(reply), nil
+}
+
+// buildSyncingReply builds the reply without the starting block, and reports the
+// committed execution progress it read. While the highest block is still unknown
+// (e.g. snapshots are downloading) it reports syncing with no stage detail.
+func (n *Notifications) buildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*remoteproto.SyncingReply, uint64, error) {
 	highestBlock := max(n.LastNewBlockSeen.Load(), frozenBlocks)
 
 	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	reply := &remoteproto.SyncingReply{
@@ -125,7 +146,7 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 			if currentBlock < snap.commitBlock {
 				reply.CurrentBlock = snap.commitBlock
 				reply.LastNewBlockSeen = max(snap.commitBlock, highestBlock)
-				return n.withStartingBlock(reply), nil
+				return reply, currentBlock, nil
 			}
 		case snapDownloading:
 			// Map the byte-completion ratio onto the block-based fields so dashboards
@@ -137,27 +158,27 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 			ratio := float64(snap.done) / float64(snap.total)
 			reply.CurrentBlock = max(currentBlock, uint64(ratio*float64(snap.targetBlock)))
 			reply.LastNewBlockSeen = max(reply.CurrentBlock, snap.targetBlock, highestBlock)
-			return n.withStartingBlock(reply), nil
+			return reply, currentBlock, nil
 		}
 	}
 
 	if highestBlock == 0 {
-		return n.withStartingBlock(reply), nil
+		return reply, currentBlock, nil
 	}
 
 	distance := max(highestBlock, currentBlock) - min(highestBlock, currentBlock)
 	if distance < syncedReorgRange {
 		reply.Syncing = false
-		return n.withStartingBlock(reply), nil
+		return reply, currentBlock, nil
 	}
 
 	reply.Stages = make([]*remoteproto.SyncingReply_StageProgress, len(stages.AllStages))
 	for i, stage := range stages.AllStages {
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		reply.Stages[i] = &remoteproto.SyncingReply_StageProgress{StageName: string(stage), BlockNumber: progress}
 	}
-	return n.withStartingBlock(reply), nil
+	return reply, currentBlock, nil
 }

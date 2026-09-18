@@ -58,7 +58,7 @@ func TestEthSubscribeSyncingOverWebsocket(t *testing.T) {
 	// The last state seen on the shared event stream seeds new subscribers.
 	ff.OnNewEvent(syncingSubscribeReply(t, &remoteproto.SyncingReply{
 		Syncing:          true,
-		StartingBlock:    100,
+		StartingBlock:    proto.Uint64(100),
 		CurrentBlock:     100,
 		LastNewBlockSeen: 200,
 		Stages: []*remoteproto.SyncingReply_StageProgress{
@@ -108,7 +108,7 @@ func TestEthSubscribeSyncingOverWebsocket(t *testing.T) {
 	// gRPC subscription delivers it in production.
 	ff.OnNewEvent(syncingSubscribeReply(t, &remoteproto.SyncingReply{
 		Syncing:          true,
-		StartingBlock:    100,
+		StartingBlock:    proto.Uint64(100),
 		CurrentBlock:     150,
 		LastNewBlockSeen: 210,
 	}))
