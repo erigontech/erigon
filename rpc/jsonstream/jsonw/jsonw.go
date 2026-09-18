@@ -26,6 +26,8 @@ type JSONWriter interface {
 	WriteNil()
 	WriteObjectStart()
 	WriteObjectField(name string)
+	// WriteNextField writes the comma and the field name of a member that is not the first.
+	WriteNextField(name string)
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteMore()

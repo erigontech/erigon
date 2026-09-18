@@ -88,11 +88,13 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 func (s *StackStream) WriteHex(b []byte) {
 	s.stream.SetBuffer(hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))), b))
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 func (s *StackStream) WriteHexUint64(v uint64) {
@@ -122,6 +124,7 @@ func (s *StackStream) writeThrough(content []byte) {
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 // WriteNil writes a null value to the stream
@@ -224,6 +227,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	writeStringFast(s.stream, val)
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
@@ -238,6 +242,7 @@ func (s *StackStream) WriteObjectEnd() {
 	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
+	flushIfFull(s.stream)
 }
 
 // WriteArrayStart writes the start of an array and adds it to the stack
@@ -252,12 +257,24 @@ func (s *StackStream) WriteArrayEnd() {
 	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
+	flushIfFull(s.stream)
 }
 
 // WriteMore writes a comma for arrays and objects
 func (s *StackStream) WriteMore() {
 	s.stream.WriteMore()
 	s.push(ItemComma)
+	flushIfFull(s.stream)
+}
+
+// WriteNextField writes the comma and the field name of a member that is not the first, in one
+// append. The name is not escaped, like WriteObjectField.
+func (s *StackStream) WriteNextField(name string) {
+	buf := append(s.stream.Buffer(), ',', '"')
+	buf = append(buf, name...)
+	s.stream.SetBuffer(append(buf, '"', ':'))
+	s.push(ItemField)
+	flushIfFull(s.stream)
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
@@ -391,5 +408,4 @@ func (s *StackStream) popCommaOrField() {
 			s.stack = s.stack[:len(s.stack)-1]
 		}
 	}
-	flushIfFull(s.stream)
 }

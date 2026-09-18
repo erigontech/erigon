@@ -67,6 +67,8 @@ type Stream interface {
 	WriteArrayEnd()
 	WriteMore()
 	WriteObjectField(fieldName string)
+	// WriteNextField writes the comma and the field name of a member that is not the first.
+	WriteNextField(name string)
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)

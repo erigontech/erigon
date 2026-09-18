@@ -103,6 +103,8 @@ func (s *LazyFieldStream) WriteHexUint64(v uint64) { s.ensure(); s.inner.WriteHe
 func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
 func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
 
+func (s *LazyFieldStream) WriteNextField(name string) { s.inner.WriteNextField(name) }
+
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
 func (s *LazyFieldStream) WriteArrayEnd()  { s.inner.WriteArrayEnd() }
