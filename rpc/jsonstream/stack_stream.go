@@ -372,6 +372,10 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	return s.stream.Error
 }
 
+// Err reports a write error the stream latched. Flush cannot stand in for it on a stream with no
+// writer: jsoniter returns nil for that case before it looks at the latched error.
+func (s *StackStream) Err() error { return s.stream.Error }
+
 func (s *StackStream) Depth() int { return len(s.stack) }
 
 // push adds an item to the stack

@@ -1165,7 +1165,7 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteString("pending")
 	Put(s)
 
@@ -1177,13 +1177,13 @@ func TestPutReleasesWriterAndBytes(t *testing.T) {
 // A response above the bound is dropped rather than pooled, so one outsized
 // value cannot pin its peak per goroutine.
 func TestPutDropsOversizedBuffer(t *testing.T) {
-	s := Get(nil).(*StackStream)
+	s := Get(nil)
 	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
 
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
-	require.NotSame(t, s, Get(nil).(*StackStream))
+	require.NotSame(t, s, Get(nil))
 }
 
 // WriteHex matches json.Marshal of hexutil.Bytes inside a container, whether the value
@@ -1283,7 +1283,7 @@ func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
 // buffer, so the stream survives Put instead of being dropped by the size check.
 func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteObjectStart()
 	s.WriteObjectField("result")
 	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))
@@ -1344,4 +1344,15 @@ func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
 	s.WriteObjectEnd()
 	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
 	require.Error(t, s.Flush())
+}
+
+// A latched write error must reach the caller. Flush cannot report it on a writerless stream,
+// so marshalFastJSONTo would otherwise clone a buffer holding the empty-string placeholder.
+func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
+	s := Get(nil)
+	defer Put(s)
+	s.WriteQuotedText(failingAppender{})
+
+	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
+	require.Error(t, s.Err(), "the latched appender error must stay reachable")
 }

@@ -125,6 +125,9 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 	if err := fm.MarshalFastJSONTo(s); err != nil {
 		return nil, err
 	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
 	return bytes.Clone(s.Buffer()), nil
 }
 

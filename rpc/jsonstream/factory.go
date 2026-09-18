@@ -60,7 +60,7 @@ const maxPooledBufferSize = 16 * FlushThreshold
 
 // Get is New over a pool. Put the stream back once its bytes have left it;
 // skipping Put only costs the recycling.
-func Get(out io.Writer) Stream {
+func Get(out io.Writer) *StackStream {
 	s := streamPool.Get().(*StackStream)
 	s.Reset(out)
 	return s
