@@ -1161,6 +1161,18 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
+// A value chained onto an explicit field must land on that field, not behind the pending one.
+func TestLazyFieldStreamChainsValueOntoExplicitField(t *testing.T) {
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	lazy := NewLazyFieldStream(inner, "result", false)
+
+	lazy.WriteObjectField("error").WriteString("boom")
+
+	require.False(t, lazy.Written(), "a chained value must not open the pending field")
+	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
+}
+
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {

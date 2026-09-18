@@ -99,9 +99,12 @@ func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmp
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.inner.WriteMore() }
+
+// The chained value belongs to the field just written, so it goes straight to inner: routing it
+// back through the wrapper would open the pending field between the name and its value.
 func (s *LazyFieldStream) WriteObjectField(name string) Stream {
 	s.inner.WriteObjectField(name)
-	return s
+	return s.inner
 }
 
 // The ends close what a value opened, so the field is already there.
