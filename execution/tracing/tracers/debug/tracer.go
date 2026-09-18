@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -63,13 +64,14 @@ func New(outputDir string, opts ...Option) *tracers.Tracer {
 func (t *Tracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		// VM events
-		OnTxStart:   t.OnTxStart,
-		OnTxEnd:     t.OnTxEnd,
-		OnEnter:     t.OnEnter,
-		OnExit:      t.OnExit,
-		OnOpcode:    t.OnOpcode,
-		OnFault:     t.OnFault,
-		OnGasChange: t.OnGasChange,
+		OnTxStart:     t.OnTxStart,
+		OnTxEnd:       t.OnTxEnd,
+		OnEnter:       t.OnEnter,
+		OnExit:        t.OnExit,
+		OnOpcode:      t.OnOpcode,
+		OnFault:       t.OnFault,
+		OnGasChange:   t.OnGasChange,
+		OnGasChangeV2: t.OnGasChangeV2,
 		// Chain events
 		OnBlockchainInit:    t.OnBlockchainInit,
 		OnBlockStart:        t.OnBlockStart,
@@ -293,6 +295,18 @@ func (t *Tracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
 			Reason: fmt.Sprintf("%v", reason),
 		},
 	})
+}
+
+func (t *Tracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {
+	if t.recordOptions.DisableOnGasChangeRecording {
+		return
+	}
+	if t.wrapped != nil {
+		t.wrapped.Hooks.EmitGasChange(old, new, reason)
+	}
+	t.traces.Append(Trace{OnGasChangeV2: &OnGasChangeTraceV2{
+		Old: old, New: new, Reason: reason.String(),
+	}})
 }
 
 func (t *Tracer) OnBlockchainInit(chainConfig *chain.Config) {
@@ -614,13 +628,14 @@ func (t *Traces) Append(trace Trace) {
 
 type Trace struct {
 	// VM events
-	OnTxStart   *OnTxStartTrace   `json:"onTxStart,omitempty"`
-	OnTxEnd     *OnTxEndTrace     `json:"onTxEnd,omitempty"`
-	OnEnter     *OnEnterTrace     `json:"onEnter,omitempty"`
-	OnExit      *OnExitTrace      `json:"onExit,omitempty"`
-	OnOpcode    *OnOpcodeTrace    `json:"onOpcode,omitempty"`
-	OnFault     *OnFaultTrace     `json:"onFault,omitempty"`
-	OnGasChange *OnGasChangeTrace `json:"onGasChange,omitempty"`
+	OnTxStart     *OnTxStartTrace     `json:"onTxStart,omitempty"`
+	OnTxEnd       *OnTxEndTrace       `json:"onTxEnd,omitempty"`
+	OnEnter       *OnEnterTrace       `json:"onEnter,omitempty"`
+	OnExit        *OnExitTrace        `json:"onExit,omitempty"`
+	OnOpcode      *OnOpcodeTrace      `json:"onOpcode,omitempty"`
+	OnFault       *OnFaultTrace       `json:"onFault,omitempty"`
+	OnGasChange   *OnGasChangeTrace   `json:"onGasChange,omitempty"`
+	OnGasChangeV2 *OnGasChangeTraceV2 `json:"onGasChangeV2,omitempty"`
 	// Chain events
 	OnBlockchainInit  *OnBlockchainInitTrace  `json:"onBlockchainInit,omitempty"`
 	OnBlockStart      *OnBlockStartTrace      `json:"onBlockStart,omitempty"`
@@ -692,6 +707,12 @@ type OnFaultTrace struct {
 	MemorySize int             `json:"memSize,omitempty"`
 	Depth      int             `json:"depth,omitempty"`
 	Error      string          `json:"error,omitempty"`
+}
+
+type OnGasChangeTraceV2 struct {
+	Old    mdgas.MdGas `json:"old"`
+	New    mdgas.MdGas `json:"new"`
+	Reason string      `json:"reason"`
 }
 
 type OnGasChangeTrace struct {

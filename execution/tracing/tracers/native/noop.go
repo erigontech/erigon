@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -50,6 +51,7 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 			OnOpcode:        t.OnOpcode,
 			OnFault:         t.OnFault,
 			OnGasChange:     t.OnGasChange,
+			OnGasChangeV2:   t.OnGasChangeV2,
 			OnBalanceChange: t.OnBalanceChange,
 			OnNonceChange:   t.OnNonceChange,
 			OnCodeChange:    t.OnCodeChange,
@@ -68,6 +70,8 @@ func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpC
 }
 
 func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
+
+func (t *noopTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {}
 
 func (t *noopTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 }

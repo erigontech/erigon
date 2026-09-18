@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -75,6 +76,7 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 			OnOpcode:            t.OnOpcode,
 			OnFault:             t.OnFault,
 			OnGasChange:         t.OnGasChange,
+			OnGasChangeV2:       t.OnGasChangeV2,
 			OnBalanceChange:     t.OnBalanceChange,
 			OnNonceChangeV2:     t.OnNonceChangeV2,
 			OnCodeChangeV2:      t.OnCodeChangeV2,
@@ -118,6 +120,12 @@ func (t *muxTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason)
 		if t.OnGasChange != nil {
 			t.OnGasChange(old, new, reason)
 		}
+	}
+}
+
+func (t *muxTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitGasChange(old, new, reason)
 	}
 }
 
