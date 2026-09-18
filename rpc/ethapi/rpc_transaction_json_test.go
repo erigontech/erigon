@@ -94,30 +94,33 @@ func TestRPCTransactionJSONPinned(t *testing.T) {
 		name    string
 		txn     types.Transaction
 		block   bool
+		pending bool
 		baseFee *uint256.Int
 		want    string
 	}{
-		{name: "legacy-pre155-in-block", txn: legacyPre155, block: true, baseFee: baseFee,
+		{name: "legacy-pre155-in-block", txn: legacyPre155, block: true, pending: false, baseFee: baseFee,
 			want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":"0x3e8","from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x64","hash":"0x8ef46ab1d208f19757d251208b6c266203a5d840db17dd5391cad7cedec1c6d5","input":"0xcafe","nonce":"0x5","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x0","v":"0x1c","r":"0x1111","s":"0x2222"}`},
-		{name: "legacy-eip155-pending", txn: legacy155, block: false, baseFee: nil,
+		{name: "legacy-eip155-pending", txn: legacy155, block: false, pending: true, baseFee: nil,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x64","hash":"0x3a5149d3c004d26e7aa7c02252e40ec269e2b26da5a020c3c158e242d85c2add","input":"0xcafe","nonce":"0x6","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x0","chainId":"0x1","v":"0x26","r":"0x1111","s":"0x2222"}`},
-		{name: "legacy-unsigned-pending", txn: legacyUnsigned, block: false, baseFee: nil,
+		{name: "legacy-unsigned-pending", txn: legacyUnsigned, block: false, pending: true, baseFee: nil,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x64","hash":"0xe771ac00824457ce02bd60ab3b9b0bf87fcef50de4b08c6fb1880b14e5566ee5","input":"0xcafe","nonce":"0x7","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x0","v":null,"r":null,"s":null}`},
-		{name: "accesslist-in-block", txn: accessList, block: true, baseFee: baseFee,
+		{name: "accesslist-in-block", txn: accessList, block: true, pending: false, baseFee: baseFee,
 			want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":"0x3e8","from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x64","hash":"0xabb4f9a8c5e58fb1824763b2a85066b60e92ffd0563c62811bff5acd049e821a","input":"0xcafe","nonce":"0x8","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x1","accessList":[{"address":"0x1234567890123456789012345678901234567890","storageKeys":["0x0000000000000000000000000000000000000000000000000000000000000001"]}],"chainId":"0x1","v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "dynamicfee-in-block", txn: dynamicFee, block: true, baseFee: baseFee,
+		{name: "dynamicfee-in-block", txn: dynamicFee, block: true, pending: false, baseFee: baseFee,
 			want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":"0x3e8","from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x11","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xd9bdf6e2ecb2b07bb8076a7079b99c8fb6c45bf613c6c479687d078c6c437fe2","input":"0xcafe","nonce":"0x9","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x2","accessList":null,"chainId":"0x1","v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "dynamicfee-pending-no-basefee", txn: dynamicFee, block: false, baseFee: nil,
+		{name: "dynamicfee-pending-no-basefee", txn: dynamicFee, block: false, pending: true, baseFee: nil,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x3e8","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xd9bdf6e2ecb2b07bb8076a7079b99c8fb6c45bf613c6c479687d078c6c437fe2","input":"0xcafe","nonce":"0x9","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x2","accessList":null,"chainId":"0x1","v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "dynamicfee-pending-with-basefee", txn: dynamicFee, block: false, baseFee: baseFee,
+		{name: "dynamicfee-pending-with-basefee", txn: dynamicFee, block: false, pending: true, baseFee: baseFee,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x3e8","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xd9bdf6e2ecb2b07bb8076a7079b99c8fb6c45bf613c6c479687d078c6c437fe2","input":"0xcafe","nonce":"0x9","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x2","accessList":null,"chainId":"0x1","v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "blob-pending-with-basefee", txn: blob, block: false, baseFee: baseFee,
+		{name: "dynamicfee-in-pending-block", txn: dynamicFee, block: false, pending: false, baseFee: baseFee,
+			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x11","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xd9bdf6e2ecb2b07bb8076a7079b99c8fb6c45bf613c6c479687d078c6c437fe2","input":"0xcafe","nonce":"0x9","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x2","accessList":null,"chainId":"0x1","v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
+		{name: "blob-pending-with-basefee", txn: blob, block: false, pending: true, baseFee: baseFee,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x3e8","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xb7df8bc4dc66f7f371245812036aefff8b6c35abc3998a9dde1171187fb12e07","input":"0xcafe","nonce":"0xa","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x3","accessList":null,"chainId":"0x1","maxFeePerBlobGas":"0x32","blobVersionedHashes":["0x0000000000000000000000000000000000000000000000000000000000000102"],"v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "setcode-pending-with-basefee", txn: setCode, block: false, baseFee: baseFee,
+		{name: "setcode-pending-with-basefee", txn: setCode, block: false, pending: true, baseFee: baseFee,
 			want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x3e8","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0x590610d2b442819852a4bfe6058fcddd202107fd2084c6dd56947aab6b372284","input":"0xcafe","nonce":"0xb","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x4","accessList":null,"chainId":"0x1","authorizationList":[{"chainId":"0x1","address":"0x1234567890123456789012345678901234567890","nonce":"0xc","yParity":"0x1","r":"0x3333","s":"0x4444"}],"v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "blob-in-block", txn: blob, block: true, baseFee: baseFee,
+		{name: "blob-in-block", txn: blob, block: true, pending: false, baseFee: baseFee,
 			want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":"0x3e8","from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x11","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0xb7df8bc4dc66f7f371245812036aefff8b6c35abc3998a9dde1171187fb12e07","input":"0xcafe","nonce":"0xa","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x3","accessList":null,"chainId":"0x1","maxFeePerBlobGas":"0x32","blobVersionedHashes":["0x0000000000000000000000000000000000000000000000000000000000000102"],"v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
-		{name: "setcode-in-block", txn: setCode, block: true, baseFee: baseFee,
+		{name: "setcode-in-block", txn: setCode, block: true, pending: false, baseFee: baseFee,
 			want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":"0x3e8","from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x11","maxPriorityFeePerGas":"0xa","maxFeePerGas":"0x3e8","hash":"0x590610d2b442819852a4bfe6058fcddd202107fd2084c6dd56947aab6b372284","input":"0xcafe","nonce":"0xb","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x4","accessList":null,"chainId":"0x1","authorizationList":[{"chainId":"0x1","address":"0x1234567890123456789012345678901234567890","nonce":"0xc","yParity":"0x1","r":"0x3333","s":"0x4444"}],"v":"0x1","yParity":"0x1","r":"0x1111","s":"0x2222"}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,7 +129,7 @@ func TestRPCTransactionJSONPinned(t *testing.T) {
 			if tt.block {
 				blockHash, blockTime, blockNumber, index = pinBlockHash, 1000, 100, 3
 			}
-			got, err := json.Marshal(NewRPCTransaction(tt.txn, blockHash, blockTime, blockNumber, index, tt.baseFee))
+			got, err := json.Marshal(NewRPCTransaction(tt.txn, blockHash, blockTime, blockNumber, index, tt.baseFee, tt.pending))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, string(got))
 		})

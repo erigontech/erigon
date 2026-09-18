@@ -591,9 +591,10 @@ type RPCTransaction struct {
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
-// representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
-	pending := blockHash == (common.Hash{})
+// representation, with the given location metadata set (if available). pending
+// drives the price alone: the pending block has no hash to report, yet its
+// transactions are priced as in a block.
+func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int, pending bool) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -672,7 +673,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		result.From = from.Value()
 	}
 
-	if !pending {
+	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
 		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
@@ -694,5 +695,5 @@ func computeGasPrice(txn types.Transaction, pending bool, baseFee *uint256.Int) 
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
+	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee(), false)
 }

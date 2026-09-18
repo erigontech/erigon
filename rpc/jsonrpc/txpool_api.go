@@ -24,8 +24,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -54,10 +52,10 @@ func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool txpoolproto.TxpoolClie
 	}
 }
 
-func flattenTxs(txs []types.Transaction, curHeader *types.Header, cc *chain.Config) map[string]*ethapi.RPCTransaction {
+func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 	dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 	for _, txn := range txs {
-		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
+		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn)
 	}
 	return dump
 }
@@ -102,25 +100,11 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	cc, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	curHeader := rawdb.ReadCurrentHeader(tx)
-	if curHeader == nil {
-		return nil, nil
-	}
 	for account, txs := range pending {
-		content["pending"][account.Hex()] = flattenTxs(txs, curHeader, cc)
+		content["pending"][account.Hex()] = flattenTxs(txs)
 	}
 	for account, txs := range queued {
-		content["queued"][account.Hex()] = flattenTxs(txs, curHeader, cc)
+		content["queued"][account.Hex()] = flattenTxs(txs)
 	}
 	return content, nil
 }
@@ -161,22 +145,8 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	cc, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	curHeader := rawdb.ReadCurrentHeader(tx)
-	if curHeader == nil {
-		return nil, nil
-	}
-	content["pending"] = flattenTxs(pending, curHeader, cc)
-	content["queued"] = flattenTxs(queued, curHeader, cc)
+	content["pending"] = flattenTxs(pending)
+	content["queued"] = flattenTxs(queued)
 	return content, nil
 }
 

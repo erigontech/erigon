@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -88,12 +87,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
-	}
-
-	curHeader := rawdb.ReadCurrentHeader(tx)
-	if curHeader == nil {
-		return nil, nil
+		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee, false), nil
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
@@ -112,7 +106,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		return newRPCPendingTransaction(txn, curHeader, chainConfig), nil
+		return newRPCPendingTransaction(txn), nil
 	}
 
 	// Transaction unknown, return as such
@@ -201,7 +195,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, nil // not error
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee(), false), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -253,7 +247,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if uint64(txIndex) >= uint64(len(txs)) {
 			return nil, nil
 		}
-		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee()), nil
+		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee(), false), nil
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
@@ -285,7 +279,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, nil // not error
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee(), false), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.
