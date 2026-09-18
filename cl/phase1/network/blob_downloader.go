@@ -328,14 +328,15 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	retryPending := true
 	targetSlot := b.nextBackfillTargetSlot
 	retryFloor := uint64(0)
+	blobRetentionFloor := uint64(0)
 	fuluRetentionFloor := uint64(0)
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
 		retentionSlot := b.ethClock.GetCurrentSlot()
-		retentionFloor := b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
+		blobRetentionFloor = b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
 		fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
-		targetSlot = max(targetSlot, retentionFloor)
-		retryFloor = retentionFloor
+		targetSlot = min(currentSlot, max(targetSlot, blobRetentionFloor))
+		retryFloor = blobRetentionFloor
 	}
 
 	if shouldLog {
@@ -366,7 +367,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				break
 			}
 		}
-
+		// Admit a lagging head into the loop so retries can advance, but do not
+		// recreate non-archive work that has already left the blob-serving range.
+		if currentSlot < blobRetentionFloor {
+			break
+		}
 		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot, fuluRetentionFloor)
 		if err != nil {
 			return err
@@ -920,7 +925,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 }
 
 func (b *BlobHistoryDownloader) outsideFuluRetention(block *cltypes.SignedBeaconBlock, slot, retentionFloor uint64) bool {
-	return !b.archiveBlobs && block.Version() >= clparams.FuluVersion && slot < retentionFloor
+	return block.Version() >= clparams.FuluVersion && slot < retentionFloor
 }
 
 // storedSidecarsAvailable reports whether a count-equal slot is actually backed by files, since

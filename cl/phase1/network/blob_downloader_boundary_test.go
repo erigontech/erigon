@@ -566,33 +566,23 @@ func TestBlobHistoryDownloaderDropsExpiredFuluRetryButKeepsDenebRetry(t *testing
 		require.NotEmpty(t, downloader.retryRanges)
 	})
 
-	for _, test := range []struct {
-		name               string
-		archive            bool
-		fuluRetentionFloor uint64
-	}{
-		{name: "exact floor", fuluRetentionFloor: slot},
-		{name: "archive below floor", archive: true, fuluRetentionFloor: slot + 1},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			storage := blobstoragemock.NewMockBlobStorage(ctrl)
-			storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
-			peerDas := mock_services.NewMockPeerDas(ctrl)
-			peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(errors.New("unavailable"))
-			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-			block.Block.Slot = slot
-			block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-			downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
-			downloader.blobStorage = storage
-			downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
-			downloader.archiveBlobs = test.archive
-			downloader.addRetrySlot(slot)
+	t.Run("exact floor", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		storage := blobstoragemock.NewMockBlobStorage(ctrl)
+		storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
+		peerDas := mock_services.NewMockPeerDas(ctrl)
+		peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(errors.New("unavailable"))
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		block.Block.Slot = slot
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+		downloader.blobStorage = storage
+		downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+		downloader.addRetrySlot(slot)
 
-			require.NoError(t, downloader.retryFailedRecoveries(0, test.fuluRetentionFloor))
-			require.NotEmpty(t, downloader.retryRanges)
-		})
-	}
+		require.NoError(t, downloader.retryFailedRecoveries(0, slot))
+		require.NotEmpty(t, downloader.retryRanges)
+	})
 }
 
 func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T) {
@@ -834,32 +824,118 @@ func TestBlobHistoryDownloaderInteriorResolveKeepsRetryRangeBound(t *testing.T) 
 
 func TestBlobHistoryDownloaderUsesWallClockEpochRetentionFloor(t *testing.T) {
 	const (
-		wallClockSlot    = uint64(100)
-		headSlot         = uint64(99)
-		retentionFloor   = uint64(64)
-		expiredRetrySlot = retentionFloor - 1
+		wallClockSlot    = uint64(128) // epoch 8
+		headSlot         = uint64(111) // epoch 6
+		retentionFloor   = uint64(96)
+		expiredRetrySlot = uint64(80)
 	)
-	wantErr := errors.New("retained retry visited")
-	reader := &boundaryBlockReader{errors: map[uint64]error{retentionFloor: wantErr}}
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("expired retry visited")).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = expiredRetrySlot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{expiredRetrySlot: block}}
 	downloader := newBoundaryDownloader(t, headSlot, 0, 0, reader)
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 16
 	beaconCfg.MinEpochsForBlobSidecarsRequests = 2
 	beaconCfg.DenebForkEpoch = 0
 	downloader.beaconCfg = &beaconCfg
+	downloader.blobStorage = storage
 	downloader.archiveBlobs = false
 	downloader.immediateBlobsBackfilling = true
 	downloader.addRetrySlot(expiredRetrySlot)
 	downloader.addRetrySlot(retentionFloor)
+	var completed atomic.Bool
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { completed.Store(value) }))
 
-	ctrl := gomock.NewController(t)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(wallClockSlot)
 	downloader.ethClock = clock
 
-	require.ErrorIs(t, downloader.downloadOnce(false), wantErr)
-	require.NotContains(t, reader.slots, expiredRetrySlot)
-	require.Contains(t, reader.slots, retentionFloor)
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Empty(t, downloader.retryRanges, "wall-clock floor must discard work outside the serving window")
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, completed.Load(), "discarding expired work must allow the downstream completion signal")
+}
+
+func TestBlobHistoryDownloaderLaggingHeadStillRetriesBeforeCompletion(t *testing.T) {
+	const (
+		wallClockSlot  = uint64(160) // epoch 10
+		headSlot       = uint64(64)  // epoch 4
+		retentionFloor = uint64(128)
+	)
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, headSlot, 0, retentionFloor, reader)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 16
+	beaconCfg.MinEpochsForBlobSidecarsRequests = 2
+	beaconCfg.DenebForkEpoch = 0
+	downloader.beaconCfg = &beaconCfg
+	downloader.denebStartSlot = 0
+	downloader.archiveBlobs = false
+	downloader.immediateBlobsBackfilling = true
+	downloader.addRetrySlot(retentionFloor)
+	var completed atomic.Bool
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { completed.Store(value) }))
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(wallClockSlot).Times(2)
+	downloader.ethClock = clock
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{retentionFloor}, reader.slots, "the exact-floor retry must be read, not trimmed or dropped")
+	require.Empty(t, downloader.retryRanges, "a retention floor above the head must not skip pending retry work")
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, completed.Load(), "completion must be published only after retry work advances")
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{retentionFloor}, reader.slots, "a completed recurring pass must not recreate stale scan work")
+	require.Empty(t, downloader.retryRanges)
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, completed.Load())
+}
+
+func TestBlobHistoryDownloaderLaggingHeadDoesNotResurrectExpiredDenebWork(t *testing.T) {
+	const (
+		wallClockSlot = uint64(160) // epoch 10
+		headSlot      = uint64(64)  // epoch 4
+	)
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = headSlot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{block: block}
+	downloader := newBoundaryDownloader(t, headSlot, 0, 0, reader)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 16
+	beaconCfg.MinEpochsForBlobSidecarsRequests = 2
+	beaconCfg.DenebForkEpoch = 0
+	downloader.beaconCfg = &beaconCfg
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = false
+	downloader.immediateBlobsBackfilling = true
+	ctx, cancel := context.WithCancel(t.Context())
+	downloader.ctx = ctx
+	peers := &boundarySequencePeerCounter{counts: []uint64{1}, onRequest: cancel}
+	downloader.rpc = peers
+	var completed atomic.Bool
+	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(value bool) { completed.Store(value) }))
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(wallClockSlot).Times(2)
+	downloader.ethClock = clock
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Zero(t, peers.requests, "expired Deneb work must not be re-requested on recurring passes")
+	require.Empty(t, downloader.retryRanges, "expired Deneb work must not be resurrected as retry state")
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, completed.Load())
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader *boundaryBlockReader) *BlobHistoryDownloader {
