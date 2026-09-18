@@ -133,6 +133,7 @@ type HexPatriciaHashed struct {
 	branchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
 	touchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	afterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
+	witnessPath   [128]uint16 // For each row, bitmap of cells on a proven key's path
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -172,7 +173,8 @@ type HexPatriciaHashed struct {
 	foldFrontierLen int16
 	foldFrontierSet bool
 
-	memoizationOff bool // if true, do not rely on memoized hashes
+	memoizationOff  bool // if true, do not rely on memoized hashes
+	readOnlyWitness bool // proofs only: off-path cells keep their stored hashes and no branch is written
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
@@ -258,6 +260,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 		hph.depths[i] = 0
 		hph.branchBefore[i] = false
 		hph.touchMap[i] = 0
+		hph.witnessPath[i] = 0
 		hph.afterMap[i] = 0
 	}
 
@@ -1189,7 +1192,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
-	if hph.memoizationOff {
+	if hph.memoizationOff && !hph.readOnlyWitness { // a read-only witness fold drops hashes in prepareBranchCells
 		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
 	}
 	if cell.storageAddrLen > 0 {
@@ -1618,7 +1621,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
-	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
+	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row], hph.witnessPath[row] = 0, 0, false, 0
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
@@ -1771,12 +1774,14 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	prev, err := hph.previousBranch(row, updateKey)
-	if err != nil {
-		return err
-	}
-	if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, prev); err != nil {
-		return fmt.Errorf("failed to encode branch update: %w", err)
+	if !hph.readOnlyWitness {
+		prev, err := hph.previousBranch(row, updateKey)
+		if err != nil {
+			return err
+		}
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, prev); err != nil {
+			return fmt.Errorf("failed to encode branch update: %w", err)
+		}
 	}
 	upCell.extLen = depth - upDepth - 1
 	upCell.hashedExtLen = upCell.extLen
@@ -1909,7 +1914,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
 
-		if hph.memoizationOff {
+		if hph.memoizationOff && (!hph.readOnlyWitness || hph.witnessPath[row]&bit != 0) {
 			cell.stateHashLen = 0
 		}
 		/* memoization of state hashes*/
@@ -2509,7 +2514,13 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
+// WitnessNodesByHash folds read-only: the set holds only the proven paths, off-path nodes are referenced by hash.
 func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+	if len(hph.branchEncoder.deferred) > 0 {
+		return nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
+	}
+	hph.readOnlyWitness = true
+	defer func() { hph.readOnlyWitness = false }()
 	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
 	if err != nil {
 		return nil, nil, err
@@ -2518,13 +2529,18 @@ func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *U
 }
 
 func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updates, produceExclusionProofs bool) (set *witnessNodeSet, provedKeys [][]byte, rootHash []byte, err error) {
+	memoizationOff := hph.memoizationOff
 	hph.memoizationOff = true
+	defer func() { hph.memoizationOff = memoizationOff }()
 	set = newWitnessNodeSet()
 	hph.witness.tracer = set
 	defer hph.witness.reset()
 
 	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		if hph.readOnlyWitness && len(hashedKey) != 64 && len(hashedKey) != 128 {
+			return fmt.Errorf("read-only witness fold needs a whole hashed key, got %d nibbles", len(hashedKey))
+		}
 		provedKeys = append(provedKeys, bytes.Clone(hashedKey))
 		if len(plainKey) > 0 {
 			if int16(len(plainKey)) == hph.accountKeyLen {
@@ -2581,6 +2597,11 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 				if err := hph.unfold(hashedKey, 1); err != nil {
 					return fmt.Errorf("extra unfold: %w", err)
 				}
+			}
+		}
+		for row := range hph.activeRows {
+			if d := int(hph.depths[row]); d <= len(hashedKey) {
+				hph.witnessPath[row] |= uint16(1) << hashedKey[d-1]
 			}
 		}
 		return nil
