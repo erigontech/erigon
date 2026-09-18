@@ -50,6 +50,29 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
+// modeBApplies reports whether targetBlock lands past the diffset
+// window, reading on a RO tx so the decision costs no writer.
+func (e *ExecModule) modeBApplies(ctx context.Context, targetBlock uint64) (bool, error) {
+	tx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin ro transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	currentHead, err := getLatestBlockNumber(tx)
+	if err != nil {
+		return false, err
+	}
+	if targetBlock >= currentHead {
+		return false, nil
+	}
+	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+	if err != nil {
+		return false, fmt.Errorf("failed to check minimum unwindable block: %w", err)
+	}
+	return targetBlock < minUnwindableBlock, nil
+}
+
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// Wait for any in-flight execution to drain BEFORE acquiring the
 	// semaphore. Holding the semaphore during the wait would block
@@ -91,6 +114,28 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		}
 	}
 	defer e.semaphore.Release(1)
+
+	// Gate state-domain build+merge before the write tx exists. The
+	// builders being waited on read the db behind the aggregator
+	// commit gate, and the gate's writer side blocks on a held write
+	// tx — waiting with the tx open lets a builder that is already
+	// past the entry gate park forever, so the wait could only ever
+	// end by timing out. quiesceRetireIfPastTarget covers BlockRetire
+	// separately, once mode B is under way.
+	if e.unwinder != nil {
+		modeB, err := e.modeBApplies(ctx, targetBlock)
+		if err != nil {
+			return err
+		}
+		if modeB {
+			e.unwinder.BlockBuildFiles(true)
+			defer e.unwinder.BlockBuildFiles(false)
+			if err := e.unwinder.WaitForBuildAndMergeQuiescence(modeBBuildQuiescenceTimeout); err != nil {
+				e.unwinder.AbortUnwind()
+				return fmt.Errorf("SetHead mode B: %w", err)
+			}
+		}
+	}
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {

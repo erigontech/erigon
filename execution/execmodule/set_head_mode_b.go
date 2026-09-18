@@ -79,16 +79,6 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
 
-	// Gate state-domain build+merge so file production cannot race the
-	// unwind tx; quiesceRetireIfPastTarget below covers BlockRetire,
-	// not this. Wait covers goroutines already past the entry gate.
-	e.unwinder.BlockBuildFiles(true)
-	defer e.unwinder.BlockBuildFiles(false)
-	if err := e.unwinder.WaitForBuildAndMergeQuiescence(modeBBuildQuiescenceTimeout); err != nil {
-		e.unwinder.AbortUnwind()
-		return fmt.Errorf("SetHead mode B: %w", err)
-	}
-
 	// Cancel any in-flight BlockRetire whose range crosses
 	// targetBlock — that work is, by definition, producing
 	// snapshot/.idx files for blocks the unwind is about to
