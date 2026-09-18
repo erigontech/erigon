@@ -16,11 +16,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -32,10 +31,9 @@ type commitmentResult struct {
 	err       error
 }
 
-// commitComputeRequest is sent through the commitResults channel to tell
-// the calculator to compute commitment NOW. It flows through the same
-// channel as txResult/blockResult so ordering is preserved — by the time
-// the calculator sees it, all prior touches have been accumulated.
+// commitComputeRequest tells the calculator to compute commitment now. It flows
+// through the same channel as txResult/blockResult, so by the time it arrives
+// all prior touches have been accumulated.
 type commitComputeRequest struct{}
 
 // pendingBlock is a blockRequest the calculator has received but not yet
@@ -50,30 +48,21 @@ type pendingBlock struct {
 // silently degrading to incremental).
 var computedAheadCount atomic.Int64
 
+// logNpPhases emits the per-block additive newPayload phase breakdown
+// (stage/exec/commit/overlap/gap/residual) for perf attribution.
+var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
 func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 
 // commitmentCalculator receives the same txResult/blockResult stream as the
-// apply loop (via a fan-out channel). For each txResult it accumulates key
-// touches from the writes. It contains the break logic that decides when
-// to compute:
-//
-//   - BatchCommitments mode (default, initial sync): accumulates across many
-//     blocks, computes only when the apply loop sends a commitComputeRequest
-//     at batch boundaries (flushPending, maxBlockNum, exhausted).
-//
-//   - Per-block mode (!BatchCommitments): computes at every blockResult.
-//     Used at chain tip or when shouldGenerateChangesets is true.
-//
-// The calculator owns its own commitment.Updates buffer, fed one aggregated
-// update per dirty key by calcState.FlushToUpdates — no serialization round-trip.
-//
-// It reads values from sd.mem (shared with the execLoop) via GetLatest.
-// The execLoop's Flush writes to sd.mem before sending the blockResult,
-// so by the time the calculator receives the blockResult, sd.mem has the
-// correct block-boundary state.
+// apply loop (via a fan-out channel), accumulates key touches, and decides when
+// to compute: in BatchCommitments mode it accumulates across blocks and computes
+// only on a commitComputeRequest at batch boundaries; otherwise it computes at
+// every blockResult. It owns its own commitment.Updates buffer and reads
+// block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
@@ -81,59 +70,44 @@ type commitmentCalculator struct {
 	logPrefix   string
 	logger      log.Logger
 
-	// updates is the calculator's OWN buffer — never shared with the
-	// execLoop or apply loop. Only this goroutine reads/writes it.
+	// updates is the calculator's OWN buffer — only this goroutine touches it.
 	updates *commitment.Updates
 
 	// spare is the other half of the compute buffer ring. handOffUpdates gives
-	// updates to the commitment context and rotates this one in; the context
-	// drains its buffer synchronously, so by the next rotation it is idle.
+	// updates to the compute for it to drain, and rotates this one in; the compute
+	// drains synchronously, so by the next rotation the handed-off buffer is idle.
 	spare *commitment.Updates
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
-	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
+	// to avoid reallocating a fresh prefix-trie arena each block.
 	balUpdates *commitment.Updates
 
-	// state accumulates account/storage values across TX writes.
-	// At block boundary, the accumulated state is flushed to updates.
-	// Values are lazy-loaded from the domain on first touch via asOfReader.
+	// state accumulates account/storage values across a block's TX writes, then
+	// flushes them to updates at the block boundary. Values are lazy-loaded from
+	// the domain on first touch via asOfReader.
 	state *calcState
 
-	// asOfReader is shared between calcState (lazy-load) and compute
-	// methods (fold/unfold sibling reads). Its txNum is updated at each
-	// block boundary.
+	// asOfReader is shared between calcState (lazy-load) and compute methods
+	// (fold/unfold sibling reads); its txNum advances at each block boundary.
 	asOfReader *asOfStateReader
 
-	// roTx is a persistent read-only transaction for domain reads.
-	// Opened at start, lives for the calculator's lifetime.
+	// roTx is a persistent read-only transaction living for the calculator's lifetime.
 	roTx kv.TemporalTx
 
-	// commitProgress holds the most recent CommitProgress the trie reported,
-	// and firstCommitAtNs the wall time of the first round. The parallel
-	// executor reads both to log commitment stats on its own ticker.
-	commitProgress  atomic.Pointer[commitment.CommitProgress]
-	firstCommitAtNs atomic.Int64
+	// lastBlockResult is the most recent block boundary, so computeAndPublish
+	// knows which block to compute for.
+	lastBlockResult *blockResult
 
-	// lastTarget tracks the most recent block boundary so that
-	// computeAndPublish knows which block to compute for.
-	lastTarget commitTarget
-
-	// lastComputedBlock tracks the block number of the last computed
-	// commitment to avoid duplicate computation when commitComputeRequest
-	// arrives after a per-block computation already covered this block.
+	// lastComputedBlock is the last computed block, avoiding duplicate
+	// computation when a commitComputeRequest arrives after a per-block compute
+	// already covered it.
 	lastComputedBlock uint64
 
-	// hasComputed disambiguates lastComputedBlock=0: without this flag,
-	// "never computed" and "computed block 0 (genesis)" both look like
-	// lastComputedBlock=0. The commitComputeRequest dedup check would
-	// then skip computing the very first batch when its lastTarget
-	// is block 0 — leaving the genesis commitment unwritten to sd, which
-	// breaks SeekCommitment for the next exec3 cycle (it falls back to
-	// stage progress instead of finding a commitment state).
+	// hasComputed disambiguates lastComputedBlock=0 (see forcePerBlockCompute).
 	hasComputed bool
 
-	// in receives the same applyResult stream as the apply loop,
-	// plus commitComputeRequest messages for explicit compute triggers.
+	// in receives the same applyResult stream as the apply loop, plus
+	// commitComputeRequest messages.
 	in chan applyResult
 	// blockRequests is the per-block heads-up channel — separate from `in`
 	// so a blockRequest is never trapped behind a block's txResults.
@@ -141,126 +115,58 @@ type commitmentCalculator struct {
 	// out publishes commitment roots.
 	out chan commitmentResult
 
-	// pending records the per-block mode selected from each blockRequest,
-	// keyed by block number — populated from blockRequests, cleared on the
-	// matching blockResult.
+	// pending records the per-block mode from each blockRequest, keyed by block
+	// number; cleared on the matching blockResult.
 	pending map[uint64]*pendingBlock
 
-	// firstBlockNum is the block number of the first blockRequest this
-	// calculator sees — the batch's first block, whose baseline is already
-	// committed by the prior cycle, so its compute-ahead gate is open at once.
+	// firstBlockNum is the batch's first block, whose baseline the prior cycle
+	// already committed, so its compute-ahead gate is open at once.
 	firstBlockNum uint64
 	hasFirstBlock bool
 
-	// lastBlockResultSeen is the highest block whose blockResult has arrived
-	// on `in`. The compute-ahead gate for block N is lastBlockResultSeen >= N-1:
-	// block N-1's state must be flushed to sd.mem (blockResult signals it)
-	// before N's baseline reads.
+	// lastBlockResultSeen is the highest block whose blockResult has arrived. The
+	// compute-ahead gate for block N is lastBlockResultSeen >= N-1: N-1's state
+	// must be flushed to sd.mem before N's baseline reads.
 	lastBlockResultSeen uint64
 	hasSeenBlockResult  bool
 
-	// computedAhead marks blocks already computed by computeBlockFromBAL, so the
+	// computedAhead marks blocks already computed by computeBlockFromBAL so a
 	// later blockResult(N) does not recompute them. balRoots holds each
 	// BAL-driven root for the shadow-mode cross-check.
 	computedAhead map[uint64]bool
 	balRoots      map[uint64][]byte
 
-	// lastComputedAheadBlock is the highest block computed ahead so far. Computing
-	// ahead reads the commitment domain for its baseline, so it may only run when
-	// the preceding block advanced the domain — i.e. was itself computed ahead
-	// (or is the batch's first block, whose baseline the prior cycle committed).
-	// This stops compute-ahead from reading a stale trie across a block whose
-	// BAL sidecar was missing (eth/71 backfill is best-effort) and so never
-	// advanced it.
+	// lastComputedAheadBlock is the highest block computed ahead so far.
+	// Compute-ahead reads the commitment domain for its baseline, so it may only
+	// run when the preceding block advanced the domain (was itself computed ahead,
+	// or is the batch's first block) — otherwise it would read a stale trie
+	// across a block whose BAL sidecar was missing.
 	lastComputedAheadBlock uint64
 	hasComputedAhead       bool
 
-	// computeAheadStopped marks that the contiguity guard has already rejected a
-	// block in this batch. The chain cannot re-anchor, so every later block hits
-	// the same guard — the drop to the incremental path is reported once.
-	computeAheadStopped bool
-
-	// signalCtx is the shared executor context. A block-aware stop caps
-	// compute-ahead at its boundary; any other cancellation disables new
-	// speculative work. Compute and publish use workCtx so work already in flight
-	// can finish during executor teardown.
+	// signalCtx carries the stopCause; the calculator reads it (never its own
+	// compute ctx) to cap compute-ahead at the batch's coalesce block, so a
+	// clean-stop cancel never aborts an in-flight commitment.
 	signalCtx context.Context
 
-	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
-	// ComputeCommitment at every block boundary. Mirrors serial's
-	// `!dbg.BatchCommitments || shouldGenerateChangesets || KeepExecutionProofs`
-	// gate in [exec3_serial.go]: when changesets must be generated (reorg
-	// support) or execution proofs must be kept, per-block computation is
-	// required so that each block's changeset records the branch deltas
-	// attributable to that block alone. In batch mode, the trie folds
-	// multiple blocks together and the deferred buffer dedupes branch
-	// prefixes across the batch — those merged updates flush into the
-	// LAST block's changeset, which is wrong for per-block unwind.
+	// forcePerBlockCompute forces a ComputeCommitment at every block boundary,
+	// mirroring serial. Per-block computation is required when changesets must be
+	// generated (reorg support) or execution proofs kept, so each block's
+	// changeset records only its own branch deltas; batch mode folds blocks
+	// together and flushes merged updates into the last block's changeset, which
+	// is wrong for per-block unwind. The genesis case (block 0) relies on the
+	// separate hasComputed flag to distinguish "never computed" from "computed
+	// genesis", else the first batch's genesis commitment is never written to sd.
 	forcePerBlockCompute bool
 
-	// perBlockFrom is the batch's changeset window start: blocks >= it
-	// compute per-block (their changesets must record per-block branch
-	// deltas); blocks below it accumulate in batch mode. The last
-	// pre-window block triggers a transition compute (computeTransition)
-	// so no pre-window branch deltas leak into a window block's changeset.
+	// perBlockFrom is the changeset window start: blocks >= it compute per-block
+	// (their changesets must record per-block branch deltas), blocks below it
+	// accumulate in batch mode. The last pre-window block triggers a transition
+	// compute so no pre-window deltas leak into a window block's changeset.
 	perBlockFrom uint64
 
 	wg   sync.WaitGroup
 	done chan struct{}
-
-	// processedThrough is the highest block whose blockResult the calculator
-	// has fully handled (computed or merely accumulated). processedWake is
-	// closed and replaced on every advance so waiters can select on it.
-	processedMu      sync.Mutex
-	processedThrough uint64
-	processedWake    chan struct{}
-}
-
-// markProcessed publishes that blockNum's blockResult is fully handled. Only
-// the COMMITMENT_AFTER_EXEC barrier reads this, so the default path never pays
-// for the lock and the replacement channel.
-func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
-	cc.processedMu.Lock()
-	defer cc.processedMu.Unlock()
-	if blockNum <= cc.processedThrough {
-		return
-	}
-	cc.processedThrough = blockNum
-	close(cc.processedWake)
-	cc.processedWake = make(chan struct{})
-}
-
-// WaitProcessed blocks until the calculator has handled blockNum, the
-// calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
-// barrier: it serializes block-end handling against exec, not the mid-block
-// step-edge computes.
-//
-// A stopped calculator returns nil even when blockNum was never handled. That is
-// only safe because the sole caller is the exec loop, whose own defer closes
-// cc.in and so cannot still be waiting; a second caller would need to tell that
-// case apart.
-func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
-	if cc.in == nil {
-		// Exec-only (DISCARD_COMMITMENT): loop() never runs, so nothing ever
-		// marks a block processed and every escape below is unreachable.
-		return nil
-	}
-	for {
-		cc.processedMu.Lock()
-		reached := cc.processedThrough >= blockNum
-		wake := cc.processedWake
-		cc.processedMu.Unlock()
-		if reached {
-			return nil
-		}
-		select {
-		case <-wake:
-		case <-cc.done:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }
 
 func newCommitmentCalculator(
@@ -276,16 +182,8 @@ func newCommitmentCalculator(
 	in chan applyResult,
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
+	drTemplate *state.LayeredDomainReader,
 ) (*commitmentCalculator, error) {
-	// This calculator folds block N while the exec loop already writes N+1 into
-	// sd.mem; both settings below are what keep that read-safe.
-	if !doms.InMemHistoryReads() {
-		return nil, errors.New("commitmentCalculator: in-mem history reads must be enabled")
-	}
-	if !doms.InlineTouchKeyDisabled() {
-		return nil, errors.New("commitmentCalculator: inline TouchKey must be disabled")
-	}
-
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
@@ -296,25 +194,25 @@ func newCommitmentCalculator(
 		spareUpdates.SetMode(commitment.ModeUpdate)
 	}
 
-	// Open a persistent read-only TX for lazy-loading state from the domain.
-	// This lives for the calculator's lifetime, like worker TX handles.
+	// Persistent read-only tx for lazy-loading state, living for the calculator's
+	// lifetime. Rolled back in Stop() (not deferred here); it never spans a prune,
+	// since Stop() runs before the stageloop commit and prune only fires between
+	// batches.
 	roTx, err := db.BeginTemporalRo(workCtx) //nolint:gocritic
 	if err != nil {
+		// A cancellation here often carries a richer cause (why the batch aborted);
+		// surface it instead of the bare context.Canceled so setup failures stay
+		// attributable.
+		if errors.Is(err, context.Canceled) {
+			if cause := context.Cause(workCtx); cause != nil && !errors.Is(cause, context.Canceled) {
+				return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", cause)
+			}
+		}
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
-	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
-	// deferred here. Safe across collate/prune cycles because the calculator
-	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
-	// between batches via FCU. So this roTx never spans a prune — by the
-	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
-	// back and the calculator goroutine is gone.
 
-	// Single asOfStateReader shared by calcState (lazy-load) and compute
-	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
-	// (avoids future sd.mem state) and GetLatest for commitment branches
-	// (written sequentially by this calculator).
-	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	// Single asOfStateReader shared by calcState (lazy-load) and compute methods.
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0, dr: drTemplate.CloneWithTx(roTx)}
 
 	return &commitmentCalculator{
 		doms:                 doms,
@@ -337,36 +235,7 @@ func newCommitmentCalculator(
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
-		processedWake:        make(chan struct{}),
 	}, nil
-}
-
-// onCommitProgress is handed to ComputeCommitment so the trie's counters
-// reach the executor. Called from the calculator goroutine.
-func (cc *commitmentCalculator) onCommitProgress(p *commitment.CommitProgress) {
-	if p == nil {
-		return
-	}
-	cc.commitProgress.Store(p)
-	cc.firstCommitAtNs.CompareAndSwap(0, time.Now().UnixNano())
-}
-
-// LastCommitProgress returns the most recent round's counters, or the zero
-// value if no round has completed.
-func (cc *commitmentCalculator) LastCommitProgress() commitment.CommitProgress {
-	if p := cc.commitProgress.Load(); p != nil {
-		return *p
-	}
-	return commitment.CommitProgress{}
-}
-
-// FirstCommitAt reports when the first round ran; zero if none has.
-func (cc *commitmentCalculator) FirstCommitAt() time.Time {
-	ns := cc.firstCommitAtNs.Load()
-	if ns == 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, ns)
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
@@ -388,14 +257,11 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
-	// Drain cc.in until the exec loop closes it. Do not add ctx.Done or cc.done
-	// checks: leaving early would put commitment behind sd.mem and cause nonce
-	// mismatches on restart. The exec loop owns input closure on every exit, so
-	// all buffered items are processed before the calculator stops.
-	//
-	// blockRequests is multiplexed but not a gate: it is only a compute-ahead
-	// heads-up, and draining leftovers after cc.in closes would recompute
-	// already-finalized blocks. It is set to nil once closed.
+	// Exit ONLY when cc.in is closed (by the exec loop, which owns shutdown
+	// sequencing). Do NOT add ctx.Done/cc.done checks — exiting early leaves
+	// commitment behind sd.mem, causing nonce mismatches on batch restart; all
+	// buffered items must be processed. blockRequests is only a compute-ahead
+	// heads-up, not a gate, so it is set to nil once closed rather than drained.
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
 		select {
@@ -404,6 +270,12 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				in = nil
 				continue
 			}
+			// Drain buffered requests before handling the result: a block's request
+			// is always sent before the exec that produces its result, but a fair
+			// select can pick the result first and let handleBlockRequest drop the
+			// request as stale (blockNum <= lastBlockResultSeen). That drops the
+			// block's compute-ahead, and the contiguity gate then keeps compute-ahead
+			// off for the rest of the batch.
 			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
@@ -412,8 +284,8 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
-// acceptBlockRequest handles a request received from reqs, returning the channel
-// to keep selecting on — nil once it is closed.
+// acceptBlockRequest handles a request from reqs, returning the channel to keep
+// selecting on — nil once it is closed.
 func (cc *commitmentCalculator) acceptBlockRequest(ctx context.Context, reqs chan *blockRequest, req *blockRequest, ok bool) chan *blockRequest {
 	if !ok {
 		return nil
@@ -423,8 +295,7 @@ func (cc *commitmentCalculator) acceptBlockRequest(ctx context.Context, reqs cha
 }
 
 // drainBlockRequests handles every buffered request, returning nil once the
-// channel is closed. A block's request is always sent before the exec that
-// produces its result, so draining before handling a result keeps that order
+// channel is closed. Draining before a result keeps the send-before-exec order
 // past select, which would otherwise let the result drop the request as stale.
 func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
 	for reqs != nil {
@@ -440,136 +311,124 @@ func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs cha
 
 // perBlockCompute reports whether the given block computes commitment at its
 // own boundary (vs accumulating into a batch).
+
 func (cc *commitmentCalculator) perBlockCompute(blockNum uint64) bool {
 	return !dbg.BatchCommitments || cc.forcePerBlockCompute || blockNum >= cc.perBlockFrom
 }
 
 // ownsChangeset reports whether block n gets its own changeset: genesis excluded,
 // window starts at perBlockFrom. A block owning none must compute isolated.
+
 func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 	return n != 0 && n >= cc.perBlockFrom
 }
 
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
+
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
-		// Accumulate writes in the calculator's local state.
-		// Values are lazy-loaded from domain on first touch, then
-		// overwritten by each TX's writes. At block boundary,
-		// the accumulated final values are flushed to the trie.
-		//
-		// Pin asOfReader at this tx's txNum BEFORE ApplyWrites so any
-		// first-touch lazy-load reads the canonical "pre-tx" state via
-		// GetAsOf(r.txNum). Without this the calculator's initial
-		// asOfReader.txNum=0 leaks into the first lazy-load and crashes
-		// with seekInFiles(txNum=0) on snapshot-loaded datadirs whose
-		// visible history window starts well past genesis (e.g. devnets
-		// loaded from a chunked snapshot). On synced-from-genesis
-		// datadirs txNum=0 is in-window so the bug is invisible.
-		//
-		// computeAndPublish overwrites this back to lastTxNum+1 right
-		// before ComputeCommitment, so the per-tx setting only affects
-		// the lazy-load path and never leaks into the trie fold path.
-		if !r.writes.IsEmpty() {
+		// Pin asOfReader at this tx's txNum before ApplyWrites so a first-touch
+		// lazy-load reads the canonical pre-tx state via GetAsOf(r.txNum).
+		// Otherwise the initial txNum=0 leaks into the first lazy-load and crashes
+		// with seekInFiles(txNum=0) on datadirs whose history window starts past
+		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
+		// it only affects the lazy-load path, never the trie fold.
+		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
-		// the BAL (checkpointStepsFromBAL), computed while the domain sat exactly at
-		// each edge. Re-checkpointing here from the partially-accumulated cc.state
-		// on an already-advanced domain would let the last writer win and leave the
-		// step's commitment .kv inconsistent — so exactly one of the two paths
-		// checkpoints a block. loop() drains a block's request before its results,
-		// so computedAhead[n] is already settled when this hook fires.
+		// the BAL while the domain sat at each edge; re-checkpointing here on an
+		// already-advanced domain would let the last writer win and leave the step's
+		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
+		// computedAhead[n] unset and both paths checkpoint the same edge, that is
+		// benign — both emit identical values at the same txNum.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
-			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum})
+			// Checkpoint commitment at a mid-block step edge without advancing
+			// lastComputedBlock or resetting block flags — the block-end fold still
+			// needs the pre-edge dirty keys.
+			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 		}
 
 	case *blockResult:
-		// A failed block may contain only partial state. Do not compute its
-		// commitment; the apply loop owns error classification.
+		// A rejected block: skip commitment. sd.mem may hold partial-tx writes
+		// from txs that succeeded before the failing one (root would be
+		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
+		// apply loop's Err return and mask the original validation diagnostic.
 		if r.Err != nil {
 			return
 		}
-		target := targetOf(r)
-		blockNum := target.blockNum
 
-		// Track the latest block boundary. lastBlockResultSeen opens the
-		// compute-ahead gate for the next block (its baseline is now in sd.mem).
-		cc.lastTarget = target
-		cc.lastBlockResultSeen = blockNum
+		// lastBlockResultSeen opens the compute-ahead gate for the next block
+		// (its baseline is now in sd.mem).
+		cc.lastBlockResult = r
+		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
 
-		// Break logic: in per-block mode, compute at every block boundary.
-		// Skip the first block if it's a partial block (resumed mid-block).
-		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
-		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
-		// || shouldGenerateChangesets || ...` check) — per-block compute is
-		// required when changesets must record per-block branch deltas
-		// (reorg support, KeepExecutionProofs). Blocks from the changeset
-		// window (perBlockFrom) onward compute per-block for the same reason.
+		commitStart := time.Now()
 		switch {
-		case cc.computedAhead[blockNum]:
-			// Computed ahead from its BAL (pre-window: computeIsolated already
-			// advanced the domain and flushed its deferred update under a nil
-			// accumulator, so nothing leaks into a later block's changeset). In
-			// shadow mode, recompute incrementally and cross-check the roots;
-			// otherwise the verified root was already published. Either way clear
-			// the per-block dirty flags the block's txResults set in cc.state so
-			// they are not re-flushed by a later transition compute.
+		case cc.computedAhead[r.BlockNum]:
+			// Already computed ahead from its BAL. In shadow mode, recompute
+			// incrementally and cross-check; otherwise the verified root was already
+			// published. Either way clear the per-block dirty flags so a later
+			// transition compute doesn't re-flush them.
 			if dbg.BALShadowCompute {
-				cc.shadowCrossCheck(ctx, target)
+				cc.shadowCrossCheck(ctx, r)
 			} else {
 				cc.state.ResetBlockFlags()
 			}
-		case cc.perBlockCompute(blockNum):
+		case cc.perBlockCompute(r.BlockNum):
 			if cc.lastComputedBlock == 0 && r.isPartial {
-				// First block is partial (resumed mid-block).
-				// Compute it (like serial does) to save trie state, then
-				// restore that state so the next full block starts from
-				// the same trie state as serial's batch 2 start.
-				cc.computeWithoutCheck(ctx, target)
+				// First block resumed mid-block: compute (as serial does) to save
+				// trie state without checking the root.
+				cc.compute(ctx, targetOf(r), computeMode{label: "partial-block "})
 			} else {
-				cc.computeAndCheck(ctx, target)
+				// Per-block compute that validates the root, publishing only on
+				// mismatch (silent success keeps the bounded output channel from
+				// deadlocking).
+				cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 			}
-			if blockNum+1 == cc.perBlockFrom {
-				// Pre-window per-block computes (BatchCommitments off) defer
-				// branch writes too — flush the boundary block's pending update
-				// outside any changeset before the first window block's compute
-				// routes into its saved CS.
-				cc.flushPendingUpdatesWithoutChangeset(ctx, target)
+			if r.BlockNum+1 == cc.perBlockFrom {
+				// Flush the boundary block's pending update outside any changeset
+				// before the first window block's compute routes into its saved CS.
+				cc.flushPendingUpdatesWithoutChangeset(ctx, r)
 			}
-		case blockNum+1 == cc.perBlockFrom:
-			// Last pre-window block: fold everything accumulated in batch
-			// mode now, so the first window block's per-block compute (and
-			// changeset) covers only its own deltas.
-			cc.computeTransition(ctx, target)
+		case r.BlockNum+1 == cc.perBlockFrom:
+			// Last pre-window block: fold everything accumulated in batch mode now,
+			// so the first window block's compute covers only its own deltas.
+			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
-		// In BatchCommitments mode (without forcePerBlockCompute): just
-		// accumulate — compute only on explicit commitComputeRequest from
-		// the apply loop.
-
-		// Block N is done; its boundary opens the compute-ahead gate for N+1.
-		delete(cc.pending, blockNum)
-		delete(cc.computedAhead, blockNum)
-		delete(cc.balRoots, blockNum)
-		if dbg.CommitmentAfterExec {
-			// Before the compute-ahead: that work is block n+1's, and overlapping
-			// it with exec is the whole point of computing ahead. Holding the
-			// barrier through it would serialize what the flag exists to measure.
-			cc.markProcessed(blockNum)
+		if logNpPhases && !r.execStartedAt.IsZero() {
+			commitEnd := time.Now()
+			execActive := r.execEndedAt.Sub(r.execStartedAt)
+			commitActive := commitEnd.Sub(commitStart)
+			stageWall := commitEnd.Sub(r.execStartedAt)
+			// Overlap and gap between the exec and commit windows; exactly one is
+			// non-zero, and residual proves full accounting.
+			var overlap, gap time.Duration
+			if d := r.execEndedAt.Sub(commitStart); d > 0 {
+				overlap = d
+			} else {
+				gap = -d
+			}
+			residual := stageWall - execActive - commitActive + overlap - gap
+			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
+				"stage", stageWall, "exec", execActive, "commit", commitActive,
+				"overlap", overlap, "gap", gap, "residual", residual)
 		}
-		cc.maybeComputeAhead(ctx, blockNum+1)
+		delete(cc.pending, r.BlockNum)
+		delete(cc.computedAhead, r.BlockNum)
+		delete(cc.balRoots, r.BlockNum)
+		cc.maybeComputeAhead(ctx, r.BlockNum+1)
 
 	case *commitComputeRequest:
-		// Explicit compute signal from the apply loop at batch boundary.
 		if cc.shouldComputeOnRequest() {
-			cc.computeAndPublish(ctx, cc.lastTarget)
+			cc.compute(ctx, targetOf(cc.lastBlockResult), computeMode{checkRoot: true, publishRoot: true})
 		} else {
-			// Publish empty result so drainBeforeExit doesn't block forever
+			// Publish empty result so drainBeforeExit doesn't block forever.
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
 	}
@@ -580,18 +439,17 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to compute the
 // block ahead of its result stream (maybeComputeAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
-	// Record the batch's first block before the drop-guard below: were the first
-	// request ever dropped, leaving n+1 to claim firstBlockNum would bypass
-	// computeAheadGateOpen's and the contiguity guard's n == firstBlockNum
-	// exception, letting n+1 compute ahead on a baseline missing n.
+	// Record the batch's first block before the drop-guard: if blockResult(n)
+	// arrives before blockRequest(n), a dropped first request must still set
+	// firstBlockNum to n, else n+1 claims it and computes ahead on a baseline
+	// missing n.
 	if !cc.hasFirstBlock {
 		cc.firstBlockNum = req.blockNum
 		cc.hasFirstBlock = true
 	}
 	// Drop a request whose block result was already processed: re-inserting
-	// pending[n] would let a late compute-ahead read a trie that has since advanced
-	// (batch boundary, step checkpoint, per-block compute), poisoning a valid block,
-	// and would leak pending/computedAhead/balRoots (retaining the decoded BAL).
+	// pending[n] would let a late compute-ahead read a since-advanced trie and
+	// leak pending/computedAhead/balRoots.
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
 	}
@@ -614,34 +472,26 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 }
 
 // maybeComputeAhead computes block n from its BAL when it is BAL-driven, the
-// compute-ahead gate is open, and computing it ahead is safe. This overlaps
-// with the execution of block n — the parallel-commitment win. Idempotent
-// (computedAhead guard).
+// compute-ahead gate is open, and doing so is safe — overlapping with block n's
+// execution. Idempotent (computedAhead guard).
 //
-// Two safety restrictions, both preserving the well-tested incremental path:
-//   - Only pre-window blocks (!ownsChangeset) compute ahead. A block that owns
-//     a changeset computes incrementally at its own boundary so its per-block
-//     branch deltas are captured; computing it ahead would race the exec loop's
-//     changeset-accumulator install. Pre-window compute-aheads run under
-//     computeIsolated (nil accumulator), so nothing leaks into a later window
-//     block's changeset.
-//   - Compute ahead only contiguously from the batch's first block: n's
-//     baseline is read from the commitment domain, which only a prior
-//     compute-ahead (or the prior cycle, for the first block) advanced. A
-//     missing-BAL block accumulates without advancing the domain, so computing
-//     ahead across it would read a stale trie.
+// Two safety restrictions:
+//   - Only pre-window blocks (!ownsChangeset) compute ahead, under computeIsolated
+//     (nil accumulator), so nothing leaks into a later window block's changeset.
+//     A changeset-owning block computes incrementally at its own boundary.
+//   - Compute ahead only contiguously from the batch's first block: n's baseline
+//     comes from the commitment domain, which only a prior compute-ahead (or the
+//     prior cycle) advanced. Computing across a missing-BAL block would read a
+//     stale trie.
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
 	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
 	}
-	// Read the shared signal context, not the compute context: work already in
-	// flight must finish. A block-aware stop allows catch-up through its boundary;
-	// any other cancellation starts no new speculative work.
-	if cc.signalCtx != nil && cc.signalCtx.Err() != nil {
-		if sc, bounded := stopCauseOf(cc.signalCtx); !bounded || n > sc.block {
-			return
-		}
+	// Cap compute-ahead at the batch's coalesce block so commitment cannot outrun
+	// the state exec will stop at. Read the signal context, not the compute ctx.
+	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
+		return
 	}
 	if cc.ownsChangeset(n) {
 		return
@@ -650,25 +500,9 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 		return
 	}
 	if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
-		cc.reportComputeAheadStopped(n)
 		return
 	}
 	cc.computeBlockFromBAL(ctx, pb)
-}
-
-// reportComputeAheadStopped logs the first block the contiguity guard rejects.
-// Compute-ahead never re-anchors within a batch, so this one line marks where the
-// whole remaining batch fell back to incremental commitment.
-func (cc *commitmentCalculator) reportComputeAheadStopped(n uint64) {
-	if cc.computeAheadStopped {
-		return
-	}
-	cc.computeAheadStopped = true
-	if cc.logger == nil {
-		return
-	}
-	cc.logger.Info("["+cc.logPrefix+"] BAL compute-ahead stopped, rest of batch computes incrementally",
-		"block", n, "lastComputedAhead", cc.lastComputedAheadBlock, "hasComputedAhead", cc.hasComputedAhead)
 }
 
 // computeBlockFromBAL computes block pb's commitment from its BAL, ahead of the
@@ -678,39 +512,37 @@ func (cc *commitmentCalculator) reportComputeAheadStopped(n uint64) {
 // the cross-block incremental accumulator.
 func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pendingBlock) {
 	req := pb.req
-	target := commitTarget{
-		blockNum:  req.blockNum,
-		blockHash: req.blockHash,
-		stateRoot: req.stateRoot,
+	br := &blockResult{
+		BlockNum:  req.blockNum,
+		BlockHash: req.blockHash,
+		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	// EIP-161 empty-removal inputs, matching Normalize on the exec path.
-	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
-	// keeps empty leaves in the compute-ahead exactly as exec does.
+	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in
+	// disabledEIPs keeps empty leaves exactly as exec does.
 	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	eip8246 := cc.chainConfig.IsAmsterdam(req.blockTime)
-	// A block straddling an unfrozen step edge must leave a commitment checkpoint
-	// at that edge (else the step's commitment .kv lags its account/storage .kv).
-	// The per-tx BAL lets compute-ahead checkpoint mid-block, so a straddling
-	// block stays on the compute-ahead path instead of dropping to the incremental one.
+	// A block straddling an unfrozen step edge must checkpoint at that edge, else
+	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
+	// compute-ahead do this mid-block.
 	if err := cc.checkpointStepsFromBAL(ctx, req, emptyRemoval, eip8246); err != nil {
-		cc.fail(ctx, target, err)
+		cc.fail(ctx, br, err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, eip8246, target)
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, eip8246, targetOf(br))
 	if err != nil {
-		cc.fail(ctx, target, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
 	if !bytes.Equal(rh, req.stateRoot[:]) {
 		cc.doms.GetCommitmentContext().ResetPendingUpdates()
-		cc.fail(ctx, target, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
+		cc.fail(ctx, br, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
 		return
 	}
 	if flushOwn != nil {
 		if err := flushOwn(); err != nil {
-			cc.fail(ctx, target, fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
+			cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
 			return
 		}
 	}
@@ -721,22 +553,17 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	computedAheadCount.Add(1)
 	cc.lastComputedBlock = req.blockNum
 	cc.hasComputed = true
-	// Shadow mode defers publish to the incremental cross-check at
-	// blockResult(N); otherwise publish the verified root now.
+	// Shadow mode defers publish to the incremental cross-check; otherwise publish now.
 	if !dbg.BALShadowCompute {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
 }
 
-// checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step edge
-// interior to the block (edge < block-end txNum), applying the per-tx BAL up to
-// that edge. Without it a block straddling a step edge would leave the step's
-// commitment .kv lagging its account/storage .kv. The BAL index of a txNum is
-// txNum-firstTxNum (blockAccessIndex == TxIndex+1 and txNum == firstTxNum+
-// TxIndex+1), so applying changes at index ≤ edge-firstTxNum is the state as of
-// the edge. computeRootFromUpdates saves the checkpoint (ComputeCommitmentWithDiff
-// with saveStateAfter); the returned root is discarded — there is no header to
-// verify mid-block. Runs before the block-end compute so that builds on it.
+// checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step
+// edge interior to the block, applying the per-tx BAL up to that edge. A txNum's
+// BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
+// gives the state as of the edge. The returned root is discarded (no header to
+// verify mid-block). Runs before the block-end compute so that builds on it.
 func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, emptyRemoval bool, eip8246 bool) error {
 	ss := cc.doms.StepSize()
 	if ss == 0 {
@@ -746,8 +573,8 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
 			continue
 		}
-		target := commitTarget{blockNum: req.blockNum, blockHash: req.blockHash, lastTxNum: edge}
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, eip8246, target)
+		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, eip8246, targetOf(stepBr))
 		if err != nil {
 			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
@@ -764,7 +591,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
@@ -772,7 +599,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
-		// ModeDirect must upgrade to ModeUpdate to carry compute-ahead's BAL values.
+		// ModeDirect must upgrade to ModeUpdate to carry the BAL values.
 		if cc.balUpdates.Mode() != commitment.ModeParallel {
 			cc.balUpdates.SetMode(commitment.ModeUpdate)
 		}
@@ -785,12 +612,9 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
-// commitment context and computes the root, routed by ownsChangeset exactly
-// like compute(): a pre-window block computes isolated (no changeset diff) so
-// its branch deltas never pend into a later window block's changeset, and
-// returns the flush of its own deferred update for the caller to run once the
-// root is accepted. Used by BAL compute-ahead, which supplies its own
-// balState-derived updates rather than cc.state.
+// commitment context and computes the root, routed by ownsChangeset like
+// compute(). Used by BAL compute-ahead, which supplies its own balState-derived
+// updates rather than cc.state.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
@@ -803,71 +627,63 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 	return rh, nil, err
 }
 
-// shadowCrossCheck recomputes block N the incremental way and asserts the
-// root matches the BAL-driven root computed ahead by computeBlockFromBAL — the
-// dual-compute consistency net. Divergence fails the block. Publishes the
-// incremental root (the proven oracle). BALShadowCompute only.
-func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target commitTarget) {
-	balRoot := cc.balRoots[target.blockNum]
+// shadowCrossCheck recomputes block N incrementally and asserts the root matches
+// the BAL-driven root computed ahead; divergence fails the block. Publishes the
+// incremental root. BALShadowCompute only.
+func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockResult) {
+	balRoot := cc.balRoots[r.BlockNum]
 	if err := cc.state.LazyLoadErr(); err != nil {
-		cc.fail(ctx, target, fmt.Errorf("shadow incremental lazy-load: %w", err))
+		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
+	// Mirror compute(): the raw versionMap view carries no EIP-161 deletion
+	// marker, so a touched-empty account must be removed before the flush or the
+	// recompute keeps a spurious leaf the BAL-driven root dropped.
+	emptyRemoval := r.BlockNum != 0 && cc.chainConfig.IsEIP161Enabled(r.BlockNum)
+	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, target, cc.handOffUpdates(), cc.asOfReader)
+	incUpdates := cc.handOffUpdates()
+	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader)
 	if err != nil {
-		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
+		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
 	if !bytes.Equal(rh, balRoot) {
 		cc.doms.GetCommitmentContext().ResetPendingUpdates()
-		cc.fail(ctx, target, fmt.Errorf("%w: shadow mismatch block %d incremental %x BAL-driven %x",
-			ErrWrongTrieRoot, target.blockNum, rh, balRoot))
+		cc.fail(ctx, r, fmt.Errorf("%w: shadow mismatch block %d incremental %x BAL-driven %x",
+			ErrWrongTrieRoot, r.BlockNum, rh, balRoot))
 		return
 	}
 	if flushOwn != nil {
 		if err := flushOwn(); err != nil {
-			cc.fail(ctx, target, fmt.Errorf("shadow incremental flush: %w", err))
+			cc.fail(ctx, r, fmt.Errorf("shadow incremental flush: %w", err))
 			return
 		}
 	}
-	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh})
+	cc.publish(ctx, commitmentResult{blockNum: r.BlockNum, blockHash: r.BlockHash, txNum: r.lastTxNum, rootHash: rh})
 }
 
-// fail publishes a calculator error without canceling execution. The apply loop
-// classifies it, including deferring a compute-ahead wrong-root until the block's
-// execution verdict, and the stage wrapper owns any resulting unwind.
-func (cc *commitmentCalculator) fail(ctx context.Context, target commitTarget, err error) {
+// fail publishes a calculator error. It does NOT cancel execution: the apply
+// loop is the sole cancellation authority.
+func (cc *commitmentCalculator) fail(ctx context.Context, br *blockResult, err error) {
 	if cc.logger != nil {
-		cc.logger.Error("["+cc.logPrefix+"] commitmentCalculator: reporting failure", "block", target.blockNum, "err", err)
+		cc.logger.Error("["+cc.logPrefix+"] commitmentCalculator: reporting failure", "block", br.BlockNum, "err", err)
 	}
-	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, err: err})
+	cc.publish(ctx, commitmentResult{blockNum: br.BlockNum, blockHash: br.BlockHash, txNum: br.lastTxNum, err: err})
 }
 
-// shouldComputeOnRequest decides whether a commitComputeRequest should
-// trigger a fresh ComputeCommitment vs. publish an empty result. Returns
-// true when there is a blockResult to compute against AND either:
-//
-//	(a) we haven't computed at all yet — covers the very first batch
-//	    which may be just genesis at blockNum=0; without this, the
-//	    genesis commitment would never be written to sd because
-//	    lastTarget.blockNum=0 fails the > lastComputedBlock=0 check
-//	    (the same blockNum=0 ambiguity as SeekCommitment's stageProgress
-//	    fallback), leaving SeekCommitment in a subsequent exec3 cycle
-//	    to fall back to stage progress instead of finding a commitment
-//	    state — which then forces re-execution of block 0 and corrupts
-//	    the next batch's commitment.
-//
-//	(b) a new block boundary advanced past the last computed one.
+// shouldComputeOnRequest returns true when there's a blockResult and either
+// nothing has been computed yet (covers a genesis-only first batch) or a new
+// boundary advanced past the last computed one.
 func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
-	if !cc.hasSeenBlockResult {
+	if cc.lastBlockResult == nil {
 		return false
 	}
 	if !cc.hasComputed {
 		return true
 	}
-	return cc.lastTarget.blockNum > cc.lastComputedBlock
+	return cc.lastBlockResult.BlockNum > cc.lastComputedBlock
 }
 
 // commitTarget is the block identity a compute needs; a mid-block checkpoint has
@@ -880,7 +696,7 @@ type commitTarget struct {
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.BlockNum, blockHash: br.BlockHash, lastTxNum: br.lastTxNum, stateRoot: br.StateRoot}
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
@@ -893,7 +709,8 @@ type computeMode struct {
 }
 
 // handOffUpdates returns the filled buffer for the caller to compute against and
-// rotates the spare into cc.updates.
+// rotates the spare into cc.updates. The compute drains the returned buffer
+// synchronously, so it is idle again by the next rotation.
 func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 	filled := cc.updates
 	cc.updates, cc.spare = cc.spare, filled
@@ -903,13 +720,18 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
+
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
 	if err := cc.state.LazyLoadErr(); err != nil {
 		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
+	// The raw versionMap view carries no EIP-161 deletion marker; synthesize the
+	// empty→removal here.
+	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
+	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
 	}
@@ -963,14 +785,14 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.publish(ctx, r)
 }
 
-// computeIsolated computes with no changeset diff, so a block that owns no
-// changeset records into none. It returns the root and the flush of its own
-// deferred updates, which the caller runs only once the root is accepted.
+// computeIsolated computes under a nil changeset accumulator, so a block that
+// owns no changeset records into none. It returns the root and the flush of its
+// own deferred updates, which the caller runs only once the root is accepted.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, func() error, error) {
-	// Flushes the previous block's own pending update, hash-routed. The swap to
-	// nil covers the case where that block owns no saved changeset: without it
-	// the flush falls back to whatever accumulator is currently live, leaking a
-	// pre-window block's branch deltas into a later window block's changeset.
+	// Flush the previous block's own pending update, hash-routed. The commitment
+	// diff is swapped to nil for the flush so that when that block owns no saved
+	// changeset the flush does not leak its branch deltas into the live
+	// accumulator (a later window block's changeset).
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
@@ -980,60 +802,38 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		return nil, nil, err
 	}
 
-	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil)
+	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	return rh, func() error { return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx) }, nil
 }
 
-func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{checkRoot: true, publishRoot: true})
-}
-
-// computeWithoutCheck computes the first partial block's commitment without
-// verifying the root (its trie state doesn't match the header).
-func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{label: "partial-block "})
-}
-
-// computeStepBoundary checkpoints commitment at a mid-block step edge without
-// advancing lastComputedBlock or resetting block flags — the block-end fold
-// still needs the pre-edge dirty keys.
-func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
-}
-
-// computeAndCheck computes per-block commitment and validates the root,
-// publishing only on mismatch (silent success keeps the bounded output channel
-// from deadlocking).
-func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{checkRoot: true})
-}
-
 // flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred
-// update with no changeset diff — a pre-window block's branch deltas must not
-// pend into the first window block's changeset-routed compute.
-func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, target commitTarget) {
-	if err := cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx); err != nil {
+// update under a nil accumulator — a pre-window block's branch deltas must
+// not pend into the first window block's changeset-routed compute.
+
+func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
+	// The closure bounds the locked window: publish must stay outside it, since
+	// its send can block on the apply loop, which contends on changesetMu.
+	err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		defer cc.doms.SwapCommitmentDiffLocked(nil)()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}()
+	if err != nil {
 		cc.publish(ctx, commitmentResult{
-			blockNum: target.blockNum,
-			txNum:    target.lastTxNum,
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
 			err:      fmt.Errorf("commitmentCalculator: %w", err),
 		})
 	}
 }
 
-// computeTransition folds all accumulated batch-mode blocks at the last
-// pre-window block, isolated so their deltas don't leak into the first window
-// block's changeset.
-func (cc *commitmentCalculator) computeTransition(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{checkRoot: true})
-}
-
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
-	// Best-effort send; log only genuine errors as a breadcrumb (the apply loop
-	// surfaces the authoritative one). Wrong-root and shutdown cancels are expected.
+	// Best-effort send; log only genuine errors (wrong-root and shutdown cancels
+	// are expected). The apply loop surfaces the authoritative error.
 	if r.err != nil && cc.logger != nil &&
 		!errors.Is(r.err, ErrWrongTrieRoot) &&
 		!errors.Is(r.err, context.Canceled) &&
@@ -1047,40 +847,33 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	}
 }
 
-// computeWithBlockAccumulator runs ComputeCommitment with block N's saved
-// changeset (looked up by hash) passed as an explicit diff, so that any branch
-// writes during compute (a capacity flush from the encoder in eager mode, plus
-// the [state] write at end via encodeAndStoreCommitmentState) land in block N's
-// CS rather than whatever the exec loop has installed as current. A mid-block step boundary runs before N is saved and falls back to
-// the live accumulator, which is still N's — see the body.
+// computeWithBlockAccumulator runs ComputeCommitment with block N's own writes
+// (branch nodes and the [state] marker) routed into an explicit diff — N's saved
+// changeset when present, else the live accumulator's. Routing through the diff
+// needs no changesetMu against a concurrent SetChangesetAccumulator, so the apply
+// loop's DomainPut is never blocked by the fold.
 //
-// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
-// can hold multiple changesets per block number after a fork-bounce
-// (canonical block 1 + forks[i] block 1 with different hashes), and a
-// number-only GetChangesetByBlockNum returns the first match in
-// non-deterministic map iteration order. That non-determinism caused the
-// calculator's [state] write for canonical block 1 to land in the fork's
-// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
+// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator can hold
+// multiple changesets per block number after a fork-bounce (canonical block 1 +
+// forks[i] block 1 with different hashes), and a number-only lookup returns the
+// first match in non-deterministic map iteration order. That non-determinism
+// caused the calculator's [state] write for canonical block 1 to land in the
+// fork's block 1 CS during the TestBlockchainHeaderchainReorgConsistency
 // reproducer, leaving canonical block 1's CS without [state] and producing
 // off-by-one wrong-trie-root chains on the next iteration's re-execution.
 //
-// Also annotates the pending deferred update (set inside ComputeCommitment
-// when defer mode is on) with the block's hash, so the next call's
-// FlushPendingUpdates uses the same hash-aware routing.
+// It also stamps the pending deferred update with the block's hash so the next
+// call's FlushPendingUpdates uses the same hash-aware routing.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
-		// Stamp the pending update (if any was set during ComputeCommitment)
-		// with this block's hash so FlushPendingUpdates on the next call
-		// routes to the exact (BlockNum, BlockHash) entry rather than
-		// guessing among ambiguous block-number-only matches.
 		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {
 			upd.BlockHash = t.blockHash
 		}
 	}()
 
-	// Flush block N-1's own pending update (hash-routed to N-1's saved
-	// changeset, independent of N's diff below) — the one remaining
-	// changesetMu window, brief rather than spanning the fold that follows.
+	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
+	// independent of N's diff below) — the one remaining changesetMu window, brief
+	// rather than spanning the fold that follows.
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
@@ -1089,28 +882,19 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return nil, err
 	}
 
-	// This call's own writes (branch nodes and the [state] marker) route
-	// directly into diff — see DomainPutCommitmentDiff — so nothing here needs
-	// changesetMu against a concurrent SetChangesetAccumulator. A deferred
-	// update ComputeCommitment leaves pending is NOT covered by diff: it is
-	// flushed hash-routed by the next call's FlushPendingUpdatesLocked above.
-	//
-	// A mid-block step-boundary compute finds no saved changeset for N, since
-	// the exec loop saves only once the whole block is done, and falls back to
-	// the live accumulator. Read live before the saved lookup: the exec loop
-	// saves N strictly before it rotates away from N, so whichever of the two
-	// reads lands after a rotation, the other still identifies N's changeset.
-	// Using nil here would silently drop this step's writes.
+	// Read live before the saved lookup: the exec loop saves N strictly before it
+	// rotates away from N, so whichever read lands after a rotation, the other
+	// still identifies N's changeset. A mid-block step-boundary finds no saved cs
+	// (the exec loop saves once the block is done) and falls back to live.
 	live := cc.doms.GetChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-
 	var diff *kv.DomainDiff
 	if cs != nil {
 		diff = &cs.Diffs[kv.CommitmentDomain]
 	} else if live != nil {
 		diff = &live.Diffs[kv.CommitmentDomain]
 	}
-	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff)
+	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
@@ -1118,10 +902,18 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd     *execctx.SharedDomains
-	roTx   kv.TemporalTx
-	getter execctxapi.StateGetter
-	txNum  uint64
+	sd    *execctx.SharedDomains
+	roTx  kv.TemporalTx
+	txNum uint64
+	// workerCtx, when non-nil, carries a worker's lock-free metrics accumulator so
+	// the CommitmentDomain read routes through GetLatestContext instead of racing
+	// the shared main accumulator. Nil on the main reader.
+	workerCtx context.Context
+
+	// dr is the shared account/storage/code reader (the multi-block versionMap
+	// window over sd.mem + files). It carries its own files-fallback tx, so
+	// concurrent users never share one.
+	dr *state.LayeredDomainReader
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1133,49 +925,32 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		if r.getter != nil {
-			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
-		} else {
-			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		if r.workerCtx != nil {
+			return r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
 		}
-	} else {
-		// Account/storage/code: use GetAsOf to avoid reading future state.
-		// Check sd.mem first (in-memory data from current batch), then
-		// fall through to DB files for data not in the batch.
-		var ok bool
-		enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
-		if err != nil {
-			return nil, 0, err
-		}
-		if !ok {
-			// Not in sd.mem — read from DB files
-			enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
-			if err != nil {
-				return nil, 0, err
-			}
-			if !ok {
-				enc = nil
-			}
-		}
-		if stepSize > 0 {
-			step = kv.Step(r.txNum / stepSize)
-		}
+		return r.sd.GetLatest(d, r.roTx, plainKey)
 	}
-	return enc, step, err
+	// Account/storage/code: the window layered over sd.mem + files.
+	enc, ok, err := r.dr.ReadDomain(d, plainKey, r.txNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		enc = nil
+	}
+	if stepSize > 0 {
+		step = kv.Step(r.txNum / stepSize)
+	}
+	return enc, step, nil
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, dr: r.dr.CloneWithTx(tx)}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
-// accumulator carried by workerCtx (this reader is used as the commitment
-// reader during block assembly, where trie-warmup runs concurrently — so it
-// must not write the shared main accumulator).
+// accumulator carried by workerCtx, so a clone used during block assembly (where
+// trie-warmup runs concurrently) doesn't write the shared main accumulator.
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	getterOpts := execctxapi.StateGetterOptions{}
-	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
-		getterOpts = getterOpts.WithMetrics(metrics)
-	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx)}
 }

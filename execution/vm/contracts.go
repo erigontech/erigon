@@ -35,6 +35,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	evmone "github.com/erigontech/evmone_precompiles"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -279,6 +280,13 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 // ECRECOVER implemented as a native contract.
 type ecrecover struct{}
 
+// ECRECOVER is a pure function of its 128-byte input, so successful recoveries
+// are memoized in a bounded global cache: this dedups OCC re-executions (a re-run
+// tx repeats the same recovery) and repeated signatures, skipping the secp256k1 +
+// keccak compute on a hit. Gas is charged by RequiredGas regardless, so the cache
+// is consensus-neutral.
+var ecrecoverCache, _ = lru.New[[128]byte, [32]byte](100_000)
+
 func (c *ecrecover) RequiredGas(input []byte) uint64 {
 	return params.EcrecoverGas
 }
@@ -289,6 +297,14 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	input = common.RightPadBytes(input, ecRecoverInputLength)
 	// "input" is (hash, v, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
+
+	var key [ecRecoverInputLength]byte
+	copy(key[:], input)
+	if cached, ok := ecrecoverCache.Get(key); ok {
+		out := make([]byte, 32)
+		copy(out, cached[:])
+		return out, nil
+	}
 
 	r := new(uint256.Int).SetBytes(input[64:96])
 	s := new(uint256.Int).SetBytes(input[96:128])
@@ -311,7 +327,11 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	}
 
 	// the first byte of pubkey is bitcoin heritage
-	return common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil
+	out := common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32)
+	var cached [32]byte
+	copy(cached[:], out)
+	ecrecoverCache.Add(key, cached)
+	return out, nil
 }
 
 func (c *ecrecover) Name() string {
