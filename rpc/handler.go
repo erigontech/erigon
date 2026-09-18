@@ -39,8 +39,9 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. Message handling never blocks indefinitely
-// because RPCs are processed on background goroutines launched by handler.
+// handler is not safe for concurrent use. On a connection, message handling never blocks
+// indefinitely because RPCs are processed on background goroutines launched by handler;
+// with inlineCalls they run on the caller's goroutine, which a single HTTP request owns.
 //
 // The entry points for incoming messages are:
 //
@@ -195,7 +196,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 
-	// Process calls on a goroutine because they may block indefinitely:
+	// Calls may block indefinitely, so they go to a goroutine unless the caller waits anyway:
 	h.startCallProc(func(cp *callProc) {
 		// Batch items below run concurrently and write into private per-item buffers.
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
