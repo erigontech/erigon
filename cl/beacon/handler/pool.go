@@ -266,7 +266,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
-	}); err != nil && !errors.Is(err, services.ErrIgnore) {
+	}); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
