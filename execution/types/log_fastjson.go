@@ -17,10 +17,12 @@
 package types
 
 import (
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
@@ -39,9 +41,9 @@ func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
 	return append(dst, '"')
 }
 
-// fastJSONLen is an upper bound on the encoded size, so the buffer is allocated
+// JSONLen is an upper bound on the encoded size, so the buffer is allocated
 // once instead of doubling.
-func (l *RPCLog) fastJSONLen() int {
+func (l *RPCLog) JSONLen() int {
 	if l == nil {
 		return len("null")
 	}
@@ -58,9 +60,9 @@ func (l *RPCLog) fastJSONLen() int {
 	return n
 }
 
-// appendFastJSON writes the log in the field order encoding/json uses for the
+// AppendJSON writes the log in the field order encoding/json uses for the
 // struct, so the output is byte-identical to reflection-based marshalling.
-func (l *RPCLog) appendFastJSON(dst []byte) []byte {
+func (l *RPCLog) AppendJSON(dst []byte) []byte {
 	if l == nil {
 		return append(dst, "null"...)
 	}
@@ -99,26 +101,27 @@ func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON.
-func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
+func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteRawBytes(l.AppendJSON(make([]byte, 0, l.JSONLen())))
+	return nil
 }
 
-// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
-func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo encodes one log at a time, so the stream can flush between them and a big
+// answer never has to fit in memory.
+func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if logs == nil {
-		return []byte("null"), nil
+		w.WriteNil()
+		return nil
 	}
-	size := len("[]") + len(logs)
-	for _, l := range logs {
-		size += l.fastJSONLen()
-	}
-	out := append(make([]byte, 0, size), '[')
+	var buf []byte
+	w.WriteArrayStart()
 	for i, l := range logs {
 		if i > 0 {
-			out = append(out, ',')
+			w.WriteMore()
 		}
-		out = l.appendFastJSON(out)
+		buf = l.AppendJSON(slices.Grow(buf[:0], l.JSONLen()))
+		w.WriteRawBytes(buf)
 	}
-	return append(out, ']'), nil
+	w.WriteArrayEnd()
+	return nil
 }

@@ -92,15 +92,7 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 }
 
 func (s *StackStream) WriteHex(b []byte) {
-	buf := s.stream.Buffer()
-	start := len(buf)
-	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
+	s.stream.SetBuffer(hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))), b))
 	s.popCommaOrField()
 }
 

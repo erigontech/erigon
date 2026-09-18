@@ -22,6 +22,8 @@ import "encoding"
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	// WriteRawBytes writes already-encoded JSON.
+	WriteRawBytes(b []byte)
 	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
 	// escaping: callers pass hex quantities.
 	WriteQuotedText(v encoding.TextAppender)
