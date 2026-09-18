@@ -143,6 +143,8 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
+	// The service shuts the sentinel down by cancelling its ctx, not by calling Stop.
+	context.AfterFunc(s.ctx, s.peers.Close)
 
 	mux := chi.NewRouter()
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
