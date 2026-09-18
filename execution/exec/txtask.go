@@ -734,9 +734,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-// executeSystemTx runs a consensus system transaction as a free call (no gas
-// pool, no intrinsic gas): the engine owns the surrounding state effect, the run
-// closure bumps the sender nonce and performs the EVM call.
+// executeSystemTx runs a consensus system transaction as a free call: no gas
+// pool, no intrinsic gas, and the engine owns the surrounding state effect.
 func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
 	var result TxResult
 
@@ -747,8 +746,6 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 	}
 	from := msg.From()
 
-	// The engine performs the consensus state effect (reward move); the executor
-	// bumps the sender nonce and runs the call.
 	if err = engine.ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
 		result.Err = err
 		return &result
@@ -769,10 +766,10 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 	}
 
-	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
-	if callErr != nil {
+	_, _, gasUsed, err := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if err != nil {
 		// A reverted system tx is a consensus violation: reject the block.
-		result.Err = callErr
+		result.Err = err
 		return &result
 	}
 	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
