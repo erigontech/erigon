@@ -88,9 +88,10 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time            atomic.Uint64
-	highestSeen     atomic.Uint64
-	highestSeenRoot atomic.Value // common.Hash
+	time             atomic.Uint64
+	highestSeen      atomic.Uint64
+	highestSeenRoot  atomic.Value // common.Hash
+	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -182,7 +183,7 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects payload vote updates and first-valid gossip tracking
+	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadAttestationSeenSlot  uint64
@@ -401,12 +402,17 @@ func NewForkChoiceStore(
 	randaoMixesLists.Add(anchorRoot, r)
 	// Seed the eth2Root→eth1Hash mapping for the anchor block so that
 	// fork choice can resolve the EL genesis hash at startup.
-	anchorExecHeader := anchorState.LatestExecutionPayloadHeader()
-	if anchorExecHeader != nil && anchorExecHeader.BlockHash != (common.Hash{}) {
-		eth2Roots.Add(anchorRoot, anchorExecHeader.BlockHash)
+	var anchorExecutionHash common.Hash
+	if anchorState.Version().AfterOrEqual(clparams.GloasVersion) {
+		anchorExecutionHash = anchorState.GetLatestBlockHash()
+	} else if header := anchorState.LatestExecutionPayloadHeader(); header != nil {
+		anchorExecutionHash = header.BlockHash
+	}
+	if anchorExecutionHash != (common.Hash{}) {
+		eth2Roots.Add(anchorRoot, anchorExecutionHash)
 		// Also map the zero hash → EL genesis for the finalized checkpoint
 		// which starts as zero at genesis.
-		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
+		eth2Roots.Add(common.Hash{}, anchorExecutionHash)
 	}
 
 	headSet := make(map[common.Hash]struct{})
@@ -561,6 +567,12 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
+// Blocks parked between network-service retries have not entered OnBlock and are not counted.
+func (f *ForkChoiceStore) BlockProcessing() bool {
+	return f.blocksProcessing.Load() > 0
 }
 
 // HighestSeenRoot returns the block root of the highest seen slot.
