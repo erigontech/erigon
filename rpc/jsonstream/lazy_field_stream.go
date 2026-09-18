@@ -104,8 +104,11 @@ func (s *LazyFieldStream) WriteValue(v jsonw.JSONAppender) { s.ensure(); s.inner
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
-func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
+func (s *LazyFieldStream) WriteMore() { s.inner.WriteMore() }
+func (s *LazyFieldStream) WriteObjectField(name string) Stream {
+	s.inner.WriteObjectField(name)
+	return s
+}
 
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }

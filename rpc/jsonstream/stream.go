@@ -68,7 +68,8 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
-	WriteObjectField(fieldName string)
+	// WriteObjectField returns the stream, so a field and its value can be chained.
+	WriteObjectField(fieldName string) Stream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
