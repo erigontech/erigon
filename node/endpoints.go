@@ -28,9 +28,6 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
@@ -66,10 +63,6 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
-	// create the http2 server for handling h2c
-	h2 := &http2.Server{}
-	// enable h2c support
-	handler = h2c.NewHandler(handler, h2)
 	// Bundle the http server
 	httpSrv := &http.Server{
 		Handler:           handler,
@@ -78,6 +71,9 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
 	}
+	httpSrv.Protocols = new(http.Protocols)
+	httpSrv.Protocols.SetHTTP1(true)
+	httpSrv.Protocols.SetHTTP2(true)
 	// start the HTTP server
 	go func() {
 		var serveErr error
