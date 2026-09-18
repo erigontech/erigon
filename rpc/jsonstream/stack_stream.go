@@ -262,7 +262,7 @@ func (s *StackStream) WriteMore() {
 
 // WriteObjectField writes a field name for an object and adds it to the stack. It returns the
 // stream so the value write can be chained: s.WriteObjectField("gas").WriteHex(v).
-func (s *StackStream) WriteObjectField(fieldName string) Stream {
+func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)

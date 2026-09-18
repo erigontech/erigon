@@ -105,7 +105,7 @@ func (s *LazyFieldStream) WriteValue(v jsonw.JSONAppender) { s.ensure(); s.inner
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) Stream {
+func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
 	s.inner.WriteObjectField(name)
 	return s
 }

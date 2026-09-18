@@ -69,7 +69,7 @@ type Stream interface {
 	WriteArrayEnd()
 	WriteMore()
 	// WriteObjectField returns the stream, so a field and its value can be chained.
-	WriteObjectField(fieldName string) Stream
+	WriteObjectField(fieldName string) jsonw.JSONWriter
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)

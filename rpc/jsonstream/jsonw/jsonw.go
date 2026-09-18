@@ -25,7 +25,8 @@ type JSONWriter interface {
 	WriteString(s string)
 	WriteNil()
 	WriteObjectStart()
-	WriteObjectField(name string)
+	// WriteObjectField returns the writer, so a field and its value can be chained.
+	WriteObjectField(name string) JSONWriter
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteMore()
