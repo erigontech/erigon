@@ -47,10 +47,6 @@ type ReceiptsFilter struct {
 }
 
 func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Config) *ReceiptsFilterAggregator {
-	signer := &types.Signer{}
-	if chainConfig != nil {
-		signer = types.LatestSigner(chainConfig)
-	}
 	return &ReceiptsFilterAggregator{
 		aggReceiptsFilter: ReceiptsFilter{
 			txHashes: make(map[common.Hash]int),
@@ -58,7 +54,7 @@ func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Confi
 		receiptsFilters: make(map[uint64]*ReceiptsFilter),
 		nextFilterId:    0,
 		events:          events,
-		signer:          signer,
+		signer:          types.LatestSigner(chainConfig),
 	}
 }
 
