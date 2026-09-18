@@ -40,40 +40,44 @@ type StorProofResult struct {
 
 func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectStart()
-	w.WriteObjectField("address")
-	w.WriteHex(r.Address[:])
-	writeField(w, "accountProof")
-	writeHexArray(w, r.AccountProof)
-	writeField(w, "balance")
-	writeU256(w, r.Balance)
-	writeField(w, "codeHash")
-	w.WriteHex(r.CodeHash[:])
-	writeField(w, "nonce")
-	w.WriteQuotedText(&r.Nonce)
-	writeField(w, "storageHash")
-	w.WriteHex(r.StorageHash[:])
-	writeField(w, "storageProof")
-	if r.StorageProof == nil {
-		w.WriteNil()
-		w.WriteObjectEnd()
-		return nil
-	}
-	w.WriteArrayStart()
-	for i := range r.StorageProof {
-		if i > 0 {
-			w.WriteMore()
+	{
+		w.WriteObjectField("address")
+		w.WriteHex(r.Address[:])
+		writeField(w, "accountProof")
+		writeHexArray(w, r.AccountProof)
+		writeField(w, "balance")
+		writeU256(w, r.Balance)
+		writeField(w, "codeHash")
+		w.WriteHex(r.CodeHash[:])
+		writeField(w, "nonce")
+		w.WriteQuotedText(&r.Nonce)
+		writeField(w, "storageHash")
+		w.WriteHex(r.StorageHash[:])
+		writeField(w, "storageProof")
+		if r.StorageProof == nil {
+			w.WriteNil()
+			w.WriteObjectEnd()
+			return nil
 		}
-		sp := &r.StorageProof[i]
-		w.WriteObjectStart()
-		w.WriteObjectField("key")
-		w.WriteString(sp.Key)
-		writeField(w, "value")
-		writeU256(w, sp.Value)
-		writeField(w, "proof")
-		writeHexArray(w, sp.Proof)
-		w.WriteObjectEnd()
+		w.WriteArrayStart()
+		for i := range r.StorageProof {
+			if i > 0 {
+				w.WriteMore()
+			}
+			sp := &r.StorageProof[i]
+			w.WriteObjectStart()
+			{
+				w.WriteObjectField("key")
+				w.WriteString(sp.Key)
+				writeField(w, "value")
+				writeU256(w, sp.Value)
+				writeField(w, "proof")
+				writeHexArray(w, sp.Proof)
+			}
+			w.WriteObjectEnd()
+		}
+		w.WriteArrayEnd()
 	}
-	w.WriteArrayEnd()
 	w.WriteObjectEnd()
 	return nil
 }
