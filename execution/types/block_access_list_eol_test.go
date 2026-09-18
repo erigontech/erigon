@@ -10,6 +10,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// An account with no address returns a wrapped rlp.EOL. Treating it as the end
+// of the outer BAL would silently drop the malformed account.
 func TestBlockAccessListRejectsAddresslessAccount(t *testing.T) {
 	t.Parallel()
 	// c1 = list(len 1) containing c0 = empty list (an account with no address).
