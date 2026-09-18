@@ -186,6 +186,10 @@ type Hooks struct {
 	OnOpcode    OpcodeHook
 	OnFault     FaultHook
 	OnGasChange GasChangeHook
+	// OnOpcodeMask, when set, names the opcodes OnOpcode wants. The interpreter skips
+	// the call for every other one, so a tracer that watches a handful of opcodes does
+	// not pay an indirect call per instruction. Nil means every opcode is delivered.
+	OnOpcodeMask *OpcodeMask
 	// Chain events
 	OnBlockchainInit    BlockchainInitHook
 	OnBlockStart        BlockStartHook
@@ -387,3 +391,21 @@ const (
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	CodeChangeRevert CodeChangeReason = 6
 )
+
+// OpcodeMask is the set of opcodes a tracer asks to see.
+type OpcodeMask [256]bool
+
+// NewOpcodeMask returns a mask holding exactly ops.
+func NewOpcodeMask(ops ...byte) *OpcodeMask {
+	var m OpcodeMask
+	for _, op := range ops {
+		m[op] = true
+	}
+	return &m
+}
+
+// wants reports whether op is in the mask. A nil mask wants everything.
+func (m *OpcodeMask) wants(op byte) bool { return m == nil || m[op] }
+
+// WantsOpcode reports whether the hooks ask to see op.
+func (h *Hooks) WantsOpcode(op byte) bool { return h.OnOpcodeMask.wants(op) }
