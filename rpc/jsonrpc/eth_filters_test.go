@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
+func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache kvcache.Cache, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
