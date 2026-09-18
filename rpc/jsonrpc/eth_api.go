@@ -190,7 +190,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRUBytes := 32 * datasize.MB
+	blocksLRUBytes := 200 * datasize.MB
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !conf.SingleNodeMode {
 		blocksLRUBytes *= 5
