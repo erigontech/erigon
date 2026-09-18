@@ -782,7 +782,7 @@ func (l *recordingListener) Accept() (net.Conn, error) {
 // Server.Shutdown closes a connection as soon as it is idle, so the whole response must reach the socket before
 // net/http marks the connection idle.
 func TestCorkConnFlushesBeforeIdle(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	recording := &recordingListener{Listener: ln}
 	body := bytes.Repeat([]byte("a"), 8*1024)
