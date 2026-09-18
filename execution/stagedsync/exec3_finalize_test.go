@@ -688,10 +688,11 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		task.version = iterVersion
 
 		// The worker's coinbase debit is held as an Estimate until calcFees
-		// materializes the tip-inclusive Done — mirroring the real exec hold —
-		// so the flush below and the calcFees flush at 700 are one Estimate→Done
-		// transition at (txIdx,0), not two Done writes at the same version.
-		vm.FlushVersionedWritesFeeEstimate(result.TxOut, true, "", func(a accounts.Address) bool { return a == s.coinbase })
+		// materializes the tip-inclusive Done — mirroring the real exec hold — so this
+		// flush and the calcFees flush below are one Estimate→Done transition at
+		// (txIdx,0), not two Done writes at the same version. An incomplete flush
+		// publishes the whole write-set as Estimate, which covers the coinbase balance.
+		vm.FlushVersionedWrites(result.TxOut, false, "")
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)

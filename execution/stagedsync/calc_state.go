@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"math"
-	"slices"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -298,72 +298,20 @@ func (cs *calcState) zeroTouchedStorage(addr accounts.Address) {
 	}
 }
 
-// hasTxIndex is satisfied by BAL change elements, each carrying the tx index
-// within the block at which it was written.
-type hasTxIndex interface{ GetIndex() uint32 }
-
-// finalChangeUpTo returns the latest change whose tx index is <= maxTxIndex — the
-// field's value as of that point in the block. Indices are strictly increasing,
-// so a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
-// selects the whole block.
-func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
-	for _, change := range slices.Backward(changes) {
-		if change.GetIndex() <= maxTxIndex {
-			return change, true
-		}
-	}
-	var zero T
-	return zero, false
-}
-
 // LoadFromBAL populates calcState from an EIP-7928 Block Access List instead of
 // the per-tx VersionedWrites stream, feeding each field's block-end value into
 // ApplyWrites. The BAL carries no deletion marker, so a touched account whose
 // block-end state is empty is reconstructed as a delete here. Storage reads are
 // ignored.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura, eip8246)
+func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura, eip8246)
 }
 
 // LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index <= maxTxIndex,
 // i.e. the state as of that point in the block, used to fold up to a mid-block
 // step boundary. maxTxIndex == math.MaxUint32 is the whole block.
-func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
-	writes := &state.WriteSet{}
-	for i := range bal {
-		ac := &bal[i]
-		addr := ac.Address
-		if bc, ok := finalChangeUpTo(ac.BalanceChanges, maxTxIndex); ok {
-			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bc.Value,
-			})
-		}
-		if nc, ok := finalChangeUpTo(ac.NonceChanges, maxTxIndex); ok {
-			writes.SetNonce(addr, &state.VersionedWrite[uint64]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nc.Value,
-			})
-		}
-		if cc, ok := finalChangeUpTo(ac.CodeChanges, maxTxIndex); ok {
-			// Emit CodeHashPath alongside CodePath so codeHash is single-sourced
-			// from CodeHashes() on both paths — the BAL carries only bytecode, so
-			// the hash is derived here.
-			code := accounts.NewCode(cc.Bytecode)
-			writes.SetCode(addr, &state.VersionedWrite[accounts.Code]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: code,
-			})
-			writes.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath}, Val: code.Hash,
-			})
-		}
-		for _, sc := range ac.StorageChanges {
-			if chg, ok := finalChangeUpTo(sc.Changes, maxTxIndex); ok {
-				writes.SetStorage(addr, sc.Slot, &state.VersionedWrite[uint256.Int]{
-					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: sc.Slot}, Val: chg.Value,
-				})
-			}
-		}
-	}
-	cs.ApplyWrites(writes, eip8246)
+func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex), eip8246)
 	cs.ApplyEIP161Removal(emptyRemoval, isAura)
 }
 
@@ -410,15 +358,12 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 		// retained incarnation) keeps its leaf via a regular UPDATE.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
 		var u commitment.Update
+		// A deleted account removes its leaf (DeleteUpdate) only when it is fully
+		// zero AND holds no retained incarnation; a retained incarnation keeps the
+		// leaf via the default zero-valued UPDATE (which, under isAllZero, writes the
+		// same zeros).
 		switch {
-		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			u = commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  uint256.Int{},
-				Nonce:    0,
-				CodeHash: empty.CodeHash,
-			}
-		case acc.Deleted && isAllZero:
+		case acc.Deleted && acc.Incarnation == 0 && isAllZero:
 			u = commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,

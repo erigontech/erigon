@@ -275,22 +275,6 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
 }
 
-// WriteOriginAddressOnce seeds addr's committed pre-block account at originIndex only
-// if no origin cell exists. Origin is the immutable pre-block base for the block's life;
-// re-seeding it would publish a mid-block value (e.g. a tip-inflated coinbase balance)
-// as the base and corrupt every fall-through read.
-func (vm *VersionMap) WriteOriginAddressOnce(addr accounts.Address, value *accounts.Account) {
-	e := vm.entryOrCreate(addr)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.Address != nil {
-		if _, ok := e.Address.Get(originIndex); ok {
-			return
-		}
-	}
-	e.Address = putCell(vm, e.Address, addr, AddressPath, originIndex, 0, flagFor(true), value, getCellAccount)
-}
-
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
@@ -684,20 +668,6 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 // FlushVersionedWrites routes a tx's typed write collections into the version map. Each
 // cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
 func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
-	vm.flushVersionedWrites(writes, complete, tracePrefix, nil)
-}
-
-// FlushVersionedWritesFeeEstimate flushes writes, but publishes the Address and Balance
-// cells as Estimate (regardless of complete) for any address where feeEstimate is true.
-// A fee recipient has no final balance until the postponed fee calc, so its balance must
-// stay an in-flight dependency (readers hit Dep and pause) rather than a committed-looking
-// pre-tip value. calcFees is the sole writer that turns it Done — the one transition
-// allowed to change a value.
-func (vm *VersionMap) FlushVersionedWritesFeeEstimate(writes *WriteSet, complete bool, tracePrefix string, feeEstimate func(accounts.Address) bool) {
-	vm.flushVersionedWrites(writes, complete, tracePrefix, feeEstimate)
-}
-
-func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string, feeEstimate func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -711,20 +681,16 @@ func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, trac
 			return
 		}
 		seen[addr] = struct{}{}
-		feeBalFlag := flag
-		if feeEstimate != nil && feeEstimate(addr) {
-			feeBalFlag = FlagEstimate
-		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		if vw, ok := writes.address[addr]; ok {
-			e.Address = putCell(vm, e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellAccount)
+			e.Address = putCell(vm, e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
 			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = putCell(vm, e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellBalance)
+			e.Balance = putCell(vm, e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellBalance)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
 			e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
