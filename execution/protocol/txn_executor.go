@@ -60,6 +60,11 @@ TxnExecutor applies a single transaction to the current world state.
 
 var ErrTxnExecutionFailed = errors.New("txn execution failed")
 
+// ErrExecPanic wraps a panic recovered during versioned transition execution. It is an
+// infrastructure failure, not a block-validity verdict, so callers route it operationally
+// (fail the stage retryably) rather than as ErrInvalidBlock.
+var ErrExecPanic = errors.New("transition exec panic")
+
 // nonceError formats lazily: under parallel execution a nonce mismatch is a
 // routine re-execution signal whose text is discarded.
 type nonceError struct {
@@ -548,7 +553,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 				// Versioned execution no longer panics for control flow — an
 				// in-flight dependency pauses and re-reads (see waitCommit), it does
 				// not abort. Any panic here is therefore a genuine failure.
-				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
+				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()
 	}

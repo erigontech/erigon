@@ -597,6 +597,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 	}
+	// A panic recovered inside versioned transition execution is an infrastructure
+	// failure, not a block-validity verdict; route it operationally like a state-read
+	// error rather than letting it condemn the block as invalid.
+	if result.Err != nil && errors.Is(result.Err, protocol.ErrExecPanic) && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		result.Operational = true
+	}
 	if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 		result.Operational = true
 		result.Err = stateErr
