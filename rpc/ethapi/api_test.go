@@ -304,3 +304,17 @@ func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
 	require.Equal(t, `[]`, field(false, false),
 		"inclTx=false must still emit an empty array, not null and not an absent field")
 }
+
+// TestRPCMarshalBlockEmptyKeepsElementType pins the element type an empty block
+// carries: ots_getBlockTransactions type-asserts this field, so an empty block must
+// hold the same slice type a populated one does.
+func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
+	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
+
+	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
+	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
+}
