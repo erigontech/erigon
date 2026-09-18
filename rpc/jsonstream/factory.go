@@ -34,9 +34,15 @@ const FlushThreshold = int(64 * datasize.KB)
 // flushIfFull hands the buffer over once it is full, so a large response streams
 // instead of being held whole.
 func flushIfFull(stream *jsoniter.Stream) {
-	if len(stream.Buffer()) < FlushThreshold {
-		return
+	if len(stream.Buffer()) >= FlushThreshold {
+		flushFull(stream)
 	}
+}
+
+// flushFull is outlined so the threshold check stays inlinable into every value write.
+//
+//go:noinline
+func flushFull(stream *jsoniter.Stream) {
 	if err := stream.Flush(); err != nil {
 		// Discarded, not retried: jsoniter latches err on the stream, so every
 		// later Flush returns it without draining and these bytes can never
@@ -68,11 +74,10 @@ func Get(out io.Writer) *StackStream {
 
 // Put returns a stream to the pool. The caller must hold no view of Buffer()
 // afterwards, and must not write to the stream again.
-func Put(s Stream) {
-	ss, ok := s.(*StackStream)
-	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
+func Put(s *StackStream) {
+	if cap(s.stream.Buffer()) > maxPooledBufferSize {
 		return
 	}
-	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
-	streamPool.Put(ss)
+	s.Reset(nil) // the writer goes too, so an idle stream pins no connection
+	streamPool.Put(s)
 }
