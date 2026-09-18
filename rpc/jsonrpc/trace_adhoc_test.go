@@ -22,7 +22,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,7 +134,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -171,7 +170,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -281,7 +280,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -316,7 +315,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -359,7 +358,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[2].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -396,7 +395,7 @@ func TestReplayTransaction(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
 	addrDiff := results.StateDiff[internedAddress("0x0000000000000006000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -413,7 +412,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
 	addrDiff := results[0].StateDiff[internedAddress("0x0000000000000001000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -605,7 +604,7 @@ func TestRawTransactionStateDiff(t *testing.T) {
 
 	// Receiver balance must increase: either a new account ("+") or a change ("*" with To > From).
 	switch v := receiverDiff.Balance.(type) {
-	case map[string]*hexutil.Big:
+	case map[string]*hexutil.U256:
 		val, exists := v["+"]
 		require.True(t, exists, "new receiver account balance must use '+' key")
 		require.Positive(t, val.ToInt().Sign(), "receiver initial balance must be positive")
@@ -698,8 +697,8 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
@@ -719,13 +718,13 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)
 
-	overriddenBalance := (*hexutil.Big)(big.NewInt(7_000_000_000_000_000_000))
+	overriddenBalance := (*hexutil.U256)(uint256.MustFromDecimal("7000000000000000000000"))
 	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(bankAddr): {Balance: &overriddenBalance},
@@ -737,7 +736,7 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	require.NotNil(t, sender)
 	balance, ok := sender.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "sender balance must be reported as changed, got %v", sender.Balance)
-	require.Equal(t, (*big.Int)(overriddenBalance).String(), (*big.Int)(balance["*"].From).String())
+	require.Equal(t, *overriddenBalance, *balance["*"].From)
 }
 
 func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
@@ -750,7 +749,7 @@ func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(recipient): {Code: &overriddenCode},
@@ -802,12 +801,12 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 
 	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	untouched := common.HexToAddress("0x00000000000000000000000000000000cafe0002")
-	untouchedBalance := (*hexutil.Big)(big.NewInt(123))
+	untouchedBalance := (*hexutil.U256)(uint256.NewInt(123))
 
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:  &bankAddr,
 		To:    &recipient,
-		Value: (*hexutil.Big)(big.NewInt(1)),
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
 	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(untouched): {Balance: &untouchedBalance},
@@ -1239,7 +1238,7 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 func traceCallValueTransfer() TraceCallParam {
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.Big)(big.NewInt(1))}
+	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.U256)(uint256.NewInt(1))}
 }
 
 func TestTraceCallKeepsTraceEmptyWhenNotRequested(t *testing.T) {

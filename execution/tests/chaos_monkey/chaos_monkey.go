@@ -17,8 +17,8 @@
 package chaos_monkey
 
 import (
+	"context"
 	"fmt"
-
 	"math/rand/v2"
 
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -33,4 +33,25 @@ func ThrowRandomConsensusError(isInitialCycle bool, txIndex int, badBlockHalt bo
 		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr) //nolint:errorlint // txTaskErr is nil on the path the monkey fires on; %w would render %!w(<nil>)
 	}
 	return nil
+}
+
+type Faults struct {
+	PreExecutionError error
+	WorkerError       error
+	TaskPanic         error
+	ExecLoopPanic     error
+	ApplyLoopPanic    error
+}
+
+type faultsContextKey struct{}
+
+func WithFaults(ctx context.Context, faults Faults) context.Context {
+	return context.WithValue(ctx, faultsContextKey{}, faults)
+}
+
+func FaultsFromContext(ctx context.Context) Faults {
+	if faults, ok := ctx.Value(faultsContextKey{}).(Faults); ok {
+		return faults
+	}
+	return Faults{}
 }
