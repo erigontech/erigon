@@ -68,6 +68,9 @@ type Stream interface {
 	WriteMore()
 	WriteObjectField(fieldName string)
 
+	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
+	WriteHex(b []byte)
+
 	// Utility methods
 
 	WriteEmptyArray()
