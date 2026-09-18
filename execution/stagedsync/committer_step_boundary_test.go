@@ -688,7 +688,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		}
 		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
 		bList = append(bList, types.AccountChanges{
-			Address:        accounts.InternAddress([20]byte(addrBytes)),
+			Address:        [20]byte(addrBytes),
 			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
 			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
 		})
@@ -771,7 +771,7 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 				addrBytes := make([]byte, length.Addr)
 				rnd.Read(addrBytes)
 				bal := types.BlockAccessList{{
-					Address:      accounts.InternAddress([20]byte(addrBytes)),
+					Address:      [20]byte(addrBytes),
 					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
 				}}
 

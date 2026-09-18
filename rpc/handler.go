@@ -39,8 +39,9 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. Message handling never blocks indefinitely
-// because RPCs are processed on background goroutines launched by handler.
+// handler is not safe for concurrent use. On a connection, message handling never blocks
+// indefinitely because RPCs are processed on background goroutines launched by handler;
+// with inlineCalls they run on the caller's goroutine, which a single HTTP request owns.
 //
 // The entry points for incoming messages are:
 //
@@ -70,6 +71,7 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
+	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -194,7 +196,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 
-	// Process calls on a goroutine because they may block indefinitely:
+	// Calls may block indefinitely, so they go to a goroutine unless the caller waits anyway:
 	h.startCallProc(func(cp *callProc) {
 		// Batch items below run concurrently and write into private per-item buffers.
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
@@ -438,13 +440,18 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	h.callWG.Go(func() {
+	run := func() {
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
-	})
+	}
+	if h.inlineCalls {
+		run()
+		return
+	}
+	h.callWG.Go(run)
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
@@ -509,7 +516,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		h.handleCall(ctx, msg, stream)
+		_, _ = h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
@@ -531,7 +538,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			start = time.Now()
 		}
 
-		resp := h.handleCall(ctx, msg, stream)
+		resp, answered := h.handleCall(ctx, msg, stream)
 
 		if doSlowLog {
 			requestDuration := time.Since(start)
@@ -540,11 +547,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			}
 		}
 
-		if resp != nil && resp.Error != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
-			if resp.Error.Data != nil {
+		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
+			switch {
+			case answered != nil:
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
-			} else {
+			case resp != nil && resp.Error != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
@@ -572,7 +582,7 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
 	if msg.isSubscribe() {
 		return h.handleSubscribe(cp, msg, stream)
 	}
@@ -583,51 +593,51 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 		callb = h.reg.callback(msg.Method)
 	}
 	if callb == nil {
-		return msg.errorResponse(&methodNotFoundError{method: msg.Method})
+		return msg.errorResponse(&methodNotFoundError{method: msg.Method}), nil
 	}
 	args, err := parsePositionalArguments(msg.Params, callb.argTypes)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	start := time.Now()
-	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
+	answer, answered := h.runMethod(cp.ctx, msg, callb, args, stream)
 
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
 		rpcRequestGauge.Inc()
-		if answer != nil && answer.Error != nil {
+		if answered != nil || (answer != nil && answer.Error != nil) {
 			failedReqeustGauge.Inc()
 			callb.timerFailure.ObserveDuration(start)
 		} else {
 			callb.timerSuccess.ObserveDuration(start)
 		}
 	}
-	return answer
+	return answer, answered
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !h.allowSubscribe {
-		return msg.errorResponse(ErrNotificationsUnsupported)
+		return msg.errorResponse(ErrNotificationsUnsupported), nil
 	}
 
 	// Subscription method name is first argument.
 	name, err := parseSubscriptionName(msg.Params)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	namespace := msg.namespace()
 	callb := h.reg.subscription(namespace, name)
 	if callb == nil {
-		return msg.errorResponse(&subscriptionNotFoundError{namespace, name})
+		return msg.errorResponse(&subscriptionNotFoundError{namespace, name}), nil
 	}
 
 	// Parse subscription name arg too, but remove it before calling the callback.
 	argTypes := append([]reflect.Type{stringType}, callb.argTypes...)
 	args, err := parsePositionalArguments(msg.Params, argTypes)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	args = args[1:]
 
@@ -649,44 +659,26 @@ func remapDBOverload(ctx context.Context, err error) error {
 	return err
 }
 
-// runMethod runs the Go callback for an RPC method.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) *jsonrpcMessage {
+// runMethod runs the Go callback for an RPC method. It returns either a response for the caller to
+// write, or the error it already answered with in the stream.
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
-			return msg.errorResponse(remapDBOverload(ctx, err))
+			return msg.errorResponse(remapDBOverload(ctx, err)), nil
 		}
 		if msg.isNotification() {
-			return nil
+			return nil, nil
 		}
-		return msg.writeResponse(stream, result)
+		return nil, msg.writeResponse(stream, result)
 	}
 
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString("2.0")
-	stream.WriteMore()
-	if msg.ID != nil {
-		stream.WriteObjectField("id")
-		stream.WriteRawBytes(msg.ID)
-		stream.WriteMore()
-	}
-	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
-	_, err := callb.call(ctx, msg.Method, args, rs)
-	if err != nil {
-		err = remapDBOverload(ctx, err)
-		if rs.Written() {
-			rs.CloseIfOpen()
-			stream.WriteMore()
+	return nil, writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
+			return remapDBOverload(ctx, err)
 		}
-		HandleError(err, stream)
-	} else if !rs.Written() {
-		// A response carries exactly one of result and error, so a callback that
-		// succeeded without writing still owes a result.
-		rs.WriteNil()
-	}
-	stream.WriteObjectEnd()
-	return nil
+		return nil
+	})
 }
 
 // writeTo writes a response built as a message, such as an error; success results go through
