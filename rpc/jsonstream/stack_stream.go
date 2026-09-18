@@ -262,11 +262,13 @@ func (s *StackStream) WriteMore() {
 	s.push(ItemComma)
 }
 
-// WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) {
+// WriteObjectField writes a field name for an object and adds it to the stack. It returns the
+// stream so the value write can be chained: s.WriteObjectField("gas").WriteHex(v).
+func (s *StackStream) WriteObjectField(fieldName string) Stream {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
+	return s
 }
 
 // Flush flushes the underlying stream
