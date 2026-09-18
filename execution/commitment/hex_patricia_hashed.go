@@ -2316,9 +2316,12 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 			return err
 		}
 	}
-	// Delete this branch: touchMap = all present children, afterMap = 0 → the
-	// merge clears every child, leaving an empty-branch tombstone.
-	return hph.branchEncoder.CollectUpdate(hph.ctx, nibbles.HexToCompact(prefix), 0, maps.Bitmap, 0, nil, nil)
+	// Delete this branch: touchMap = all present children, afterMap = 0 → the merge
+	// clears every child, leaving an empty-branch tombstone. Pass the branch in hand as
+	// prev (like collectDeleteUpdate) so the merge runs and the changeset records the
+	// real pre-image — a nil prev would tombstone without merging and leave an empty
+	// pre-image, so an unwind of the self-destruct could not restore the pruned subtree.
+	return hph.branchEncoder.CollectUpdate(hph.ctx, nibbles.HexToCompact(prefix), 0, maps.Bitmap, 0, nil, branch)
 }
 
 // resetAccountStorageRoot clears the in-grid account cell's storage-root reference
