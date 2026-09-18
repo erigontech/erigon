@@ -20,4 +20,17 @@ package jsonw
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
+	// WriteHexUint64 writes v as a 0x-prefixed hex quantity, without leading zeros.
+	WriteHexUint64(v uint64)
+	// WriteHexQuantity writes big-endian be as a 0x-prefixed hex quantity, without leading zeros.
+	WriteHexQuantity(be []byte)
+	// WriteString writes s as an escaped JSON string.
+	WriteString(s string)
+	WriteNil()
+	WriteObjectStart()
+	WriteObjectField(name string)
+	WriteObjectEnd()
+	WriteArrayStart()
+	WriteMore()
+	WriteArrayEnd()
 }

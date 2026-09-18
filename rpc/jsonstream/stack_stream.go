@@ -17,9 +17,11 @@
 package jsonstream
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -99,6 +101,31 @@ func (s *StackStream) WriteHex(b []byte) {
 	} else {
 		s.stream.SetBuffer(buf)
 	}
+	s.popCommaOrField()
+}
+
+func (s *StackStream) WriteHexUint64(v uint64) {
+	s.stream.SetBuffer(append(strconv.AppendUint(append(s.stream.Buffer(), `"0x`...), v, 16), '"'))
+	s.popCommaOrField()
+}
+
+// WriteHexQuantity writes a big-endian number the way JSON-RPC quantities are encoded: no leading
+// zero digits, and "0x0" for zero.
+func (s *StackStream) WriteHexQuantity(be []byte) {
+	for len(be) > 0 && be[0] == 0 {
+		be = be[1:]
+	}
+	buf := append(s.stream.Buffer(), `"0x`...)
+	if len(be) == 0 {
+		s.stream.SetBuffer(append(buf, '0', '"'))
+		s.popCommaOrField()
+		return
+	}
+	if be[0] < 0x10 {
+		buf = append(buf, hexDigits[be[0]])
+		be = be[1:]
+	}
+	s.stream.SetBuffer(append(hex.AppendEncode(buf, be), '"'))
 	s.popCommaOrField()
 }
 

@@ -70,6 +70,9 @@ type Stream interface {
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// WriteHexUint64 and WriteHexQuantity write JSON-RPC quantities: 0x-prefixed hex without leading zeros.
+	WriteHexUint64(v uint64)
+	WriteHexQuantity(be []byte)
 
 	// Utility methods
 

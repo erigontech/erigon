@@ -95,6 +95,10 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+func (s *LazyFieldStream) WriteHexUint64(v uint64) { s.ensure(); s.inner.WriteHexUint64(v) }
+
+func (s *LazyFieldStream) WriteHexQuantity(be []byte) { s.ensure(); s.inner.WriteHexQuantity(be) }
+
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
