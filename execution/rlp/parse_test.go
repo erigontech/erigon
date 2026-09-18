@@ -102,18 +102,18 @@ func TestCountItems(t *testing.T) {
 			require.NoError(t, err)
 			raw := s.Peek()
 			require.GreaterOrEqual(t, uint64(len(raw)), size)
-			assert.Equal(t, tc.want, countItems(raw[:size]))
+			assert.Equal(t, tc.want, CountItems(raw[:size]))
 		})
 	}
 }
 
-// countItems sizes allocations from attacker-controlled bytes, so it must never
+// CountItems sizes allocations from attacker-controlled bytes, so it must never
 // report more items than the input can hold, and never panic.
 func TestCountItemsBounded(t *testing.T) {
 	t.Parallel()
 	check := func(raw []byte) {
 		t.Helper()
-		got := countItems(raw)
+		got := CountItems(raw)
 		assert.GreaterOrEqual(t, got, 0)
 		assert.LessOrEqual(t, got, len(raw), "%d bytes reported %d items", len(raw), got)
 	}
@@ -162,7 +162,7 @@ func TestCountItemsMatchesPrefixWalk(t *testing.T) {
 		size, err := s.List()
 		require.NoError(t, err)
 		payload := s.Peek()[:size]
-		assert.Equal(t, viaPrefix(payload), countItems(payload), "%T", val)
+		assert.Equal(t, viaPrefix(payload), CountItems(payload), "%T", val)
 		PutStream(s)
 	}
 }

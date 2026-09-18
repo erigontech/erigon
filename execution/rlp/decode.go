@@ -355,7 +355,7 @@ func sliceHint(s *Stream, elem reflect.Type, size uint64) int {
 	if uint64(len(raw)) < size {
 		return 0
 	}
-	n := countItems(raw[:size])
+	n := CountItems(raw[:size])
 	if elemSize := elem.Size(); elemSize > 0 {
 		n = min(n, maxSliceHintBytes/int(elemSize))
 	}
