@@ -198,12 +198,6 @@ func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
-	if p.template != nil {
-		p.template.EnableCsvMetrics(filePathPrefix)
-	}
-}
-
 func (p *ParallelPatriciaHashed) Variant() TrieVariant {
 	return VariantParallelHexPatricia
 }

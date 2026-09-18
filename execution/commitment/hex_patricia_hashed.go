@@ -2755,11 +2755,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 func (hph *HexPatriciaHashed) SetTraceWriter(w io.Writer) { hph.traceW = w }
 
-func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
-	hph.metrics.EnableCsvMetrics(filePathPrefix)
-	hph.cfg.CsvMetricsFilePrefix = filePathPrefix
-}
-
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 
 // TakeDeferredUpdates returns the current deferred updates from the branch encoder
@@ -2773,15 +2768,6 @@ func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 // HasPendingDeferredUpdates returns true if the branch encoder has non-empty deferred updates.
 func (hph *HexPatriciaHashed) HasPendingDeferredUpdates() bool {
 	return len(hph.branchEncoder.deferred) > 0
-}
-
-// ApplyAndClearInlineDeferredUpdates applies deferred updates inline via ctx.PutBranch and clears them.
-func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
-	if err := hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
-		return fmt.Errorf("apply deferred updates: %w", err)
-	}
-	hph.branchEncoder.ClearDeferred()
-	return nil
 }
 
 // SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the

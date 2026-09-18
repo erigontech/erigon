@@ -116,11 +116,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		p.SetTraceWriter(nil)
 		assert.Nil(t, p.template.traceW, "nil writer disables tracing on template")
 	})
-
-	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
-		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-		require.NotPanics(t, func() { p.EnableCsvMetrics("") })
-	})
 }
 
 func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
@@ -163,7 +158,6 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 		var buf bytes.Buffer
 		p.SetTraceWriter(&buf)
 		p.SetTraceWriter(nil)
-		p.EnableCsvMetrics("")
 		p.ResetContext(nil)
 	})
 

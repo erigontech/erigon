@@ -88,7 +88,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -1336,10 +1335,6 @@ func (t *Updates) arenaEnsureCap(c int) {
 			t.arenas[i] = make([]byte, 0, c)
 		}
 	}
-}
-
-func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel
 }
 
 type keyHasher func(key []byte) []byte
