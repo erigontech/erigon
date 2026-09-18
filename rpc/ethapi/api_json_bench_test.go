@@ -55,7 +55,7 @@ func BenchmarkRPCMarshalHeader(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := json.Marshal(rpcMarshalHeader(tc.head, tc.head.Hash()))
+				out, err := json.Marshal(RPCMarshalHeader(tc.head, tc.head.Hash()))
 				if err != nil || len(out) == 0 {
 					b.Fatal(err)
 				}

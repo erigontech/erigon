@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
@@ -79,7 +82,12 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(floor, weigh)
+	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
+		b.resident.Add(-weigh(e.Key, e.Value))
+		if fn := b.onEvict.Load(); fn != nil {
+			(*fn)(e.Key, e.Value)
+		}
+	})
 	return b
 }
 
@@ -89,21 +97,16 @@ func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) 
 	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(b.maxBytes, weigh)
+	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
 	return b
 }
 
-func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
+func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion func(otter.DeletionEvent[uint64, V])) *otter.Cache[uint64, V] {
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
-		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
-			b.resident.Add(-weigh(e.Key, e.Value))
-			if fn := b.onEvict.Load(); fn != nil {
-				(*fn)(e.Key, e.Value)
-			}
-		},
-		Executor: func(fn func()) { fn() },
+		OnDeletion:    onDeletion,
+		Executor:      func(fn func()) { fn() },
 	})
 }
 
@@ -180,4 +183,32 @@ func (b *ByteLRU[V]) Close() {
 	}
 	b.limit.Store(0)
 	b.ceiling.Store(0)
+}
+
+// HashByteLRU is an unbudgeted ByteLRU keyed by a hash: the first 8 bytes pick the slot, Get compares the whole hash.
+type HashByteLRU[V any] struct {
+	c     *ByteLRU[hashEntry[V]]
+	weigh func(V) int64
+}
+
+type hashEntry[V any] struct {
+	hash   common.Hash
+	value  V
+	weight int64 // weighed once in Add: ByteLRU asks for the weight on Add, on insert and on eviction
+}
+
+func NewHashByteLRU[V any](maxBytes datasize.ByteSize, weigh func(V) int64) *HashByteLRU[V] {
+	return &HashByteLRU[V]{weigh: weigh, c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 { return e.weight })}
+}
+
+func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
+	e, ok := l.c.Get(binary.BigEndian.Uint64(hash[:]))
+	if !ok || e.hash != hash {
+		return value, false
+	}
+	return e.value, true
+}
+
+func (l *HashByteLRU[V]) Add(hash common.Hash, value V) {
+	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value, weight: l.weigh(value) + length.Hash + ByteLRUEntryOverheadBytes})
 }

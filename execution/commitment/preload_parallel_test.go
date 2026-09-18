@@ -1062,3 +1062,74 @@ func TestContractTrunkPreloadParallel_DepthCeilingReportsDoneOnAnyBudget(t *test
 		t.Error("a zero budget past the depth ceiling disagreed with the spendable one")
 	}
 }
+
+func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *testing.T) {
+	hash := make([]byte, 32)
+	for i := range hash {
+		hash[i] = 0x7a
+	}
+	root := string(hexNibbles(hash))
+	r1 := root + string([]byte{1})
+	r2 := root + string([]byte{2})
+	r13 := r1 + string([]byte{3})
+	const valSz = 100
+
+	tree := syntheticTree{root: 0b110, r1: 0b1000, r2: 0, r13: 0}
+	r1Val := branchVal(tree[r1], valSz)
+	r1Key := bytes.Clone(nibbles.HexToCompact([]byte(r1)))
+
+	base := fakeResolver(tree, nil, valSz, "")
+	calls := 0
+	resolve := func(keys [][]byte) ([][]byte, error) {
+		calls++
+		return base(keys)
+	}
+
+	c := NewBranchCache(64)
+	defer c.Close()
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootKey := nibbles.HexToCompact([]byte(root))
+	rootCost := estimatedEntryCost(rootKey, branchVal(0b110, valSz))
+	stepBudget := rootCost + minEntryBytes
+
+	n, done, err := p.Run(stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || done {
+		t.Fatalf("first Run pinned %d (done=%v), want 1 (the root) and done=false", n, done)
+	}
+	if p.DbHitsPinned() != 0 {
+		t.Fatalf("db-hits pinned %d, want 0: the budget must defer R1, not pin it", p.DbHitsPinned())
+	}
+	if p.QueueRemaining() != 2 {
+		t.Fatalf("queue holds %d, want 2: the deferred db-hit R1 and the deferred miss R2", p.QueueRemaining())
+	}
+	if calls != 1 {
+		t.Fatalf("resolver called %d times, want 1 (the root wave alone): R1 must land in the db-hit partition, whose reserved bytes leave no file budget for R2", calls)
+	}
+
+	if _, done, err = p.Run(1<<20, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !done {
+		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
+	}
+
+	gotR1, _, ok := c.Get(r1Key)
+	if !ok {
+		t.Fatal("R1 was dropped: a db-hit deferred into a Run whose overlay no longer lists it must still resolve")
+	}
+	if !bytes.Equal(gotR1, r1Val) {
+		t.Fatalf("R1 pinned as %x, want the authoritative value %x", gotR1, r1Val)
+	}
+	if _, _, ok := c.Get(nibbles.HexToCompact([]byte(r13))); !ok {
+		t.Fatal("R1's child was never queued, so the subtree under the deferred db-hit went unpinned")
+	}
+	if p.PinnedTotal() != 4 {
+		t.Fatalf("pinned %d, want 4: root, R1, R2 and R1.3", p.PinnedTotal())
+	}
+}
