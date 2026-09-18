@@ -573,7 +573,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
 
-	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
+	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
