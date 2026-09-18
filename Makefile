@@ -482,6 +482,11 @@ check-kurtosis:
 test-kurtosis-setup:
 	@bash .github/actions/setup-kurtosis/setup.test.sh
 
+## test-pectra-fixtures:            check Pectra validator fixtures (requires yq v4)
+.PHONY: test-pectra-fixtures
+test-pectra-fixtures:
+	@python3 .github/workflows/scripts/pectra-fixtures.test.py
+
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
