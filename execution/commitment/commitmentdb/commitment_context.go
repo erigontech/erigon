@@ -329,33 +329,28 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-// witnessCapture runs the on-the-fly fold and returns the captured superset node
-// set (root first), the fold's hashed keys, and the root hash.
-func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
-	}
-	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
-}
-
 func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if !ok {
 		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 	}
-	return hexPatriciaHashed.WitnessNodesByHash(ctx, sdc.updates)
+	byHash, _, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, false)
+	return byHash, rootHash, err
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
-	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	byHash, provedKeys, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, err
 	}
-	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	lean, err := trie.WitnessNodesForKeysByHash(byHash, rootHash, provedKeys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
