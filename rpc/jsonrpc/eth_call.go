@@ -534,6 +534,13 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if !bytes.Equal(root, header.Root[:]) {
 		return nil, fmt.Errorf("witness root %x does not match header root %x", root, header.Root[:])
 	}
+	return proofFromWitness(ctx, header.Root, address, storageKeys, nodes, root)
+}
+
+// proofFromWitness is kept out of line so its locals are not on the stack under the witness fold.
+//
+//go:noinline
+func proofFromWitness(ctx context.Context, stateRoot common.Hash, address common.Address, storageKeys []StorageKeysInfo, nodes map[string][]byte, root []byte) (*accounts.AccProofResult, error) {
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
@@ -567,7 +574,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 				Proof: []hexutil.Bytes{},
 			}
 		}
-		return proof, assertProofVerifies(header.Root, proof)
+		return proof, assertProofVerifies(stateRoot, proof)
 	}
 
 	// get storage key proofs
@@ -597,7 +604,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
-	return proof, assertProofVerifies(header.Root, proof)
+	return proof, assertProofVerifies(stateRoot, proof)
 }
 
 // assertProofVerifies runs only under ERIGON_ASSERT: a serving node relies on the root check.

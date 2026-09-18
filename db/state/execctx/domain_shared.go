@@ -350,6 +350,33 @@ func PickTrieVariant() commitment.TrieVariant {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+	sd, err := newSharedDomains(tx, logger, opts)
+	if err != nil {
+		return nil, err
+	}
+	_, blockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return sd, err
+	}
+
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return sd, err
+		}
+		if lastBn < blockNum {
+			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
+	}
+
+	return sd, nil
+}
+
+// newSharedDomains is kept out of line so its setup locals are not on the stack under SeekCommitment.
+//
+//go:noinline
+func newSharedDomains(tx kv.TemporalTx, logger log.Logger, opts []SharedDomainOption) (*SharedDomains, error) {
 	o := sharedDomainOptions{
 		trieCfg:              commitment.DefaultTrieConfig(),
 		useSharedBranchCache: true,
@@ -410,23 +437,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	if o.paraTrieDB != nil {
 		sd.EnableParaTrieDB(o.paraTrieDB)
 	}
-
-	_, blockNum, err := sd.SeekCommitment(ctx, tx)
-	if err != nil {
-		return sd, err
-	}
-
-	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
-	if blockNum > 0 {
-		lastBn, _, err := rawdbv3.TxNums.Last(tx)
-		if err != nil {
-			return sd, err
-		}
-		if lastBn < blockNum {
-			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
-		}
-	}
-
 	return sd, nil
 }
 
@@ -1449,22 +1459,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// rows inside the bound, so the "authoritative" read can return
 			// dead-fork bytes and blame the cache for a legitimate hit.
 			if dbg.AssertStateCache && maxStep == kv.NoStepBound {
-				// Fetch authoritative value from the backing tx and panic on any divergence.
-				// sd.mem and sd.parent.mem were already checked above and missed, so the
-				// backing tx is the single source of truth for this key at this point.
-				var vDB []byte
-				var err error
-				getOpts := kv.GetLatestOptions{}
-				if wm != nil {
-					getOpts = getOpts.WithMetrics(wm, start)
-				}
-				vDB, _, err = tx.GetLatest(domain, k, getOpts)
-				if err != nil {
-					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", err)
-				}
-				if !bytes.Equal(v, vDB) {
-					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
-						domain, k, v, vDB, sd.txNum))
+				if err := sd.assertStateCacheHit(domain, tx, k, v, wm, start); err != nil {
+					return nil, 0, err
 				}
 			}
 			return v, cStep, nil
@@ -1487,6 +1483,29 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 
+	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	var buf []byte
+	if fillsCode {
+		buf = opts.buf
+	}
+
+	v, step, err = tx.GetLatest(domain, k, latestReadOptions(wm, start, maxStep, useBranchCache, buf))
+	if err != nil {
+		return nil, 0, readError(k, err)
+	}
+
+	// A bounded read observes a staged unwind, not stable committed state.
+	if willFill {
+		v = sd.fillStateCache(domain, tx, k, v, step, view, opts.codeHash, fillsCode)
+	}
+	return v, step, nil
+}
+
+// The helpers below stay out of line so their locals are not in getLatest's frame under tx.GetLatest.
+
+//go:noinline
+func latestReadOptions(wm kv.GetLatestMetrics, start time.Time, maxStep kv.Step, useBranchCache bool, buf []byte) kv.GetLatestOptions {
 	getOpts := kv.GetLatestOptions{}
 	if wm != nil {
 		getOpts = getOpts.WithMetrics(wm, start)
@@ -1497,33 +1516,50 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
-	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
-	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	if buf != nil {
+		getOpts = getOpts.WithBuf(buf)
+	}
+	return getOpts
+}
+
+//go:noinline
+func readError(k []byte, err error) error {
+	return fmt.Errorf("storage %x read error: %w", k, err)
+}
+
+//go:noinline
+func (sd *SharedDomains) fillStateCache(domain kv.Domain, tx kv.TemporalTx, k, v []byte, step kv.Step, view cache.ReadView, codeHash []byte, fillsCode bool) []byte {
+	readTxNum := step.LastTxNum(sd.StepSize())
+	if view.NeedsFrontier() {
+		// Frontier-less views retry on the miss path, where binding cost is
+		// amortized by the backing read. Stale views do not request a retry.
+		view = view.WithFrontier(sd.cacheFrontierFor(tx))
+	}
 	if fillsCode {
-		getOpts = getOpts.WithBuf(opts.buf)
+		return view.FillCode(k, v, codeHash, readTxNum)
 	}
+	view.Fill(domain, k, v, readTxNum)
+	return v
+}
 
-	v, step, err = tx.GetLatest(domain, k, getOpts)
+// assertStateCacheHit reads the backing tx and panics if it disagrees with a cache hit.
+// sd.mem and sd.parent.mem already missed, so the backing tx is the single source of truth.
+//
+//go:noinline
+func (sd *SharedDomains) assertStateCacheHit(domain kv.Domain, tx kv.TemporalTx, k, v []byte, wm kv.GetLatestMetrics, start time.Time) error {
+	getOpts := kv.GetLatestOptions{}
+	if wm != nil {
+		getOpts = getOpts.WithMetrics(wm, start)
+	}
+	vDB, _, err := tx.GetLatest(domain, k, getOpts)
 	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+		return fmt.Errorf("AssertStateCache: authoritative read failed: %w", err)
 	}
-
-	// A bounded read observes a staged unwind, not stable committed state.
-	if willFill {
-		readTxNum := step.LastTxNum(sd.StepSize())
-		fillView := view
-		if fillView.NeedsFrontier() {
-			// Frontier-less views retry on the miss path, where binding cost is
-			// amortized by the backing read. Stale views do not request a retry.
-			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
-		}
-		if fillsCode {
-			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
-		} else {
-			fillView.Fill(domain, k, v, readTxNum)
-		}
+	if !bytes.Equal(v, vDB) {
+		panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
+			domain, k, v, vDB, sd.txNum))
 	}
-	return v, step, nil
+	return nil
 }
 
 // GetCodeSize returns the length of the contract code at addr, probing a
