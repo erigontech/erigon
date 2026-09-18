@@ -36,8 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -802,7 +804,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	witness, err := witnessTrie.ExtractWitness(true, nil)
+	witness, err := witnessTrie.ExtractWitness(false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -872,6 +874,60 @@ type accessListResult struct {
 	Accesslist *types.AccessList `json:"accessList"`
 	Error      string            `json:"error,omitempty"`
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
+}
+
+// excludeAuthorities adds the message's EIP-7702 authorities to excl, which the state
+// transition pre-warms. Each one costs an ECDSA recovery, so a list that cannot cover
+// its intrinsic gas is refused before any of them runs.
+func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}) error {
+	if err := checkIntrinsicGas(msg, chainRules); err != nil {
+		return err
+	}
+	auths := msg.Authorizations()
+	for i := range auths {
+		auth := &auths[i]
+		if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(chainRules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			continue
+		}
+		authority, err := auth.RecoverSigner()
+		if err != nil {
+			continue
+		}
+		excl[authority] = struct{}{}
+	}
+	return nil
+}
+
+// checkIntrinsicGas rejects a message whose gas cannot cover the intrinsic cost of
+// its authorizations. It leaves out the access list, which the tracer strips of
+// excluded addresses before the executor prices it, so the figure stays at or below
+// what the executor charges and a call it would run is never refused here.
+//
+// The EIP-7825 cap the executor applies beside this comparison is gated on CheckGas,
+// which ToMessage leaves false, so enforcing it here would reject calls too.
+func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
+	contractCreation := msg.To().IsNil()
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+		HasValue:           !msg.Value().IsZero(),
+		IsEIP2:             chainRules.IsHomestead,
+		IsEIP2028:          chainRules.IsIstanbul,
+		IsEIP3860:          chainRules.IsShanghai,
+		IsEIP7623:          chainRules.IsPrague,
+		IsEIP7976:          chainRules.IsAmsterdam,
+		IsEIP7981:          chainRules.IsAmsterdam,
+		IsEIP2780:          chainRules.IsAmsterdam,
+	})
+	if overflow {
+		return protocol.ErrGasUintOverflow
+	}
+	if required := max(intrinsic.ExecutionGas, intrinsic.FloorGasCost); msg.Gas() < required {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	}
+	return nil
 }
 
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
@@ -986,28 +1042,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
 	if len(args.AuthorizationList) > 0 {
-		gasCap := api.GasCap
-		if args.Gas != nil && uint64(*args.Gas) < gasCap {
-			gasCap = uint64(*args.Gas)
+		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
+		if err != nil {
+			return nil, err
 		}
-		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
-			return nil, errors.New("insufficient gas to process all authorizations")
-		}
-		rules := blockCtx.Rules(chainConfig)
-		for i := range args.AuthorizationList {
-			jsonAuth := &args.AuthorizationList[i]
-			auth, err := jsonAuth.ToAuthorization()
-			if err != nil {
-				continue
-			}
-			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
-				continue
-			}
-			authority, err := auth.RecoverSigner()
-			if err != nil {
-				continue
-			}
-			excl[authority] = struct{}{}
+		if err := excludeAuthorities(msg, blockCtx.Rules(chainConfig), excl); err != nil {
+			return nil, err
 		}
 	}
 

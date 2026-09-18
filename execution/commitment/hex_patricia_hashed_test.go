@@ -1913,3 +1913,19 @@ func TestStateDecodeRejectsTruncatedInput(t *testing.T) {
 		require.Error(t, new(state).Decode(enc[:n]), "prefix of %d bytes", n)
 	}
 }
+
+func TestComputeCellHashKeepsLeafPath(t *testing.T) {
+	acct := common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	upd := Update{Flags: NonceUpdate}
+	upd.Nonce = 1
+	hph.updateCell(acct[:], KeyToHexNibbleHash(acct[:]), &upd)
+	addStorageToCell(&hph.root, acct, common.Hash{}, []byte{0xaa})
+	hph.root.hashedExtLen = 0
+	require.NoError(t, hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]))
+	path := bytes.Clone(hph.root.hashedExtension[:hph.root.hashedExtLen])
+
+	_, err := hph.computeCellHash(&hph.root, 0, nil)
+	require.NoError(t, err)
+	require.Equal(t, path, hph.root.hashedExtension[:hph.root.hashedExtLen])
+}

@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,8 +359,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
 	var stream jsonstream.Stream
+	var sent *sentWriter
 	if !s.disableStreaming {
-		stream = jsonstream.Get(w)
+		sent = &sentWriter{w: w}
+		stream = jsonstream.Get(sent)
 		defer jsonstream.Put(stream)
 	}
 
@@ -373,6 +376,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.disableStreaming {
+		// Codec writes (batches) never share a request with a buffered answer, so a non-empty buffer is the whole response.
+		if !sent.sent && len(stream.Buffer()) > 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
+		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already
 		// buffered in the stream. Set 503 before flushing so the status is correct.
 		if *overloaded {
@@ -458,4 +465,14 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	return false
+}
+
+type sentWriter struct {
+	w    io.Writer
+	sent bool
+}
+
+func (s *sentWriter) Write(p []byte) (int, error) {
+	s.sent = true
+	return s.w.Write(p)
 }
