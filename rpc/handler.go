@@ -509,7 +509,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		h.handleCall(ctx, msg, stream)
+		_, _ = h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
