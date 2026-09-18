@@ -1223,6 +1223,22 @@ func TestWriteHex(t *testing.T) {
 	}
 }
 
+// WriteHexUint64 matches json.Marshal of hexutil.Uint64 inside a container.
+func TestWriteHexUint64(t *testing.T) {
+	t.Parallel()
+	for _, v := range []uint64{0, 1, 0xf, 0x10, 0xabcdef, math.MaxUint64} {
+		want, err := json.Marshal(hexutil.Uint64(v))
+		require.NoError(t, err)
+		s := New(nil)
+		s.WriteArrayStart()
+		s.WriteHexUint64(v)
+		s.WriteMore()
+		s.WriteHexUint64(v)
+		s.WriteArrayEnd()
+		require.Equal(t, `[`+string(want)+`,`+string(want)+`]`, string(s.Buffer()))
+	}
+}
+
 // A raw payload at or above FlushThreshold goes to the writer instead of being
 // copied into the buffer. Both branches emit the same bytes, so the buffer is the
 // only thing that shows which one ran.

@@ -517,8 +517,7 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// The fast encoders replace json.Marshal for these results, so they must match it byte for byte and
-// stay within JSONLen.
+// The fast encoders replace json.Marshal for these results, so they must match it byte for byte.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
 	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
@@ -560,9 +559,10 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 			for _, l := range logs {
 				want, err := json.Marshal(l)
 				require.NoError(t, err)
-				got := l.AppendJSON(nil)
-				require.Equal(t, string(want), string(got))
-				require.LessOrEqual(t, len(got), l.JSONLen())
+				s := jsonstream.Get(nil)
+				require.NoError(t, l.MarshalFastJSONTo(s))
+				require.Equal(t, string(want), string(s.Buffer()))
+				jsonstream.Put(s)
 			}
 		})
 	}
