@@ -75,11 +75,11 @@ The ports to allow inbound:
 | P2P (execution layer)            | 30303 | TCP+UDP  |
 | Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
 | Caplin DISCV5 discovery          | 4000  | UDP      |
-| Caplin libp2p peering            | 4001  | TCP      |
+| Caplin libp2p peering            | 4001  | TCP+UDP  |
 
 This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
 
-The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. Note the second flag's help text calls it a DISCV5 port, which is a misnomer: DISCV5 is UDP-only and runs on `4000`, while `4001` is the libp2p TCP listen address Caplin advertises for peering. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, while `4001` is the numeric libp2p port Caplin advertises for TCP and QUIC/UDP peering. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
