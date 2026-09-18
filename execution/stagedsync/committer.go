@@ -339,7 +339,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
-			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
+			// Checkpoint commitment at a mid-block step edge without advancing
+			// lastComputedBlock or resetting block flags — the block-end fold still
+			// needs the pre-edge dirty keys.
+			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 		}
 
 	case *blockResult:
@@ -373,9 +376,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block resumed mid-block: compute (as serial does) to save
 				// trie state without checking the root.
-				cc.computeWithoutCheck(ctx, r)
+				cc.compute(ctx, targetOf(r), computeMode{label: "partial-block "})
 			} else {
-				cc.computeAndCheck(ctx, r)
+				// Per-block compute that validates the root, publishing only on
+				// mismatch (silent success keeps the bounded output channel from
+				// deadlocking).
+				cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 			}
 			if r.BlockNum+1 == cc.perBlockFrom {
 				// Flush the boundary block's pending update outside any changeset
@@ -385,7 +391,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		case r.BlockNum+1 == cc.perBlockFrom:
 			// Last pre-window block: fold everything accumulated in batch mode now,
 			// so the first window block's compute covers only its own deltas.
-			cc.computeTransition(ctx, r)
+			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
 		if logNpPhases && !r.execStartedAt.IsZero() {
 			commitEnd := time.Now()
@@ -412,7 +418,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 	case *commitComputeRequest:
 		if cc.shouldComputeOnRequest() {
-			cc.computeAndPublish(ctx, cc.lastBlockResult)
+			cc.compute(ctx, targetOf(cc.lastBlockResult), computeMode{checkRoot: true, publishRoot: true})
 		} else {
 			// Publish empty result so drainBeforeExit doesn't block forever.
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
@@ -795,33 +801,6 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	return rh, func() error { return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx) }, nil
 }
 
-func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{checkRoot: true, publishRoot: true})
-}
-
-// computeWithoutCheck computes the first partial block's commitment without
-// verifying the root (its trie state doesn't match the header).
-
-func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{label: "partial-block "})
-}
-
-// computeStepBoundary checkpoints commitment at a mid-block step edge without
-// advancing lastComputedBlock or resetting block flags — the block-end fold
-// still needs the pre-edge dirty keys.
-
-func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{label: "step-boundary ", midBlock: true})
-}
-
-// computeAndCheck computes per-block commitment and validates the root,
-// publishing only on mismatch (silent success keeps the bounded output channel
-// from deadlocking).
-
-func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{checkRoot: true})
-}
-
 // flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred
 // update under a nil accumulator — a pre-window block's branch deltas must
 // not pend into the first window block's changeset-routed compute.
@@ -842,14 +821,6 @@ func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.
 			err:      fmt.Errorf("commitmentCalculator: %w", err),
 		})
 	}
-}
-
-// computeTransition folds all accumulated batch-mode blocks at the last
-// pre-window block, isolated so their deltas don't leak into the first window
-// block's changeset.
-
-func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{checkRoot: true})
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {

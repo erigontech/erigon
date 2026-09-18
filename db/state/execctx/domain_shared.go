@@ -1778,17 +1778,8 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 			return err
 		}
 	}
-	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
-	case kv.RCacheDomain:
-		//noop
-	default:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
+	if domain != kv.RCacheDomain && bytes.Equal(prevVal, v) {
+		return nil
 	}
 
 	// The write stays isolated in sd.mem and reaches the shared state cache only
@@ -1905,19 +1896,10 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
-	return sd.computeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress, false)
-}
-
-func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), lockHeld bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
 	// Flush the previous block's pending deferred updates into its own changeset
 	// (hash-aware lookup) so its branch writes can be reverted on unwind.
-	if lockHeld {
-		err = sd.FlushPendingUpdatesLocked(ctx, tx)
-	} else {
-		err = sd.FlushPendingUpdates(ctx, tx)
-	}
-	if err != nil {
+	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)

@@ -1981,7 +1981,7 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 		return false, -1, blocker
 	}
 	target = -1
-	result.TxIn.RangeHeaders(func(_ state.AccountPath, hdr state.ReadHeader) bool {
+	result.TxIn.EachHeader(func(hdr state.ReadHeader) bool {
 		if hdr.Source != state.MapRead {
 			return true
 		}

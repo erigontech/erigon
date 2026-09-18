@@ -491,9 +491,9 @@ func eachHeaderOf[T any](m map[accounts.Address]VersionedRead[T], yield func(Rea
 	return true
 }
 
-// eachHeader visits the type-agnostic header of every read; the callback
+// EachHeader visits the type-agnostic header of every read; the callback
 // returns false to stop early.
-func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
+func (s ReadSet) EachHeader(yield func(ReadHeader) bool) {
 	if !eachHeaderOf(s.address, yield) ||
 		!eachHeaderOf(s.balance, yield) ||
 		!eachHeaderOf(s.nonce, yield) ||
@@ -514,40 +514,8 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 	}
 }
 
-func rangePathHeaders[T any](m map[accounts.Address]VersionedRead[T], path AccountPath, yield func(AccountPath, ReadHeader) bool) bool {
-	for _, tr := range m {
-		if !yield(path, tr.ReadHeader) {
-			return false
-		}
-	}
-	return true
-}
-
-// RangeHeaders visits every read's (path, header); the callback returns false
-// to stop early.
-func (s ReadSet) RangeHeaders(yield func(AccountPath, ReadHeader) bool) {
-	if !rangePathHeaders(s.address, AddressPath, yield) ||
-		!rangePathHeaders(s.balance, BalancePath, yield) ||
-		!rangePathHeaders(s.nonce, NoncePath, yield) ||
-		!rangePathHeaders(s.incarnation, IncarnationPath, yield) ||
-		!rangePathHeaders(s.selfDestruct, SelfDestructPath, yield) ||
-		!rangePathHeaders(s.createContract, CreateContractPath, yield) ||
-		!rangePathHeaders(s.code, CodePath, yield) ||
-		!rangePathHeaders(s.codeHash, CodeHashPath, yield) ||
-		!rangePathHeaders(s.codeSize, CodeSizePath, yield) {
-		return
-	}
-	for _, inner := range s.storage {
-		for _, tr := range inner {
-			if !yield(StoragePath, tr.ReadHeader) {
-				return
-			}
-		}
-	}
-}
-
 // RangeFullHeaders visits every read as (address, path, key, header) — like
-// RangeHeaders but with the address/key the internal maps are keyed by, so a
+// EachHeader but with the address/key the internal maps are keyed by, so a
 // caller can build a reverse (key -> readers) index. Callback returns false to
 // stop early.
 func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, accounts.StorageKey, ReadHeader) bool) {
@@ -2846,7 +2814,7 @@ type versionedReadSet struct {
 // AllHeaders iterates the type-agnostic header of every read in the set.
 func (s versionedReadSet) AllHeaders() iter.Seq[ReadHeader] {
 	return func(yield func(ReadHeader) bool) {
-		s.readSet.eachHeader(yield)
+		s.readSet.EachHeader(yield)
 	}
 }
 
