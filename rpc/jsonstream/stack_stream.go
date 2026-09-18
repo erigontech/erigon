@@ -17,14 +17,12 @@
 package jsonstream
 
 import (
-	"encoding/hex"
+	"encoding"
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 
-	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -105,25 +103,17 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.popCommaOrField()
 }
 
-func (s *StackStream) WriteHexUint64(v uint64) {
-	s.stream.SetBuffer(append(strconv.AppendUint(append(s.stream.Buffer(), `"0x`...), v, 16), '"'))
-	s.popCommaOrField()
-}
-
-// WriteHexU256 writes a number the way JSON-RPC quantities are encoded: no leading zero digits,
-// and "0x0" for zero.
-func (s *StackStream) WriteHexU256(v uint256.Int) {
-	be := v.Bytes32()
-	trimmed := be[:]
-	for len(trimmed) > 1 && trimmed[0] == 0 {
-		trimmed = trimmed[1:]
+// WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
+// for hex quantities, which never need escaping.
+func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
+	if err != nil {
+		if s.stream.Error == nil {
+			s.stream.Error = err
+		}
+		return
 	}
-	buf := append(s.stream.Buffer(), `"0x`...)
-	if trimmed[0] < 0x10 {
-		buf = append(buf, hexDigits[trimmed[0]])
-		trimmed = trimmed[1:]
-	}
-	s.stream.SetBuffer(append(hex.AppendEncode(buf, trimmed), '"'))
+	s.stream.SetBuffer(append(buf, '"'))
 	s.popCommaOrField()
 }
 

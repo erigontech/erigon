@@ -17,8 +17,6 @@
 package accounts
 
 import (
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
@@ -51,7 +49,7 @@ func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	writeField(w, "codeHash")
 	w.WriteHex(r.CodeHash[:])
 	writeField(w, "nonce")
-	w.WriteHexUint64(uint64(r.Nonce))
+	w.WriteQuotedText(&r.Nonce)
 	writeField(w, "storageHash")
 	w.WriteHex(r.StorageHash[:])
 	writeField(w, "storageProof")
@@ -105,5 +103,5 @@ func writeU256(w jsonw.JSONWriter, v *hexutil.U256) {
 		w.WriteNil()
 		return
 	}
-	w.WriteHexU256(uint256.Int(*v))
+	w.WriteQuotedText(v)
 }

@@ -16,16 +16,15 @@
 
 package jsonw
 
-import "github.com/holiman/uint256"
+import "encoding"
 
 // JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
-	// WriteHexUint64 writes v as a 0x-prefixed hex quantity, without leading zeros.
-	WriteHexUint64(v uint64)
-	// WriteHexU256 writes v as a 0x-prefixed hex quantity, without leading zeros.
-	WriteHexU256(v uint256.Int)
+	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
+	// escaping: callers pass hex quantities.
+	WriteQuotedText(v encoding.TextAppender)
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
 	WriteNil()
