@@ -123,15 +123,17 @@ jobs:
             jq '.[:5]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
           fi
 
-      - name: Regenerate llms.txt artifacts
-        run: python3 scripts/generate-llms.py
-
       - name: Verify build
         run: npm run build
         env:
           # Same reasoning as the snapshot step: `npm run build` loads the same
           # branch-controlled config, so it gets the read-only token too.
           GITHUB_TOKEN: ${{ steps.docs_token.outputs.token }}
+
+      # Page bodies are read from the built site, so this has to follow the
+      # build: running it first regenerates the corpus from the previous one.
+      - name: Regenerate llms.txt artifacts
+        run: python3 scripts/generate-llms.py
 
       - name: Open pull request
         env:
