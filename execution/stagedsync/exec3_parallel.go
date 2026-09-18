@@ -1313,9 +1313,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
-			Task:               txTask,
-			index:              i,
-			shouldDelayFeeCalc: true,
+			Task:  txTask,
+			index: i,
 		}
 
 		executor.tasks = append(executor.tasks, t)
@@ -1999,8 +1998,7 @@ const (
 
 type execTask struct {
 	exec.Task
-	index              int
-	shouldDelayFeeCalc bool
+	index int
 }
 
 type execResult struct {
@@ -2109,12 +2107,26 @@ func (result *execResult) calcFees(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
+	recipient := result.Coinbase
+	if r := result.FeePolicy.TipRecipient; !r.IsNil() {
+		recipient = r
+	}
+	tipCredit := result.ExecutionResult.FeeTipped
+	if blobRecipient := result.FeePolicy.BlobFeeRecipient; !blobRecipient.IsNil() {
+		// One deferred credit per tx, so a chain that splits the tip and the blob
+		// fee across two addresses cannot be replayed here.
+		if blobRecipient != recipient {
+			return nil, feeCreditNone, fmt.Errorf("deferred fee credit: blob recipient %x differs from tip recipient %x", blobRecipient, recipient)
+		}
+		tipCredit.Add(&result.ExecutionResult.FeeTipped, &result.ExecutionResult.FeeBlob)
+	}
+
 	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
 	// own prior incarnations that would double-apply the tip on re-execution.
 	// Worker writes for the current tx are picked up below via TxOut.
 	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 
-	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
+	coinbaseAcc, err := vsReader.ReadAccountData(recipient)
 	if err != nil {
 		return nil, feeCreditNone, err
 	}
@@ -2138,7 +2150,7 @@ func (result *execResult) calcFees(
 		}
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
-	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
+	// applied to sender under calcFees=false execution). Track Nonce / CodeHash
 	// alongside Balance so the EIP-161 empty-removal check below sees the
 	// worker's post-write coinbase state, not the stale pre-tx snapshot.
 	coinbaseNonce := uint64(0)
@@ -2149,19 +2161,19 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
-	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
+	if bw, ok := result.TxOut.GetBalance(recipient); ok {
 		newCoinbaseBalance = bw.Val
 	}
-	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
+	if nw, ok := result.TxOut.GetNonce(recipient); ok {
 		coinbaseNonce = nw.Val
 	}
-	if _, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
+	if _, ok := result.TxOut.GetCodeHash(recipient); ok {
 		coinbaseHasCodeHashWrite = true
 	}
-	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
+	if sw, ok := result.TxOut.GetSelfDestruct(recipient); ok {
 		coinbaseSelfdestructed = sw.Val
 	}
-	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
+	if cw, ok := result.TxOut.GetCreateContract(recipient); ok {
 		coinbaseCreatedContract = cw.Val
 	}
 	if hasBurnt {
@@ -2177,7 +2189,7 @@ func (result *execResult) calcFees(
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &tipCredit)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt {
@@ -2193,7 +2205,7 @@ func (result *execResult) calcFees(
 	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
-	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
+	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, recipient)
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
@@ -2213,7 +2225,7 @@ func (result *execResult) calcFees(
 
 	var coinbaseEntry, burntEntry *feeEntry
 	if emitCoinbase {
-		coinbaseEntry = &feeEntry{addr: result.Coinbase, deleted: coinbaseEmptied}
+		coinbaseEntry = &feeEntry{addr: recipient, deleted: coinbaseEmptied}
 		if !coinbaseEmptied {
 			coinbaseEntry.acc = feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce)
 			coinbaseEntry.reason = tracing.BalanceIncreaseRewardTransactionFee
@@ -2228,7 +2240,7 @@ func (result *execResult) calcFees(
 	}
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
-	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
+	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, recipient) &&
 		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
 		return nil, feeCreditRecorded, nil
 	}
@@ -2430,7 +2442,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
-		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+		chainConfig, chainReader, dirs, false)
 
 	if !result.Operational && (ibs.HadInvalidRead() || result.Err != nil) {
 		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
@@ -3037,17 +3049,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.number(), txVersion.TxIndex, txVersion.Incarnation)
 		}
 
-		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Caveat: the tip write is stamped at the
-		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-		// downstream tx that read coinbase via versionMap between the worker
-		// write and the tip write records the same Version the validator
-		// observes — the version-only validator will NOT catch that case.
-		// In practice this is unusual: only sender==coinbase produces a
-		// worker coinbase write, and downstream BALANCE(coinbase) reads
-		// across this window are rare. Value-aware validation would close
-		// the gap if it surfaces.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
+		// Credit the deferred tip pre-validate so the validator sees the post-tip
+		// recipient write. Parlia routes the tip (and post-Cancun blob fee) to the
+		// contended SystemAddress instead of the coinbase; deferring it (rather
+		// than crediting inline) keeps workers from serializing on SystemAddress
+		// and lets the in-block system tx's read of it re-execute normally.
+		// Residual: under many fee-crediting txs per block, a lower tx's re-exec
+		// can restamp a credit's value at an unchanged version — a gap the
+		// version-only validator would miss (not observed on Chapel; revisit for
+		// high-contention BSC). System txs are excluded: their result carries no
+		// Coinbase and they distribute SystemAddress themselves.
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && !txTask.IsSystemTx() && txResult != nil && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
@@ -3143,7 +3155,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				if txn := txTask.Tx(); txn != nil {
+				if txn := txTask.Tx(); txn != nil && !txTask.IsSystemTx() {
 					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
 					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
 						return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil

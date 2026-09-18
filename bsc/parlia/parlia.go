@@ -14,11 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package parlia is a minimal, permissive stand-in for BSC's Parlia (PoSA)
-// consensus engine. It accepts any well-formed header without seal, validator
-// or finality verification, so a Chapel/BSC node can boot and download blocks
-// over devp2p without executing them. It is NOT correct for execution or
-// validation — real Parlia consensus is a later phase.
+// Package parlia implements BSC's Parlia (PoSA) consensus engine.
 package parlia
 
 import (
@@ -30,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -41,14 +38,67 @@ import (
 
 var errNotSupported = errors.New("parlia: block production/execution not supported by the download-only stub")
 
+// bscSystemContracts are the addresses a Parlia system transaction may target.
+var bscSystemContracts = map[common.Address]struct{}{
+	common.HexToAddress("0x0000000000000000000000000000000000001000"): {}, // Validator
+	common.HexToAddress("0x0000000000000000000000000000000000001001"): {}, // Slash
+	common.HexToAddress("0x0000000000000000000000000000000000001002"): {}, // SystemReward
+	common.HexToAddress("0x0000000000000000000000000000000000001003"): {}, // LightClient
+	common.HexToAddress("0x0000000000000000000000000000000000001004"): {}, // TokenHub
+	common.HexToAddress("0x0000000000000000000000000000000000001005"): {}, // RelayerIncentivize
+	common.HexToAddress("0x0000000000000000000000000000000000001006"): {}, // RelayerHub
+	common.HexToAddress("0x0000000000000000000000000000000000001007"): {}, // GovHub
+	common.HexToAddress("0x0000000000000000000000000000000000002000"): {}, // CrossChain
+	common.HexToAddress("0x0000000000000000000000000000000000002002"): {}, // StakeHub
+	common.HexToAddress("0x0000000000000000000000000000000000002004"): {}, // Governor
+	common.HexToAddress("0x0000000000000000000000000000000000002005"): {}, // GovToken
+	common.HexToAddress("0x0000000000000000000000000000000000002006"): {}, // Timelock
+	common.HexToAddress("0x0000000000000000000000000000000000003000"): {}, // TokenRecoverPortal
+}
+
 // Parlia is the permissive stub engine. See package docs.
 type Parlia struct {
 	chainConfig *chain.Config
+	signer      *types.Signer
 	logger      log.Logger
 }
 
 func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
-	return &Parlia{chainConfig: chainConfig, logger: logger}
+	return &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
+}
+
+// IsSystemTransaction reports whether tx is a Parlia system transaction: a
+// gas-price-zero call to a system contract from the block validator.
+func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	to := tx.GetTo()
+	if to == nil {
+		return false, nil
+	}
+	if _, ok := bscSystemContracts[*to]; !ok {
+		return false, nil
+	}
+	if !tx.GetTipCap().IsZero() {
+		return false, nil
+	}
+	sender, err := tx.Sender(*p.signer)
+	if err != nil {
+		return false, errors.New("parlia: unauthorized system transaction")
+	}
+	return sender.Value() == header.Coinbase, nil
+}
+
+// ApplySystemTx performs the consensus state effect before a system transaction
+// runs: distributeToSystem/distributeToValidator move the reward from
+// SystemAddress to the validator, which forwards it on-chain as the tx value.
+func (p *Parlia) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	value := tx.GetValue()
+	if value.IsZero() {
+		return nil
+	}
+	if err := ibs.SubBalance(params.SystemAddress, *value, tracing.BalanceChangeUnspecified); err != nil {
+		return err
+	}
+	return ibs.AddBalance(accounts.InternAddress(header.Coinbase), *value, tracing.BalanceChangeUnspecified)
 }
 
 // --- EngineReader ---
@@ -70,6 +120,17 @@ func (p *Parlia) Type() chain.RulesName { return chain.ParliaRules }
 func (p *Parlia) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header,
 	syscall rules.SystemCall) ([]rules.Reward, error) {
 	return nil, nil
+}
+
+// FeePolicy routes the tip to SystemAddress, which the block's system
+// transactions sweep to the validator on-chain. The blob fee follows it from
+// Cancun on, where other chains burn it.
+func (p *Parlia) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	policy := evmtypes.FeePolicy{TipRecipient: params.SystemAddress}
+	if p.chainConfig.IsCancun(header.Time) {
+		policy.BlobFeeRecipient = params.SystemAddress
+	}
+	return policy
 }
 
 func (p *Parlia) GetTransferFunc() evmtypes.TransferFunc { return misc.Transfer }

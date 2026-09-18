@@ -110,6 +110,16 @@ func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
 
+// systemTxFlag reports whether the body tx at txIndex is a consensus system
+// transaction (Parlia). Non-body indices and engines without in-block system
+// transactions return false.
+func systemTxFlag(engine rules.Engine, txs types.Transactions, txIndex int, header *types.Header) (bool, error) {
+	if txIndex < 0 || txIndex >= len(txs) {
+		return false, nil
+	}
+	return engine.IsSystemTransaction(txs[txIndex], header)
+}
+
 // execRange is the resolved block/txNum window the executor runs over. The
 // stage wrapper resolves it (SeekCommitment + restoreTxNum) and passes it in;
 // the exec core does not touch the stage's DB metadata to derive it.
@@ -798,6 +808,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Logger:           te.logger,
 					BlockStateCache:  blockStateCache,
 				}
+
+				sysTx, err := systemTxFlag(te.cfg.engine, txs, txIndex, header)
+				if err != nil {
+					return err
+				}
+				txTask.SetSystemTx(sysTx)
 
 				txTasks = append(txTasks, txTask)
 				inputTxNum++

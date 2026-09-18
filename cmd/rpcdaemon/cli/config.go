@@ -1078,6 +1078,10 @@ func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHe
 	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
+func (e *remoteRulesEngine) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
+}
+
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
@@ -1144,6 +1148,14 @@ func (e *remoteRulesEngine) APIs(_ rules.ChainHeaderReader) []rpc.API {
 
 func (e *remoteRulesEngine) TxDependencies(header *types.Header) [][]int {
 	panic("remoteRulesEngine.TxDependencies not supported")
+}
+
+func (e *remoteRulesEngine) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	panic("remoteRulesEngine.IsSystemTransaction not supported")
+}
+
+func (e *remoteRulesEngine) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	panic("remoteRulesEngine.ApplySystemTx not supported")
 }
 
 func readChainConfigFromDB(ctx context.Context, db kv.RoDB) (*chain.Config, error) {

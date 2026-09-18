@@ -785,8 +785,18 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		feePolicy := st.evm.Context.FeePolicy
+		tipRecipient := feePolicy.TipRecipient
+		if tipRecipient.IsNil() {
+			tipRecipient = coinbase
+		}
+		if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+		if !feePolicy.BlobFeeRecipient.IsNil() {
+			if err := st.state.AddBalance(feePolicy.BlobFeeRecipient, fees.blobGasVal, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			}
 		}
 	}
 
@@ -826,6 +836,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		SenderInitBalance:     senderInitBalance,
 		CoinbaseInitBalance:   coinbaseInitBalance,
 		FeeTipped:             tipAmount,
+		FeeBlob:               fees.blobGasVal,
 		FeeBurnt:              burnAmount,
 	}
 
