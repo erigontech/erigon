@@ -682,7 +682,11 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 	}
 	path := nibbles.KeybytesToHex(key)[:2*len(key)] // without the terminator nibble
 	for enc != nil {
-		proof = append(proof, enc)
+		// An inline child is carried inside its parent, so emitting it again would leave the
+		// verifier an element it never asks for.
+		if len(proof) == 0 || len(enc) >= length.Hash {
+			proof = append(proof, enc)
+		}
 		elems, _, err := rlp.SplitList(enc)
 		if err != nil {
 			return nil, nil, err

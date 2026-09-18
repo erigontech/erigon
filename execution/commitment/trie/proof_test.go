@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -122,4 +123,34 @@ func TestVerifyStorageProofRejectsValueForAbsentKey(t *testing.T) {
 		noValue.Proof = append(noValue.Proof, n)
 	}
 	require.NoError(t, VerifyStorageProofByHash(root, common.BytesToHash(absent), noValue), "a missing value is zero")
+}
+
+// A child whose encoding is under 32 bytes sits inside its parent, so it is not a proof element of
+// its own. Short keys reach that shape; the 32-byte hashed keys eth_getProof uses do not.
+func TestProofFromNodesSkipsInlineChildren(t *testing.T) {
+	tr := New(common.Hash{})
+	keys := make([][]byte, 8)
+	for i := range keys {
+		keys[i] = crypto.Keccak256([]byte{byte(i)})[:1]
+		tr.Update(keys[i], []byte{byte(i) | 1})
+	}
+	root := tr.Hash()
+
+	byHash := map[string][]byte{}
+	for _, k := range keys {
+		nodes, err := tr.Prove(k, 0, false)
+		require.NoError(t, err)
+		for _, n := range nodes {
+			byHash[string(crypto.Keccak256(n))] = n
+		}
+	}
+
+	for _, k := range keys {
+		got, _, err := ProofFromNodes(byHash, root[:], k)
+		require.NoError(t, err)
+		for i, n := range got {
+			require.True(t, i == 0 || len(n) >= length.Hash,
+				"element %d of %d bytes is inline in its parent, so it must not be emitted", i, len(n))
+		}
+	}
 }
