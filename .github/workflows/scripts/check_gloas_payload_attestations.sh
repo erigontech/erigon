@@ -115,6 +115,7 @@ while ((SECONDS < deadline)); do
     continue
   fi
   if ((SECONDS >= deadline)); then
+    head_fetch_unavailable=true
     break
   fi
   head_fetch_unavailable=false
@@ -160,6 +161,8 @@ while ((SECONDS < deadline)); do
             (.data | type == "object") and
             (.data.message | type == "object") and
             (.data.message.slot | canonical_decimal) and
+            (.data.message.parent_root | type == "string") and
+            (.data.message.parent_root | test("^0x[0-9a-fA-F]{64}\\z")) and
             (.data.message.body | type == "object") and
             (.data.message.body.payload_attestations | type == "array") and
             all(.data.message.body.payload_attestations[];
@@ -167,8 +170,11 @@ while ((SECONDS < deadline)); do
               (.aggregation_bits | type == "string") and
               (.signature | type == "string") and
               (.data | type == "object") and
+              (.data.beacon_block_root | type == "string") and
+              (.data.beacon_block_root | test("^0x[0-9a-fA-F]{64}\\z")) and
               (.data.slot | canonical_decimal) and
-              (.data.payload_present | type == "boolean")
+              (.data.payload_present | type == "boolean") and
+              (.data.blob_data_available | type == "boolean")
             )
           ' "$api_tmp_dir/candidate.json"; then
             echo "Candidate block response for slot $slot was invalid; retrying"
@@ -176,33 +182,41 @@ while ((SECONDS < deadline)); do
           elif ! jq -e \
             --arg requested_slot "$slot" \
             --arg attestation_slot "$((slot - 1))" '
+            .data.message.parent_root as $parent_root |
             .version == "gloas" and
             .data.message.slot == $requested_slot and
             all(.data.message.body.payload_attestations[];
               .data.slot == $attestation_slot and
+              (.data.beacon_block_root | ascii_downcase) == ($parent_root | ascii_downcase) and
               (.aggregation_bits |
-                test("^0x[0-9a-fA-F]+$") and
-                (test("^0x0+$"; "i") | not)
+                test("^0x[0-9a-fA-F]{128}\\z") and
+                (test("^0x0+\\z"; "i") | not)
               ) and
               (.signature |
-                test("^0x[0-9a-fA-F]{192}$") and
-                (test("^0x0+$"; "i") | not)
+                test("^0x[0-9a-fA-F]{192}\\z") and
+                (test("^0x0+\\z"; "i") | not)
               )
             )
           ' "$api_tmp_dir/candidate.json"; then
             echo "Candidate block response for slot $slot was invalid; retrying"
             slot_unresolved=true
-          elif jq -e '
-            any(.data.message.body.payload_attestations[];
-              .data.payload_present == true
-            )
-          ' "$api_tmp_dir/candidate.json"; then
+          else
+            payload_available=false
+            if jq -e '
+              any(.data.message.body.payload_attestations[];
+                .data.payload_present == true
+              )
+            ' "$api_tmp_dir/candidate.json" >/dev/null; then
+              payload_available=true
+            fi
             if ((SECONDS >= deadline)); then
               scan_incomplete=true
               break 2
             fi
-            echo "Found available payload attestations in Gloas block at slot $slot"
-            exit 0
+            if [ "$payload_available" = true ]; then
+              echo "Found available payload attestations in Gloas block at slot $slot"
+              exit 0
+            fi
           fi
           ;;
         404)
