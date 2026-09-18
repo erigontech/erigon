@@ -413,6 +413,13 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 
 // executionHashMarkedInvalid reports whether this execution payload is already known bad.
 func (f *ForkChoiceStore) executionHashMarkedInvalid(executionBlockHash common.Hash) bool {
+	// invalidatedExecutionPayloads outlives the bounded status caches, so it has to be
+	// consulted too or the verdict is lost once the entry is evicted.
+	if f.invalidatedExecutionPayloads != nil {
+		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
 	if f.executionPayloadStatus == nil {
 		return false
 	}
@@ -430,7 +437,8 @@ func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
 }
 
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
-// the EL without holding f.mu. Admission is re-checked and the verdict recorded while the
+// the EL without holding f.mu. stillAdmissible is called under a read lock, and skipped if
+// that lock is not free, so the global admission token is never held waiting on f.mu. Admission is re-checked and the verdict recorded while the
 // admission token is still held, so queued callers neither resend nor run stale work.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
@@ -445,9 +453,16 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	f.mu.Unlock()
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		// The wait for the token can be long enough for the block to go stale.
-		if err := stillAdmissible(); err != nil {
-			return execution_client.PayloadStatusNone, err
+		// The wait for the token can be long enough for the block to go stale. The check
+		// needs f.mu, but this owns the global token, so never wait for it: whoever holds
+		// the lock may be in a slow EL call of its own and every payload would queue
+		// behind that. Skipping only costs a call the re-check afterwards still undoes.
+		if f.mu.TryRLock() {
+			err := stillAdmissible()
+			f.mu.RUnlock()
+			if err != nil {
+				return execution_client.PayloadStatusNone, err
+			}
 		}
 		// Invalid is terminal and outranks a validated marker, matching markPayloadStatus.
 		// The claimed hash is safe to read: only derived hashes are ever written, so a hit

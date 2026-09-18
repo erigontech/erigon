@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -401,29 +402,29 @@ func TestNewPayloadSkipsELWhenBlockWentStaleWhileQueued(t *testing.T) {
 // Invalid is terminal. A root invalidated while the EL call was in flight must not be
 // reported as validated to a queued caller, nor have its validated marker revived.
 func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().
-		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Times(0)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	store, block := buildExAnteStorePendingLast(t, engine)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	// Both markers set for the same root, as they would be if an invalidation landed
-	// after the payload had once been validated.
-	store.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+			blockRoot, func() error { return nil }, noDerivedHash,
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+	}()
+	awaitSignal(t, elEntered, "NewPayload to start")
+
+	// The root is invalidated while the EL is still working on it.
 	store.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+	close(releaseEL)
+	awaitSignal(t, done, "the validating caller to finish")
 
-	store.mu.Lock()
-	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, func() error { return nil }, noDerivedHash,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
-	store.mu.Unlock()
-
-	require.NoError(t, err)
-	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status,
-		"the invalid marker must outrank the validated one")
+	require.False(t, store.verifiedExecutionPayload.Contains(blockRoot),
+		"a root invalidated during the call must not gain a validated marker")
 }
 
 // Two beacon blocks can carry the same execution payload. The invalid verdict must be
@@ -465,12 +466,44 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 	status, ok := store.executionPayloadStatus.Get(executionHash)
 	require.True(t, ok, "the verdict must be cached against the payload before the token is released")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
-	// A different beacon root carrying the same payload must now short-circuit.
-	require.True(t, store.executionHashMarkedInvalid(payload.BlockHash))
 	<-store.payloadValidationAdmission
 
 	close(unpin)
 	awaitSignal(t, done, "the validating caller to finish")
+
+	// A different beacon root carrying the same payload must reuse that verdict. The mock
+	// allows one call only, so a resend fails here.
+	store.mu.Lock()
+	second, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		common.HexToHash("0xbbbb"), func() error { return nil }, derived,
+		payload, &block.Block.ParentRoot, nil, nil)
+	store.mu.Unlock()
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, second)
+}
+
+// The verdict must also survive eviction from the bounded status caches: the authoritative
+// invalid set outlives them and has to be consulted too.
+func TestNewPayloadHonoursTheAuthoritativeInvalidSet(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	payload := block.Block.Body.ExecutionPayload
+	derived := selfConsistentPayload(t, block)
+
+	// Only the authoritative set knows, as it would be once the LRUs evicted the entry.
+	store.invalidatedExecutionPayloads.Store(payload.BlockHash, struct{}{})
+
+	store.mu.Lock()
+	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		common.HexToHash("0xcccc"), func() error { return nil }, derived,
+		payload, &block.Block.ParentRoot, nil, nil)
+	store.mu.Unlock()
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 }
 
 // stillAdmissible has to run after the admission token is acquired, not before. Running it
@@ -487,28 +520,35 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 	store.payloadValidationOnce.Do(func() { store.payloadValidationAdmission = make(chan struct{}, 1) })
 	store.payloadValidationAdmission <- struct{}{}
 
-	checked := make(chan struct{})
-	done := make(chan struct{})
+	var checked atomic.Bool
+	ctx, cancel := context.WithCancel(context.Background())
+	locked, done := make(chan struct{}), make(chan error, 1)
 	go func() {
-		defer close(done)
 		store.mu.Lock()
-		defer store.mu.Unlock()
-		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+		close(locked)
+		_, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(ctx,
 			common.HexToHash("0xbbbb"), func() error {
-				close(checked)
-				return errBlockAtFinalizedHorizon
+				checked.Store(true)
+				return nil
 			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		store.mu.Unlock()
+		done <- err
 	}()
 
-	select {
-	case <-checked:
-		t.Fatal("admission was checked before the token was acquired")
-	case <-time.After(200 * time.Millisecond):
-	}
+	// Taking f.mu proves the helper released it, so it is now parked on the token.
+	awaitSignal(t, locked, "the caller to take the fork-choice lock")
+	store.mu.Lock()
+	store.mu.Unlock()
+	cancel()
 
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, errPayloadValidationAdmission)
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("the caller did not return after cancellation")
+	}
+	require.False(t, checked.Load(), "admission was checked before the token was won")
 	<-store.payloadValidationAdmission
-	awaitSignal(t, checked, "admission to be checked after the token was acquired")
-	awaitSignal(t, done, "the caller to finish")
 }
 
 // A payload whose claimed hash does not match its contents is rejected for naming the
@@ -548,6 +588,43 @@ func mustRoot(t *testing.T, block *cltypes.SignedBeaconBlock) common.Hash {
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	return root
+}
+
+// The global admission token must never be held waiting on f.mu: whoever holds the lock
+// may be in a slow EL call of its own, and every other payload would queue behind it.
+func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+
+	// Occupy the token so the caller below parks on it with f.mu already released.
+	store.payloadValidationOnce.Do(func() { store.payloadValidationAdmission = make(chan struct{}, 1) })
+	store.payloadValidationAdmission <- struct{}{}
+
+	var checked atomic.Bool
+	locked, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		store.mu.Lock()
+		close(locked)
+		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+			mustRoot(t, block), func() error {
+				checked.Store(true)
+				return nil
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		store.mu.Unlock()
+	}()
+
+	// Taking f.mu proves the caller released it, and holding it is the contention the
+	// caller must not wait on once it wins the token.
+	awaitSignal(t, locked, "the caller to take the fork-choice lock")
+	store.mu.Lock()
+	<-store.payloadValidationAdmission
+
+	awaitSignal(t, elEntered, "NewPayload to start while the fork-choice lock is held")
+	require.False(t, checked.Load(), "admission must be skipped rather than wait for the lock")
+	store.mu.Unlock()
+	close(releaseEL)
+	awaitSignal(t, done, "the caller to finish")
 }
 
 // A caller that wins admission only after someone else validated the same payload

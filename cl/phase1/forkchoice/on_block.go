@@ -354,8 +354,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			var admissionErr error
 			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
-				f.mu.RLock()
-				defer f.mu.RUnlock()
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 				return admissionErr
 			}, func() (common.Hash, bool) {
