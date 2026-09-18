@@ -481,7 +481,7 @@ func FuzzFillMessage(f *testing.F) {
 }
 
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
-	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
+	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
 func blockResultFixture(n int) map[string]any {

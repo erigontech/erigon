@@ -134,7 +134,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			stream := jsonstream.New(&buf)
 
 			h := handler{}
-			h.runMethod(context.Background(), &msg, cb, args, stream)
+			_, _ = h.runMethod(context.Background(), &msg, cb, args, stream)
 
 			stream.Flush()
 
@@ -177,7 +177,7 @@ func TestRunMethodStreamable(t *testing.T) {
 
 	h := handler{}
 	assert.NotPanics(t, func() {
-		h.runMethod(ctx, &msg, cb, args, stream)
+		_, _ = h.runMethod(ctx, &msg, cb, args, stream)
 	})
 }
 
