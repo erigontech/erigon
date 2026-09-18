@@ -130,6 +130,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		ethClock:    ethClock,
 		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute),
 	}
+	context.AfterFunc(ctx, p.bannedPeers.Close)
 
 	// pubsub
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval

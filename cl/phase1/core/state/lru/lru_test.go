@@ -44,7 +44,8 @@ func deadlineOf[K comparable, V any](t *testing.T, c *CacheWithTTL[K, V], k K) t
 	t.Helper()
 	e, ok := c.cache.Peek(k)
 	require.True(t, ok, "no entry held for the key")
-	return e.expiresAt
+	require.NotNil(t, e.node, "entry held without a deadline")
+	return e.node.expiresAt
 }
 
 // held reports whether the cache still holds a key, read under the lock the sweep takes. Going
@@ -108,6 +109,12 @@ func TestCacheWithTTLCloseWaitsForRunningSweep(t *testing.T) {
 	case <-returned:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not return once the sweep could finish")
+	}
+	// Close returning is not the property: the sweep goroutine itself must be gone by then.
+	select {
+	case <-c.stopped:
+	default:
+		t.Fatal("Close returned before the sweep goroutine had stopped")
 	}
 
 	require.NotPanics(t, c.Close, "Close must stay safe to call again after it has waited")
@@ -672,7 +679,7 @@ func TestCacheWithTTLExpiryBookkeepingBoundedByCache(t *testing.T) {
 
 // TestCacheWithTTLDrainedQueueRetainsNothing pins that once every entry is reclaimed no expiry
 // bookkeeping survives: the order is a linked list with no shared backing array, each node is
-// collectable the moment it is unlinked, and none is left linked or indexed after a burst is swept.
+// collectable the moment it is unlinked, and none is left linked after a burst is swept.
 func TestCacheWithTTLDrainedQueueRetainsNothing(t *testing.T) {
 	c := NewWithTTL[uint64, uint64]("expiry_drained", 200_000, time.Hour)
 	t.Cleanup(c.Close)
@@ -687,7 +694,6 @@ func TestCacheWithTTLDrainedQueueRetainsNothing(t *testing.T) {
 	c.mu.Lock()
 	require.Nil(t, c.expiryHead)
 	require.Nil(t, c.expiryTail)
-	require.Empty(t, c.expiryByKey)
 	c.mu.Unlock()
 }
 
@@ -741,4 +747,10 @@ func TestCacheWithTTLNoTTLKeepsNoRecords(t *testing.T) {
 	require.Equal(t, 0, c.expiryLen(), "no ttl, no expiry order")
 	c.removeExpired(time.Now().Add(100 * 365 * 24 * time.Hour))
 	require.Equal(t, 8, c.Len())
+}
+
+// TestCacheWithTTLRejectsNonPositiveSize pins that a non-positive size is refused up front, as New
+// refuses it, rather than building a cache that can hold nothing.
+func TestCacheWithTTLRejectsNonPositiveSize(t *testing.T) {
+	require.Panics(t, func() { NewWithTTL[uint64, uint64]("nonpositive_size", 0, time.Second) })
 }

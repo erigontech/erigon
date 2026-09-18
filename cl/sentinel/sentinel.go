@@ -225,6 +225,7 @@ func (s *Sentinel) Stop() {
 	//s.subManager.Close()
 	s.cancel()
 	s.p2p.Host().Close()
+	s.peers.Close()
 }
 
 func (s *Sentinel) String() string {
