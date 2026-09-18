@@ -634,7 +634,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, balance, b)
 }
 
-func TestVersionMapMarkEstimate(t *testing.T) {
+func TestEstimateDependencyCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
@@ -669,14 +669,16 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx1 write
+	// Tx1 speculative write: flushed incomplete, so its cells are born ESTIMATE
+	// (the branch never downgrades a completed Done cell back to Estimate).
 	_, err = states[1].GetOrNewStateObject(addr)
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), false, "")
 
-	// Tx2 read
+	// Tx2 read: an estimate cell still carries its value, so the read returns it
+	// and records the dependency.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[2].GetBalance(addr)
@@ -684,15 +686,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx1 mark estimate
-	for h := range states[1].VersionedWrites().AllHeaders() {
-		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
-	}
-
 	// Read-once (Block-STM): states[2] already recorded its state/balance reads
 	// above, so the repeat reads are served from the read-set and no longer abort
-	// eagerly when Tx1's writes are marked ESTIMATE. The estimate dependency is
-	// caught at commit — ValidateVersion re-reads Tx1's now-Estimate balance cell
+	// eagerly on the ESTIMATE dependency. The estimate dependency is caught at
+	// commit — ValidateVersion re-reads Tx1's Estimate balance cell
 	// (MVReadResultDependency) and returns VersionInvalid, which drives re-execution.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
@@ -707,7 +704,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, true, false, false, "")
+	}, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
