@@ -265,6 +265,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
+| eth_getHeaderByHash                        | Yes     |                                                       |
+| eth_getHeaderByNumber                      | Yes     |                                                       |
 | eth_getBlockTransactionCountByHash         | Yes     |                                                       |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                                       |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                                       |
@@ -352,6 +354,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV1                          | Yes     |                                                       |
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
+| engine_getBlobsV4                          | Yes     | Added in Amsterdam                                   |
 |                                            |         |                                                       |
 | testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
 | testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |

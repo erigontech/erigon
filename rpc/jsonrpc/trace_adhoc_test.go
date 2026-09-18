@@ -22,7 +22,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,7 +134,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -171,7 +170,7 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -281,7 +280,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[0].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -316,7 +315,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
@@ -359,7 +358,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	if res, ok := results[2].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
-		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.U256)
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
@@ -396,7 +395,7 @@ func TestReplayTransaction(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
 	addrDiff := results.StateDiff[internedAddress("0x0000000000000006000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -413,7 +412,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
 	addrDiff := results[0].StateDiff[internedAddress("0x0000000000000001000000000000000000000000")]
-	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
+	v := addrDiff.Balance.(map[string]*hexutil.U256)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
@@ -605,7 +604,7 @@ func TestRawTransactionStateDiff(t *testing.T) {
 
 	// Receiver balance must increase: either a new account ("+") or a change ("*" with To > From).
 	switch v := receiverDiff.Balance.(type) {
-	case map[string]*hexutil.Big:
+	case map[string]*hexutil.U256:
 		val, exists := v["+"]
 		require.True(t, exists, "new receiver account balance must use '+' key")
 		require.Positive(t, val.ToInt().Sign(), "receiver initial balance must be positive")
@@ -698,8 +697,8 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
@@ -711,6 +710,110 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	require.NoError(t, err)
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.Output.String())
+}
+
+// State overrides are synthetic pre-state, so the stateDiff baseline must be read
+// from the overridden state and the override itself must not surface as a change.
+func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	overriddenBalance := (*hexutil.U256)(uint256.MustFromDecimal("7000000000000000000000"))
+	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+
+	result, err := api.Call(context.Background(), TraceCallParam{
+		From:  &bankAddr,
+		To:    &recipient,
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(bankAddr): {Balance: &overriddenBalance},
+		},
+	})
+	require.NoError(t, err)
+
+	sender := result.StateDiff[accounts.InternAddress(bankAddr)]
+	require.NotNil(t, sender)
+	balance, ok := sender.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "sender balance must be reported as changed, got %v", sender.Balance)
+	require.Equal(t, *overriddenBalance, *balance["*"].From)
+}
+
+func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	overriddenCode := hexutil.Bytes{0x60, 0x00, 0x60, 0x00, 0xf3}
+
+	result, err := api.Call(context.Background(), TraceCallParam{
+		From:  &bankAddr,
+		To:    &recipient,
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(recipient): {Code: &overriddenCode},
+		},
+	})
+	require.NoError(t, err)
+
+	recipientDiff := result.StateDiff[accounts.InternAddress(recipient)]
+	require.NotNil(t, recipientDiff)
+	require.Equal(t, "=", recipientDiff.Code)
+}
+
+func TestTraceCallStateDiffStorageBaselineIncludesStateOverrides(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0001")
+	slot := common.HexToHash("0x01")
+	overriddenSlot := common.HexToHash("0x05")
+	// PUSH1 0x09, PUSH1 0x01, SSTORE, STOP
+	sstoreCode := hexutil.Bytes{0x60, 0x09, 0x60, 0x01, 0x55, 0x00}
+
+	result, err := api.Call(context.Background(), TraceCallParam{
+		From: &bankAddr,
+		To:   &target,
+	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(target): {
+				Code:      &sstoreCode,
+				StateDiff: &map[common.Hash]common.Hash{slot: overriddenSlot},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	targetDiff := result.StateDiff[accounts.InternAddress(target)]
+	require.NotNil(t, targetDiff)
+	storage, ok := targetDiff.Storage[slot]["*"].(*StateDiffStorage)
+	require.True(t, ok, "slot must be reported as changed, got %v", targetDiff.Storage[slot])
+	require.Equal(t, overriddenSlot, storage.From)
+	require.Equal(t, common.HexToHash("0x09"), storage.To)
+}
+
+// An account that is only overridden and never touched by the call stays out of the
+// diff: the override is pre-state, not an effect of the traced transaction.
+func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	recipient := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	untouched := common.HexToAddress("0x00000000000000000000000000000000cafe0002")
+	untouchedBalance := (*hexutil.U256)(uint256.NewInt(123))
+
+	result, err := api.Call(context.Background(), TraceCallParam{
+		From:  &bankAddr,
+		To:    &recipient,
+		Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(untouched): {Balance: &untouchedBalance},
+		},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, result.StateDiff, accounts.InternAddress(untouched))
 }
 
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a
@@ -1135,7 +1238,7 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 func traceCallValueTransfer() TraceCallParam {
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.Big)(big.NewInt(1))}
+	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.U256)(uint256.NewInt(1))}
 }
 
 func TestTraceCallKeepsTraceEmptyWhenNotRequested(t *testing.T) {
@@ -1231,6 +1334,36 @@ func TestReplayTransactionInvalidType(t *testing.T) {
 	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, new(bool), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unrecognized trace type")
+}
+
+// theAddr receives 1e15 wei in block 1 and another 1e15 wei in block 2. With
+// parent block 1, a bundle call that touches theAddr must see the post-block-1
+// balance, never the one block 2's real transaction produced.
+func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	parentNum := rpc.BlockNumber(1)
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
+
+	const bundle = `[
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace"]],
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0100000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
+]`
+
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	diff, ok := results[1].StateDiff[internedAddress("0x0100000000000000000000000000000000000000")]
+	require.True(t, ok, "theAddr missing from the second call's stateDiff")
+	balance, ok := diff.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "unexpected balance diff shape %+v", diff.Balance)
+	require.Len(t, balance, 1)
+	for _, b := range balance {
+		require.Equal(t, uint64(1000000000000000), b.From.ToInt().Uint64(),
+			"second bundle call read state past the parent boundary")
+		require.Equal(t, uint64(1000000000000001), b.To.ToInt().Uint64())
+	}
 }
 
 func TestOeTracerMcopyMemory(t *testing.T) {

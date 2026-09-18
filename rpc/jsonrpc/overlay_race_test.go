@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -550,7 +551,7 @@ func TestGetTransactionReceiptPinsOverlayView(t *testing.T) {
 	receipt, err := api.GetTransactionReceipt(m.Ctx, txn.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, receipt)
-	require.Equal(t, txn.Hash(), receipt["transactionHash"])
+	require.Equal(t, txn.Hash(), receipt.TransactionHash)
 }
 
 func TestGetTransactionReceiptRejectsMismatchedTransaction(t *testing.T) {
@@ -1041,7 +1042,7 @@ func TestOtterscanSearchUsesCommittedView(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, results.Txs)
 	require.Equal(t, committedHash, *results.Txs[0].BlockHash)
-	require.Equal(t, committedHash, results.Receipts[0]["blockHash"])
+	require.Equal(t, committedHash, results.Receipts[0].BlockHash)
 }
 
 func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
@@ -1143,7 +1144,7 @@ func TestGetTransactionReceiptHandlesMissingHeader(t *testing.T) {
 	base._blockReader = hideHeaderBlockReader{FullBlockReader: base._blockReader, blockNumber: 1}
 	api := newEthApiForTest(base, m.DB, nil, nil)
 
-	var receipt map[string]any
+	var receipt *ethutils.RPCReceipt
 	require.NotPanics(t, func() {
 		receipt, err = api.GetTransactionReceipt(m.Ctx, common.Hash{1})
 	})
@@ -2060,6 +2061,9 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 	detailsHash := func(v any) common.Hash {
 		return blockHash(v.(map[string]any)["block"])
 	}
+	headerHash := func(v any) common.Hash {
+		return *v.(*ethapi.RPCHeader).Hash
+	}
 
 	cases := []struct {
 		name       string
@@ -2106,6 +2110,20 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 				api := NewPrivateDebugAPI(h.base, db, nil, &rpccfg.DebugApiConfig{})
 				return api.GetRawHeader(h.m.Ctx, rpc.BlockNumberOrHashWithNumber(head(h)))
 			},
+		},
+		{
+			name: "eth_getHeaderByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByNumber(h.m.Ctx, head(h))
+			},
+			hashOf: headerHash,
+		},
+		{
+			name: "eth_getHeaderByHash",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByHash(h.m.Ctx, h.overlayHeader.Hash())
+			},
+			hashOf: headerHash,
 		},
 		{
 			name: "erigon_getHeaderByNumber",

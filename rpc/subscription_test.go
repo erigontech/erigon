@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestNewID(t *testing.T) {
@@ -233,5 +234,41 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 		}
 	default:
 		return nil, nil, fmt.Errorf("unrecognized message: %v", msg)
+	}
+}
+
+type fastJSONPayload struct{}
+
+func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"`), nil }
+
+type streamedPayload struct{}
+
+func (streamedPayload) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteHex([]byte{0xab})
+	return nil
+}
+
+// bothFastJSON implements both fast-JSON interfaces with value receivers, so a typed nil panics
+// unless Notify sends it down the reflection path.
+type bothFastJSON struct{ data []byte }
+
+func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
+
+func (b bothFastJSON) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteHex(b.data)
+	return nil
+}
+
+func TestNotifyUsesFastJSON(t *testing.T) {
+	t.Parallel()
+
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
+		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
+		if err := n.Notify("0x1", payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
+			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
+		}
 	}
 }

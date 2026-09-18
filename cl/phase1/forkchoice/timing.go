@@ -98,26 +98,15 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
 func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) {
-	if f.Slot() != block.Slot {
-		return
-	}
-
-	epoch := f.computeEpochAtSlot(block.Slot)
-
-	// Compute time_into_slot_ms
-	secondsSinceGenesis := f.time.Load() - f.genesisTime
-	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
-
-	attestationThresholdMs := f.getAttestationDueMs(epoch)
-
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < attestationThresholdMs
-
-	// [New in Gloas:EIP7732] Post-GLOAS: also check if block arrived before PTC deadline.
-	// This is a time-based check (not a PTC vote count check).
-	if epoch >= f.beaconCfg.GloasForkEpoch {
-		ptcThresholdMs := f.getPayloadAttestationDueMs(epoch)
-		timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < ptcThresholdMs
+	if f.Slot() == block.Slot {
+		epoch := f.computeEpochAtSlot(block.Slot)
+		secondsSinceGenesis := f.time.Load() - f.genesisTime
+		timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
+		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
+		if epoch >= f.beaconCfg.GloasForkEpoch {
+			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs(epoch)
+		}
 	}
 
 	f.blockTimeliness.Store(blockRoot, timeliness)
