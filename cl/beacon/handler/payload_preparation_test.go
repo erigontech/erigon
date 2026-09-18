@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -2338,6 +2339,134 @@ func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, head)
 	require.Equal(t, 2, buildAttempts)
+}
+
+func TestPreparePayloadLoopRecoversAfterExecutionRetryCutoff(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "busy", err: chainreader.ErrExecutionBusy},
+		{name: "head mismatch", err: execution_client.ErrPayloadBuildHeadMismatch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 2
+			targetSlot := postState.Slot() + 1
+			advancedState := state.New(handler.beaconChainCfg)
+			require.NoError(t, postState.CopyInto(advancedState))
+			for _, slot := range []uint64{targetSlot, targetSlot + 1} {
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, slot))
+				proposerIndex, err := advancedState.GetBeaconProposerIndex()
+				require.NoError(t, err)
+				validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+			}
+			baseBlockRoot := common.Hash{0x41}
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(postState, baseBlockRoot, postState.Slot())
+				},
+			).AnyTimes()
+
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				slotDuration := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
+				// Put the cutoff between retry timers so cancellation, not a completed sleep,
+				// must wake the persistent-failure attempt.
+				slotStart := time.Now().Add(1850 * time.Millisecond)
+				cutoff := slotStart.Add(-minimumPreparationLead)
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 {
+					if time.Now().Before(slotStart) {
+						return targetSlot - 1
+					}
+					return targetSlot
+				}).AnyTimes()
+				clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+					return slotStart.Add(time.Duration(slot-targetSlot) * slotDuration)
+				}).AnyTimes()
+				handler.ethClock = clock
+
+				payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+				var buildAttempts atomic.Int64
+				executionRecovered := make(chan struct{})
+				engine := newPayloadBuildEngine(t, ctrl)
+				engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+					buildAttempts.Add(1)
+					select {
+					case <-executionRecovered:
+						return payloadID, nil
+					default:
+						return nil, test.err
+					}
+				}
+				handler.engine = engine
+
+				type preparationResult struct {
+					slot       uint64
+					err        error
+					finishedAt time.Time
+				}
+				results := make(chan preparationResult, 2)
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					handler.preparePayloadLoopWith(ctx, func(callCtx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
+						outcome, err := handler.preparePayloadForWithScratch(callCtx, key, scratch)
+						select {
+						case results <- preparationResult{slot: outcome.targetSlot, err: err, finishedAt: time.Now()}:
+						case <-ctx.Done():
+						}
+						return outcome, err
+					})
+				}()
+				defer func() {
+					cancel()
+					<-done
+				}()
+
+				synctest.Wait()
+				time.Sleep(time.Until(cutoff))
+				synctest.Wait()
+				select {
+				case result := <-results:
+					require.Equal(t, targetSlot, result.slot)
+					require.ErrorIs(t, result.err, errPreparationTooLate)
+					require.Equal(t, cutoff, result.finishedAt)
+				default:
+					t.Fatal("preparation did not stop at its cutoff")
+				}
+				require.Greater(t, buildAttempts.Load(), int64(1), "execution must remain unavailable across multiple retries")
+				require.Empty(t, handler.preparedPayload.payloads, "an exhausted attempt must not record a payload")
+				require.True(t, handler.payloadPreparationGate.idle(), "deadline exhaustion must release the preparation gate")
+				finishBlockWork := handler.payloadPreparationGate.beginBlockWork()
+				finishBlockWork()
+
+				attemptsAtCutoff := buildAttempts.Load()
+				time.Sleep(time.Until(slotStart))
+				synctest.Wait()
+				require.Equal(t, attemptsAtCutoff, buildAttempts.Load(), "retries must not continue into the proposal slot")
+				close(executionRecovered)
+				select {
+				case result := <-results:
+					require.Equal(t, targetSlot+1, result.slot)
+					require.NoError(t, result.err)
+				case <-time.After(slotDuration):
+					t.Fatal("preparation did not recover for the next target slot")
+				}
+				synctest.Wait()
+				require.Equal(t, attemptsAtCutoff+1, buildAttempts.Load())
+				require.Len(t, handler.preparedPayload.payloads, 1)
+				record := handler.preparedPayload.payloads[targetSlot+1]
+				require.Equal(t, payloadID, record.id)
+				require.Equal(t, baseBlockRoot, record.head)
+			})
+		})
+	}
 }
 
 func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
