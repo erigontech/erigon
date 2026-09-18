@@ -29,9 +29,9 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 	w.WriteObjectStart()
 	{
-		w.WriteFieldToken(`"address":`)
+		w.WriteObjectField("address")
 		w.WriteHex(l.Address[:])
-		w.WriteFieldToken(`,"topics":`)
+		w.WriteNextField("topics")
 		if l.Topics == nil {
 			w.WriteNil()
 		} else {
@@ -44,21 +44,21 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 			}
 			w.WriteArrayEnd()
 		}
-		w.WriteFieldToken(`,"data":`)
+		w.WriteNextField("data")
 		w.WriteHex(l.Data)
-		w.WriteFieldToken(`,"blockNumber":`)
+		w.WriteNextField("blockNumber")
 		w.WriteHexUint64(uint64(l.BlockNumber))
-		w.WriteFieldToken(`,"transactionHash":`)
+		w.WriteNextField("transactionHash")
 		w.WriteHex(l.TxHash[:])
-		w.WriteFieldToken(`,"transactionIndex":`)
+		w.WriteNextField("transactionIndex")
 		w.WriteHexUint64(uint64(l.TxIndex))
-		w.WriteFieldToken(`,"blockHash":`)
+		w.WriteNextField("blockHash")
 		w.WriteHex(l.BlockHash[:])
-		w.WriteFieldToken(`,"logIndex":`)
+		w.WriteNextField("logIndex")
 		w.WriteHexUint64(uint64(l.Index))
-		w.WriteFieldToken(`,"removed":`)
+		w.WriteNextField("removed")
 		w.WriteBool(l.Removed)
-		w.WriteFieldToken(`,"blockTimestamp":`)
+		w.WriteNextField("blockTimestamp")
 		w.WriteHexUint64(uint64(l.BlockTimestamp))
 	}
 	w.WriteObjectEnd()

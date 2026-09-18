@@ -28,8 +28,6 @@ type JSONWriter interface {
 	WriteObjectField(name string)
 	// WriteNextField writes the comma and the field name of a member that is not the first.
 	WriteNextField(name string)
-	// WriteFieldToken writes a ready-made field token such as `,"gas":`.
-	WriteFieldToken(token string)
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteMore()
