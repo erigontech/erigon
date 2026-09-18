@@ -19,8 +19,6 @@ package jsonstream
 import (
 	"encoding"
 	"io"
-
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var (
@@ -99,8 +97,6 @@ func (s *LazyFieldStream) WriteObjectStart()      { s.ensure(); s.inner.WriteObj
 func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArrayStart() }
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
-
-func (s *LazyFieldStream) WriteValue(v jsonw.JSONAppender) { s.ensure(); s.inner.WriteValue(v) }
 
 func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 	s.ensure()

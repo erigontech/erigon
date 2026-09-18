@@ -17,6 +17,7 @@
 package types
 
 import (
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -101,21 +102,25 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 }
 
 func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	w.WriteValue(l)
+	w.WriteRawBytes(l.AppendJSON(make([]byte, 0, l.JSONLen())))
 	return nil
 }
 
+// MarshalFastJSONTo encodes one log at a time, so the stream can flush between them and a big
+// answer never has to fit in memory.
 func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if logs == nil {
 		w.WriteNil()
 		return nil
 	}
+	var buf []byte
 	w.WriteArrayStart()
 	for i, l := range logs {
 		if i > 0 {
 			w.WriteMore()
 		}
-		w.WriteValue(l)
+		buf = l.AppendJSON(slices.Grow(buf[:0], l.JSONLen()))
+		w.WriteRawBytes(buf)
 	}
 	w.WriteArrayEnd()
 	return nil

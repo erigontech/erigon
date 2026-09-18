@@ -1347,17 +1347,12 @@ func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
 	require.Error(t, s.Flush())
 }
 
-type hexValue []byte
-
-func (v hexValue) JSONLen() int                 { return hexutil.QuotedLen(len(v)) }
-func (v hexValue) AppendJSON(dst []byte) []byte { return hexutil.AppendQuoted(dst, v) }
-
 // A long array of values must reach the writer as it goes, not pile up in the buffer.
-func TestWriteValueFlushesAcrossThreshold(t *testing.T) {
+func TestWriteRawBytesFlushesAcrossThreshold(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
 	s := New(&out)
-	value := hexValue(bytes.Repeat([]byte{0xab}, 512))
+	value := hexutil.AppendQuoted(nil, bytes.Repeat([]byte{0xab}, 512))
 	const count = 4 * FlushThreshold / (2 * 512)
 
 	s.WriteArrayStart()
@@ -1365,13 +1360,13 @@ func TestWriteValueFlushesAcrossThreshold(t *testing.T) {
 		if i > 0 {
 			s.WriteMore()
 		}
-		s.WriteValue(value)
+		s.WriteRawBytes(value)
 	}
 	s.WriteArrayEnd()
 	require.Less(t, len(s.Buffer()), FlushThreshold, "the stream holds at most one flush worth")
 	require.NoError(t, s.Flush())
 
-	want, err := json.Marshal(slices.Repeat([]hexutil.Bytes{hexutil.Bytes(value)}, count))
+	want, err := json.Marshal(slices.Repeat([]hexutil.Bytes{bytes.Repeat([]byte{0xab}, 512)}, count))
 	require.NoError(t, err)
 	require.Equal(t, string(want), out.String())
 }

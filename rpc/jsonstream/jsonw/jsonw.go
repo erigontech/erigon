@@ -22,7 +22,8 @@ import "encoding"
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
-	WriteValue(v JSONAppender)
+	// WriteRawBytes writes already-encoded JSON.
+	WriteRawBytes(b []byte)
 	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
 	// escaping: callers pass hex quantities.
 	WriteQuotedText(v encoding.TextAppender)
@@ -35,10 +36,4 @@ type JSONWriter interface {
 	WriteArrayStart()
 	WriteMore()
 	WriteArrayEnd()
-}
-
-// JSONAppender is one JSON value that knows an upper bound of its encoded size.
-type JSONAppender interface {
-	JSONLen() int
-	AppendJSON(dst []byte) []byte
 }
