@@ -163,9 +163,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Logger:           se.logger,
 			}
 
-			sysTx, sysErr := systemTxFlag(se.cfg.engine, txs, txIndex, header)
-			if sysErr != nil {
-				return nil, rwTx, sysErr
+			sysTx, err := systemTxFlag(se.cfg.engine, txs, txIndex, header)
+			if err != nil {
+				return nil, rwTx, err
 			}
 			txTask.SetSystemTx(sysTx)
 

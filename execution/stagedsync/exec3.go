@@ -809,9 +809,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					BlockStateCache:  blockStateCache,
 				}
 
-				sysTx, sysErr := systemTxFlag(te.cfg.engine, txs, txIndex, header)
-				if sysErr != nil {
-					return sysErr
+				sysTx, err := systemTxFlag(te.cfg.engine, txs, txIndex, header)
+				if err != nil {
+					return err
 				}
 				txTask.SetSystemTx(sysTx)
 
