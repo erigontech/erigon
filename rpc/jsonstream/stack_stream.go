@@ -106,7 +106,14 @@ func (s *StackStream) WriteHex(b []byte) {
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
-	buf, _ := v.AppendText(append(s.stream.Buffer(), '"'))
+	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
+	if err != nil {
+		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
+		buf = append(s.stream.Buffer(), '"')
+		if s.stream.Error == nil {
+			s.stream.Error = err
+		}
+	}
 	s.stream.SetBuffer(append(buf, '"'))
 	s.popCommaOrField()
 }

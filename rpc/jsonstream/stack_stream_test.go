@@ -1326,3 +1326,22 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 		})
 	}
 }
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText(dst []byte) ([]byte, error) {
+	return nil, errors.New("append failed")
+}
+
+// A failing appender must not truncate what the stream already holds.
+func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	s := New(&out)
+	s.WriteObjectStart()
+	s.WriteObjectField("balance")
+	s.WriteQuotedText(failingAppender{})
+	s.WriteObjectEnd()
+	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
+	require.Error(t, s.Flush())
+}
