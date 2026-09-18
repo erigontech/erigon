@@ -2445,7 +2445,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		// experiences state access itself, so drop it unless it has actual state
 		// changes or a user tx performed a non-revertable access to it (it is
 		// touched every block as the beacon-root syscall's msg.sender).
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
 		bal = append(bal, *account.changes)
@@ -2593,16 +2593,20 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 	*a.balanceValue = v
 }
 
-func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
-	if account, ok := accounts[addr]; ok {
-		return account
-	}
-	account := &accountState{
-		changes: &types.AccountChanges{Address: addr},
+func newAccountState(addr accounts.Address) *accountState {
+	return &accountState{
+		changes: &types.AccountChanges{Address: addr.Value()},
 		balance: newBalanceTracker(),
 		nonce:   newNonceTracker(),
 		code:    newCodeTracker(),
 	}
+}
+
+func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
+	if account, ok := accounts[addr]; ok {
+		return account
+	}
+	account := newAccountState(addr)
 	accounts[addr] = account
 	return account
 }

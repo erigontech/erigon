@@ -242,25 +242,65 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
+		addr := accounts.InternAddress(accountChanges.Address)
+		if dbg.TraceBALFeed {
+			fmt.Printf(
+				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
+				accountChanges.Address,
+				len(accountChanges.StorageChanges),
+				len(accountChanges.BalanceChanges),
+				len(accountChanges.NonceChanges),
+				len(accountChanges.CodeChanges),
+				len(accountChanges.StorageReads),
+			)
+		}
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
-				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				if dbg.TraceBALFeed {
+					fmt.Printf(
+						"BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n",
+						accountChanges.Address,
+						storageChanges.Slot,
+						change.Index,
+						int(change.Index)-1,
+						change.Value.Hex(),
+					)
+				}
+				vm.WriteStorage(addr, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
-			vm.WriteBalance(accountChanges.Address, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+			if dbg.TraceBALFeed {
+				fmt.Printf(
+					"BAL-CELL %x balance balIdx=%d cell=%d val=%v\n",
+					accountChanges.Address,
+					balanceChange.Index,
+					int(balanceChange.Index)-1,
+					&balanceChange.Value,
+				)
+			}
+			vm.WriteBalance(addr, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
-			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+			if dbg.TraceBALFeed {
+				fmt.Printf(
+					"BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n",
+					accountChanges.Address,
+					nonceChange.Index,
+					int(nonceChange.Index)-1,
+					nonceChange.Value,
+				)
+			}
+			vm.WriteNonce(addr, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
 			// Seed the whole code trio together: a CodePath cell without its
 			// CodeHashPath/CodeSizePath siblings lets a reader see code but no code hash.
 			code := accounts.NewCode(codeChange.Bytecode)
 			v := Version{TxIndex: int(codeChange.Index) - 1}
-			vm.WriteCode(accountChanges.Address, v, code, true)
-			vm.WriteCodeHash(accountChanges.Address, v, code.Hash, true)
-			vm.WriteCodeSize(accountChanges.Address, v, code.Len(), true)
+			vm.WriteCode(addr, v, code, true)
+			vm.WriteCodeHash(addr, v, code.Hash, true)
+			vm.WriteCodeSize(addr, v, code.Len(), true)
 		}
 	}
 }

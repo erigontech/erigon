@@ -1627,7 +1627,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
 	rules                 *chain.Rules
-	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
+	isFinalize            bool
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -3398,6 +3398,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if finErr != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.blockNum, finErr)), nil
+				}
+
+				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
+
+				// Block-end logs belong to no receipt, so the per-tx publish
+				// loop, which indexes receipt logs only, never sees them. Index
+				// them here, on the exec loop that owns sd.mem, to keep the log
+				// indexes identical to the ones the serial executor builds.
+				if len(blockEndLogs) > 0 {
+					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, 0,
+						blockEndLogs, nil, nil, true); err != nil {
+						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
+					}
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

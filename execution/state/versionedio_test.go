@@ -18,6 +18,8 @@ package state
 
 import (
 	"fmt"
+	"math/big"
+	"math/rand"
 	"sort"
 	"testing"
 
@@ -160,7 +162,7 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 	bal := io.AsBlockAccessList()
 
 	require.Len(t, bal, 1)
-	require.Equal(t, params.SystemAddress, bal[0].Address)
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
 
 // state changes and only revertable accesses (e.g. incidental gas-calculation
@@ -189,13 +191,13 @@ func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
 
 	// System address should be excluded (no state changes, only revertable access).
 	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
+		require.NotEqual(t, sysAddr.Value(), ac.Address,
 			"system address should be excluded from BAL when it has no state changes and only revertable accesses")
 	}
 	// User address should be present.
 	found := false
 	for _, ac := range bal {
-		if ac.Address == userAddr {
+		if ac.Address == userAddr.Value() {
 			found = true
 			break
 		}
@@ -224,7 +226,7 @@ func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testi
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -257,7 +259,7 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -294,7 +296,7 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
+		require.NotEqual(t, sysAddr.Value(), ac.Address,
 			"system address should be excluded: non-revertable access from system call (txIndex < 0) should not trigger inclusion")
 	}
 }
@@ -323,7 +325,7 @@ func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == sysAddr {
+		if ac.Address == sysAddr.Value() {
 			found = true
 			break
 		}
@@ -356,7 +358,7 @@ func TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL(t *testing.T) {
 
 	bal := io.AsBlockAccessList()
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"net-zero balance write (matches pre-block balance, no intermediates) must not appear in BAL")
 		}
@@ -395,7 +397,7 @@ func TestVersionedIO_BalanceRestoreAfterIntermediateIsRecorded(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 2,
 				"both the intermediate write and the restore-to-initial write must appear in BAL")
@@ -433,7 +435,7 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx1's write of 200 is a no-op (same as tx0's 200); stale read must not cause a spurious second entry")
@@ -485,7 +487,7 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx 1's burn write must remain in BAL — a post-write read with the same value must not seed initialBalanceValue and trigger the net-zero filter")
@@ -525,7 +527,7 @@ func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address != addr {
+		if ac.Address != addr.Value() {
 			continue
 		}
 		found = true
@@ -1173,7 +1175,7 @@ func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	slot := accounts.InternKey(common.HexToHash("0x07"))
 	orig := *uint256.NewInt(42)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := &accountState{changes: &types.AccountChanges{Address: addr.Value()}}
 
 	account.updateReadStorage(slot, orig)
 	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
@@ -1194,7 +1196,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	orig := *uint256.NewInt(42)
 	changed := *uint256.NewInt(99)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := &accountState{changes: &types.AccountChanges{Address: addr.Value()}}
 
 	account.updateReadStorage(slot, orig)
 
@@ -1223,7 +1225,7 @@ func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Len(t, bal[0].BalanceChanges, 1)
 	require.Equal(t, uint64(1), bal[0].BalanceChanges[0].Value.Uint64(),
 		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
@@ -1238,7 +1240,7 @@ func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1, "a destroyed account with no net changes is still a touched BAL entry")
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Empty(t, bal[0].BalanceChanges)
 }
 
@@ -1565,7 +1567,7 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"balance is unchanged (7->7); the promoted read is the baseline so EELS emits no BalanceChange\n%s", bal.DebugString())
 		}
@@ -1592,7 +1594,7 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Empty(t, ac.CodeChanges,
 				"a delegation set then cleared in the same tx nets to empty code; pre-block code of an absent account is empty, so no code change must be recorded\n%s", bal.DebugString())
@@ -1629,7 +1631,7 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.CodeChanges, 1,
 				"the delegation clear is a real pre!=post code change and must stay in the BAL\n%s", bal.DebugString())
@@ -1638,4 +1640,144 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 		}
 	}
 	require.True(t, found, "authority account must appear in BAL")
+}
+
+// Slots recorded on either side of the slotIndexMin crossover must stay
+// findable, in both directions: a missed write index opens a second SlotChanges
+// for the same slot, and a missed read index leaves a superseded read behind.
+func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	account := newAccountState(addr)
+	key := func(n int64) accounts.StorageKey {
+		return accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(n)))
+	}
+
+	early := key(1)
+	account.applyWriteStorage(early, *uint256.NewInt(1), 0)
+	for i := range 4 * slotIndexMin {
+		account.updateReadStorage(key(int64(i+1000)), uint256.Int{})
+		account.applyWriteStorage(key(int64(i+100)), *uint256.NewInt(1), uint32(i))
+	}
+	require.NotNil(t, account.slotWrites, "the index must be built past the threshold")
+	require.NotNil(t, account.slotReads)
+
+	late := key(9999)
+	account.updateReadStorage(late, uint256.Int{})
+	account.applyWriteStorage(late, *uint256.NewInt(1), 50)
+	account.applyWriteStorage(early, *uint256.NewInt(2), 98)
+	account.applyWriteStorage(late, *uint256.NewInt(2), 99)
+
+	changes := account.changes
+	for _, slot := range []accounts.StorageKey{early, late} {
+		seen := 0
+		for _, sc := range changes.StorageChanges {
+			if sc.Slot == slot {
+				seen++
+				require.Len(t, sc.Changes, 2, "the second write must append to the existing slot")
+			}
+		}
+		require.Equal(t, 1, seen, "the slot must appear exactly once")
+		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
+	}
+	require.Len(t, changes.StorageReads, 4*slotIndexMin)
+}
+
+// TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
+// cross slotIndexMin in both lists and compares the normalized result against a
+// straightforward builder. The indexes are pure bookkeeping, so any divergence
+// is a bug in them.
+func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	r := rand.New(rand.NewSource(11))
+	for range 300 {
+		nSlots := 1 + r.Intn(4*slotIndexMin)
+		keys := make([]accounts.StorageKey, nSlots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+
+		account := newAccountState(addr)
+		ref := newReferenceAccount(addr)
+		for op := range 4 * nSlots {
+			k := keys[r.Intn(nSlots)]
+			v := *uint256.NewInt(uint64(r.Intn(3)))
+			if r.Intn(2) == 0 {
+				account.updateReadStorage(k, v)
+				ref.read(k, v)
+				continue
+			}
+			account.applyWriteStorage(k, v, uint32(op))
+			ref.write(k, v, uint32(op))
+		}
+
+		got, want := account.changes, ref.changes
+		got.Normalize()
+		want.Normalize()
+		require.Equal(t, want.StorageReads, got.StorageReads, "slots=%d", nSlots)
+		require.Equal(t, want.StorageChanges, got.StorageChanges, "slots=%d", nSlots)
+	}
+}
+
+// referenceAccount is the BAL storage bookkeeping written the obvious way.
+type referenceAccount struct {
+	changes  *types.AccountChanges
+	origVals map[accounts.StorageKey]uint256.Int
+}
+
+func newReferenceAccount(addr accounts.Address) *referenceAccount {
+	return &referenceAccount{
+		changes:  &types.AccountChanges{Address: addr.Value()},
+		origVals: map[accounts.StorageKey]uint256.Int{},
+	}
+}
+
+func (a *referenceAccount) written(slot accounts.StorageKey) int {
+	for i := range a.changes.StorageChanges {
+		if a.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
+	if _, seen := a.origVals[slot]; !seen {
+		a.origVals[slot] = val
+	}
+	if a.written(slot) >= 0 {
+		return
+	}
+	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+}
+
+func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
+	at := a.written(slot)
+	if at < 0 {
+		if orig, seen := a.origVals[slot]; seen && val.Eq(&orig) {
+			return
+		}
+	}
+	kept := a.changes.StorageReads[:0]
+	for _, s := range a.changes.StorageReads {
+		if s != slot {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == 0 {
+		a.changes.StorageReads = nil
+	} else {
+		a.changes.StorageReads = kept
+	}
+	if at >= 0 {
+		sc := &a.changes.StorageChanges[at]
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
+			return
+		}
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: idx, Value: val})
+		return
+	}
+	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: idx, Value: val}},
+	})
 }

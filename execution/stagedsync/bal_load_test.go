@@ -53,7 +53,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 
 	bal := types.BlockAccessList{
 		{
-			Address: addrA,
+			Address: addrA.Value(),
 			BalanceChanges: []*types.BalanceChange{
 				{Index: 0, Value: *uint256.NewInt(10)},
 				{Index: 3, Value: *uint256.NewInt(99)}, // final
@@ -63,7 +63,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 			},
 		},
 		{
-			Address: addrB,
+			Address: addrB.Value(),
 			StorageChanges: []types.SlotChanges{
 				{Slot: slotS1, Changes: []*types.StorageChange{
 					{Index: 0, Value: *uint256.NewInt(1)},
@@ -75,7 +75,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 			},
 		},
 		{
-			Address: addrC,
+			Address: addrC.Value(),
 			BalanceChanges: []*types.BalanceChange{
 				{Index: 0, Value: *uint256.NewInt(1000)},
 			},
@@ -84,11 +84,11 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 			},
 		},
 		{
-			Address:      addrD,
+			Address:      addrD.Value(),
 			StorageReads: []accounts.StorageKey{slotS1}, // pure read — ignored
 		},
 		{
-			Address: addrE,
+			Address: addrE.Value(),
 			BalanceChanges: []*types.BalanceChange{
 				{Index: 2, Value: *uint256.NewInt(200)},
 				{Index: 5, Value: *uint256.NewInt(500)}, // final
@@ -144,8 +144,8 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	emptied := accounts.InternAddress([20]byte{0xab})
 	live := accounts.InternAddress([20]byte{0xcd})
 	bal := types.BlockAccessList{
-		{Address: emptied, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
-		{Address: live, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
+		{Address: emptied.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
+		{Address: live.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
 	}
 
 	cs := newTestCalcState()
@@ -169,7 +169,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	// (pre-fork a touched empty account is created and persists).
 	csPre := newTestCalcState()
 	csPre.LoadFromBAL(types.BlockAccessList{
-		{Address: emptied, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
+		{Address: emptied.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
 	}, false, false, false)
 	require.False(t, csPre.accounts[emptied].Deleted,
 		"pre-SpuriousDragon, an empty touched account is not removed")
@@ -189,7 +189,7 @@ func TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	bal := types.BlockAccessList{
 		{
-			Address:        contract,
+			Address:        contract.Value(),
 			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}},
 			CodeChanges:    []*types.CodeChange{{Index: 0, Bytecode: code}},
 		},
@@ -219,7 +219,7 @@ func TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf(t *testing.T) {
 	live := accounts.InternAddress([20]byte{0xcd})
 	// The transient (created-then-destroyed) account is absent from the BAL.
 	bal := types.BlockAccessList{
-		{Address: live, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
+		{Address: live.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
 	}
 
 	cs := newTestCalcState()
