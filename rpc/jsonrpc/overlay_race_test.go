@@ -614,7 +614,7 @@ func TestTxPoolContent_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
-	api := NewTxPoolAPI(h.base, h.m.DB, pool)
+	api := NewTxPoolAPI(h.base, pool)
 
 	content, err := api.Content(h.m.Ctx)
 	require.NoError(t, err)
@@ -1566,7 +1566,7 @@ func TestTxPoolContentFrom_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
-	api := NewTxPoolAPI(h.base, h.m.DB, pool)
+	api := NewTxPoolAPI(h.base, pool)
 
 	content, err := api.ContentFrom(h.m.Ctx, h.m.Address)
 	require.NoError(t, err)

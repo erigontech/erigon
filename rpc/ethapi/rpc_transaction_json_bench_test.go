@@ -48,7 +48,7 @@ func BenchmarkNewRPCTransaction(b *testing.B) {
 		b.Run(bb.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := json.Marshal(NewRPCTransaction(bb.txn, pinBlockHash, 1000, 100, 3, baseFee, false))
+				out, err := json.Marshal(NewRPCTransaction(bb.txn, pinBlockHash, 1000, 100, 3, baseFee))
 				if err != nil || len(out) == 0 {
 					b.Fatal(err)
 				}

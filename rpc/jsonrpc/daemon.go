@@ -96,7 +96,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	base.witnessCache = witnessCache
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
-	txpoolImpl := NewTxPoolAPI(base, db, txPool)
+	txpoolImpl := NewTxPoolAPI(base, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	debugImpl.witnessCache = witnessCache
