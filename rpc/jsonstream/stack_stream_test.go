@@ -1353,3 +1353,33 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 		})
 	}
 }
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText(dst []byte) ([]byte, error) {
+	return nil, errors.New("append failed")
+}
+
+// A failing appender must not truncate what the stream already holds.
+func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	s := New(&out)
+	s.WriteObjectStart()
+	s.WriteObjectField("balance")
+	s.WriteQuotedText(failingAppender{})
+	s.WriteObjectEnd()
+	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
+	require.Error(t, s.Flush())
+}
+
+// A latched write error must reach the caller. Flush cannot report it on a writerless stream,
+// so marshalFastJSONTo would otherwise clone a buffer holding the empty-string placeholder.
+func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
+	s := Get(nil)
+	defer Put(s)
+	s.WriteQuotedText(failingAppender{})
+
+	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
+	require.Error(t, s.Err(), "the latched appender error must stay reachable")
+}

@@ -16,7 +16,11 @@
 
 package jsonstream
 
-import "io"
+import (
+	"encoding"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"io"
+)
 
 var (
 	_ Stream = (*StackStream)(nil)
@@ -95,14 +99,16 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
+	s.ensure()
+	s.inner.WriteQuotedText(v)
+}
+
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.inner.WriteMore() }
-
-// The chained value belongs to the field just written, so it goes straight to inner: routing it
-// back through the wrapper would open the pending field between the name and its value.
-func (s *LazyFieldStream) WriteObjectField(name string) Stream {
+func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
 	return s.inner.WriteObjectField(name)
 }
 
@@ -114,6 +120,7 @@ func (s *LazyFieldStream) Buffer() []byte                 { return s.inner.Buffe
 func (s *LazyFieldStream) Flush() error                   { return s.inner.Flush() }
 func (s *LazyFieldStream) ClosePending(target uint) error { return s.inner.ClosePending(target) }
 func (s *LazyFieldStream) Depth() int                     { return s.inner.Depth() }
+func (s *LazyFieldStream) Err() error                     { return s.inner.Err() }
 
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
