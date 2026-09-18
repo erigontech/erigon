@@ -248,10 +248,21 @@ func (streamedPayload) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
+// bothFastJSON implements both fast-JSON interfaces with value receivers, so a typed nil panics
+// unless Notify sends it down the reflection path.
+type bothFastJSON struct{ data []byte }
+
+func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
+
+func (b bothFastJSON) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteHex(b.data)
+	return nil
+}
+
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`} {
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
