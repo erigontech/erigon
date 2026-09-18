@@ -331,6 +331,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// after run() is a race.
 	pe.prevBlocks = state.NewPrevBlockList()
 
+	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop
+	// goroutine: execLoop's exit path (closeApplyChannels) reads pe.consumers, so
+	// setting them after run() races that goroutine (same reason pe.prevBlocks is set
+	// above). Registration order is publish order; close walks it in reverse (commit
+	// before apply). blockRequests is not registered — it is closed by its sole sender
+	// (the executeBlocks dispatch goroutine), not by execLoop.
+	pe.consumers = newResultStream()
+	pe.consumers.register("applyResults", applyResults)
+	pe.consumers.register("commitResults", commitResults)
+	pe.maxBlockNum = maxBlockNum
+
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 
@@ -356,15 +367,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	sdCtx := pe.rs.Domains().GetCommitmentContext()
 	prevStateReader := sdCtx.StateReader()
 	defer sdCtx.SetStateReader(prevStateReader)
-
-	// Register the fan-out consumers so execLoop can publish + close them.
-	// Registration order is publish order; close walks it in reverse (commit before
-	// apply). blockRequests is not registered — it is closed by its sole sender (the
-	// executeBlocks dispatch goroutine), not by execLoop.
-	pe.consumers = newResultStream()
-	pe.consumers.register("applyResults", applyResults)
-	pe.consumers.register("commitResults", commitResults)
-	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE the exec
 	// loop / executeBlocks goroutines start touching sd.mem. The exec loop owns all
