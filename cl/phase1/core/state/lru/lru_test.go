@@ -42,6 +42,8 @@ func surviving(t *testing.T) int {
 // instant rather than race the wall clock.
 func deadlineOf[K comparable, V any](t *testing.T, c *CacheWithTTL[K, V], k K) time.Time {
 	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e, ok := c.cache.Peek(k)
 	require.True(t, ok, "no entry held for the key")
 	require.NotNil(t, e.node, "entry held without a deadline")

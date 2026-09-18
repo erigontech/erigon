@@ -114,7 +114,7 @@ type CacheWithTTL[K comparable, V any] struct {
 }
 
 // NewWithTTL builds a cache of at most size entries that each live for ttl after their last Add. A
-// ttl of zero disables expiry. size must be positive, as for New; no caller passes otherwise.
+// ttl of zero disables expiry. size must be positive, as for New.
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
 	c := &CacheWithTTL[K, V]{
 		ttl:           ttl,
