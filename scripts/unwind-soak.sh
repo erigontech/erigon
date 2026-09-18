@@ -468,6 +468,13 @@ scenario_test() {
     local STAGNATION_POLL_LIMIT="${STAGNATION_POLL_LIMIT:-6}"
     local last_log_progress=0
     local soft_wedge_errors=0
+    # The consensus client refetches the unwound gap before the EL can
+    # execute any of it, at a rate set by how many CL peers will serve
+    # history — 4 blk/s some nights, 68 blk/s others. That is not part of
+    # what the depth-scaled budget sizes, so every poll that sees the
+    # download advance credits its own duration back. A download that
+    # stops advancing stops earning credit and the budget applies again.
+    local dl_last=-1 dl_credit=0
     while true; do
         sleep 5
         post_head_hex=$(eth_block_number)
@@ -528,12 +535,22 @@ scenario_test() {
             if [[ -r "$LOG" ]]; then
                 log_progress_now=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
             fi
+            local dl_now
+            dl_now=$(tail -c 200000 "$LOG" 2>/dev/null \
+                | grep -oE "Downloading Execution History +progress=[0-9]+" \
+                | tail -1 | grep -oE "[0-9]+$" || true)
+            if [[ -n "${dl_now:-}" ]]; then
+                if [[ $dl_last -ge 0 && $dl_now -gt $dl_last ]]; then
+                    dl_credit=$((dl_credit + 30))
+                fi
+                dl_last=$dl_now
+            fi
             if [[ $post_head -gt $last_head || $log_progress_now -gt $last_log_progress ]]; then
                 stagnation_polls=0
             else
                 stagnation_polls=$((stagnation_polls + 1))
             fi
-            echo "  t+${elapsed}s head=$post_head log_bytes=${log_progress_now} stagnation=${stagnation_polls}/${STAGNATION_POLL_LIMIT} $( [[ $require_forward -eq 1 ]] && echo "pre_head+${FORWARD_PROGRESS_MARGIN}=$((pre_head + FORWARD_PROGRESS_MARGIN))" || echo "target+1000=$((target + RECOVERY_WINDOW_BLOCKS))")"
+            echo "  t+${elapsed}s head=$post_head log_bytes=${log_progress_now} stagnation=${stagnation_polls}/${STAGNATION_POLL_LIMIT} cl_dl=${dl_last}/+${dl_credit}s $( [[ $require_forward -eq 1 ]] && echo "pre_head+${FORWARD_PROGRESS_MARGIN}=$((pre_head + FORWARD_PROGRESS_MARGIN))" || echo "target+1000=$((target + RECOVERY_WINDOW_BLOCKS))")"
             last_head=$post_head
             last_log_progress=$log_progress_now
             if [[ $stagnation_polls -ge $STAGNATION_POLL_LIMIT ]]; then
@@ -560,8 +577,8 @@ scenario_test() {
         # progress but the unwind/recovery genuinely takes longer than
         # the depth-scaled budget. Bumped 2x vs the prior hard timeout
         # since the liveness gate is the primary fail mechanism now.
-        if [[ $elapsed -gt $((recovery_timeout * 2)) ]]; then
-            echo "  HARD TIMEOUT after ${elapsed}s — exceeded 2x recovery_timeout (system progressing but extremely slow)"
+        if [[ $elapsed -gt $((recovery_timeout * 2 + dl_credit)) ]]; then
+            echo "  HARD TIMEOUT after ${elapsed}s — exceeded 2x recovery_timeout + ${dl_credit}s of consensus-client backfill (system progressing but extremely slow)"
             break
         fi
     done
