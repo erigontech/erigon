@@ -575,7 +575,7 @@ func TestCacheWithTTLSweepIgnoresPromotion(t *testing.T) {
 	// Key 0 is the oldest by a clear margin, so it is the only entry due at first+1ms.
 	c.Add(0, 0)
 	c.mu.Lock()
-	first := c.expiry[0].expiresAt
+	first := c.expiryHead.expiresAt
 	c.mu.Unlock()
 	time.Sleep(2 * time.Millisecond)
 	for i := 1; i < entries; i++ {
@@ -593,36 +593,34 @@ func TestCacheWithTTLSweepIgnoresPromotion(t *testing.T) {
 	require.True(t, held(c, entries-1))
 }
 
-// TestCacheWithTTLAddRenewsAndSkipsStaleRecord pins a renewal: the entry lives to its new deadline,
-// and the record the first Add left behind is consumed at its own deadline without touching the
-// entry, because the deadline it carries no longer matches.
-func TestCacheWithTTLAddRenewsAndSkipsStaleRecord(t *testing.T) {
-	c := NewWithTTL[string, int]("readd_renews", 8, time.Hour)
+// TestCacheWithTTLAddRenewsMovesRecord pins a renewal: the entry lives to its new deadline, and the
+// key's one node moves to the tail with that deadline. Nothing is left behind for the old one
+// (review: a size-1 cache renewed 100,000 times must not hold 100,000 records).
+func TestCacheWithTTLAddRenewsMovesRecord(t *testing.T) {
+	c := NewWithTTL[string, int]("readd_moves_record", 8, time.Hour)
 	t.Cleanup(c.Close)
 
 	c.Add("k", 1)
 	c.mu.Lock()
-	first := c.expiry[0].expiresAt
+	first := c.expiryHead.expiresAt
 	c.mu.Unlock()
 
 	time.Sleep(2 * time.Millisecond)
 	c.Add("k", 2)
+	require.Equal(t, 1, c.expiryLen(), "a renewal moves the key's node; it does not add one")
 	c.mu.Lock()
-	require.Len(t, c.expiry, 2, "a renewal appends a record; it does not rewrite the old one")
-	second := c.expiry[1].expiresAt
+	second := c.expiryHead.expiresAt
 	c.mu.Unlock()
 	require.True(t, second.After(first))
 
 	c.removeExpired(first.Add(time.Millisecond))
 	v, ok := c.Get("k")
-	require.True(t, ok, "the stale record must not reclaim a renewed entry")
+	require.True(t, ok, "the old deadline must not reclaim a renewed entry")
 	require.Equal(t, 2, v)
-	c.mu.Lock()
-	require.Len(t, c.expiry, 1, "the stale record is consumed once its deadline passes")
-	c.mu.Unlock()
 
 	c.removeExpired(second.Add(time.Nanosecond))
 	require.False(t, held(c, "k"))
+	require.Equal(t, 0, c.expiryLen())
 }
 
 // TestCacheWithTTLSweepBoundsLockHold pins the pacing that remains: one lock hold reclaims at most
@@ -647,23 +645,92 @@ func TestCacheWithTTLSweepBoundsLockHold(t *testing.T) {
 	require.False(t, c.removeExpiredUpTo(past, sweepChunk), "an empty queue reports nothing to do")
 }
 
-// TestCacheWithTTLExpiryQueueCompacts pins that consumed records release their memory: after
-// churning far more entries than the cache holds, a drained queue is not still backed by an array
-// sized to everything ever added.
-func TestCacheWithTTLExpiryQueueCompacts(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("expiry_queue_compacts", 64, time.Hour)
+// TestCacheWithTTLExpiryBookkeepingBoundedByCache pins the review's first finding: the expiry
+// order holds one node per LIVE entry, whatever the rate of Add. Renewals move a node, and a
+// removal or a size eviction unlinks one, so a size-1 cache updated 100,000 times holds one record
+// and a size-64 cache fed 10,000 distinct keys holds 64.
+func TestCacheWithTTLExpiryBookkeepingBoundedByCache(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("expiry_bounded_renewal", 1, 30*time.Minute)
 	t.Cleanup(c.Close)
+	for i := range 100_000 {
+		c.Add(7, uint64(i))
+	}
+	require.Equal(t, 1, c.Len())
+	require.Equal(t, 1, c.expiryLen(), "100,000 renewals of one key must leave one record")
 
+	d := NewWithTTL[uint64, uint64]("expiry_bounded_eviction", 64, 30*time.Minute)
+	t.Cleanup(d.Close)
 	for i := range 10_000 {
+		d.Add(uint64(i), uint64(i))
+	}
+	require.Equal(t, 64, d.Len())
+	require.Equal(t, 64, d.expiryLen(), "size eviction must unlink the evicted key's record")
+
+	require.True(t, d.Remove(9_999))
+	require.Equal(t, 63, d.expiryLen(), "Remove must unlink the key's record")
+	require.False(t, d.Remove(9_999), "removing an absent key changes nothing")
+	require.Equal(t, 63, d.expiryLen())
+}
+
+// TestCacheWithTTLDrainedQueueRetainsNothing pins the review's second finding: once every entry is
+// reclaimed, no expiry bookkeeping survives. The order is a linked list, so there is no shared
+// backing array to keep alive; each node is collectable the moment it is unlinked, and this pins
+// that none is left linked or indexed after a burst is swept.
+func TestCacheWithTTLDrainedQueueRetainsNothing(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("expiry_drained", 200_000, time.Hour)
+	t.Cleanup(c.Close)
+	for i := range 115_456 {
 		c.Add(uint64(i), uint64(i))
 	}
-	c.removeExpired(time.Now().Add(2 * time.Hour))
+	require.Equal(t, 115_456, c.expiryLen())
 
+	c.removeExpired(time.Now().Add(2 * time.Hour))
+	require.Equal(t, 0, c.Len())
+	require.Equal(t, 0, c.expiryLen())
 	c.mu.Lock()
-	n, capacity := len(c.expiry), cap(c.expiry)
+	require.Nil(t, c.expiryHead)
+	require.Nil(t, c.expiryTail)
+	require.Empty(t, c.expiryByKey)
 	c.mu.Unlock()
-	require.Equal(t, 0, n)
-	require.LessOrEqual(t, capacity, expiryCompactMin, "a drained queue must not keep a 10,000-record backing array")
+}
+
+// TestCacheWithTTLGetDropsExpiredRecord pins that an expired entry dropped by a Get takes its
+// record with it: the sweep is not the only consumer.
+func TestCacheWithTTLGetDropsExpiredRecord(t *testing.T) {
+	c := NewWithTTL[string, int]("get_drops_record", 8, 20*time.Millisecond)
+	t.Cleanup(c.Close)
+	c.Add("k", 1)
+	require.Equal(t, 1, c.expiryLen())
+	time.Sleep(30 * time.Millisecond)
+	_, ok := c.Get("k")
+	require.False(t, ok)
+	require.Equal(t, 0, c.expiryLen(), "a Get that drops an expired entry must unlink its record")
+}
+
+// TestCacheWithTTLNoRecordsAfterClose pins the review's third point: after Close nothing consumes
+// the expiry order, so it is dropped and churn records nothing. Add and Remove keep working, and a
+// Get still drops an expired entry it reads.
+func TestCacheWithTTLNoRecordsAfterClose(t *testing.T) {
+	c := NewWithTTL[uint64, uint64]("no_records_after_close", 64, 20*time.Millisecond)
+	for i := range 32 {
+		c.Add(uint64(i), uint64(i))
+	}
+	require.Equal(t, 32, c.expiryLen())
+	c.Close()
+	require.Equal(t, 0, c.expiryLen(), "Close drops the order nothing will consume")
+
+	for i := range 100_000 {
+		c.Add(uint64(i%128), uint64(i))
+	}
+	require.Equal(t, 64, c.Len())
+	require.Equal(t, 0, c.expiryLen(), "post-Close churn must record nothing")
+	require.True(t, c.Remove(1))
+	require.Equal(t, 63, c.Len())
+
+	time.Sleep(30 * time.Millisecond)
+	_, ok := c.Get(2)
+	require.False(t, ok, "a closed cache still treats an expired entry as a miss")
+	require.Equal(t, 62, c.Len())
 }
 
 // TestCacheWithTTLNoTTLKeepsNoRecords pins that a cache without a ttl, which runs no sweep, also
@@ -674,9 +741,7 @@ func TestCacheWithTTLNoTTLKeepsNoRecords(t *testing.T) {
 	for i := range 8 {
 		c.Add(uint64(i), uint64(i))
 	}
-	c.mu.Lock()
-	require.Empty(t, c.expiry)
-	c.mu.Unlock()
+	require.Equal(t, 0, c.expiryLen(), "no ttl, no expiry order")
 	c.removeExpired(time.Now().Add(100 * 365 * 24 * time.Hour))
 	require.Equal(t, 8, c.Len())
 }

@@ -68,11 +68,8 @@ const minSweepInterval = time.Millisecond
 // until nothing due is left, so the cap bounds how long readers wait, not how much a tick reclaims.
 const sweepChunk = 512
 
-// expiryCompactMin is the queue capacity below which spent records are not worth reclaiming.
-const expiryCompactMin = 1024
-
-// ttlEntry is what the cache stores. expiresAt is set by Add and by nothing else: the expiry queue
-// records the same deadline, and the two are compared to tell a live record from a stale one.
+// ttlEntry is what the cache stores. expiresAt is set by Add and by nothing else, and the entry's
+// expiry node carries the same deadline: the two are kept in step by Add alone.
 type ttlEntry[V any] struct {
 	value     V
 	expiresAt time.Time
@@ -82,10 +79,11 @@ func (e ttlEntry[V]) expired(now time.Time) bool {
 	return !e.expiresAt.IsZero() && now.After(e.expiresAt)
 }
 
-// expiryRecord is one Add, in the order it happened.
-type expiryRecord[K comparable] struct {
-	key       K
-	expiresAt time.Time
+// expiryNode is one live entry's place in the expiry order.
+type expiryNode[K comparable] struct {
+	key        K
+	expiresAt  time.Time
+	prev, next *expiryNode[K]
 }
 
 // CacheWithTTL is a size- and time-bounded cache whose expiry sweep can be stopped. The sweep runs
@@ -101,15 +99,20 @@ type CacheWithTTL[K comparable, V any] struct {
 	metricTTLHit, metricTTLMiss metrics.Counter
 
 	mu sync.Mutex
-	// expiry holds one record per Add, oldest first. Every entry shares the one ttl and Add stamps
-	// its deadline under mu, so deadlines are non-decreasing along the queue and the head is always
-	// the entry due soonest. A sweep pops from the head until it meets a deadline still in the
-	// future and never looks past it: its cost is the number of entries due, not the size of the
-	// cache, and a Get, which moves an entry in the eviction list but not here, cannot hide one.
-	// A record outlives its entry when the key is renewed, removed or evicted by size; it is then
-	// skipped when its deadline comes, since the entry it described is gone or carries a later
-	// deadline. If entries ever get individual ttls this must become a heap.
-	expiry []expiryRecord[K]
+	// The expiry order: one node per live entry, oldest deadline first, with an index by key.
+	// Every entry shares the one ttl and Add stamps its deadline under mu, so deadlines are
+	// non-decreasing along the list and the head is always the entry due soonest. A sweep pops
+	// from the head until it meets a deadline still in the future and never looks past it: its
+	// cost is the number of entries due, not the size of the cache, and a Get, which moves an
+	// entry in the eviction list but not here, cannot hide one.
+	//
+	// The list is bounded by the cache, not by the rate of Add: a renewal moves the key's node to
+	// the tail, and the dependency's eviction hook unlinks a node when its entry is removed or
+	// evicted by size. If entries ever get individual ttls this must become a heap.
+	expiryHead, expiryTail *expiryNode[K]
+	expiryByKey            map[K]*expiryNode[K]
+	// After Close nothing consumes the list, so it is dropped and nothing more is recorded.
+	closed bool
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -118,14 +121,18 @@ type CacheWithTTL[K comparable, V any] struct {
 
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
 	c := &CacheWithTTL[K, V]{
-		cache:         expirable.NewLRU[K, ttlEntry[V]](size, nil, 0),
 		ttl:           ttl,
 		metric:        metricName,
+		expiryByKey:   make(map[K]*expiryNode[K]),
 		done:          make(chan struct{}),
 		stopped:       make(chan struct{}),
 		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s=%q}`, "cache", metricName)),
 		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}
+	// The hook runs inside the dependency's own lock, on the goroutine that called into the
+	// cache, which already holds c.mu on every path that can evict. It touches only the expiry
+	// order and never calls back into the cache.
+	c.cache = expirable.NewLRU[K, ttlEntry[V]](size, func(k K, _ ttlEntry[V]) { c.unlink(k) }, 0)
 	if ttl > 0 {
 		go c.sweep(sweepInterval(ttl))
 	} else {
@@ -144,8 +151,14 @@ func sweepInterval(ttl time.Duration) time.Duration {
 
 // Close stops the background sweep and waits for it to finish, so the sweep reclaims nothing once
 // Close has returned. Get still treats an entry past its deadline as a miss and drops it; only the
-// sweep stops. Close is safe to call more than once and from several goroutines at once.
+// sweep stops, and with it the expiry bookkeeping, which nothing would consume. Close is safe to
+// call more than once and from several goroutines at once.
 func (c *CacheWithTTL[K, V]) Close() {
+	c.mu.Lock()
+	c.closed = true
+	c.expiryHead, c.expiryTail = nil, nil
+	c.expiryByKey = nil
+	c.mu.Unlock()
 	c.closeOnce.Do(func() { close(c.done) })
 	<-c.stopped
 }
@@ -155,20 +168,24 @@ func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
 	defer c.mu.Unlock()
 	// The deadline is taken under the lock: time spent waiting for it would otherwise be charged
 	// to the entry's ttl, and a long enough wait would store a value that is already expired.
-	// Taking it under the lock is also what keeps the expiry queue ordered.
+	// Taking it under the lock is also what keeps the expiry order sorted.
 	e := ttlEntry[V]{value: v}
 	if c.ttl > 0 {
 		e.expiresAt = time.Now().Add(c.ttl)
-		c.expiry = append(c.expiry, expiryRecord[K]{key: k, expiresAt: e.expiresAt})
 	}
-	return c.cache.Add(k, e)
+	// A size eviction inside Add unlinks the evicted key through the hook; it can never be k.
+	evicted = c.cache.Add(k, e)
+	if c.ttl > 0 {
+		c.record(k, e.expiresAt)
+	}
+	return evicted
 }
 
 func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
 	c.mu.Lock()
 	e, ok := c.cache.Get(k)
 	if ok && e.expired(time.Now()) {
-		c.cache.Remove(k)
+		c.cache.Remove(k) // the hook unlinks it
 		ok = false
 	}
 	c.mu.Unlock()
@@ -185,13 +202,75 @@ func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
 func (c *CacheWithTTL[K, V]) Remove(k K) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.cache.Remove(k)
+	return c.cache.Remove(k) // the hook unlinks it
 }
 
 func (c *CacheWithTTL[K, V]) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.cache.Len()
+}
+
+// record places k at the tail of the expiry order with its new deadline, moving its node there on
+// a renewal so a key never holds more than one. Called under mu. After Close nothing is recorded:
+// no sweep will consume it, and Get still drops an expired entry it reads.
+func (c *CacheWithTTL[K, V]) record(k K, expiresAt time.Time) {
+	if c.closed {
+		return
+	}
+	n := c.expiryByKey[k]
+	if n == nil {
+		n = &expiryNode[K]{key: k}
+		c.expiryByKey[k] = n
+	} else {
+		c.detach(n)
+	}
+	n.expiresAt = expiresAt
+	n.prev, n.next = c.expiryTail, nil
+	if c.expiryTail != nil {
+		c.expiryTail.next = n
+	} else {
+		c.expiryHead = n
+	}
+	c.expiryTail = n
+}
+
+// unlink forgets k's place in the expiry order, if it has one. Called under mu, directly or
+// through the eviction hook.
+func (c *CacheWithTTL[K, V]) unlink(k K) {
+	if n := c.expiryByKey[k]; n != nil {
+		delete(c.expiryByKey, k)
+		c.detach(n)
+	}
+}
+
+// detach splices n out of the list without touching the index.
+func (c *CacheWithTTL[K, V]) detach(n *expiryNode[K]) {
+	if n.prev != nil {
+		n.prev.next = n.next
+	} else {
+		c.expiryHead = n.next
+	}
+	if n.next != nil {
+		n.next.prev = n.prev
+	} else {
+		c.expiryTail = n.prev
+	}
+	n.prev, n.next = nil, nil
+}
+
+// expiryLen reports how many entries the expiry order holds. The index and the list must agree.
+func (c *CacheWithTTL[K, V]) expiryLen() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for x := c.expiryHead; x != nil; x = x.next {
+		n++
+	}
+	if n != len(c.expiryByKey) {
+		panic(fmt.Sprintf("lru: expiry list holds %d nodes but the index holds %d", n, len(c.expiryByKey)))
+	}
+	return n
 }
 
 func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
@@ -210,46 +289,34 @@ func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
 }
 
 // removeExpired reclaims every entry past its deadline as of now. The work is done in lock holds of
-// at most sweepChunk records each, so a large burst of expiries is reclaimed in full at this tick
+// at most sweepChunk entries each, so a large burst of expiries is reclaimed in full at this tick
 // without holding readers off for the whole burst.
 func (c *CacheWithTTL[K, V]) removeExpired(now time.Time) {
 	for c.removeExpiredUpTo(now, sweepChunk) {
 	}
 }
 
-// removeExpiredUpTo pops up to limit due records off the expiry queue under one lock hold and drops
-// the entries they still describe. It reports whether it stopped at the limit with more still due.
+// removeExpiredUpTo drops up to limit due entries from the head of the expiry order under one lock
+// hold. It reports whether it stopped at the limit with more still due.
 func (c *CacheWithTTL[K, V]) removeExpiredUpTo(now time.Time, limit int) (more bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	i := 0
-	for i < len(c.expiry) && i < limit {
-		rec := c.expiry[i]
-		if !now.After(rec.expiresAt) {
+	for i < limit {
+		n := c.expiryHead
+		if n == nil || !now.After(n.expiresAt) {
 			// The head is not due, and nothing behind it is either.
 			break
 		}
 		i++
-		// Peek reads an entry without moving it, so a sweep does not make anything look recently
-		// used and size eviction still reaches the genuinely oldest entry. A deadline that differs
-		// from the record's means the key was renewed after this record was written: the newer
-		// record, later in the queue, owns it now.
-		if e, ok := c.cache.Peek(rec.key); ok && e.expiresAt.Equal(rec.expiresAt) {
-			c.cache.Remove(rec.key)
+		// Remove unlinks the node through the hook. Peek is not needed: a node exists only
+		// while its entry does, with the entry's own deadline.
+		c.cache.Remove(n.key)
+		if c.expiryHead == n {
+			// Only if the hook did not run, which the dependency guarantees it does.
+			c.unlink(n.key)
 		}
 	}
-	if i == 0 {
-		return false
-	}
-	more = i == limit && i < len(c.expiry) && now.After(c.expiry[i].expiresAt)
-
-	// Release the consumed prefix. Re-slicing is O(1) but keeps the backing array; once most of it
-	// is spent, copy the live tail into a right-sized array so a drained queue does not hold the
-	// memory of everything ever added.
-	c.expiry = c.expiry[i:]
-	if cap(c.expiry) > 2*len(c.expiry)+expiryCompactMin {
-		c.expiry = append(make([]expiryRecord[K], 0, len(c.expiry)), c.expiry...)
-	}
-	return more
+	return i == limit && c.expiryHead != nil && now.After(c.expiryHead.expiresAt)
 }
