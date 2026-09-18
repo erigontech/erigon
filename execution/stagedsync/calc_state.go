@@ -131,6 +131,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 			acc.Balance = dbAcc.Balance
 			acc.Nonce = dbAcc.Nonce
 			acc.CodeHash = dbAcc.CodeHash.Value()
+			acc.Incarnation = dbAcc.Incarnation
 		}
 	}
 	cs.accounts[addr] = acc
