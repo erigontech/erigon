@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
+
 	jsoniter "github.com/json-iterator/go"
 )
 
@@ -95,6 +97,14 @@ func TestWriteObjectFieldFastMatchesJsoniter(t *testing.T) {
 
 		require.Equal(t, string(want.Buffer()), string(got.Buffer()), "field %q", name)
 	}
+}
+
+func TestWriteObjectFieldFastAssertsEscapes(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
+	require.Panics(t, func() { writeObjectFieldFast(stream, `odd"name`) })
+	require.NotPanics(t, func() { writeObjectFieldFast(stream, "oddName") })
 }
 
 // TestWriteStringThroughWrappers exercises the composition the parity test
