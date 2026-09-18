@@ -1089,7 +1089,7 @@ func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) 
 
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
 	for i := range bal {
-		if bal[i].Address == addr {
+		if bal[i].Address == addr.Value() {
 			return &bal[i]
 		}
 	}
@@ -1220,7 +1220,7 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 		require.ErrorContains(t, status.ValidationError.Error(), "access list")
 
 		oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-			Address: accounts.InternAddress(common.Address{1}),
+			Address: common.Address{1},
 		}})
 		require.NoError(t, err)
 		oversizedBytes := hexutil.Bytes(oversized)
