@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -88,5 +89,71 @@ func TestChangesetDerivedEqualsAccumulated(t *testing.T) {
 	for i := range accumulated {
 		require.Equal(t, []byte(accumulated[i].Key), []byte(derivedSet[i].Key), "diff key %d", i)
 		require.Equal(t, accumulated[i].Value, derivedSet[i].Value, "diff prevValue %d (key %x)", i, accumulated[i].Key)
+	}
+}
+
+// TestChangesetDerivedEqualsAccumulated_SelfDestruct proves the one storage case
+// that needs more than the tx write set: a self-destruct (DomainDelPrefix) records
+// a per-slot delete diff for every slot the account held; the derivation must
+// enumerate those pre-block slots as-of the boundary (they are tombstoned by
+// block-end) and emit the same diffs.
+func TestChangesetDerivedEqualsAccumulated_SelfDestruct(t *testing.T) {
+	ctx := context.Background()
+	_, tx, doms := setupStepTest(t) // stepSize 16
+
+	// Account X with 3 storage slots, committed as the pre-block base.
+	acct := make([]byte, 20)
+	acct[0] = 0x99
+	slots := [][]byte{}
+	for i := 0; i < 3; i++ {
+		k := make([]byte, 52) // 20 addr + 32 loc
+		copy(k, acct)
+		k[51] = byte(i + 1)
+		val := []byte{0xaa, byte(i + 1)}
+		require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, k, val, 5, nil))
+		slots = append(slots, k)
+	}
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	const sdTxNum = uint64(17) // block N boundary txNum for the self-destruct
+	const blockBoundary = uint64(17)
+
+	// --- accumulated path: self-destruct via DomainDelPrefix ---
+	cs := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(cs)
+	require.NoError(t, doms.DomainDelPrefix(kv.StorageDomain, tx, acct, sdTxNum))
+	accumulated := sortDiffs(cs.Diffs[kv.StorageDomain].GetDiffSet())
+
+	// --- derived path: enumerate pre-block slots as-of boundary, GetAsOf each ---
+	derived := &kv.DomainDiff{}
+	prefixEnd := make([]byte, 20)
+	copy(prefixEnd, acct)
+	for i := len(prefixEnd) - 1; i >= 0; i-- { // next-prefix
+		prefixEnd[i]++
+		if prefixEnd[i] != 0 {
+			break
+		}
+	}
+	it, err := tx.RangeAsOf(kv.StorageDomain, acct, prefixEnd, blockBoundary, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	step := kv.Step(sdTxNum / 16)
+	got := 0
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		if len(v) == 0 {
+			continue
+		}
+		derived.DomainUpdate(k, step, v)
+		got++
+	}
+	require.Equal(t, len(slots), got, "must enumerate all pre-block slots")
+	derivedSet := sortDiffs(derived.GetDiffSet())
+
+	require.Equal(t, len(accumulated), len(derivedSet), "self-destruct diff count")
+	for i := range accumulated {
+		require.Equal(t, []byte(accumulated[i].Key), []byte(derivedSet[i].Key), "sd diff key %d", i)
+		require.Equal(t, accumulated[i].Value, derivedSet[i].Value, "sd diff prevValue %d", i)
 	}
 }
