@@ -17,7 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
@@ -39,11 +41,13 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -614,4 +618,57 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot[:]}, at)
 	require.NoError(t, err)
 	require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+}
+
+// sloadStub returns the storage slot named by the call data, so a call can read the slot the
+// EIP-2935 system call writes.
+var sloadStub = []byte{0x5f, 0x35, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+
+func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	slotOfNextBlock := common.BigToHash(big.NewInt(bn))
+	slotOfThisBlock := common.BigToHash(big.NewInt(bn - 1))
+
+	traceAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+	traceRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: slot[:]}, []string{"trace"}, at, nil)
+		require.NoError(t, err)
+		return common.BytesToHash(res.Output)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), traceRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, traceRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
+
+	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	debugRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		data := hexutil.Bytes(slot[:])
+		var out bytes.Buffer
+		stream := jsonstream.New(&out)
+		require.NoError(t, debugAPI.TraceCall(context.Background(), ethapi.CallArgs{To: &historyAddr, Data: &data}, at, &tracersConfig.TraceConfig{}, stream))
+		require.NoError(t, stream.Flush())
+		var traced struct {
+			ReturnValue string `json:"returnValue"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &traced))
+		return common.HexToHash(traced.ReturnValue)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), debugRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, debugRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
 }
