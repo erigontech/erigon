@@ -456,7 +456,7 @@ func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineap
 	}
 }
 
-func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold, response <-chan error) error {
+func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold, response <-chan error, allowEarlySuccess bool) error {
 	for {
 		select {
 		case <-hold.reached:
@@ -464,6 +464,9 @@ func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold,
 		case err := <-response:
 			if err != nil {
 				return fmt.Errorf("forkchoice before transition %d: %w", hold.point, err)
+			}
+			if !allowEarlySuccess {
+				return fmt.Errorf("forkchoice returned before transition %d", hold.point)
 			}
 			response = nil
 		case <-ctx.Done():
@@ -502,16 +505,40 @@ func runUnwindCrashChild(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	startForkchoice := func(payload *engineapitester.MockClPayload) <-chan error {
+	startForkchoice := func(head common.Hash) <-chan error {
 		response := make(chan error, 1)
-		go func() { response <- eat.MockCl.UpdateForkChoice(ctx, payload) }()
+		go func() {
+			state := enginetypes.ForkChoiceState{
+				HeadHash:           head,
+				SafeBlockHash:      eat.GenesisBlock.Hash(),
+				FinalizedBlockHash: eat.GenesisBlock.Hash(),
+			}
+			result, err := engineapitester.RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+				func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+					var result *enginetypes.ForkChoiceUpdatedResponse
+					var err error
+					if eat.ChainConfig.AmsterdamTime != nil {
+						result, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &state, nil, nil)
+					} else {
+						result, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &state, nil)
+					}
+					if err != nil {
+						return nil, "", err
+					}
+					return result, result.PayloadStatus.Status, nil
+				})
+			if err == nil && result.PayloadStatus.Status != enginetypes.ValidStatus {
+				err = fmt.Errorf("forkchoice returned %s", result.PayloadStatus.Status)
+			}
+			response <- err
+		}()
 		return response
 	}
 	t.Log("importing the canonical chain")
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Canonical)
 	canonicalPublished := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
 	canonicalCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
-	canonicalResponse := startForkchoice(request.Canonical[len(request.Canonical)-1])
+	canonicalResponse := startForkchoice(request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockHash)
 	// Force the early response to arrive while persistence is still blocked.
 	// Only this FCU's clear event allows the replacement barrier to be armed.
 	t.Log("waiting for the canonical FCU's early response")
@@ -522,16 +549,23 @@ func runUnwindCrashChild(t *testing.T) {
 		t.Fatalf("canonical FCU did not respond before commit: %v", ctx.Err())
 	}
 	t.Log("waiting for canonical overlay publication")
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil), "canonical FCU after its early response")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil, true), "canonical FCU after its early response")
 	canonicalPublished.release()
 	t.Log("waiting for canonical overlay teardown")
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil), "canonical FCU after overlay publication")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil, true), "canonical FCU after overlay publication")
 	canonicalCleared.release()
 
 	t.Log("importing the replacement chain")
 	var boundary *stateTransitionHold
+	var replacementHead common.Hash
 	if request.CatchupCommit > 0 {
-		insertCrashRecoveryBlocks(ctx, t, eat, request.Downloaded)
+		blocks, err := decodeCrashRecoveryBlocks(request.Downloaded)
+		require.NoError(t, err)
+		require.NotEmpty(t, blocks)
+		replacementHead = blocks[len(blocks)-1].Hash()
+		status, err := eat.ExecutionModule.InsertBlocks(ctx, blocks)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 		seen := 0
 		boundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
 			seen++
@@ -539,24 +573,16 @@ func runUnwindCrashChild(t *testing.T) {
 		})
 	} else {
 		insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
+		replacementHead = request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockHash
 		boundary = transitions.hold(t, request.Point, 1)
 	}
 	// Abort before cleanup can release the crash barrier, even on failure.
 	t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
-	response := startForkchoice(request.Replacement[len(request.Replacement)-1])
+	response := startForkchoice(replacementHead)
 	t.Logf("waiting for replacement transition %d", request.Point)
-	if request.CatchupCommit > 0 {
-		select {
-		case <-boundary.reached:
-			require.NoError(t, ctx.Err())
-		case err := <-response:
-			t.Fatalf("unvalidated FCU returned before catch-up cycle %d, transition %d: %v", request.CatchupCommit, request.Point, err)
-		case <-ctx.Done():
-			t.Fatalf("waiting for catch-up cycle %d, transition %d: %v", request.CatchupCommit, request.Point, ctx.Err())
-		}
-	} else {
-		require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response), "replacement FCU")
-	}
+	// A prevalidated tip FCU may return VALID before its commit. Bulk import
+	// clears that validation, so a catch-up response before the barrier is a failure.
+	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response, request.CatchupCommit == 0), "replacement FCU, catch-up cycle %d", request.CatchupCommit)
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
 	require.NoError(t, err)
@@ -601,13 +627,24 @@ func crashRecoveryExitError(err error) error {
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
 	require.NotEmpty(t, request.Canonical)
-	require.NotEmpty(t, request.Replacement)
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
 	if request.CatchupCommit > 0 {
-		require.Greater(t, replacementHead, canonicalHead+16, "the replacement FCU must enter catch-up mode")
-		require.Len(t, request.Downloaded, len(request.Replacement))
+		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
+		blocks, err := decodeCrashRecoveryBlocks(request.Downloaded)
+		require.NoError(t, err)
+		require.NotEmpty(t, blocks)
+		var forkPoint uint64
+		for i := 0; i < min(len(blocks), len(request.Canonical)); i++ {
+			if blocks[i].Hash() != request.Canonical[i].ExecutionPayload.BlockHash {
+				break
+			}
+			forkPoint = blocks[i].NumberU64()
+		}
+		checkpoint := forkPoint + uint64(request.CatchupCommit)*catchupCrashBlockLimit
+		require.Less(t, checkpoint, blocks[len(blocks)-1].NumberU64(), "the requested catch-up commit must be an intermediate checkpoint")
 	} else {
+		require.NotEmpty(t, request.Replacement)
+		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
 		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
 	}
 	testDeadline, _ := t.Deadline()

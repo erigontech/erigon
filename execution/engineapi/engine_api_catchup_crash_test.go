@@ -91,6 +91,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			chain.sum = sums[len(sums)-1]
 			chain.state = readCrashRecoveryState(t, eat.ChainDB)
 			assertCrashRecoveryReference(t, chain)
+			require.Positive(t, chain.state.CommitmentTx/eat.ChainDB.StepSize(), "the batch limit needs at least one domain step")
 			checkpoints = append(checkpoints, chain.state)
 		}
 		if side {
@@ -110,6 +111,9 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	require.Less(t, checkpoints[1].CommitmentBlock, side.state.CommitmentBlock)
 	require.NotEqual(t, canonical.state.Domains[kv.CodeDomain], checkpoints[0].Domains[kv.CodeDomain])
 	require.NotEqual(t, checkpoints[0].Domains[kv.CodeDomain], checkpoints[1].Domains[kv.CodeDomain])
+	for cycle := 1; cycle <= 2; cycle++ {
+		require.Equal(t, uint64(prefixBlocks+cycle*catchupCrashBlockLimit), checkpoints[cycle-1].CommitmentBlock, "reference catch-up checkpoint %d", cycle)
+	}
 
 	for cycle := 1; cycle <= 2; cycle++ {
 		t.Run(fmt.Sprintf("cycle_%d", cycle), func(t *testing.T) {
@@ -118,8 +122,8 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 				point     execmodule.StateTransitionPoint
 				committed bool
 			}{
-				{"commit_ready", execmodule.StateTransitionCatchupCommitReady, false},
-				{"commit_complete", execmodule.StateTransitionCatchupCommitComplete, true},
+				{"commit_ready", execmodule.StateTransitionFCUCatchupCommitReady, false},
+				{"commit_complete", execmodule.StateTransitionFCUCatchupCommitComplete, true},
 			} {
 				t.Run(window.name, func(t *testing.T) {
 					request := crashRecoveryRequest{
@@ -128,7 +132,6 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 						DataDir:       newSmallStepDataDir(t),
 						Point:         window.point,
 						Canonical:     canonical.payloads,
-						Replacement:   side.payloads,
 						CatchupCommit: cycle,
 						Downloaded:    downloaded,
 					}
@@ -149,26 +152,18 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					inspected := false
 					args.BeforeNodeStart = func(db kv.TemporalRoDB) {
 						assertCatchupRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
+						require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, side.payloads), "bulk-imported blocks and BALs must survive every crash")
 						inspected = true
 					}
 					eat, initErr := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 					require.NoError(t, initErr)
 					t.Cleanup(func() { require.NoError(t, eat.Close()) })
 					require.True(t, inspected, "the crash oracle must run before startup execution")
-					if completed == 0 {
-						insertCrashRecoveryBlocks(t.Context(), t, eat, downloaded)
-					} else {
-						require.Eventually(t, func() bool {
-							tx, err := eat.ChainDB.BeginTemporalRo(t.Context())
-							require.NoError(t, err)
-							defer tx.Rollback()
-							progress, err := stages.GetStageProgress(tx, stages.Finish)
-							require.NoError(t, err)
-							return progress == side.state.CommitmentBlock
-						}, rpcTransitionTimeout, 10*time.Millisecond, "startup must finish the downloaded chain without re-import")
+					if completed > 0 {
+						require.NoError(t, waitCrashRecoveryExecution(t.Context(), eat.ChainDB, side.state.CommitmentBlock))
 					}
-					// Once a cycle commits, all downloaded blocks must survive the crash:
-					// the first recovery FCU has no newPayload or InsertBlocks to help it.
+					// Bulk import is durable before the FCU; recovery must not re-import.
+					// Re-importing would hide missing headers, bodies, or BALs after the crash.
 					require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), side.payloads[len(side.payloads)-1]))
 					assertCatchupRecoveryState(t, side.state, readCrashRecoveryState(t, eat.ChainDB))
 					churn, bindErr := contracts.NewStateChurn(addr, eat.ContractBackend)
@@ -199,8 +194,39 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	}
 }
 
+func waitCrashRecoveryExecution(ctx context.Context, db kv.TemporalRoDB, head uint64) error {
+	ctx, cancel := context.WithTimeout(ctx, rpcTransitionTimeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		progress, err := func() (uint64, error) {
+			tx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return 0, err
+			}
+			defer tx.Rollback()
+			return stages.GetStageProgress(tx, stages.Finish)
+		}()
+		if err != nil {
+			return fmt.Errorf("read startup execution progress: %w", err)
+		}
+		if progress == head {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("startup execution at block %d, want %d: %w", progress, head, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 func assertCatchupRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	t.Helper()
+	require.Equal(t, want.CommitmentBlock, got.CommitmentBlock, "persisted catch-up checkpoint: got block %d, want %d", got.CommitmentBlock, want.CommitmentBlock)
+	require.Equal(t, want.CommitmentTx, got.CommitmentTx, "persisted catch-up checkpoint: got transaction %d, want %d", got.CommitmentTx, want.CommitmentTx)
+	require.Equal(t, want.StageProgress, got.StageProgress, "persisted catch-up stage progress")
 	// Different flush boundaries can keep or remove empty branch records.
 	// Compare every live branch, including its child hashes and plain keys.
 	for _, state := range []*crashRecoveryState{&want, &got} {
@@ -224,6 +250,9 @@ func assertCatchupRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	assertCrashRecoveryState(t, want, got)
 }
 
+// An intermediate commit persists execution only through its batch, but block
+// metadata can describe the full downloaded chain. Forkchoice markers still
+// describe the previously accepted FCU until the replacement FCU completes.
 func catchupRecoveryCheckpoint(executed, previous, downloaded crashRecoveryState) crashRecoveryState {
 	state := executed
 	state.HeadBlock, state.HeadHeader = downloaded.HeadBlock, downloaded.HeadHeader
@@ -245,31 +274,48 @@ func readCrashRecoveryBlocks(t *testing.T, db kv.TemporalRoDB, payloads []*engin
 	for i, payload := range payloads {
 		hash, number := payload.ExecutionPayload.BlockHash, uint64(payload.ExecutionPayload.BlockNumber)
 		block := rawdb.ReadBlock(tx, hash, number)
-		require.NotNil(t, block)
+		require.NotNilf(t, block, "missing block %d (%s)", number, hash)
+		require.NotNilf(t, block.BlockAccessListHash(), "block %d must use Amsterdam", number)
 		blocks[i].RLP, err = rlp.EncodeToBytes(block)
 		require.NoError(t, err)
 		blocks[i].BAL, err = rawdb.ReadBlockAccessListBytes(tx, hash, number)
 		require.NoError(t, err)
 		blocks[i].BAL = bytes.Clone(blocks[i].BAL)
+		require.NotEmptyf(t, blocks[i].BAL, "missing block access list for block %d", number)
 	}
 	return blocks
 }
 
-func insertCrashRecoveryBlocks(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, downloaded []crashRecoveryBlock) {
-	t.Helper()
+func decodeCrashRecoveryBlocks(downloaded []crashRecoveryBlock) ([]*types.Block, error) {
 	blocks := make([]*types.Block, len(downloaded))
 	for i, data := range downloaded {
 		var block types.Block
-		require.NoError(t, rlp.DecodeBytes(data.RLP, &block))
+		if err := rlp.DecodeBytes(data.RLP, &block); err != nil {
+			return nil, err
+		}
+		expectedHash := block.BlockAccessListHash()
 		if len(data.BAL) > 0 {
+			if expectedHash == nil {
+				return nil, fmt.Errorf("block %d: block access list without a header hash", block.NumberU64())
+			}
 			sidecar, err := types.DecodeBlockAccessListSidecar(data.BAL)
-			require.NoError(t, err)
+			if err != nil {
+				return nil, err
+			}
+			hash, err := sidecar.Hash()
+			if err != nil {
+				return nil, err
+			}
+			if hash != *expectedHash {
+				return nil, fmt.Errorf("block %d: block access list hash mismatch: got %s, want %s", block.NumberU64(), hash, *expectedHash)
+			}
 			blocks[i] = block.WithBlockAccessListSidecar(sidecar)
 		} else {
+			if expectedHash != nil {
+				return nil, fmt.Errorf("block %d: missing block access list", block.NumberU64())
+			}
 			blocks[i] = &block
 		}
 	}
-	status, err := eat.ExecutionModule.InsertBlocks(ctx, blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	return blocks, nil
 }

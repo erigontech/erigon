@@ -19,7 +19,8 @@ package execmodule
 import "context"
 
 // StateTransitionPoint identifies where an integration test may pause RPC view
-// binding or forkchoice processing.
+// binding or forkchoice processing. Catch-up points cover FCU execution only,
+// not startup execution.
 type StateTransitionPoint uint8
 
 const (
@@ -41,12 +42,12 @@ const (
 	// StateTransitionCommitReady means the tip FCU's metadata and domain writes
 	// have been flushed into its MDBX transaction, which has not committed yet.
 	StateTransitionCommitReady
-	// StateTransitionCatchupCommitReady means a catch-up cycle has flushed its
+	// StateTransitionFCUCatchupCommitReady means an FCU catch-up cycle has flushed its
 	// writes into an uncommitted MDBX transaction. The FCU may need more cycles.
-	StateTransitionCatchupCommitReady
-	// StateTransitionCatchupCommitComplete means that cycle is durable, before
+	StateTransitionFCUCatchupCommitReady
+	// StateTransitionFCUCatchupCommitComplete means that cycle is durable, before
 	// opening the next read view. Final forkchoice markers may still be pending.
-	StateTransitionCatchupCommitComplete
+	StateTransitionFCUCatchupCommitComplete
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each

@@ -18,8 +18,10 @@ package execmodule_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -70,6 +72,41 @@ func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 	}))
 }
 
+func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(4, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.Drain()
+	head, safe, finalized := chain.TopBlock.Hash(), chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.Drain()
+	for _, zeroFinality := range []bool{false, true} {
+		t.Run(fmt.Sprintf("zero_finality_%t", zeroFinality), func(t *testing.T) {
+			defer m.ExecModule.Drain()
+			writer, err := m.DB.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer writer.Rollback()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			requestSafe, requestFinalized := safe, finalized
+			if zeroFinality {
+				requestSafe, requestFinalized = common.Hash{}, common.Hash{}
+			}
+			result, err := m.ExecModule.UpdateForkChoice(ctx, head, requestSafe, requestFinalized)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "unchanged markers must not need the MDBX writer lock")
+		})
+	}
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
+		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
+		return nil
+	}))
+}
+
 func TestCatchupCommitObservations(t *testing.T) {
 	var mu sync.Mutex
 	var observed []execmodule.StateTransitionPoint
@@ -95,8 +132,8 @@ func TestCatchupCommitObservations(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, []execmodule.StateTransitionPoint{
-		execmodule.StateTransitionCatchupCommitReady,
-		execmodule.StateTransitionCatchupCommitComplete,
+		execmodule.StateTransitionFCUCatchupCommitReady,
+		execmodule.StateTransitionFCUCatchupCommitComplete,
 		execmodule.StateTransitionOverlayPublished,
 		execmodule.StateTransitionCommitReady,
 		execmodule.StateTransitionCommitComplete,
