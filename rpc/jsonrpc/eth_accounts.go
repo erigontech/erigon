@@ -63,7 +63,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		tx.Rollback()
 		return nil, nil, err
@@ -181,7 +181,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

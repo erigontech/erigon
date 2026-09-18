@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -286,25 +285,22 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 		// if block number changed, calculate all related field
 		if blockNumChanged {
+			if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
+				return rpcLogs, nil
+			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				continue
+				return nil, fmt.Errorf("header not found: %d", blockNum)
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
 			timestamp = header.Time
 			blockCount++
-
 		}
 		var logIndex uint
 		var blockLogs types.Logs
-
-		if logOptions.BlockCount != 0 && logOptions.BlockCount < blockCount {
-			return rpcLogs, nil
-		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {

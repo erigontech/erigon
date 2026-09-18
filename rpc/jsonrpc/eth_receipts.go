@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -377,8 +376,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				continue
+				return nil, fmt.Errorf("header not found: %d", blockNum)
 			}
 		}
 
