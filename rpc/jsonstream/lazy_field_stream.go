@@ -16,7 +16,11 @@
 
 package jsonstream
 
-import "io"
+import (
+	"io"
+
+	"github.com/holiman/uint256"
+)
 
 var (
 	_ Stream = (*StackStream)(nil)
@@ -97,7 +101,7 @@ func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmp
 
 func (s *LazyFieldStream) WriteHexUint64(v uint64) { s.ensure(); s.inner.WriteHexUint64(v) }
 
-func (s *LazyFieldStream) WriteHexQuantity(be []byte) { s.ensure(); s.inner.WriteHexQuantity(be) }
+func (s *LazyFieldStream) WriteHexU256(v *uint256.Int) { s.ensure(); s.inner.WriteHexU256(v) }
 
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a

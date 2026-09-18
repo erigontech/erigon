@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"github.com/holiman/uint256"
 	"io"
 )
 
@@ -72,7 +73,7 @@ type Stream interface {
 	WriteHex(b []byte)
 	// WriteHexUint64 and WriteHexQuantity write JSON-RPC quantities: 0x-prefixed hex without leading zeros.
 	WriteHexUint64(v uint64)
-	WriteHexQuantity(be []byte)
+	WriteHexU256(v *uint256.Int)
 
 	// Utility methods
 

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -109,23 +110,20 @@ func (s *StackStream) WriteHexUint64(v uint64) {
 	s.popCommaOrField()
 }
 
-// WriteHexQuantity writes a big-endian number the way JSON-RPC quantities are encoded: no leading
-// zero digits, and "0x0" for zero.
-func (s *StackStream) WriteHexQuantity(be []byte) {
-	for len(be) > 0 && be[0] == 0 {
-		be = be[1:]
+// WriteHexU256 writes a number the way JSON-RPC quantities are encoded: no leading zero digits,
+// and "0x0" for zero.
+func (s *StackStream) WriteHexU256(v *uint256.Int) {
+	be := v.Bytes32()
+	trimmed := be[:]
+	for len(trimmed) > 1 && trimmed[0] == 0 {
+		trimmed = trimmed[1:]
 	}
 	buf := append(s.stream.Buffer(), `"0x`...)
-	if len(be) == 0 {
-		s.stream.SetBuffer(append(buf, '0', '"'))
-		s.popCommaOrField()
-		return
+	if trimmed[0] < 0x10 {
+		buf = append(buf, hexDigits[trimmed[0]])
+		trimmed = trimmed[1:]
 	}
-	if be[0] < 0x10 {
-		buf = append(buf, hexDigits[be[0]])
-		be = be[1:]
-	}
-	s.stream.SetBuffer(append(hex.AppendEncode(buf, be), '"'))
+	s.stream.SetBuffer(append(hex.AppendEncode(buf, trimmed), '"'))
 	s.popCommaOrField()
 }
 
