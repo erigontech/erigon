@@ -81,7 +81,7 @@ func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
-	if cfg.Port > 0 && uint(cfg.Port) == cfg.QUICPort {
+	if discoveryAndQUICPortConflict(cfg) {
 		return nil, fmt.Errorf("discovery and QUIC ports must differ: %d", cfg.Port)
 	}
 
@@ -183,6 +183,22 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	go p.peerMonitor(ctx)
 	initialized = true
 	return &p, nil
+}
+
+func discoveryAndQUICPortConflict(cfg *P2PConfig) bool {
+	if cfg.Port <= 0 || uint(cfg.Port) != cfg.QUICPort {
+		return false
+	}
+	discoveryIP := net.ParseIP(cfg.IpAddr)
+	quicIP := discoveryIP
+	if cfg.LocalIP != "" {
+		quicIP = net.ParseIP(cfg.LocalIP)
+	}
+	if discoveryIP == nil || quicIP == nil {
+		return false
+	}
+	sameFamily := discoveryIP.To4() != nil == (quicIP.To4() != nil)
+	return discoveryIP.Equal(quicIP) || sameFamily && (discoveryIP.IsUnspecified() || quicIP.IsUnspecified())
 }
 
 func hostTCPPort(h host.Host) uint {
