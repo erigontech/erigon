@@ -47,7 +47,7 @@ func TestWriteResponseMatchesJSONMarshal(t *testing.T) {
 
 			var buf bytes.Buffer
 			stream := jsonstream.New(&buf)
-			(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, json.RawMessage(r))
+			_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, json.RawMessage(r))
 			require.NoError(t, stream.Flush())
 
 			require.Equal(t, string(want), buf.String(), "want=%s", want)
@@ -63,7 +63,7 @@ func TestWriteResponseSkipsIDHTMLEscaping(t *testing.T) {
 
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
-	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, 1)
+	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(stream, 1)
 	require.NoError(t, stream.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":"a<b>&c","result":1}`, buf.String())
 
