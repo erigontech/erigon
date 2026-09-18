@@ -17,10 +17,12 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -61,12 +63,18 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }
 
-// The backend leaves "from" unset when it cannot recover the sender, so
-// MarshalSubscribeReceipt must not dereference it.
+// The backend leaves "from" unset when it cannot recover the sender. The zero
+// address is a valid address, so an unknown sender must marshal to null like
+// "to" and "contractAddress" do, not to 0x00..00.
 func TestMarshalSubscribeReceiptWithoutSender(t *testing.T) {
 	reply := &remoteproto.SubscribeReceiptsReply{
 		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
 		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
 	}
-	assert.Equal(t, common.Address{}, MarshalSubscribeReceipt(reply).From)
+	receipt := MarshalSubscribeReceipt(reply)
+	assert.Nil(t, receipt.From)
+
+	encoded, err := json.Marshal(receipt)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"from":null`)
 }

@@ -87,6 +87,8 @@ type EthBackend interface {
 	SetHead(ctx context.Context, targetBlock uint64) error
 }
 
+// NewEthBackendServer panics on a nil chainConfig: receipt subscriptions build
+// their signer from it, and a signer without a chain id recovers no sender.
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
