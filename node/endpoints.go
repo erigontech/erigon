@@ -84,14 +84,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
 		ConnState: func(conn net.Conn, state http.ConnState) {
-			c, ok := conn.(*corkConn)
-			if !ok {
-				return
-			}
-			switch state {
-			case http.StateIdle:
-				c.flushIdle()
-			case http.StateHijacked: // the handler owns the connection now and expects its writes to reach the wire
+			if c, ok := conn.(*corkConn); ok && state == http.StateHijacked { // the handler owns the connection now and expects its writes to reach the wire
 				c.uncork()
 			}
 		},
@@ -182,8 +175,7 @@ func (c *corkConn) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Read flushes first: the peer may be waiting for what is buffered before it sends anything more - a
-// TLS handshake record, a "100 Continue", or the previous response on a keep-alive connection.
+// Read flushes first: the peer may wait for a buffered "100 Continue" before it sends the body.
 func (c *corkConn) Read(p []byte) (int, error) {
 	if !c.uncorked.Load() {
 		c.flush()
@@ -220,15 +212,19 @@ func (c *corkConn) CloseWrite() error {
 	return closer.CloseWrite()
 }
 
-// flushIdle sends what the finished response left buffered. net/http has cleared the request's write deadline
-// by now, so the endpoint's own timeout bounds this write.
-func (c *corkConn) flushIdle() {
-	if c.uncorked.Load() { // an h2c connection is still reported idle, but its deadlines belong to the HTTP/2 server
-		return
+// SetWriteDeadline flushes first. http.Server resets the write deadline after it finishes a request and before it
+// marks the connection idle, so the response leaves under the request's own deadline and Server.Shutdown waits for
+// it. A handler's Flush does not reach the socket while the response stays below corkBufferBytes.
+func (c *corkConn) SetWriteDeadline(t time.Time) error {
+	if !c.uncorked.Load() {
+		c.flushAndRelease()
 	}
+	return c.Conn.SetWriteDeadline(t)
+}
+
+func (c *corkConn) flushAndRelease() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.bound()
 	_ = c.flushLocked()
 	c.releaseLocked()
 }

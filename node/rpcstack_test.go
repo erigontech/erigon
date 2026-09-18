@@ -40,6 +40,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -714,20 +715,9 @@ func TestCorkConnUncorkedWritesWithoutTheLock(t *testing.T) {
 
 type deadlineConn struct {
 	writeCountingConn
-	writeDeadline time.Time
 }
 
-func (c *deadlineConn) SetWriteDeadline(d time.Time) error { c.writeDeadline = d; return nil }
-
-// An h2c upgrade hands the hijacked connection to the HTTP/2 server, which still reports it idle: a deadline set
-// then would stay for the whole life of the connection.
-func TestCorkConnIdleAfterUncorkSetsNoDeadline(t *testing.T) {
-	conn := &deadlineConn{}
-	c := &corkConn{Conn: conn, writeTimeout: time.Minute}
-	c.uncork()
-	c.flushIdle()
-	require.True(t, conn.writeDeadline.IsZero())
-}
+func (*deadlineConn) SetWriteDeadline(time.Time) error { return nil }
 
 // A keep-alive connection waits between requests with its buffer back in the pool.
 func TestCorkConnIdleReleasesBuffer(t *testing.T) {
@@ -736,6 +726,99 @@ func TestCorkConnIdleReleasesBuffer(t *testing.T) {
 	require.NoError(t, err)
 	_, err = c.Write(bytes.Repeat([]byte("a"), corkBufferBytes-1))
 	require.NoError(t, err)
-	c.flushIdle()
+	require.NoError(t, c.SetWriteDeadline(time.Time{}))
 	require.Nil(t, c.buf)
+}
+
+type recordingConn struct {
+	net.Conn
+	reads   atomic.Int32
+	mu      sync.Mutex
+	written int
+	closed  bool
+}
+
+func (c *recordingConn) Read(p []byte) (int, error) {
+	c.reads.Add(1)
+	return c.Conn.Read(p)
+}
+
+func (c *recordingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.written += n
+	return n, err
+}
+
+func (c *recordingConn) Close() error {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+	return c.Conn.Close()
+}
+
+func (c *recordingConn) snapshot() (written int, closed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.written, c.closed
+}
+
+type recordingListener struct {
+	net.Listener
+	last atomic.Pointer[recordingConn]
+}
+
+func (l *recordingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	rc := &recordingConn{Conn: conn}
+	l.last.Store(rc)
+	return rc, nil
+}
+
+// Server.Shutdown closes a connection as soon as it is idle, so the whole response must reach the socket before
+// net/http marks the connection idle.
+func TestCorkConnFlushesBeforeIdle(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	recording := &recordingListener{Listener: ln}
+	body := bytes.Repeat([]byte("a"), 8*1024)
+	type socketState struct {
+		written int
+		closed  bool
+	}
+	atIdle := make(chan socketState, 1)
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// net/http's background read flushes the cork when it starts: wait for it, so that only the end of
+			// the request can send the answer.
+			assert.Eventually(t, func() bool { return recording.last.Load().reads.Load() >= 2 }, 5*time.Second, time.Millisecond)
+			_, _ = w.Write(body)
+		}),
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateIdle {
+				written, closed := recording.last.Load().snapshot()
+				atIdle <- socketState{written: written, closed: closed}
+			}
+		},
+	}
+	go func() { _ = srv.Serve(corkListener{Listener: recording, writeTimeout: time.Minute}) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String(), nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+
+	idle := <-atIdle
+	require.False(t, idle.closed)
+	total, _ := recording.last.Load().snapshot()
+	require.Equal(t, total, idle.written, "the response reached the socket before the connection went idle")
 }
