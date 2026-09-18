@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
@@ -271,10 +272,11 @@ func (s *StackStream) WriteMore() {
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) {
+func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
+	return s
 }
 
 // Flush flushes the underlying stream
@@ -363,6 +365,10 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	s.stack = s.stack[:targetDepth]
 	return s.stream.Error
 }
+
+// Err reports a write error the stream latched. Flush cannot stand in for it on a stream with no
+// writer: jsoniter returns nil for that case before it looks at the latched error.
+func (s *StackStream) Err() error { return s.stream.Error }
 
 func (s *StackStream) Depth() int { return len(s.stack) }
 

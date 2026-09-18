@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 )
 
@@ -67,7 +68,7 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
-	WriteObjectField(fieldName string)
+	WriteObjectField(fieldName string) jsonw.JSONWriter
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
@@ -86,4 +87,7 @@ type Stream interface {
 	// container nesting: a field name or a comma still waiting for its value
 	// counts too. Pass it back as targetDepth to return to this point.
 	Depth() int
+	// Err reports a write error the stream latched. Flush does not surface it on a writerless
+	// stream, so a caller that reads Buffer() instead of flushing must ask for it.
+	Err() error
 }
