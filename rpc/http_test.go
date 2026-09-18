@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -502,6 +503,8 @@ func (b *barrierService) Wait(ctx context.Context) (int, error) {
 	select {
 	case <-b.release:
 		return arrived, nil
+	case <-time.After(2 * time.Second):
+		return 0, fmt.Errorf("call %d waited alone: batch items ran one after another", arrived)
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
@@ -540,7 +543,7 @@ func TestHTTPBatchRunsItemsConcurrently(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &answers))
 	require.Len(t, answers, n)
 	for _, a := range answers {
-		require.Nil(t, a.Error, "item %d did not reach the barrier, so batch items ran one after another", a.ID)
+		require.Nil(t, a.Error, "item %d: %s", a.ID, a.Error)
 	}
 }
 
@@ -575,4 +578,30 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
+}
+
+type goroutineService struct{}
+
+func (goroutineService) Current() string { return goroutineID() }
+
+// goroutineID parses N out of the "goroutine N [running]:" stack header.
+func goroutineID() string {
+	buf := make([]byte, 64)
+	return string(bytes.Fields(buf[:runtime.Stack(buf, false)])[1])
+}
+
+// A single HTTP request is answered on the serving goroutine, with no second one started.
+func TestHTTPSingleRequestRunsOnServingGoroutine(t *testing.T) {
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	defer s.Stop()
+	require.NoError(t, s.RegisterName("gid", goroutineService{}))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://url.com", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"gid_current"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	var resp struct{ Result string }
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, goroutineID(), resp.Result)
 }
