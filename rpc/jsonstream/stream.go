@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"encoding"
 	"io"
 
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
@@ -74,6 +75,8 @@ type Stream interface {
 	WriteHex(b []byte)
 	// WriteValue appends v into the stream's buffer, grown by v.JSONLen() first.
 	WriteValue(v jsonw.JSONAppender)
+	// WriteQuotedText writes v.AppendText's output as a JSON string, with no escape scan.
+	WriteQuotedText(v encoding.TextAppender)
 
 	// Utility methods
 

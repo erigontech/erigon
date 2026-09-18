@@ -16,12 +16,22 @@
 
 package jsonw
 
+import "encoding"
+
 // JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
 	WriteHex(b []byte)
 	WriteValue(v JSONAppender)
+	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
+	// escaping: callers pass hex quantities.
+	WriteQuotedText(v encoding.TextAppender)
+	// WriteString writes s as an escaped JSON string.
+	WriteString(s string)
 	WriteNil()
+	WriteObjectStart()
+	WriteObjectField(name string)
+	WriteObjectEnd()
 	WriteArrayStart()
 	WriteMore()
 	WriteArrayEnd()

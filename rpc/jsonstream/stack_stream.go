@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"encoding"
 	"fmt"
 	"io"
 	"slices"
@@ -97,6 +98,14 @@ func (s *StackStream) WriteHex(b []byte) {
 
 func (s *StackStream) WriteValue(v jsonw.JSONAppender) {
 	s.stream.SetBuffer(v.AppendJSON(slices.Grow(s.stream.Buffer(), v.JSONLen())))
+	s.popCommaOrField()
+}
+
+// WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
+// for hex quantities, which never need escaping.
+func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	buf, _ := v.AppendText(append(s.stream.Buffer(), '"'))
+	s.stream.SetBuffer(append(buf, '"'))
 	s.popCommaOrField()
 }
 

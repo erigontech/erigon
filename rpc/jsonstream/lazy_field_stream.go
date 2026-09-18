@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"encoding"
 	"io"
 
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
@@ -100,6 +101,11 @@ func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmp
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
 func (s *LazyFieldStream) WriteValue(v jsonw.JSONAppender) { s.ensure(); s.inner.WriteValue(v) }
+
+func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
+	s.ensure()
+	s.inner.WriteQuotedText(v)
+}
 
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
