@@ -77,8 +77,6 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 	return bn, bh, latest, err
 }
 
-// GetCanonicalBlockNumber is GetBlockNumber with the canonical requirement
-// forced on; the same view contract applies.
 func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br)
 	if err != nil {
@@ -91,8 +89,6 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	// Every read below goes through tx, so the selector, the returned latest
-	// marker and any dependent read the caller makes all describe one view.
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, common.Hash{}, false, false, fmt.Errorf("getting plain state block number: %w", err)
@@ -152,8 +148,6 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
 }
 
-// CreateStateReader resolves blockNrOrHash and builds a reader for it, both on
-// tx: the selector and the state it reads back always come from one view.
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br)
 	if err != nil {
