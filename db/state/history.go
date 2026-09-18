@@ -1226,7 +1226,7 @@ func newHistoryPageCache(size datasize.ByteSize) *cache.ByteLRU[historyPage] {
 	})
 }
 
-// valueFromCachedPage looks key up in the decompressed page at offset, caching the page on a miss.
+// valueFromCachedPage looks up the key in the decompressed page at offset, caching the page on a miss.
 // A value from a cached page points into a shared page, so callers must not modify it.
 func (ht *HistoryRoTx) valueFromCachedPage(item visibleFile, pageSize int, offset uint64, key []byte) ([]byte, error) {
 	d := item.src.decompressor
