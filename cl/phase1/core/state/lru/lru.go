@@ -58,15 +58,16 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 	return v, ok
 }
 
-// sweepsPerTTL is the sweep cadence relative to the ttl: an entry is reclaimed within ttl/100 of
-// its deadline, the same bound the expirable cache's bucketed cleanup gave.
+// sweepsPerTTL sets the nominal sweep cadence, ttl/100 floored at minSweepInterval: how often the
+// sweep looks, not a bound on when an entry is reclaimed.
 const sweepsPerTTL = 100
 
 // minSweepInterval keeps a very short ttl from producing a non-positive ticker interval.
 const minSweepInterval = time.Millisecond
 
 // sweepChunk caps how many expired entries one lock hold reclaims. A sweep keeps taking the lock
-// until nothing due is left, so the cap bounds how long readers wait, not how much a tick reclaims.
+// until nothing due is left, so the cap limits the work per lock acquisition, not how much a tick
+// reclaims.
 const sweepChunk = 512
 
 // expiryNode is one live entry's place in the expiry order, linked only while the entry is live and
@@ -89,8 +90,8 @@ func (e ttlEntry[K, V]) expired(now time.Time) bool {
 }
 
 // CacheWithTTL is a size- and time-bounded cache whose expiry sweep can be stopped. The sweep runs
-// on a goroutine owned by the cache; Close stops it and waits for it to finish. A cache that
-// outlives the process needs no Close; one built per request, per peer or per test does.
+// on a goroutine owned by the cache; Close stops it and waits for it to finish. A cache that lives
+// for the whole process need not be closed; one built per request, per peer or per test must be.
 type CacheWithTTL[K comparable, V any] struct {
 	ttl    time.Duration
 	metric string
@@ -114,7 +115,7 @@ type CacheWithTTL[K comparable, V any] struct {
 }
 
 // NewWithTTL builds a cache of at most size entries that each live for ttl after their last Add. A
-// ttl of zero disables expiry. size must be positive, as for New.
+// ttl of zero or less disables expiry. size must be positive, as for New; an invalid size panics.
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
 	c := &CacheWithTTL[K, V]{
 		ttl:           ttl,

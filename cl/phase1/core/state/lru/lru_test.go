@@ -17,7 +17,6 @@
 package lru
 
 import (
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -25,17 +24,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// surviving reports how many goroutines are still running once the runtime has had a chance to
-// schedule the ones that are on their way out.
-func surviving(t *testing.T) int {
-	t.Helper()
-	var count int
-	for range 100 {
-		runtime.Gosched()
-		count = runtime.NumGoroutine()
-		time.Sleep(time.Millisecond)
+// sweepStopped reports whether the cache's sweep goroutine has returned: it closes stopped on its
+// way out, and a cache without a ttl starts none and closes it up front.
+func sweepStopped[K comparable, V any](c *CacheWithTTL[K, V]) bool {
+	select {
+	case <-c.stopped:
+		return true
+	default:
+		return false
 	}
-	return count
 }
 
 // deadlineOf reads the deadline the cache stored for a key, so a test can sweep at an exact
@@ -59,17 +56,28 @@ func held[K comparable, V any](c *CacheWithTTL[K, V], k K) bool {
 	return ok
 }
 
-func TestCacheWithTTLCloseStopsSweep(t *testing.T) {
-	before := surviving(t)
+// expire moves a key's deadline into the past under the cache lock, so a test can hand Get an
+// entry that is expired but still linked without racing the sweep. The caches that use it have an
+// hour-long ttl, so no tick falls due during the test.
+func expire[K comparable, V any](t *testing.T, c *CacheWithTTL[K, V], k K) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.cache.Peek(k)
+	require.True(t, ok, "no entry held for the key")
+	require.NotNil(t, e.node, "entry held without a deadline")
+	e.node.expiresAt = time.Now().Add(-time.Second)
+}
 
+func TestCacheWithTTLCloseStopsSweep(t *testing.T) {
 	const caches = 8
 	for i := range caches {
 		c := NewWithTTL[uint64, uint64]("close_stops_sweep", 16, time.Hour)
 		c.Add(uint64(i), uint64(i))
+		require.False(t, sweepStopped(c), "the sweep must be running until Close")
 		c.Close()
+		require.True(t, sweepStopped(c), "Close returned before the sweep goroutine had stopped")
 	}
-
-	require.LessOrEqual(t, surviving(t), before, "closed caches left sweep goroutines behind")
 }
 
 func TestCacheWithTTLCloseIsIdempotent(t *testing.T) {
@@ -164,13 +172,11 @@ func TestCacheWithTTLStartsNoSweepWithoutTTL(t *testing.T) {
 		{"negative", -time.Second},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			before := surviving(t)
-
 			c := NewWithTTL[uint64, uint64]("no_ttl_"+tt.name, 16, tt.ttl)
 			t.Cleanup(c.Close)
 			c.Add(1, 1)
 
-			require.LessOrEqual(t, surviving(t), before, "a cache without a ttl started a sweep goroutine")
+			require.True(t, sweepStopped(c), "a cache without a ttl must start no sweep goroutine")
 
 			v, ok := c.Get(1)
 			require.True(t, ok, "an entry in a cache without a ttl must not expire")
@@ -183,7 +189,7 @@ func TestCacheWithTTLStartsNoSweepWithoutTTL(t *testing.T) {
 }
 
 func TestCacheWithTTLGetMissesExpiredEntry(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("get_misses_expired", 16, 10*time.Millisecond)
+	c := NewWithTTL[uint64, uint64]("get_misses_expired", 16, time.Hour)
 	t.Cleanup(c.Close)
 
 	c.Add(1, 42)
@@ -191,7 +197,7 @@ func TestCacheWithTTLGetMissesExpiredEntry(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(42), v)
 
-	time.Sleep(50 * time.Millisecond)
+	expire(t, c, 1)
 
 	_, ok = c.Get(1)
 	require.False(t, ok, "an expired entry must read as a miss")
@@ -211,24 +217,30 @@ func TestCacheWithTTLEvictsBySize(t *testing.T) {
 }
 
 func TestCacheWithTTLAddRenewsExpiry(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("add_renews_expiry", 16, 60*time.Millisecond)
+	c := NewWithTTL[uint64, uint64]("add_renews_expiry", 16, time.Hour)
 	t.Cleanup(c.Close)
 
 	c.Add(1, 1)
-	time.Sleep(40 * time.Millisecond)
+	first := deadlineOf(t, c, 1)
+	time.Sleep(2 * time.Millisecond)
 	c.Add(1, 2)
-	time.Sleep(40 * time.Millisecond)
+	second := deadlineOf(t, c, 1)
+	require.True(t, second.After(first), "re-adding a key must renew its deadline")
 
+	c.removeExpired(first.Add(time.Nanosecond))
 	v, ok := c.Get(1)
-	require.True(t, ok, "re-adding a key must renew its deadline")
+	require.True(t, ok, "the old deadline must not reclaim a renewed entry")
 	require.Equal(t, uint64(2), v)
+
+	c.removeExpired(second.Add(time.Nanosecond))
+	require.False(t, held(c, 1))
 }
 
 // TestCacheWithTTLAddDeadlineStartsAtInsertion pins that an entry gets its full ttl in the cache.
 // Time spent waiting for the cache lock is not the entry's, and charging it there means a long
 // enough wait stores a value that is already expired and reads back as a miss.
 func TestCacheWithTTLAddDeadlineStartsAtInsertion(t *testing.T) {
-	const ttl = 50 * time.Millisecond
+	const ttl = time.Hour
 	c := NewWithTTL[uint64, uint64]("add_deadline_at_insertion", 16, ttl)
 	t.Cleanup(c.Close)
 
@@ -240,9 +252,10 @@ func TestCacheWithTTLAddDeadlineStartsAtInsertion(t *testing.T) {
 		close(added)
 	}()
 
-	// Hold the lock past the ttl, so an Add that took its deadline before waiting would store an
-	// entry whose deadline has already gone by.
-	time.Sleep(4 * ttl)
+	// Hold the lock long enough that the Add is waiting on it, then note when it was released: a
+	// deadline taken before the wait would fall short of released+ttl by the time spent waiting.
+	time.Sleep(20 * time.Millisecond)
+	released := time.Now()
 	c.mu.Unlock()
 
 	select {
@@ -251,9 +264,8 @@ func TestCacheWithTTLAddDeadlineStartsAtInsertion(t *testing.T) {
 		t.Fatal("Add did not complete once the lock was released")
 	}
 
-	v, ok := c.Get(1)
-	require.True(t, ok, "an entry that waited for the lock must still get its full ttl")
-	require.Equal(t, uint64(1), v)
+	require.False(t, deadlineOf(t, c, 1).Before(released.Add(ttl)),
+		"an entry that waited for the lock must still get its full ttl from the moment it was stored")
 }
 
 func TestCacheWithTTLRemove(t *testing.T) {
@@ -341,11 +353,11 @@ func TestCacheWithTTLSweepLeavesEvictionOrderAlone(t *testing.T) {
 }
 
 func TestCacheWithTTLGetReclaimsExpiredEntry(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("get_reclaims", 16, 10*time.Millisecond)
+	c := NewWithTTL[uint64, uint64]("get_reclaims", 16, time.Hour)
 	t.Cleanup(c.Close)
 
 	c.Add(1, 1)
-	time.Sleep(50 * time.Millisecond)
+	expire(t, c, 1)
 
 	_, ok := c.Get(1)
 	require.False(t, ok)
@@ -503,31 +515,26 @@ func TestCacheWithTTLConcurrentUseDuringSweep(t *testing.T) {
 
 // TestCacheWithTTLTickerReclaimsPromotedEntry drives the promoted-entry case through the ticker
 // rather than by calling removeExpired directly, which is the only path production code ever
-// takes: nothing outside this package calls removeExpired. The entries are spaced so there is a
-// full second in which the promoted entry is past its deadline and the entry behind it is not.
+// takes: nothing outside this package calls removeExpired. The ordering between the two entries
+// is pinned by TestCacheWithTTLSweepReclaimsPromotedEntry at controlled deadlines; here only
+// eventual reclamation is asserted, so a scheduler pause cannot fail correct code.
 func TestCacheWithTTLTickerReclaimsPromotedEntry(t *testing.T) {
-	const ttl = 2 * time.Second
+	const ttl = 200 * time.Millisecond
 	c := NewWithTTL[uint64, uint64]("ticker_reclaims_promoted", 16, ttl)
 	t.Cleanup(c.Close)
 
 	c.Add(1, 1)
-	time.Sleep(ttl / 2)
 	c.Add(2, 2)
 
-	// A Get promotes the older entry to the front without renewing it, so the still live entry is
-	// the one the eviction order reaches first.
+	// A Get promotes the older entry to the front without renewing it.
 	_, ok := c.Get(1)
 	require.True(t, ok)
 
-	// Between the two deadlines the sweep must have reclaimed the promoted entry and nothing else.
-	require.Eventually(t, func() bool { return c.Len() == 1 }, ttl, 5*time.Millisecond,
-		"the background sweep must reclaim a promoted entry it has to walk past a live one to reach")
-
-	require.False(t, held(c, 1), "the promoted entry was past its deadline when the sweep ran")
-	require.True(t, held(c, 2), "the entry still within its deadline must survive the sweep")
+	require.Eventually(t, func() bool { return c.Len() == 0 }, 10*time.Second, 5*time.Millisecond,
+		"the background sweep must reclaim a promoted entry as well as the one behind it")
 }
 
-// TestCacheWithTTLCloseDuringLiveSweep races Close against the sweep goroutine it stops — the
+// TestCacheWithTTLCloseDuringLiveSweep races Close against the sweep goroutine it stops: the
 // ticker fires on the interval floor here, so the close lands while a sweep is running or between
 // two of its ticks. Under -race this pins that the guarded close, the wait for the goroutine and
 // the sweep's own select do not race each other, from several callers at once.
@@ -538,20 +545,33 @@ func TestCacheWithTTLCloseDuringLiveSweep(t *testing.T) {
 		c.Add(uint64(i), uint64(i))
 	}
 
+	// Panics are collected rather than asserted in the workers: a failed require in a goroutine
+	// that is not the test's is not something testing supports.
 	const closers = 4
+	panics := make(chan any, closers)
 	var wg sync.WaitGroup
 	for range closers {
 		wg.Go(func() {
-			require.NotPanics(t, c.Close, "closing a cache whose sweep is running must be safe")
+			defer func() {
+				if r := recover(); r != nil {
+					panics <- r
+				}
+			}()
+			c.Close()
 		})
 	}
 	wg.Wait()
+	close(panics)
+	for r := range panics {
+		t.Fatalf("closing a cache whose sweep is running must be safe, got panic: %v", r)
+	}
+	require.True(t, sweepStopped(c))
 
 	// The cache is still usable once its sweep is stopped, just no longer reclaimed in background.
+	// Peek rather than Get: with a 5 ms ttl a Get right after the Add would race the deadline, and
+	// Len is whatever the sweep left before it stopped.
 	c.Add(1, 1)
-	v, ok := c.Get(1)
-	require.True(t, ok, "a closed cache must still serve reads")
-	require.Equal(t, uint64(1), v)
+	require.True(t, held(c, 1), "a closed cache must still store entries")
 }
 
 // TestCacheWithTTLSweepReclaimsWholeCacheWithinOneTick pins the reclamation window: every entry
@@ -601,8 +621,7 @@ func TestCacheWithTTLSweepIgnoresPromotion(t *testing.T) {
 }
 
 // TestCacheWithTTLAddRenewsMovesRecord pins a renewal: the entry lives to its new deadline, and the
-// key's one node moves to the tail with that deadline. Nothing is left behind for the old one
-// (review: a size-1 cache renewed 100,000 times must not hold 100,000 records).
+// key's one node moves to the tail with that deadline. Nothing is left behind for the old one.
 func TestCacheWithTTLAddRenewsMovesRecord(t *testing.T) {
 	c := NewWithTTL[string, int]("readd_moves_record", 8, time.Hour)
 	t.Cleanup(c.Close)
@@ -628,6 +647,32 @@ func TestCacheWithTTLAddRenewsMovesRecord(t *testing.T) {
 	c.removeExpired(second.Add(time.Nanosecond))
 	require.False(t, held(c, "k"))
 	require.Equal(t, 0, c.expiryLen())
+}
+
+// TestCacheWithTTLRenewalMovesNodeBehindOthers pins the ordering a renewal must keep: the renewed
+// key's node goes to the tail, behind entries added after it, so a sweep between the other entry's
+// deadline and the renewed one reclaims the other entry and stops at the renewed one.
+func TestCacheWithTTLRenewalMovesNodeBehindOthers(t *testing.T) {
+	c := NewWithTTL[string, int]("renewal_moves_node_behind_others", 8, time.Hour)
+	t.Cleanup(c.Close)
+
+	c.Add("a", 1)
+	time.Sleep(2 * time.Millisecond)
+	c.Add("b", 2)
+	time.Sleep(2 * time.Millisecond)
+	c.Add("a", 3)
+
+	require.Equal(t, 2, c.expiryLen(), "one node per live entry, renewal included")
+	require.True(t, deadlineOf(t, c, "a").After(deadlineOf(t, c, "b")),
+		"the renewed key's deadline must be the later one")
+
+	c.removeExpired(deadlineOf(t, c, "b").Add(time.Nanosecond))
+	require.False(t, held(c, "b"), "the entry due first must be reclaimed")
+	require.True(t, held(c, "a"), "the renewed entry must survive the sweep that reclaims the other")
+	require.Equal(t, 1, c.expiryLen())
+	v, ok := c.Get("a")
+	require.True(t, ok)
+	require.Equal(t, 3, v)
 }
 
 // TestCacheWithTTLSweepBoundsLockHold pins the pacing that remains: one lock hold reclaims at most
@@ -694,21 +739,23 @@ func TestCacheWithTTLDrainedQueueRetainsNothing(t *testing.T) {
 	require.Equal(t, 0, c.Len())
 	require.Equal(t, 0, c.expiryLen())
 	c.mu.Lock()
-	require.Nil(t, c.expiryHead)
-	require.Nil(t, c.expiryTail)
+	head, tail := c.expiryHead, c.expiryTail
 	c.mu.Unlock()
+	require.Nil(t, head)
+	require.Nil(t, tail)
 }
 
 // TestCacheWithTTLGetDropsExpiredRecord pins that an expired entry dropped by a Get takes its
 // record with it: the sweep is not the only consumer.
 func TestCacheWithTTLGetDropsExpiredRecord(t *testing.T) {
-	c := NewWithTTL[string, int]("get_drops_record", 8, 20*time.Millisecond)
+	c := NewWithTTL[string, int]("get_drops_record", 8, time.Hour)
 	t.Cleanup(c.Close)
 	c.Add("k", 1)
 	require.Equal(t, 1, c.expiryLen())
-	time.Sleep(30 * time.Millisecond)
+	expire(t, c, "k")
 	_, ok := c.Get("k")
 	require.False(t, ok)
+	require.Equal(t, 0, c.Len(), "a Get that finds an entry expired must drop it")
 	require.Equal(t, 0, c.expiryLen(), "a Get that drops an expired entry must unlink its record")
 }
 
@@ -716,7 +763,7 @@ func TestCacheWithTTLGetDropsExpiredRecord(t *testing.T) {
 // is dropped and churn records nothing, while Add and Remove keep working and a Get still drops an
 // expired entry it reads.
 func TestCacheWithTTLNoRecordsAfterClose(t *testing.T) {
-	c := NewWithTTL[uint64, uint64]("no_records_after_close", 64, 20*time.Millisecond)
+	c := NewWithTTL[uint64, uint64]("no_records_after_close", 64, time.Hour)
 	for i := range 32 {
 		c.Add(uint64(i), uint64(i))
 	}
@@ -732,7 +779,7 @@ func TestCacheWithTTLNoRecordsAfterClose(t *testing.T) {
 	require.True(t, c.Remove(1))
 	require.Equal(t, 63, c.Len())
 
-	time.Sleep(30 * time.Millisecond)
+	expire(t, c, 2)
 	_, ok := c.Get(2)
 	require.False(t, ok, "a closed cache still treats an expired entry as a miss")
 	require.Equal(t, 62, c.Len())

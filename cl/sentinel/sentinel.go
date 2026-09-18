@@ -143,7 +143,7 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
-	// The service shuts the sentinel down by cancelling its ctx, not by calling Stop.
+	// The peers pool's sweeps live as long as the sentinel's ctx.
 	context.AfterFunc(s.ctx, s.peers.Close)
 
 	mux := chi.NewRouter()

@@ -156,8 +156,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err := p.setupENR(); err != nil {
 		return nil, err
 	}
-	// Built after the last error return: a construction that fails part-way must not leave a sweep
-	// running until the caller's ctx ends.
+	// The ban cache's sweep starts only once construction has succeeded, and stops with ctx.
 	p.bannedPeers = lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute)
 	context.AfterFunc(ctx, p.bannedPeers.Close)
 	go p.updateENR()
