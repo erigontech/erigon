@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"time"
 
@@ -47,6 +48,21 @@ const (
 	subnetSearchInterval             = 12 * time.Second // Check every slot
 	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
 )
+
+func filterPublicPeerAddresses(info *peer.AddrInfo) bool {
+	info.Addrs = slices.DeleteFunc(info.Addrs, func(addr multiaddr.Multiaddr) bool {
+		for _, protocol := range []int{multiaddr.P_IP4, multiaddr.P_IP6} {
+			value, err := addr.ValueForProtocol(protocol)
+			if err != nil {
+				continue
+			}
+			ip := net.ParseIP(value)
+			return ip == nil || ip.IsPrivate() || !ip.IsGlobalUnicast()
+		}
+		return true
+	})
+	return len(info.Addrs) > 0
+}
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
 func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
@@ -122,13 +138,11 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		checked++
 		node := filteredIterator.Node()
 
-		// Skip private IPs unless local discovery is enabled
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
-			continue
-		}
-
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
+			continue
+		}
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterPublicPeerAddresses(peerInfo) {
 			continue
 		}
 
@@ -529,12 +543,11 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
-		s.pidToEnr.Store(peerInfo.ID, node)
-		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		// Skip Peer if IP was private, unless local discovery is enabled.
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterPublicPeerAddresses(peerInfo) {
 			continue
 		}
+		s.pidToEnr.Store(peerInfo.ID, node)
+		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 
 		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
 			if errors.Is(err, context.Canceled) {
