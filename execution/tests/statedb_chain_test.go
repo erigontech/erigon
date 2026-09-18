@@ -261,14 +261,11 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-				// Parallel keeps the pre-destruct nonce for a same-block deploy, #23206.
-				wantNonce := uint64(0)
-				if tc.parallel && !tc.preBlockDeploy {
-					wantNonce = 1
-				}
+				// A value-transfer resurrect leaves nonce 0; the parallel same-block
+				// deploy path no longer leaks the pre-destruct nonce, so every arm agrees.
 				nonce, err := st.GetNonce(addr)
 				require.NoError(t, err)
-				require.Equal(t, wantNonce, nonce)
+				require.Equal(t, uint64(0), nonce)
 
 				bal, err := st.GetBalance(addr)
 				require.NoError(t, err)

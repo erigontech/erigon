@@ -100,7 +100,7 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func testTemporalTxSD(t testing.TB) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	dirs := datadir.New(t.TempDir())
 
 	db := temporaltest.NewTestDB(t, dirs)
@@ -268,7 +268,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			versionMap := state.NewVersionMap(nil)
-			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader(), false)
 			statedb := state.NewWithVersionMap(reader, versionMap)
 			defer statedb.Close()
 			statedb.SetTxContext(1, 0)
@@ -313,7 +313,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 
 func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 	versionMap := state.NewVersionMap(nil)
-	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader(), false)
 	statedb := state.NewWithVersionMap(reader, versionMap)
 	defer statedb.Close()
 	statedb.SetTxContext(1, -1)
