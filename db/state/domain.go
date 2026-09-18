@@ -469,20 +469,17 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 
 	w := &DomainBufferedWriter{
 		discard:   discard,
-		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
+		name:      dt.d.Name,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-	}
-	if !discard {
-		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
 
 type DomainBufferedWriter struct {
 	values *etl.Collector
+	name   kv.Domain
 
 	discard bool
 
@@ -513,6 +510,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
+	}
+	if w.values == nil {
+		w.Close()
+		return nil
 	}
 
 	if w.largeVals {
@@ -545,6 +546,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
+func (w *DomainBufferedWriter) valsCollector() *etl.Collector {
+	if w.values == nil {
+		w.values = newWriterCollector(w.name.String()+"domain.flush", w.h.ii.tmpdir, w.h.ii.logger)
+	}
+	return w.values
+}
+
 func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
 		return nil
@@ -562,7 +570,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 			}
 		}
 
-		if err := w.values.Collect(fullkey, value); err != nil {
+		if err := w.valsCollector().Collect(fullkey, value); err != nil {
 			return err
 		}
 		return nil
@@ -581,7 +589,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
 	//}()
 
-	if err := w.values.Collect(k, w.aux2); err != nil {
+	if err := w.valsCollector().Collect(k, w.aux2); err != nil {
 		return err
 	}
 	return nil
@@ -751,7 +759,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt, dstDir)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
 	defer wal.Close()
 	if err != nil {
 		return err
