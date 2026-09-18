@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
@@ -279,10 +280,11 @@ func (s *StackStream) WriteMore() {
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) {
+func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
+	return s
 }
 
 // Flush flushes the underlying stream
