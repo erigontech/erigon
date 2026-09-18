@@ -188,32 +188,39 @@ type ReusableCaller struct {
 	rules          *chain.Rules
 	callTimeout    time.Duration
 	message        *types.Message
+	ibs            *state.IntraBlockState
 }
 
 // Close returns the state built by the last DoCallWithNewGas to its pools.
 // r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
-	if ibs := r.evm.IntraBlockState(); ibs != nil {
-		ibs.Close()
+	if r.ibs != nil {
+		r.ibs.Close()
+		r.ibs = nil
 	}
 }
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
-// InitialState builds a fresh state with the request's overrides applied, the
-// state every call runs against. The precompiles come with it because a
-// MovePrecompileTo override changes them. The caller must Close the state.
+// InitialState returns the state every call runs against, rewound to the request's
+// overrides. eth_estimateGas probes the same state several times, so the state object
+// is reused and reset rather than rebuilt: Reset returns its objects to their pools,
+// which is what building a new one would have to allocate again.
+// The precompiles come with it because a MovePrecompileTo override changes them.
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
-	ibs := state.New(r.stateReader)
+	if r.ibs == nil {
+		r.ibs = state.New(r.stateReader)
+	} else {
+		r.ibs.Reset()
+	}
 	if r.stateOverrides == nil {
-		return ibs, nil, nil
+		return r.ibs, nil, nil
 	}
 	precompiles := vm.ActivePrecompiledContracts(r.rules)
-	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
-		ibs.Close()
+	if err := r.stateOverrides.Override(r.ibs, precompiles, r.rules); err != nil {
 		return nil, nil, err
 	}
-	return ibs, precompiles, nil
+	return r.ibs, precompiles, nil
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -241,9 +248,6 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	if r.stateOverrides != nil {
 		r.evm.SetPrecompiles(precompiles)
-	}
-	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 
