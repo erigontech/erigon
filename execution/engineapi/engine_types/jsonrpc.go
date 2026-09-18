@@ -134,6 +134,11 @@ type BlobAndProofV2 struct {
 	CellProofs []hexutil.Bytes `json:"proofs"`
 }
 
+type BlobCellsAndProofsV1 struct {
+	BlobCells []*hexutil.Bytes `json:"blob_cells"`
+	Proofs    []*hexutil.Bytes `json:"proofs"`
+}
+
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
