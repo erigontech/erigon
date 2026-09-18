@@ -462,7 +462,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
+	if savesExecProgress(execErr) && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -473,6 +473,15 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+}
+
+// savesExecProgress reports whether an exec outcome may advance stage progress: a
+// clean run or a PURELY loop-exhausted one. Parallel exec joins the drain's waitErr
+// onto the return (errors.Join), so a loop-exhausted error can carry a real failure
+// alongside it; errors.Is would still match ErrLoopExhausted and save progress past
+// the failure, so this uses IsOnlyLoopExhausted (every branch must be exhausted).
+func savesExecProgress(execErr error) bool {
+	return execErr == nil || IsOnlyLoopExhausted(execErr)
 }
 
 // unwindOnExecError performs the bad-block unwind at the stage boundary after

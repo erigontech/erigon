@@ -23,6 +23,21 @@ func TestIsOnlyLoopExhausted(t *testing.T) {
 	require.False(t, IsOnlyLoopExhausted(nil))
 }
 
+// TestSavesExecProgress pins the stage-progress gate: only a clean run or a purely
+// loop-exhausted one advances Execution progress. A loop-exhausted error joined with a
+// real failure (parallel exec joins the drain's waitErr) must NOT save progress, or the
+// stage advances past the failed block and the real error is silently dropped.
+func TestSavesExecProgress(t *testing.T) {
+	t.Parallel()
+	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
+
+	require.True(t, savesExecProgress(nil))
+	require.True(t, savesExecProgress(exhausted))
+	require.False(t, savesExecProgress(errors.Join(exhausted, errors.New("boom"))),
+		"loop-exhausted joined with a real failure must not advance stage progress")
+	require.False(t, savesExecProgress(errors.New("boom")))
+}
+
 func TestResolveExecResumePoint(t *testing.T) {
 	t.Parallel()
 	// The reader is only consulted on the exec-only advanced branch; the branches
