@@ -63,6 +63,7 @@ var ourCapabilities = []string{
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
+	"engine_getBlobsV4",
 	"POST /engine/v1/payloads",
 	"POST /engine/v2/payloads",
 	"POST /engine/v3/payloads",
@@ -281,32 +282,42 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV1)
-	return engine_types.BlobsBundleV1(ret), nil
+	return ret, nil
 }
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV2)
-	return engine_types.BlobsBundleV2(ret), nil
+	return ret, nil
 }
 
 func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV2)
-	return engine_types.BlobsBundleV2(ret), nil
+	return ret, nil
+}
+
+func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+	e.logger.Debug("[GetBlobsV4] Received Request", "hashes", len(blobHashes))
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellIndices)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.([]*engine_types.BlobCellsAndProofsV1)
+	return ret, nil
 }

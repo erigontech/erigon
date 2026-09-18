@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -1845,24 +1846,38 @@ func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.
 	return nil, nil
 }
 
-// seedLogEmittingContract deploys `LOG0` bytecode at addr so that every system
+// putLogEmittingContract writes `LOG1` bytecode at addr so that every system
 // call to it appends exactly one log to the caller's IntraBlockState.
+func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
+	code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+		return err
+	}
+	return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+}
+
 func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
-	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		acc := accounts.NewAccount()
-		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
-			return err
-		}
-		return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+		return putLogEmittingContract(putter, addr)
 	})
 }
 
-// TestParallelBlockEndLogsCountEachSyscallOnce pins the block-end log run: the
-// finalize system calls share one IntraBlockState and one txIndex, so the state
-// holds their cumulative logs, and collecting per call counted the earlier ones
-// again — k(k+1)/2 logs for k calls.
+type indexCountingMemBatch struct {
+	kv.TemporalMemBatch
+	adds map[kv.InvertedIdx]int
+}
+
+func (m *indexCountingMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) error {
+	m.adds[table]++
+	return m.TemporalMemBatch.IndexAdd(table, key, txNum)
+}
+
+// Finalize system calls share an IntraBlockState and txIndex, so GetRawLogs
+// returns all logs collected so far. Reading it after each call would process
+// earlier logs again. Count index additions before storage deduplicates equal
+// (key, txNum) pairs, which would hide that duplication in index queries.
 func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	const syscalls = 3
 
@@ -1881,9 +1896,30 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 		Config:  config,
 	}
 
-	pe, roTx := newResumeTestExec(t, db, config)
-	pe.cfg.engine = &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls}
-	pe.cfg.vmConfig = &vm.Config{}
+	logger := log.New()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	indexes := &indexCountingMemBatch{
+		TemporalMemBatch: roTx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()),
+		adds:             make(map[kv.InvertedIdx]int),
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, logger, execctx.WithMemBatch(indexes))
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: config,
+				db:          db,
+				engine:      &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls},
+				vmConfig:    &vm.Config{},
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+	}
 
 	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{Task: txTask, index: 0}
@@ -1904,5 +1940,6 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.NotNil(t, res)
 	require.NoError(t, res.Err)
 
-	assert.Len(t, txResult.Logs, syscalls)
+	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
+	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
 }
