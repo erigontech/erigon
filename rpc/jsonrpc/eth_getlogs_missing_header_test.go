@@ -106,3 +106,19 @@ func TestGetLatestLogsFailsOnAMissingHeader(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "header not found")
 }
+
+// TestGetLatestLogsStopsBeforeAnUnrequestedBlock pins that BlockCount stops the scan before
+// the block that follows the last requested one, whose header the caller never asked for.
+func TestGetLatestLogsStopsBeforeAnUnrequestedBlock(t *testing.T) {
+	t.Parallel()
+
+	m := setupMissingHeaderChain(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLatestLogs(m.Ctx, fullRangeCriteria(), filters.LogFilterOptions{BlockCount: 1})
+	require.NoError(t, err)
+	require.Len(t, logs, missingHeaderLogsPerBlock)
+	for _, l := range logs {
+		require.Equal(t, hexutil.Uint64(missingHeaderChainLen), l.BlockNumber)
+	}
+}

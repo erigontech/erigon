@@ -285,6 +285,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 		// if block number changed, calculate all related field
 		if blockNumChanged {
+			if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
+				return rpcLogs, nil
+			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -295,14 +298,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			exec.ChangeBlock(header)
 			timestamp = header.Time
 			blockCount++
-
 		}
 		var logIndex uint
 		var blockLogs types.Logs
-
-		if logOptions.BlockCount != 0 && logOptions.BlockCount < blockCount {
-			return rpcLogs, nil
-		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
