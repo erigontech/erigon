@@ -860,3 +860,42 @@ func TestLogBlockNumberFromEVMContext(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
 }
+
+// TestOpcodeMaskFiltersDelivery pins that the interpreter honours a tracer's opcode
+// mask: without this, dropping the check in interpreter.go breaks nothing a test sees.
+func TestOpcodeMaskFiltersDelivery(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.PUSH1), 0x00,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.POP),
+		byte(vm.STOP),
+	}
+
+	run := func(mask *tracing.OpcodeMask) []byte {
+		var seen []byte
+		cfg := &Config{EVMConfig: vm.Config{Tracer: &tracing.Hooks{
+			OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				seen = append(seen, op)
+			},
+			OnOpcodeMask: mask,
+		}}}
+		if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		return seen
+	}
+
+	unmasked := run(nil)
+	require.Greater(t, len(unmasked), 4, "a nil mask must deliver every executed opcode")
+	require.Contains(t, unmasked, byte(vm.PUSH1))
+
+	masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
+	require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
+		"a mask must deliver exactly the opcodes it names, in execution order")
+}

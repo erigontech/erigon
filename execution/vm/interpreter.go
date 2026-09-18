@@ -459,7 +459,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if err == nil {
 				return
 			}
-			if !logged && tracer.OnOpcode != nil {
+			if !logged && tracer.OnOpcode != nil && tracer.WantsOpcode(byte(op)) {
 				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			}
 			if logged && tracer.OnFault != nil {
