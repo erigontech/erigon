@@ -411,6 +411,15 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	})
 }
 
+// executionHashMarkedInvalid reports whether this execution payload is already known bad.
+func (f *ForkChoiceStore) executionHashMarkedInvalid(executionBlockHash common.Hash) bool {
+	if f.executionPayloadStatus == nil {
+		return false
+	}
+	status, ok := f.executionPayloadStatus.Get(executionBlockHash)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
 // rootMarkedInvalid reports whether the payload for this beacon root is already known bad.
 func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
 	if f.payloadStatusByRoot == nil {
@@ -427,6 +436,7 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
 	stillAdmissible func() error,
+	derivedExecutionHash func() (common.Hash, bool),
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -440,7 +450,9 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 			return execution_client.PayloadStatusNone, err
 		}
 		// Invalid is terminal and outranks a validated marker, matching markPayloadStatus.
-		if f.rootMarkedInvalid(blockRoot) {
+		// The claimed hash is safe to read: only derived hashes are ever written, so a hit
+		// means this payload really is the one the EL rejected.
+		if f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(payload.BlockHash) {
 			return execution_client.PayloadStatusInvalidated, nil
 		}
 		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
@@ -456,10 +468,15 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 			}
 		case execution_client.PayloadStatusInvalidated:
 			// Both clients report INVALID with the reason attached, so this cannot be
-			// gated on err. The execution hash is unauthenticated until the caller
-			// derives it, so key by the beacon root instead.
+			// gated on err.
 			if f.payloadStatusByRoot != nil {
 				f.payloadStatusByRoot.Add(blockRoot, status)
+			}
+			// Cache the verdict against the payload itself only when the request was
+			// self-consistent. A claimed hash that does not match the derived one is
+			// rejected for naming the wrong payload, which says nothing about its content.
+			if executionHash, ok := derivedExecutionHash(); ok && executionHash == payload.BlockHash && f.executionPayloadStatus != nil {
+				f.executionPayloadStatus.Add(executionHash, status)
 			}
 		}
 		return status, err

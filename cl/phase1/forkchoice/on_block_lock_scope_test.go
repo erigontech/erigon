@@ -37,6 +37,8 @@ import (
 
 const lockScopeTimeout = 5 * time.Second
 
+func noDerivedHash() (common.Hash, bool) { return common.Hash{}, false }
+
 // blockingEngine returns a mock whose NewPayload signals entry and then blocks until
 // the returned release channel is closed, so a test can hold OnBlock inside the EL call.
 func blockingEngine(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
@@ -312,7 +314,7 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			blockRoot, func() error { return nil },
+			blockRoot, func() error { return nil }, noDerivedHash,
 			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
@@ -374,7 +376,7 @@ func TestNewPayloadSkipsELWhenBlockWentStaleWhileQueued(t *testing.T) {
 
 	store.mu.Lock()
 	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, func() error { return errBlockAtFinalizedHorizon },
+		blockRoot, func() error { return errBlockAtFinalizedHorizon }, noDerivedHash,
 		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	store.mu.Unlock()
 
@@ -401,13 +403,102 @@ func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
 
 	store.mu.Lock()
 	status, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, func() error { return nil },
+		blockRoot, func() error { return nil }, noDerivedHash,
 		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	store.mu.Unlock()
 
 	require.NoError(t, err)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status,
 		"the invalid marker must outrank the validated one")
+}
+
+// Two beacon blocks can carry the same execution payload. The invalid verdict must be
+// cached against the payload, not only the beacon root, or the second one resends it.
+func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, errors.New("bad block"))
+	store, block := buildExAnteStorePendingLast(t, engine)
+	payload := block.Block.Body.ExecutionPayload
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Extra = solid.NewExtraData()
+	executionHash, err := payload.ComputeBlockHash(&block.Block.ParentRoot, common.Hash{}, nil)
+	require.NoError(t, err)
+	payload.BlockHash = executionHash
+	derived := func() (common.Hash, bool) { return executionHash, true }
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+			common.HexToHash("0xaaaa"), func() error { return nil }, derived,
+			payload, &block.Block.ParentRoot, nil, nil)
+	}()
+	awaitSignal(t, elEntered, "NewPayload to start")
+
+	// Pin f.mu so nothing can be recorded after relock.
+	pinned, unpin := make(chan struct{}), make(chan struct{})
+	go func() {
+		store.mu.Lock()
+		close(pinned)
+		<-unpin
+		store.mu.Unlock()
+	}()
+	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+	close(releaseEL)
+
+	select {
+	case store.payloadValidationAdmission <- struct{}{}:
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("timed out waiting for the admission token to be released")
+	}
+	status, ok := store.executionPayloadStatus.Get(executionHash)
+	require.True(t, ok, "the verdict must be cached against the payload before the token is released")
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	// A different beacon root carrying the same payload must now short-circuit.
+	require.True(t, store.executionHashMarkedInvalid(payload.BlockHash))
+	<-store.payloadValidationAdmission
+
+	close(unpin)
+	awaitSignal(t, done, "the validating caller to finish")
+}
+
+// stillAdmissible has to run after the admission token is acquired, not before. Running it
+// earlier would re-open the window where a block goes stale while queued.
+func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+	store, block := buildExAnteStorePendingLast(t, engine)
+
+	// The channel is created lazily on first use, so make sure it exists before taking it.
+	store.payloadValidationOnce.Do(func() { store.payloadValidationAdmission = make(chan struct{}, 1) })
+	store.payloadValidationAdmission <- struct{}{}
+
+	checked := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
+			common.HexToHash("0xbbbb"), func() error {
+				close(checked)
+				return errBlockAtFinalizedHorizon
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+	}()
+
+	select {
+	case <-checked:
+		t.Fatal("admission was checked before the token was acquired")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	<-store.payloadValidationAdmission
+	awaitSignal(t, checked, "admission to be checked after the token was acquired")
+	awaitSignal(t, done, "the caller to finish")
 }
 
 // A caller that wins admission only after someone else validated the same payload
@@ -422,7 +513,8 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 
 	f.mu.Lock()
 	status, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-		blockRoot, func() error { return nil }, nil, nil, nil, nil)
+		blockRoot, func() error { return nil }, noDerivedHash,
+		&cltypes.Eth1Block{}, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
