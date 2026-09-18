@@ -20,7 +20,6 @@ import (
 func TestIncrementalFoldEquivalence(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []runMode{modeSeq, modeParallel} {
-		mode := mode
 		name := "seq"
 		if mode == modeParallel {
 			name = "parallel"
@@ -46,7 +45,7 @@ func TestIncrementalFoldEquivalence(t *testing.T) {
 			var blob, rootIncr []byte
 			const chunks = 5
 			n := len(keys)
-			for c := 0; c < chunks; c++ {
+			for c := range chunks {
 				lo := c * n / chunks
 				hi := (c + 1) * n / chunks
 				if lo == hi {
@@ -82,7 +81,7 @@ func TestIncrementalFoldEquivalenceHotKeys(t *testing.T) {
 	finalBal := make(map[string]uint64, nAcct)
 	msIncr := NewMockState(t)
 	var blob, rootIncr []byte
-	for c := 0; c < chunks; c++ {
+	for c := range chunks {
 		ub := NewUpdateBuilder()
 		for i, a := range addrs {
 			bal := uint64((c+1)*100_000 + i) // every account re-touched, new value each chunk
