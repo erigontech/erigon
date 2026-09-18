@@ -142,6 +142,63 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
+// TestHandleMessage_ForwardCadenceRootMatchesBlockEnd pins the calculator-level
+// counterpart to TestIncrementalFoldEquivalence: driving a block's txResults
+// through the mid-block forward-progress fold (dbg.CommitCadence) — which folds
+// the accumulated delta and resets the folded keys every cadence txs — yields the
+// same block root as a single block-end fold. Exercises calcState delta
+// accumulation and the ResetBlockFlags-per-checkpoint path, not just the trie.
+func TestHandleMessage_ForwardCadenceRootMatchesBlockEnd(t *testing.T) {
+	blockRoot := func(cadence int) []byte {
+		prev := dbg.CommitCadence
+		dbg.CommitCadence = cadence
+		defer func() { dbg.CommitCadence = prev }()
+
+		ctx := context.Background()
+		db, tx, doms := setupStepTest(t)
+		in := make(chan applyResult, 64)
+		out := make(chan commitmentResult, 64)
+		// forcePerBlockCompute=true so blockResult computes + publishes the root.
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil))
+		require.NoError(t, err)
+
+		// Stay under the step-0 edge (txNum 15) so only the cadence hook folds mid-block.
+		const nTx = uint64(12)
+		rnd := rand.New(rand.NewSource(99))
+		for txNum := uint64(1); txNum <= nTx; txNum++ {
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+			cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+		}
+		// Dummy StateRoot: the per-block compute publishes its computed root on the mismatch.
+		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: nTx, StateRoot: common.Hash{0xde, 0xad}})
+		cc.Stop()
+
+		var root []byte
+		for {
+			select {
+			case res := <-out:
+				if len(res.rootHash) > 0 {
+					root = bytes.Clone(res.rootHash)
+				}
+				continue
+			default:
+			}
+			break
+		}
+		require.NotEmpty(t, root, "per-block compute must publish a computed root")
+		return root
+	}
+
+	require.Equal(t, blockRoot(0), blockRoot(4),
+		"mid-block forward-cadence folds must produce the same block root as a single block-end fold")
+}
+
 // TestHandleMessage_StepCheckpointInPerBlockMode pins that the step-boundary
 // checkpoint still fires in per-block compute mode (forcePerBlockCompute), which
 // is how the archive snapshot producer runs — it needs step-aligned commitment
