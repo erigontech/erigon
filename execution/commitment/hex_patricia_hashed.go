@@ -288,6 +288,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
+	clear(hph.cellData[:])
 
 	// branch encoder: clear deferred updates, reset buffer
 	hph.branchEncoder.ClearDeferred()
