@@ -2559,6 +2559,11 @@ type blockExecutor struct {
 	// revalidateCommittedDependents re-checks only actual readers of a changed tx's
 	// keys, not every later committed task.
 	readerIdx map[readerKey][]int
+	// readerByAddr: address-level reverse index (address -> reader task indices), used
+	// when a whole-account lifecycle write (create/self-destruct/incarnation) publishes:
+	// it re-derives every field, so every reader of the address must be re-validated, not
+	// only readers of the exact written cell (see AccountPath.AffectsAccountLifecycle).
+	readerByAddr map[accounts.Address][]int
 
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
 	// published, so it must be re-validated at the finalize boundary. A clean tx is
@@ -2625,6 +2630,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
 		readerIdx:           map[readerKey][]int{},
+		readerByAddr:        map[accounts.Address][]int{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
 		slDone:              make(chan struct{}),
@@ -2644,11 +2650,29 @@ type readerKey struct {
 // incarnations; the HasReadDep re-check filters stale entries, so over-inclusion
 // only costs a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
+	seenAddr := map[accounts.Address]struct{}{}
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
 		rk := readerKey{a, p, k}
 		be.readerIdx[rk] = append(be.readerIdx[rk], taskIdx)
+		if _, ok := seenAddr[a]; !ok {
+			seenAddr[a] = struct{}{}
+			be.readerByAddr[a] = append(be.readerByAddr[a], taskIdx)
+		}
 		return true
 	})
+}
+
+// readersOf returns the reader task indices whose reads a write of header h may have
+// invalidated: for a whole-account lifecycle write (create/self-destruct/incarnation)
+// that is every reader of the address, since the lifecycle change re-derives all its
+// fields; for any other write it is the exact-cell readers. Over-inclusion only costs a
+// redundant re-validation (the HasReadDep / ValidateVersion re-check filters), while a
+// missed reader commits a stale value — so err toward the wider address-level set.
+func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
+	if h.Path.AffectsAccountLifecycle() {
+		return be.readerByAddr[h.Address]
+	}
+	return be.readerIdx[readerKey{h.Address, h.Path, h.Key}]
 }
 
 // markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
@@ -2661,7 +2685,7 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		return
 	}
 	for h := range ws.AllHeaders() {
-		for _, tx := range be.readerIdx[readerKey{h.Address, h.Path, h.Key}] {
+		for _, tx := range be.readersOf(h) {
 			if tx > writerTx {
 				be.revalidate[tx] = true
 			}
@@ -3042,7 +3066,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			return
 		}
 		for h := range ws.AllHeaders() {
-			for _, tx := range be.readerIdx[readerKey{h.Address, h.Path, h.Key}] {
+			for _, tx := range be.readersOf(h) {
 				if tx > changedTx {
 					set[tx] = struct{}{}
 				}

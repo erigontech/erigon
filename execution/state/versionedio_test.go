@@ -1362,6 +1362,72 @@ func writeKeyStr(h WriteHeader, val string) string {
 	return fmt.Sprintf("%x|%d|%x|%s", h.Address, h.Path, h.Key, val)
 }
 
+// TestHasReadDep_LifecycleWriteInvalidatesCrossPathRead is the item-2 correct-dependency
+// guard. A write to a whole-account lifecycle path (SelfDestruct/create/incarnation/whole
+// address) re-derives every field of the account, so it must register as a dependency for
+// a reader of ANY field path at that address — not only a reader of the exact written
+// cell. Without this, a tx that read A.balance while A was live is never re-validated when
+// a lower-index tx self-destructs A, and it commits a stale non-zero balance (wrong root).
+// A plain field write (balance/nonce/storage) stays exact-cell: it only invalidates same-cell
+// readers.
+func TestHasReadDep_LifecycleWriteInvalidatesCrossPathRead(t *testing.T) {
+	t.Parallel()
+	a := accounts.InternAddress(common.HexToAddress("0xda01"))
+	b := accounts.InternAddress(common.HexToAddress("0xda02"))
+
+	balRead := func(addr accounts.Address) ReadSet {
+		rs := ReadSet{}
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+			Val:        *uint256.NewInt(1_000),
+		})
+		return rs
+	}
+	sd := func(addr accounts.Address) *WriteSet {
+		return newWriteSet(&VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 2}},
+			Val:         true,
+		})
+	}
+	create := func(addr accounts.Address) *WriteSet {
+		return newWriteSet(&VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Key: accounts.NilKey, Version: Version{TxIndex: 2}},
+			Val:         true,
+		})
+	}
+	inc := func(addr accounts.Address) *WriteSet {
+		return newWriteSet(&VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Key: accounts.NilKey, Version: Version{TxIndex: 2}},
+			Val:         1,
+		})
+	}
+	balWrite := func(addr accounts.Address) *WriteSet {
+		return newWriteSet(&VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 2}},
+			Val:         *uint256.NewInt(1),
+		})
+	}
+	nonceRead := func(addr accounts.Address) ReadSet {
+		rs := ReadSet{}
+		rs.SetNonce(addr, VersionedRead[uint64]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+			Val:        3,
+		})
+		return rs
+	}
+
+	require.True(t, HasReadDep(sd(a), balRead(a)),
+		"self-destruct at A must depend a balance read of A (cross-path)")
+	require.True(t, HasReadDep(create(a), balRead(a)),
+		"create at A must depend a balance read of A (cross-path)")
+	require.True(t, HasReadDep(inc(a), balRead(a)),
+		"incarnation bump at A must depend a balance read of A (cross-path)")
+	require.False(t, HasReadDep(sd(a), balRead(b)),
+		"a lifecycle write at A must not depend a read of a different address B")
+	require.False(t, HasReadDep(balWrite(a), nonceRead(a)),
+		"a plain balance write must stay exact-cell: it does not invalidate a nonce read")
+}
+
 // headerValStr reads the typed value for h from the per-path maps (the new
 // iteration: AllHeaders + typed getters, no cast) and formats it.
 func headerValStr(s *WriteSet, h WriteHeader) string {

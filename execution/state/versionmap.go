@@ -69,6 +69,20 @@ const (
 	CreateContractPath
 )
 
+// AffectsAccountLifecycle reports whether a write to this path changes the account's
+// whole-account lifecycle (create / self-destruct / revival), which re-derives every
+// field. A reader of ANY field at the address therefore depends on such a write, not
+// only a reader of the exact cell — the cross-path dependency the revalidation index
+// (HasReadDep, markReadersDirty, revalCandidates) must honour.
+func (p AccountPath) AffectsAccountLifecycle() bool {
+	switch p {
+	case AddressPath, SelfDestructPath, IncarnationPath, CreateContractPath:
+		return true
+	default:
+		return false
+	}
+}
+
 // AccountKey is a (Path, Key) pair used as a field selector within an AddressEntry
 // and as a debug-printable identifier.
 type AccountKey struct {

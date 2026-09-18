@@ -256,6 +256,43 @@ func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key account
 	return ReadHeader{}, false
 }
 
+// hasAnyReadAt reports whether the read set contains a read of any field of addr.
+// A whole-account lifecycle write depends on such a reader regardless of which field
+// it read (see HasReadDep / AffectsAccountLifecycle).
+func (s *ReadSet) hasAnyReadAt(addr accounts.Address) bool {
+	if _, ok := s.address[addr]; ok {
+		return true
+	}
+	if _, ok := s.balance[addr]; ok {
+		return true
+	}
+	if _, ok := s.nonce[addr]; ok {
+		return true
+	}
+	if _, ok := s.incarnation[addr]; ok {
+		return true
+	}
+	if _, ok := s.selfDestruct[addr]; ok {
+		return true
+	}
+	if _, ok := s.createContract[addr]; ok {
+		return true
+	}
+	if _, ok := s.code[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeHash[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeSize[addr]; ok {
+		return true
+	}
+	if _, ok := s.storage[addr]; ok {
+		return true
+	}
+	return false
+}
+
 // setHeader records a header-only read (zero value) at (addr, path, key).
 // Used on the dependency-conflict paths where versionedReadCore records the
 // read purely for ValidateVersion's version check — the value is never
@@ -2851,6 +2888,9 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	}
 	for h := range txFrom.AllHeaders() {
 		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
+			return true
+		}
+		if h.Path.AffectsAccountLifecycle() && txTo.hasAnyReadAt(h.Address) {
 			return true
 		}
 	}

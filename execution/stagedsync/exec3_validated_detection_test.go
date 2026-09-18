@@ -35,6 +35,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
 		readerIdx:           map[readerKey][]int{},
+		readerByAddr:        map[accounts.Address][]int{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
@@ -89,6 +90,45 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	require.False(t, be.validateTasks.checkComplete(1),
 		"R was committed against W's in-flight value; W changed -> R must be un-committed")
 	require.True(t, be.slReexecFlag[1].Load(), "R must be signalled for re-execution")
+}
+
+// TestValidated_CrossPathLifecycleWriteReExecutesReader pins item 2 at the executor
+// level: a reader committed against a live account must be un-committed when a lower-
+// index tx self-destructs that account, even though the reader read a DIFFERENT field
+// (balance) than the destruct writes (SelfDestruct). The revalidation index must select
+// the reader by address for a whole-account lifecycle write, not only by the exact
+// written cell — otherwise R keeps a stale live balance and the block root is wrong.
+func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
+	be := newDetExecutor(t, 3)
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	baseBal := *uint256.NewInt(1_000)
+
+	// Base: addr live with a balance at (0,0), Validated.
+	baseW := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, baseBal).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, baseW)
+	be.versionMap.FlushVersionedWrites(baseW, false, "")
+	be.versionMap.MarkWritesValidated(baseW, nil)
+
+	// R (tx2) read addr.BALANCE at (0,0) while live, recorded the dep, committed early.
+	rReads := state.ReadSet{}
+	rReads.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0, Incarnation: 0}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 2, Incarnation: 0}, rReads)
+	be.indexReads(2, rReads)
+	be.finalizedResults[2] = &execResult{TxResult: &exec.TxResult{Task: be.tasks[2].Task}}
+	markValidated(be, 2)
+	require.True(t, be.validateTasks.checkComplete(2))
+
+	// W1 (tx1) self-destructs addr — writes SelfDestructPath only, never BalancePath.
+	sdW := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 1, Incarnation: 0}, sdW)
+	be.versionMap.FlushVersionedWrites(sdW, false, "")
+	be.versionMap.MarkWritesValidated(sdW, nil)
+
+	be.revalidateCommittedDependents(1, nil)
+
+	require.False(t, be.validateTasks.checkComplete(2),
+		"R read a live balance; a later self-destruct of that account must un-commit R (cross-path lifecycle dep)")
+	require.True(t, be.slReexecFlag[2].Load(), "R must be signalled for re-execution")
 }
 
 // TestValidated_ReaderCommittingAfterWriterChange pins the OTHER ordering: the
