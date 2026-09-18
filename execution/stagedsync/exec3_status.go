@@ -55,11 +55,7 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.ensureLen(x)
-	if !m.inProgress[x] {
-		m.inProgress[x] = true
-		m.inProgressCnt++
-	}
+	m.setInProgress(x)
 
 	return x
 }
@@ -77,11 +73,7 @@ func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
 	for _, tx := range m.pending {
 		if pred(tx) {
 			taken = append(taken, tx)
-			m.ensureLen(tx)
-			if !m.inProgress[tx] {
-				m.inProgress[tx] = true
-				m.inProgressCnt++
-			}
+			m.setInProgress(tx)
 		} else {
 			kept = append(kept, tx)
 		}

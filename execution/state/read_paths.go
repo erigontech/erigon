@@ -794,7 +794,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// gate. A destructed origin reads absent and is NOT recorded as an AddressPath read
 		// (its SD dependency travels on the field reads); recording it would trip the origin
 		// cross-check against the destruct's Incarnation cell and invalidate the tx forever.
-		if r.version.TxIndex == originIndex && gateOriginAccount(s, addr, acc) == nil {
+		if r.version.TxIndex == originIndex && !gateOriginAccount(s, addr, acc) {
 			return nil, r.source, r.version, nil
 		}
 		if r.recordVR {
@@ -853,14 +853,14 @@ func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.S
 // gateOriginAccount applies the in-block lifecycle gate to a committed-origin account:
 // if a prior tx destroyed it with no revival, it reads as absent. In-block-created
 // accounts are not gated here — their lifecycle is carried by their own cells.
-func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.Account) *accounts.Account {
+func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.Account) bool {
 	if acc == nil {
-		return nil
+		return false
 	}
 	if s.versionMap.IsNetAbsent(addr, s.txIndex) {
-		return nil
+		return false
 	}
-	return acc
+	return true
 }
 
 // seedOrigin handles an AddressPath versionMap miss: it reads the committed pre-block
@@ -892,7 +892,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	// A destructed origin reads absent and is NOT recorded as an AddressPath read (its
 	// SD dependency travels on the field reads). Only an alive origin is recorded, so its
 	// cross-check catches a later lower-tx destruct.
-	if gateOriginAccount(s, addr, &origin) == nil {
+	if !gateOriginAccount(s, addr, &origin) {
 		return nil, MapRead, ver, true, nil
 	}
 	s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: MapRead, Version: ver}, NewAccountView(&origin)})

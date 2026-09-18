@@ -804,7 +804,7 @@ func TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal(t *testing.T) {
 
 	// Seal promotes the whole tx Estimate->Done in one step; with no earlier Done
 	// this is the single legal value change at the version.
-	merged := MergeVersionedWrites(r.TxOut, writes)
+	merged := r.TxOut.Merge(writes)
 	require.NotPanics(t, func() { vm.MarkWritesComplete(merged) },
 		"Estimate->Done at seal is the single legal value change at this version")
 

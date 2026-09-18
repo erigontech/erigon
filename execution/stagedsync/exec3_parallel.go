@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -1417,10 +1418,7 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	pendingBlocks := len(pe.blockExecutors)
 	var pendingNums []uint64
 	if pendingBlocks > 0 {
-		pendingNums = make([]uint64, 0, pendingBlocks)
-		for n := range pe.blockExecutors {
-			pendingNums = append(pendingNums, n)
-		}
+		pendingNums = slices.Collect(maps.Keys(pe.blockExecutors))
 	}
 	pe.RUnlock()
 	if pendingBlocks > 0 {
@@ -1578,13 +1576,11 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 		doneCh <- nil
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-doneCh:
-			return err
-		}
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-doneCh:
+		return err
 	}
 }
 
@@ -2779,7 +2775,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	if !addWrites.IsEmpty() {
 		// Merge finalization writes with existing execution writes.
 		existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-		merged := MergeVersionedWrites(existingWrites, addWrites)
+		merged := existingWrites.Merge(addWrites)
 		be.blockIO.RecordWrites(txVersion, merged)
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
@@ -2875,7 +2871,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			}
 			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := MergeVersionedWrites(existingWrites, tipWrites)
+				merged := existingWrites.Merge(tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
@@ -3032,11 +3028,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.validateTasks.clearComplete(tx)
 		// Signal the parked worker to re-execute in place; leave execTasks complete so
 		// the re-sent result re-validates without going through the dispatch path.
-		be.slReexecFlag[tx].Store(true)
-		select {
-		case be.slReexec[tx] <- struct{}{}:
-		default:
-		}
+		be.signalSelfLoopReexec(tx)
 	}
 }
 
@@ -3059,12 +3051,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	}
 	add(newWrites)
 	add(oldWrites)
-	out := make([]int, 0, len(set))
-	for tx := range set {
-		out = append(out, tx)
-	}
-	sort.Ints(out)
-	return out
+	return slices.Sorted(maps.Keys(set))
 }
 
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
@@ -3553,8 +3540,4 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 
 	dispatch()
-}
-
-func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
-	return prev.Merge(next)
 }
