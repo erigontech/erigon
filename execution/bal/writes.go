@@ -55,8 +55,14 @@ func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state
 			})
 		}
 		if code, ok := finalChangeUpTo(accountChanges.CodeChanges, maxTxIndex); ok {
+			// Emit CodeHashPath alongside CodePath so codeHash is single-sourced from
+			// the bytecode on every path; the BAL carries only the bytecode.
+			c := accounts.NewCode(code.Bytecode)
 			writes.SetCode(addr, &state.VersionedWrite[accounts.Code]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: accounts.NewCode(code.Bytecode),
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: c,
+			})
+			writes.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath}, Val: c.Hash,
 			})
 		}
 		for _, slotChanges := range accountChanges.StorageChanges {

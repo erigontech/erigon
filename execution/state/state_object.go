@@ -40,23 +40,16 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any { return newHeapObject() },
-}
-
-func newHeapObject() *stateObject {
-	return &stateObject{}
+	New: func() any {
+		return &stateObject{
+			originStorage:      make(Storage),
+			blockOriginStorage: make(Storage),
+			dirtyStorage:       make(Storage),
+		}
+	},
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
-
-// set allocates the map on first write, so an object that never writes keeps a
-// nil Storage.
-func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
-	if *s == nil {
-		*s = make(Storage)
-	}
-	(*s)[key] = value
-}
 
 func (s Storage) String() string {
 	var str strings.Builder
@@ -83,7 +76,6 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
@@ -102,14 +94,11 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
-
-	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
-	arena bool
 }
 
-// newObject creates a state object from the arena or the pool.
+// newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := db.allocStateObject()
+	so := stateObjectPool.Get().(*stateObject)
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -124,8 +113,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// reset clears every per-use field, keeping any storage map already allocated.
-func (so *stateObject) reset() {
+// release returns the stateObject to the pool after resetting it.
+func (so *stateObject) release() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
@@ -140,14 +129,6 @@ func (so *stateObject) reset() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
-}
-
-// release resets the object and pools it, unless the arena owns the slot.
-func (so *stateObject) release() {
-	so.reset()
-	if so.arena {
-		return
-	}
 	stateObjectPool.Put(so)
 }
 
@@ -228,8 +209,8 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
-	so.originStorage.set(key, res)
-	so.blockOriginStorage.set(key, res)
+	so.originStorage[key] = res
+	so.blockOriginStorage[key] = res
 
 	return res, err
 }
@@ -299,7 +280,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 }
 
 func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
-	so.dirtyStorage.set(key, value)
+	so.dirtyStorage[key] = value
 }
 
 // updateStorage writes cached storage modifications into the object's storage trie.
@@ -359,7 +340,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
-		so.originStorage.set(key, value)
+		so.originStorage[key] = value
 	}
 	return nil
 }
@@ -422,7 +403,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.resolved() {
 			so.code = c
 			return c, nil
 		}
@@ -446,8 +427,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
 	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
-	// load; the only case they disagree is codeHash-without-code state (empty
-	// bytes, non-empty hash), reported honestly as empty so SetCode's compare
+	// load; a codeHash-without-code state reports as empty so SetCode's compare
 	// still heals it.
 	var c accounts.Code
 	if len(code) == 0 {
@@ -465,8 +445,8 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, err
 	}
 
-	// bytes.Equal confirm guards the codeHash-without-code case: a matching hash
-	// against empty prev bytes must still heal the CodeDomain, not skip.
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}

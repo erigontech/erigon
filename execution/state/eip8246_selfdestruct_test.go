@@ -146,6 +146,37 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	require.Equal(t, *uint256.NewInt(2), bal, "reader must see the latest funded balance of the preserved account")
 }
 
+// EIP-8246: the whole-account versionedStateReader — used by calcFees to read the
+// coinbase / burnt fee recipient on the state-root composition path — must not drop
+// a self-destruct-preserved balance. IsNetAbsent is fork-agnostic and reports a
+// preserve as absent; a fork-aware reader must reconstruct the preserved value from
+// the versionMap cells, or calcFees credits the tip onto 0 and burns the preserved
+// balance (a parallel-only wrong-state-root divergence vs serial).
+func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246CB"))
+	preserved := *uint256.NewInt(500)
+
+	vm := NewVersionMap(nil)
+	sdVer := Version{TxIndex: 5}
+	vm.WriteSelfDestruct(addr, sdVer, true, true)
+	vm.WriteBalance(addr, sdVer, preserved, true)
+	vm.WriteIncarnation(addr, sdVer, 0, true)
+
+	// Fork-aware reader at a later tx (the calcFees path) must surface the preserve.
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil, true /* eip8246 */)
+	acc, err := vsr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, acc, "EIP-8246 preserved coinbase must not read as absent (calcFees would burn the balance)")
+	require.Equal(t, preserved, acc.Balance)
+
+	// A fork-unaware reader keeps pre-EIP-8246 semantics: a self-destruct is absent.
+	vsrOld := NewVersionedStateReader(6, ReadSet{}, vm, nil, false)
+	accOld, err := vsrOld.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, accOld, "pre-EIP-8246 a self-destruct is fully absent")
+}
+
 // The persisted balance-only record has incarnation 0, so a later CREATE2 over
 // a preserved account must compute incarnation 1 in every execution mode.
 // Selfdestruct publishes the pre-destruct IncarnationPath and extraction keeps

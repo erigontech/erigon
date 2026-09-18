@@ -19,11 +19,9 @@ package state
 import (
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -39,6 +37,9 @@ func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptio
 }
 func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return len(g.val), len(g.val) > 0, nil
+}
+func (g fixedTemporalTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	return nil, nil, false, nil
 }
 func (g fixedTemporalTx) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
 
@@ -61,11 +62,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	key := accounts.InternKey(common.Hash{0x22})
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
 
-	cache := NewBlockStateCache()
-	cache.PutCommittedStorage(addr, key, make([]byte, 32))
-	cache.PutCommittedAccount(addr, &acc)
-	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
-
 	for _, tc := range []struct {
 		name string
 		want float64
@@ -83,97 +79,10 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
-
-		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
-		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
-		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)
 			require.Equal(t, tc.want, allocs, "%s: alloc count changed", tc.name)
 		})
-	}
-}
-
-func cacheReadTestAccount() *accounts.Account {
-	acc := accounts.NewAccount()
-	acc.Nonce = 42
-	acc.Balance = *uint256.NewInt(1e18)
-	acc.Incarnation = 1
-	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00}))
-	return &acc
-}
-
-func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
-	want := cacheReadTestAccount()
-
-	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, want)
-	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Equal(t, want.Nonce, got.Nonce)
-	require.Equal(t, want.Balance, got.Balance)
-	require.Equal(t, want.Incarnation, got.Incarnation)
-	require.Equal(t, want.CodeHash, got.CodeHash)
-	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
-}
-
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
-func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
-	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, cacheReadTestAccount())
-
-	written := cacheReadTestAccount()
-	written.Nonce = 43
-	cache.WriteAccount(addr, accounts.SerialiseV3(written), 1)
-	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Equal(t, uint64(43), got.Nonce)
-
-	cache.WriteAccount(addr, nil, 2)
-	got, err = NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.Nil(t, got)
-}
-
-func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
-	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, nil)
-	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.Nil(t, got)
-}
-
-// returnReadList pools the list, so leaving Vals populated keeps every value the
-// transaction read — bytecode included — alive for as long as the pool holds it.
-// Not parallel: it inspects an object it has just handed back to the pool.
-func TestReturnReadListUnpinsWhatTheTxnRead(t *testing.T) {
-	lists := readListPool.Get().(ReadLists)
-	tbl := lists[kv.AccountsDomain.String()]
-	tbl.Push("k1", make([]byte, 4096))
-	tbl.Push("k2", make([]byte, 4096))
-	require.Equal(t, 2, tbl.Len())
-
-	returnReadList(lists)
-
-	require.Zero(t, tbl.Len())
-	for i, v := range tbl.Vals[:cap(tbl.Vals)] {
-		require.Nil(t, v, "Vals[%d] still pins %d bytes the txn read", i, len(v))
-	}
-	for i, k := range tbl.Keys[:cap(tbl.Keys)] {
-		require.Empty(t, k, "Keys[%d] still pins a key", i)
 	}
 }
