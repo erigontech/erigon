@@ -785,18 +785,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		// Parlia routes the tip (and, post-Cancun, the blob fee) to SystemAddress
-		// rather than the coinbase; both are otherwise burnt.
-		isParlia := st.evm.ChainConfig().Parlia != nil
-		feeRecipient := coinbase
-		if isParlia {
-			feeRecipient = params.SystemAddress
+		feePolicy := st.evm.Context.FeePolicy
+		tipRecipient := feePolicy.TipRecipient
+		if tipRecipient.IsNil() {
+			tipRecipient = coinbase
 		}
-		if err := st.state.AddBalance(feeRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		if isParlia && rules.IsCancun {
-			if err := st.state.AddBalance(params.SystemAddress, fees.blobGasVal, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if !feePolicy.BlobFeeRecipient.IsNil() {
+			if err := st.state.AddBalance(feePolicy.BlobFeeRecipient, fees.blobGasVal, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		}

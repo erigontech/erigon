@@ -70,9 +70,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	var transferFunc evmtypes.TransferFunc
 	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
+	var feePolicy evmtypes.FeePolicy
 	if engine != nil {
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
+		feePolicy = engine.FeePolicy(header)
 	} else {
 		transferFunc = misc.Transfer
 	}
@@ -96,6 +98,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
+		FeePolicy:        feePolicy,
 	}
 	return blockContext
 }

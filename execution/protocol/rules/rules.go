@@ -136,6 +136,10 @@ type EngineReader interface {
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
 	) ([]Reward, error)
 
+	// FeePolicy says where this block's transaction fees go. The zero value
+	// credits the block beneficiary and burns the blob fee.
+	FeePolicy(header *types.Header) evmtypes.FeePolicy
+
 	GetTransferFunc() evmtypes.TransferFunc
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc

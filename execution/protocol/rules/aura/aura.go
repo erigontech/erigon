@@ -1209,6 +1209,10 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	return err
 }
 
+func (c *AuRa) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
+}
+
 func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
 }

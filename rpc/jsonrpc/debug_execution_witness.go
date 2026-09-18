@@ -2012,7 +2012,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
 	coinbase := accounts.InternAddress(header.Coinbase)
-	blockCtx := protocol.NewEVMBlockContext(header, result.getHashFn, nil, coinbase, chainConfig)
+	blockCtx := protocol.NewEVMBlockContext(header, result.getHashFn, engine, coinbase, chainConfig)
 	blockRules := blockCtx.Rules(chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 

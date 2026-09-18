@@ -122,6 +122,17 @@ func (p *Parlia) CalculateRewards(config *chain.Config, header *types.Header, un
 	return nil, nil
 }
 
+// FeePolicy routes the tip to SystemAddress, which the block's system
+// transactions sweep to the validator on-chain. The blob fee follows it from
+// Cancun on, where other chains burn it.
+func (p *Parlia) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	policy := evmtypes.FeePolicy{TipRecipient: params.SystemAddress}
+	if p.chainConfig.IsCancun(header.Time) {
+		policy.BlobFeeRecipient = params.SystemAddress
+	}
+	return policy
+}
+
 func (p *Parlia) GetTransferFunc() evmtypes.TransferFunc { return misc.Transfer }
 
 func (p *Parlia) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc { return nil }

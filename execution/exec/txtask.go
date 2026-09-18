@@ -109,6 +109,7 @@ type TxResult struct {
 	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
 	Operational bool
 	Coinbase    accounts.Address
+	FeePolicy   evmtypes.FeePolicy
 	TxIn        state.ReadSet
 	TxOut       *state.WriteSet
 
@@ -579,6 +580,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+		result.FeePolicy = evm.Context.FeePolicy
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {

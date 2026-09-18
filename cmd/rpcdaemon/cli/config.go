@@ -1078,6 +1078,10 @@ func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHe
 	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
+func (e *remoteRulesEngine) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
+}
+
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)

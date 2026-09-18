@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -2109,9 +2108,16 @@ func (result *execResult) calcFees(
 	taskVersion := task.Version()
 
 	recipient := result.Coinbase
+	if r := result.FeePolicy.TipRecipient; !r.IsNil() {
+		recipient = r
+	}
 	tipCredit := result.ExecutionResult.FeeTipped
-	if chainRules.IsParlia {
-		recipient = params.SystemAddress
+	if blobRecipient := result.FeePolicy.BlobFeeRecipient; !blobRecipient.IsNil() {
+		// One deferred credit per tx, so a chain that splits the tip and the blob
+		// fee across two addresses cannot be replayed here.
+		if blobRecipient != recipient {
+			return nil, feeCreditNone, fmt.Errorf("deferred fee credit: blob recipient %x differs from tip recipient %x", blobRecipient, recipient)
+		}
 		tipCredit.Add(&result.ExecutionResult.FeeTipped, &result.ExecutionResult.FeeBlob)
 	}
 

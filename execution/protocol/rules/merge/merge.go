@@ -500,6 +500,10 @@ func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {
 	return s.eth1Engine.APIs(chain)
 }
 
+func (s *Merge) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return s.eth1Engine.FeePolicy(header)
+}
+
 func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 	return s.eth1Engine.GetTransferFunc()
 }
