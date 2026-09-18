@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -286,8 +288,8 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	defer ticker.Stop()
 
 	var lastSettled preparationKey
-	var lastFailureLog time.Time
-	var lastPendingLog time.Time
+	failureLog := rate.Sometimes{Interval: time.Minute}
+	pendingLog := rate.Sometimes{Interval: time.Minute}
 	var scratch payloadPreparationScratch
 	immediate := true
 	for {
@@ -371,9 +373,10 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			var err error
 			current, err = a.precheckPreparationInputs(current)
 			if err != nil {
-				if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
-					logger.Warn("PayloadPreparation: proposer check failed", "slot", targetSlot, "err", err)
-					lastFailureLog = time.Now()
+				if !isExpectedPreparationSkip(err) {
+					failureLog.Do(func() {
+						logger.Warn("PayloadPreparation: proposer check failed", "slot", targetSlot, "err", err)
+					})
 				}
 				continue
 			}
@@ -399,11 +402,18 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			if selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				var pathErr error
 				current.gloasPath, pathErr = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
-				if current.gloasPath == gloasPayloadPathPending {
-					if time.Since(lastPendingLog) >= time.Minute {
-						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot, "err", pathErr)
-						lastPendingLog = time.Now()
+				if pathErr != nil {
+					if !isExpectedPreparationSkip(pathErr) {
+						failureLog.Do(func() {
+							logger.Warn("PayloadPreparation: Gloas payload path resolution failed", "slot", targetSlot, "head", selectedRoot, "err", pathErr)
+						})
 					}
+					continue
+				}
+				if current.gloasPath == gloasPayloadPathPending {
+					pendingLog.Do(func() {
+						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot)
+					})
 					continue
 				}
 			}
@@ -425,9 +435,10 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			lastSettled = outcome
 			scratch.release()
 		}
-		if err != nil && !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
-			logger.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
-			lastFailureLog = time.Now()
+		if err != nil && !isExpectedPreparationSkip(err) {
+			failureLog.Do(func() {
+				logger.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
+			})
 		}
 	}
 }

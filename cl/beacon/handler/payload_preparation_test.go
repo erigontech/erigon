@@ -24,7 +24,9 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -825,52 +827,78 @@ func TestPrecheckPreparationInputsRejectsHeadOutsideLookahead(t *testing.T) {
 	require.ErrorIs(t, err, errHeadTooFarBack)
 }
 
-func TestPreparePayloadLoopWarnsWhenGloasPathRemainsPending(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	var output bytes.Buffer
-	logger := log.New()
-	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
-	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
-	handler.logger = logger
-	currentSlot := postState.Slot()
-	targetSlot := currentSlot + 1
-	baseBlockRoot := common.Hash{0x41}
-	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
-	forkchoiceStore.HeadVal = baseBlockRoot
-	forkchoiceStore.HeadSlotVal = currentSlot
+func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
+	const pendingWarning = "PayloadPreparation: Gloas payload path is still pending"
+	const failureWarning = "PayloadPreparation: Gloas payload path resolution failed"
+	for _, test := range []struct {
+		name             string
+		headChanged      bool
+		lookupErr        error
+		wantFirstWarning string
+	}{
+		{name: "pending", wantFirstWarning: pendingWarning},
+		{name: "head changed", headChanged: true},
+		{name: "lookup failed", lookupErr: errors.New("head lookup failed"), wantFirstWarning: failureWarning},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				config := payloadPreparationLoopConfig(12, 1, 1)
+				currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+				handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+					t, ctrl, &config, currentSlot, currentSlot, 2*time.Second,
+				)
+				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+				var output bytes.Buffer
+				handler.logger = log.New()
+				handler.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+				defer cancel()
+				reads := 0
+				var firstOutput string
+				forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					reads++
+					head := forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusPending}
+					switch reads {
+					case 1:
+						if test.headChanged {
+							head.Root = common.Hash{0x42}
+						}
+						return head, currentSlot, test.lookupErr
+					case 2:
+						firstOutput = output.String()
+					case 3:
+						cancel()
+					}
+					return head, currentSlot, nil
+				}
+				handler.preparePayloadLoopWith(ctx, func(
+					context.Context,
+					preparationKey,
+					*payloadPreparationScratch,
+				) (preparationKey, error) {
+					t.Fatal("unresolved Gloas path reached payload preparation")
+					return preparationKey{}, nil
+				})
 
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
-	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
-	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
-	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
-		func(view synced_data.ViewHeadStateWithIdentityFn) error {
-			return view(postState, baseBlockRoot, currentSlot)
-		},
-	).AnyTimes()
-	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
-		cancel()
-		return forkchoice.ForkChoiceNode{}, 0, nil
+				require.Equal(t, 3, reads)
+				if test.wantFirstWarning == "" {
+					require.NotContains(t, firstOutput, "lvl=warn")
+				} else {
+					require.Contains(t, firstOutput, test.wantFirstWarning)
+					require.Contains(t, firstOutput, "lvl=warn")
+				}
+				if test.lookupErr != nil {
+					require.Contains(t, firstOutput, test.lookupErr.Error())
+				}
+				if test.wantFirstWarning != pendingWarning {
+					require.NotContains(t, firstOutput, pendingWarning)
+				}
+				// A lookup failure must not consume the warning budget for a pending payload.
+				require.Equal(t, 1, strings.Count(output.String(), pendingWarning))
+			})
+		})
 	}
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(2 * time.Second)).AnyTimes()
-	handler.ethClock = clock
-
-	handler.preparePayloadLoopWith(ctx, func(
-		context.Context,
-		preparationKey,
-		*payloadPreparationScratch,
-	) (preparationKey, error) {
-		t.Fatal("pending Gloas path reached payload preparation")
-		return preparationKey{}, nil
-	})
-
-	require.Contains(t, output.String(), "Gloas payload path is still pending")
-	require.Contains(t, output.String(), "lvl=warn")
 }
 
 func setupFirstGloasPayloadStates(
@@ -1118,177 +1146,183 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	config := payloadPreparationLoopConfig(1, 1, 2)
-	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	targetSlot := currentSlot + 1
-	handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
-		t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
-	)
-	handler.epbsPool = pool.NewEpbsPool()
-	var dependentRoot common.Hash
-	require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
-		header := head.LatestExecutionPayloadHeader()
-		header.GasLimit = 30_000_000
-		head.SetLatestExecutionPayloadHeader(header)
-		var err error
-		dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
-		return err
-	}))
-	preference := func(root common.Hash, validator, gas uint64) *cltypes.SignedProposerPreferences {
-		return &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
-			ProposalSlot: targetSlot, DependentRoot: root, ValidatorIndex: validator, TargetGasLimit: gas,
-		}}
-	}
-	steps := []struct {
-		name         string
-		preference   *cltypes.SignedProposerPreferences
-		prune        bool
-		wantAttempts int
-	}{
-		{name: "parent fallback", wantAttempts: 1},
-		{name: "other dependent root", preference: preference(common.Hash{0x51}, 0, 36_000_000), wantAttempts: 1},
-		{name: "other validator", preference: preference(dependentRoot, 1, 36_000_000), wantAttempts: 1},
-		{name: "same effective limit", preference: preference(dependentRoot, 0, 30_000_000), wantAttempts: 1},
-		{name: "remove same limit", prune: true, wantAttempts: 1},
-		{name: "explicit zero", preference: preference(dependentRoot, 0, 0), wantAttempts: 2},
-		{name: "restore fallback", prune: true, wantAttempts: 3},
-		{name: "re-add different limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
-		{name: "replace same limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
-		{name: "prune and re-add before next tick", prune: true, preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 5},
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	tick, attempts := 0, 0
-	syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
-		if tick > 0 {
-			require.Equal(t, steps[tick-1].wantAttempts, attempts, steps[tick-1].name)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		handler.epbsPool = pool.NewEpbsPool()
+		var dependentRoot common.Hash
+		require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+			header := head.LatestExecutionPayloadHeader()
+			header.GasLimit = 30_000_000
+			head.SetLatestExecutionPayloadHeader(header)
+			var err error
+			dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+			return err
+		}))
+		preference := func(root common.Hash, validator, gas uint64) *cltypes.SignedProposerPreferences {
+			return &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot: targetSlot, DependentRoot: root, ValidatorIndex: validator, TargetGasLimit: gas,
+			}}
 		}
-		if tick == len(steps) {
-			cancel()
-			return baseBlockRoot, currentSlot, false
+		steps := []struct {
+			name         string
+			preference   *cltypes.SignedProposerPreferences
+			prune        bool
+			wantAttempts int
+		}{
+			{name: "parent fallback", wantAttempts: 1},
+			{name: "other dependent root", preference: preference(common.Hash{0x51}, 0, 36_000_000), wantAttempts: 1},
+			{name: "other validator", preference: preference(dependentRoot, 1, 36_000_000), wantAttempts: 1},
+			{name: "same effective limit", preference: preference(dependentRoot, 0, 30_000_000), wantAttempts: 1},
+			{name: "remove same limit", prune: true, wantAttempts: 1},
+			{name: "explicit zero", preference: preference(dependentRoot, 0, 0), wantAttempts: 2},
+			{name: "restore fallback", prune: true, wantAttempts: 3},
+			{name: "re-add different limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+			{name: "replace same limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+			{name: "prune and re-add before next tick", prune: true, preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 5},
 		}
-		step := steps[tick]
-		if step.prune {
-			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
-		}
-		if step.preference != nil {
-			handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-				Slot:          step.preference.Message.ProposalSlot,
-				DependentRoot: step.preference.Message.DependentRoot,
-			}, step.preference)
-		}
-		tick++
-		return baseBlockRoot, currentSlot, true
-	}).AnyTimes()
-	handler.preparePayloadLoopWith(ctx, func(
-		_ context.Context,
-		key preparationKey,
-		_ *payloadPreparationScratch,
-	) (preparationKey, error) {
-		attempts++
-		return key, nil
-	})
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		tick, attempts := 0, 0
+		syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+			if tick > 0 {
+				require.Equal(t, steps[tick-1].wantAttempts, attempts, steps[tick-1].name)
+			}
+			if tick == len(steps) {
+				cancel()
+				return baseBlockRoot, currentSlot, false
+			}
+			step := steps[tick]
+			if step.prune {
+				handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
+			}
+			if step.preference != nil {
+				handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+					Slot:          step.preference.Message.ProposalSlot,
+					DependentRoot: step.preference.Message.DependentRoot,
+				}, step.preference)
+			}
+			tick++
+			return baseBlockRoot, currentSlot, true
+		}).AnyTimes()
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			attempts++
+			return key, nil
+		})
 
-	require.Equal(t, len(steps), tick)
-	require.Equal(t, steps[len(steps)-1].wantAttempts, attempts)
+		require.Equal(t, len(steps), tick)
+		require.Equal(t, steps[len(steps)-1].wantAttempts, attempts)
+	})
 }
 
 func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	config := payloadPreparationLoopConfig(1, 1, 2)
-	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	targetSlot := currentSlot + 1
-	handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
-		t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
-	)
-	syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
-	handler.epbsPool = pool.NewEpbsPool()
-	dependentRoot := common.Hash{0x51}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	attempts := 0
-	handler.preparePayloadLoopWith(ctx, func(
-		_ context.Context,
-		key preparationKey,
-		_ *payloadPreparationScratch,
-	) (preparationKey, error) {
-		require.Equal(t, targetSlot, key.targetSlot)
-		attempts++
-		if attempts == 1 {
-			preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
-			handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
-				Message: &cltypes.ProposerPreferences{
-					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: 36_000_000,
-				},
-			})
-			preference, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
-			require.True(t, found)
-			usedGasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
-			// Pruning during a build must not replace the limit that the attempt used with
-			// the fallback limit. The next tick must detect that difference and re-prepare.
-			handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
-			_, found = handler.epbsPool.GetPreference(targetSlot, dependentRoot)
-			require.False(t, found)
-			key.setTargetGasLimit(&usedGasLimit)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+		handler.epbsPool = pool.NewEpbsPool()
+		dependentRoot := common.Hash{0x51}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			require.Equal(t, targetSlot, key.targetSlot)
+			attempts++
+			if attempts == 1 {
+				preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+				handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: 36_000_000,
+					},
+				})
+				preference, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.True(t, found)
+				usedGasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
+				// Pruning during a build must not replace the limit that the attempt used with
+				// the fallback limit. The next tick must detect that difference and re-prepare.
+				handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
+				_, found = handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.False(t, found)
+				key.setTargetGasLimit(&usedGasLimit)
+				return key, nil
+			}
+			cancel()
 			return key, nil
-		}
-		cancel()
-		return key, nil
-	})
+		})
 
-	require.Equal(t, 2, attempts)
+		require.Equal(t, 2, attempts)
+	})
 }
 
 func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	config := payloadPreparationLoopConfig(1, 2, 2)
-	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	targetSlot := currentSlot + 1
-	handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
-		t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
-	)
-	handler.epbsPool = pool.NewEpbsPool()
-	const proposerIndex = uint64(42)
-	const gasLimit = hexutil.Uint64(36_000_000)
-	var dependentRoot common.Hash
-	require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
-		var err error
-		dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
-		return err
-	}))
-	preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
-	handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
-		ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex, TargetGasLimit: uint64(gasLimit),
-	}})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	ticks := 0
-	syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
-		ticks++
-		if ticks == 3 {
-			cancel()
-			return baseBlockRoot, currentSlot, false
-		}
-		return baseBlockRoot, currentSlot, true
-	}).AnyTimes()
-	attempts := 0
-	handler.preparePayloadLoopWith(ctx, func(
-		_ context.Context,
-		key preparationKey,
-		_ *payloadPreparationScratch,
-	) (preparationKey, error) {
-		attempts++
-		// Before Fulu, advancing the copied state can be needed to discover this proposer.
-		// Later ticks must reuse that index when reading the effective preference.
-		key.proposerIndex = proposerIndex
-		limit := gasLimit
-		key.setTargetGasLimit(&limit)
-		return key, nil
-	})
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 2, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		handler.epbsPool = pool.NewEpbsPool()
+		const proposerIndex = uint64(42)
+		const gasLimit = hexutil.Uint64(36_000_000)
+		var dependentRoot common.Hash
+		require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+			var err error
+			dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+			return err
+		}))
+		preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+		handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+			ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex, TargetGasLimit: uint64(gasLimit),
+		}})
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		ticks := 0
+		syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+			ticks++
+			if ticks == 3 {
+				cancel()
+				return baseBlockRoot, currentSlot, false
+			}
+			return baseBlockRoot, currentSlot, true
+		}).AnyTimes()
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			attempts++
+			// Before Fulu, advancing the copied state can be needed to discover this proposer.
+			// Later ticks must reuse that index when reading the effective preference.
+			key.proposerIndex = proposerIndex
+			limit := gasLimit
+			key.setTargetGasLimit(&limit)
+			return key, nil
+		})
 
-	require.Equal(t, 3, ticks)
-	require.Equal(t, 1, attempts)
+		require.Equal(t, 3, ticks)
+		require.Equal(t, 1, attempts)
+	})
 }
 
 func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
@@ -1302,41 +1336,43 @@ func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	config := payloadPreparationLoopConfig(1, 1, 1)
-	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
-	targetSlot := currentSlot + 1
-	handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
-		t, ctrl, &config, currentSlot, currentSlot-1, 750*time.Millisecond,
-	)
-	syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot-1, true).AnyTimes()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	statusReads := 0
-	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
-		statusReads++
-		return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot - 1, nil
-	}
-	attempts := 0
-	handler.preparePayloadLoopWith(ctx, func(
-		_ context.Context,
-		key preparationKey,
-		_ *payloadPreparationScratch,
-	) (preparationKey, error) {
-		require.Equal(t, targetSlot, key.targetSlot)
-		attempts++
-		if attempts == 1 {
-			// The decision changes during state work. If the loop memoizes its earlier EMPTY
-			// sample, it will incorrectly skip the next attempt when the path returns to EMPTY.
-			key.gloasPath = gloasPayloadPathFull
-			return key, errGloasPathNeedsForkChoice
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 1)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot-1, 600*time.Millisecond,
+		)
+		syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot-1, true).AnyTimes()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		statusReads := 0
+		forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+			statusReads++
+			return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot - 1, nil
 		}
-		cancel()
-		return key, nil
-	})
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			require.Equal(t, targetSlot, key.targetSlot)
+			attempts++
+			if attempts == 1 {
+				// The decision changes during state work. If the loop memoizes its earlier EMPTY
+				// sample, it will incorrectly skip the next attempt when the path returns to EMPTY.
+				key.gloasPath = gloasPayloadPathFull
+				return key, errGloasPathNeedsForkChoice
+			}
+			cancel()
+			return key, nil
+		})
 
-	require.Equal(t, 2, attempts, "a resolved FULL skip must not memoize the loop's earlier EMPTY path")
-	require.Equal(t, 2, statusReads, "the loop must compare the settled path on its next tick")
+		require.Equal(t, 2, attempts, "a resolved FULL skip must not memoize the loop's earlier EMPTY path")
+		require.Equal(t, 2, statusReads, "the loop must compare the settled path on its next tick")
+	})
 }
 
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
