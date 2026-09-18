@@ -194,7 +194,16 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool       { return discardCommitment }
+func DiscardCommitment() bool { return discardCommitment }
+
+// OverrideDiscardCommitment sets DiscardCommitment for a test and returns a restore
+// func; discardCommitment is otherwise read once from the env at init. Test-only.
+func OverrideDiscardCommitment(v bool) (restore func()) {
+	prev := discardCommitment
+	discardCommitment = v
+	return func() { discardCommitment = prev }
+}
+
 func NoPrune() bool                 { return noPrune }
 func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
