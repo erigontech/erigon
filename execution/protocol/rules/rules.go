@@ -83,14 +83,6 @@ type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
 type SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract accounts.Address, data []byte) ([]byte, error)
 
-// SystemTxEngine is implemented by engines (Parlia) that embed system
-// transactions in the block body. ApplySystemTx performs the engine's state
-// effect (the reward move) before the executor runs the transaction.
-type SystemTxEngine interface {
-	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
-	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
-}
-
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
@@ -135,6 +127,10 @@ type EngineReader interface {
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender accounts.Address, syscall SystemCall) bool
 
+	// IsSystemTransaction reports whether tx is a consensus system transaction
+	// embedded in the block body (Parlia). Engines without them return false.
+	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
+
 	Type() chain.RulesName
 
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
@@ -170,6 +166,11 @@ type EngineWriter interface {
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
 		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error
+
+	// ApplySystemTx performs the engine's consensus state effect (the reward
+	// move) before the executor runs an embedded system transaction. Engines
+	// without system transactions are never called.
+	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.

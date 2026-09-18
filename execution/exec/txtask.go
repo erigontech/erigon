@@ -747,7 +747,7 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 
 	// The engine performs the consensus state effect (reward move); the executor
 	// bumps the sender nonce and runs the call.
-	if err = engine.(rules.SystemTxEngine).ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
+	if err = engine.ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
 		result.Err = err
 		return &result
 	}

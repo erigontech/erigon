@@ -786,6 +786,14 @@ func (c *AuRa) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
+func (c *AuRa) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	return false, nil
+}
+
+func (c *AuRa) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	return nil
+}
+
 func buildFinality(e *EpochManager, chain rules.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall rules.SystemCall) []unAssembledHeader {
 	// commit_block -> aura.build_finality
 	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)

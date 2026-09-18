@@ -477,6 +477,14 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
+func (ethash *Ethash) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	return false, nil
+}
+
+func (ethash *Ethash) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	return nil
+}
+
 func (ethash *Ethash) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return false
 }

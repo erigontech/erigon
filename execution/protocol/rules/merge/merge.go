@@ -315,6 +315,14 @@ func (c *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
+func (s *Merge) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	return s.eth1Engine.IsSystemTransaction(tx, header)
+}
+
+func (s *Merge) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	return s.eth1Engine.ApplySystemTx(tx, ibs, header)
+}
+
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum rules engine with EIP-3675 modifications.
 func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header) error {

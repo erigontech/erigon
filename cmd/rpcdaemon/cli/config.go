@@ -1146,6 +1146,14 @@ func (e *remoteRulesEngine) TxDependencies(header *types.Header) [][]int {
 	panic("remoteRulesEngine.TxDependencies not supported")
 }
 
+func (e *remoteRulesEngine) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	panic("remoteRulesEngine.IsSystemTransaction not supported")
+}
+
+func (e *remoteRulesEngine) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	panic("remoteRulesEngine.ApplySystemTx not supported")
+}
+
 func readChainConfigFromDB(ctx context.Context, db kv.RoDB) (*chain.Config, error) {
 	var cc *chain.Config
 	if err := db.View(ctx, func(tx kv.Tx) error {

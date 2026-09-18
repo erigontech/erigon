@@ -117,11 +117,7 @@ func systemTxFlag(engine rules.Engine, txs types.Transactions, txIndex int, head
 	if txIndex < 0 || txIndex >= len(txs) {
 		return false, nil
 	}
-	ste, ok := engine.(rules.SystemTxEngine)
-	if !ok {
-		return false, nil
-	}
-	return ste.IsSystemTransaction(txs[txIndex], header)
+	return engine.IsSystemTransaction(txs[txIndex], header)
 }
 
 // execRange is the resolved block/txNum window the executor runs over. The
