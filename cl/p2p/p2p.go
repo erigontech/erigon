@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -80,6 +81,10 @@ func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
+	if cfg.Port > 0 && uint(cfg.Port) == cfg.QUICPort {
+		return nil, fmt.Errorf("discovery and QUIC ports must differ: %d", cfg.Port)
+	}
+
 	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
 	// the same public address. ExtIP resolves immediately; STUN/UPnP make network calls.
 	if cfg.NAT != nil {

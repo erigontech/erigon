@@ -85,6 +85,7 @@ type CaplinConfig struct {
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
 	CaplinDiscoveryTCPPort      uint64
+	CaplinDiscoveryQUICPort     uint64
 	SentinelAddr                string
 	SentinelPort                uint64
 	SubscribeAllTopics          bool

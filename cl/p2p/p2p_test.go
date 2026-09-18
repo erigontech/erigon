@@ -53,6 +53,23 @@ func TestHostQUICPortReturnsBoundPort(t *testing.T) {
 	require.NotZero(t, hostQUICPort(host))
 }
 
+func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	cfg := &P2PConfig{
+		NetworkConfig: networkConfig,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		Port:          9000,
+		TCPPort:       9000,
+		QUICPort:      9000,
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+
+	_, err = NewP2Pmanager(t.Context(), cfg, log.Root(), clock)
+	require.EqualError(t, err, "discovery and QUIC ports must differ: 9000")
+}
+
 func TestNewP2PManagerClosesHostWhenDiscoveryStartupFails(t *testing.T) {
 	blockedDiscovery, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	require.NoError(t, err)

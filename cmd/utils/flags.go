@@ -903,7 +903,12 @@ var (
 	}
 	CaplinDiscoveryTCPPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.tcpport",
-		Usage: "TCP and QUIC port for Caplin libp2p",
+		Usage: "TCP port for Caplin libp2p",
+		Value: 4001,
+	}
+	CaplinDiscoveryQUICPortFlag = cli.Uint64Flag{
+		Name:  "caplin.discovery.quicport",
+		Usage: "QUIC port for Caplin libp2p",
 		Value: 4001,
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
@@ -1932,6 +1937,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryQUICPort = ctx.Uint64(CaplinDiscoveryQUICPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}

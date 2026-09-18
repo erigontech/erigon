@@ -29,6 +29,7 @@ var CliFlags = []cli.Flag{
 	&SentinelServerPort,
 	&SentinelServerAddr,
 	&SentinelTcpPort,
+	&SentinelQUICPort,
 	&NoDiscovery,
 	&LocalDiscovery,
 	&BootnodesFlag,
@@ -48,7 +49,12 @@ var (
 	}
 	SentinelTcpPort = cli.UintFlag{
 		Name:  "sentinel.tcp.port",
-		Usage: "sets lightclient TCP and QUIC port",
+		Usage: "sets lightclient TCP port",
+		Value: 4001,
+	}
+	SentinelQUICPort = cli.UintFlag{
+		Name:  "sentinel.quic.port",
+		Usage: "sets lightclient QUIC port",
 		Value: 4001,
 	}
 	SentinelServerPort = cli.IntFlag{
