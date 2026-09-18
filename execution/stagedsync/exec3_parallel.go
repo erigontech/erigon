@@ -523,6 +523,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			}
 		}
 
+		// applyFault routes an apply-loop infrastructure fault (per-tx apply or the
+		// block-end fold) through fail + cancel and keeps the loop draining.
+		applyFault := func(blockNum uint64, blockHash common.Hash, err error) {
+			appliedBlocks[blockNum] = struct{}{}
+			fail.consider(blockNum, blockHash, true, err)
+			finalized = true
+			deliberateCancel()
+		}
+
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop. Do NOT
 		// add ctx.Done / executorContext.Done cases — the exec loop owns shutdown
 		// sequencing, and exiting early leaves sd.mem inconsistent with the commitment
@@ -598,9 +607,28 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
 					blockUpdateCount += writeCount
-					// The apply loop is the sole sd.mem writer: buffer each tx result
-					// and fold the buffer to sd.mem at block end.
-					splitApplyBuf = append(splitApplyBuf, applyResult)
+					if dbg.PerTxApply {
+						// Per-tx apply: fold this sealed result to sd.mem immediately so the
+						// sd.mem writer + changeset lock run concurrently with exec instead of
+						// batching at block end. Results arrive in publish order and exec reads
+						// the versionMap before sd.mem, so an advanced sd.mem cell is redundant
+						// with the already-Done versionMap cell.
+						restoreCS := pe.bindBlockChangesetForFold(applyResult.blockNum, applyResult.blockHash)
+						applyErr := pe.rs.ApplyStateWrites(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes, nil, applyResult.rules)
+						if applyErr == nil && !applyResult.isFinalize {
+							applyErr = pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+						}
+						restoreCS()
+						if applyErr != nil {
+							applyFault(applyResult.blockNum, applyResult.blockHash, fmt.Errorf("perTxApply block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, applyErr))
+							pe.rs.SetTrace(false)
+							continue
+						}
+					} else {
+						// The apply loop is the sole sd.mem writer: buffer each tx result
+						// and fold the buffer to sd.mem at block end.
+						splitApplyBuf = append(splitApplyBuf, applyResult)
+					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -642,26 +670,29 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					// Fold the block's per-tx versionMap views to sd.mem at block end in
 					// publish order; the versionMap composes each tx's base. The finalize
-					// tx skips ApplyTxIndexes, matching the exec loop.
-					restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
-					var applyErr error
-					for _, r := range splitApplyBuf {
-						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
-							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-							break
-						}
-						if !r.isFinalize {
-							if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
-								applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+					// tx skips ApplyTxIndexes, matching the exec loop. Under PerTxApply each
+					// result was already folded as it arrived, so the buffer is empty.
+					if !dbg.PerTxApply {
+						restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
+						var applyErr error
+						for _, r := range splitApplyBuf {
+							if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+								applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 								break
 							}
+							if !r.isFinalize {
+								if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
+									applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+									break
+								}
+							}
 						}
-					}
-					restoreCS()
-					splitApplyBuf = splitApplyBuf[:0]
-					if applyErr != nil {
-						failInfra(applyErr)
-						continue
+						restoreCS()
+						splitApplyBuf = splitApplyBuf[:0]
+						if applyErr != nil {
+							failInfra(applyErr)
+							continue
+						}
 					}
 					// This block's writes are now in the shared domain: drop it from the
 					// tail of the prev-block list so later blocks read it from the domain.
