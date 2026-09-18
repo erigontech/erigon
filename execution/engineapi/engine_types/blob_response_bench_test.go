@@ -18,7 +18,10 @@ package engine_types
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // BenchmarkBlobsBundleV2Marshal compares the worst-case getBlobsV3 response (128 blobs, each with
@@ -47,4 +50,38 @@ func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkBlobCellsAndProofsV1Marshal(b *testing.B) {
+	for _, blobs := range []int{6, 128} {
+		for _, cells := range []int{8, 64, int(params.CellsPerExtBlob)} {
+			b.Run(fmt.Sprintf("blobs=%d/cells=%d", blobs, cells), func(b *testing.B) {
+				slice := blobCellsAndProofsBundle(blobs, cells)
+				bundle := BlobsBundleV3(slice)
+				enc, err := json.Marshal(slice)
+				if err != nil {
+					b.Fatal(err)
+				}
+				size := int64(len(enc))
+				b.Run("stdlib_reflect", func(b *testing.B) {
+					b.SetBytes(size)
+					b.ReportAllocs()
+					for b.Loop() {
+						if _, err := json.Marshal(slice); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+				b.Run("fast", func(b *testing.B) {
+					b.SetBytes(size)
+					b.ReportAllocs()
+					for b.Loop() {
+						if _, err := bundle.MarshalFastJSON(); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			})
+		}
+	}
 }
