@@ -55,24 +55,6 @@ func (r *calcDomainReader) ReadAccountData(addr accounts.Address) (*accounts.Acc
 	return acc, nil
 }
 
-func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	addrVal := addr.Value()
-	keyVal := key.Value()
-	composite := make([]byte, 20+32)
-	copy(composite, addrVal[:])
-	copy(composite[20:], keyVal[:])
-	enc, _, err := r.reader.Read(kv.StorageDomain, composite, 0)
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-	if len(enc) == 0 {
-		return uint256.Int{}, false, nil
-	}
-	var val uint256.Int
-	val.SetBytes(enc)
-	return val, true, nil
-}
-
 // calcState is the commitment calculator's local state accumulator. It holds the
 // current state for every touched account/storage key: values are lazy-loaded
 // from the domain on first touch, overwritten by later writes, and fed to the
