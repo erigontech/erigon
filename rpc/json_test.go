@@ -480,7 +480,6 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-// respond mirrors answerInto: the success response, or the error response if the result does not encode.
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
 	(&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
@@ -549,7 +548,7 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 
 func TestResponseWritesJSONToStream(t *testing.T) {
 	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
-	for _, result := range []any{hexutil.Bytes("small"), large, (*hexutil.Bytes)(nil)} {
+	for _, result := range []any{hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil)} {
 		want, err := json.Marshal(result)
 		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {

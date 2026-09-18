@@ -111,8 +111,9 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. It returns
-// any error before its first call to w, so a failed result leaves the stream untouched.
+// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. An
+// implementation reports an error before its first call to w: once it writes, the stream already
+// holds part of the result and the response carries both result and error.
 type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(w jsonw.JSONWriter) error
 }
@@ -129,9 +130,12 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
-func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) {
-	writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
-		if fm, ok := result.(fastJSONMarshalerTo); ok && !isNilPointer(result) {
+func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
+	return writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+		if isNilPointer(result) {
+			return json.NewEncoder(encoderWriter{rs}).Encode(result)
+		}
+		if fm, ok := result.(fastJSONMarshalerTo); ok {
 			return fm.MarshalFastJSONTo(rs)
 		}
 		if fm, ok := result.(fastJSONResult); ok {
@@ -146,8 +150,9 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) {
 }
 
 // writeLazyResponse writes the response envelope and lets write fill "result", which opens on its first value.
-// An error from write becomes "error", after closing whatever part of the result was written.
-func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(jsonstream.Stream) error) {
+// An error from write becomes "error", after closing whatever part of the result was written, and is returned
+// for the caller's metrics and logs.
+func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(jsonstream.Stream) error) error {
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(vsn)
@@ -158,7 +163,8 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
-	if err := write(rs); err != nil {
+	err := write(rs)
+	if err != nil {
 		if rs.Written() {
 			rs.CloseIfOpen()
 			stream.WriteMore()
@@ -170,6 +176,7 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 		rs.WriteNil()
 	}
 	stream.WriteObjectEnd()
+	return err
 }
 
 // encoderWriter hands the stream json.Encoder output without its trailing newline. Encode writes once, after
