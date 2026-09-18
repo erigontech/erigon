@@ -312,7 +312,9 @@ func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState,
 	// with a result from the pre-fork algorithm.
 	if f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(currentSlot)) >= clparams.GloasVersion {
 		f.mu.Unlock()
-		return f.getHeadGloas()
+		// getHeadGloas runs its own checkpoint retry, so its result is final.
+		head, headSlot, err := f.getHeadGloas()
+		return head, headSlot, true, err
 	}
 	defer f.mu.Unlock()
 	if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
