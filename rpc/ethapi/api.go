@@ -482,16 +482,23 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 // result carries the block's transactions, as full objects if fullTx is also true and
 // as hashes otherwise.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
-	transactions := make([]any, 0)
+	// A concrete slice type, not []any: boxing each element would heap-allocate
+	// every hash and send the encoder down its reflection path per transaction.
+	var transactions any = []common.Hash{}
 	if inclTx {
 		txs := block.Transactions()
-		transactions = make([]any, len(txs))
-		for i, txn := range txs {
-			if fullTx {
-				transactions[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
-			} else {
-				transactions[i] = txn.Hash()
+		if fullTx {
+			full := make([]*RPCTransaction, len(txs))
+			for i, txn := range txs {
+				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
 			}
+			transactions = full
+		} else {
+			hashes := make([]common.Hash, len(txs))
+			for i, txn := range txs {
+				hashes[i] = txn.Hash()
+			}
+			transactions = hashes
 		}
 	}
 
