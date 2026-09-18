@@ -181,9 +181,9 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
-// DefaultBlockCacheBytes bounds the decoded blocks the RPC layer keeps. A mainnet block costs
-// ~331KB of heap, so this holds ~1600 of them, about 5 hours of chain.
-const DefaultBlockCacheBytes = 512 * datasize.MB
+// BlockCacheBytes bounds the decoded blocks the RPC layer keeps. A mainnet block costs ~331KB of
+// heap, so this holds ~1600 of them, about 5 hours of chain.
+var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
 // blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
 // transaction struct per transaction, which hold inline integers and hash and sender caches.
@@ -195,7 +195,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
-	blocksLRU := cache.NewHashByteLRU(dbg.EnvDataSize("RPC_BLOCK_CACHE", DefaultBlockCacheBytes), blockHeapSize)
+	blocksLRU := cache.NewHashByteLRU(BlockCacheBytes, blockHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
