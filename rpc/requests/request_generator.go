@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
@@ -72,14 +72,14 @@ func (e EthError) Error() string {
 
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
-	GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetBalance(address common.Address, blockRef rpc.BlockReference) (*uint256.Int, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockRef rpc.BlockReference) (*accounts.AccProofResult, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error)
 	TraceTransaction(hash common.Hash) ([]TransactionTrace, error)
-	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*uint256.Int, error)
 	BlockNumber() (uint64, error)
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error)
@@ -94,7 +94,7 @@ type RequestGenerator interface {
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
 	EstimateGas(args bind.CallMsg, blockNum BlockNumber) (uint64, error)
-	GasPrice() (*big.Int, error)
+	GasPrice() (*uint256.Int, error)
 	GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error)
 }
 
