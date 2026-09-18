@@ -592,6 +592,9 @@ func VerifyStorageProof(storageRoot common.Hash, proof accounts.StorProofResult)
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
 func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proof accounts.StorProofResult) error {
+	if proof.Value == nil {
+		proof.Value = new(hexutil.U256)
+	}
 	if storageRoot == EmptyRoot || storageRoot == (common.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
@@ -624,8 +627,7 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 	}
 
 	var expected []byte
-	if value != nil {
-		// A non-nil value proves the storage does exist.
+	if value != nil || proof.Value.ToInt().Sign() != 0 {
 		expected, err = rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
 		if err != nil {
 			return err
@@ -680,7 +682,11 @@ func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte,
 	}
 	path := nibbles.KeybytesToHex(key)[:2*len(key)] // without the terminator nibble
 	for enc != nil {
-		proof = append(proof, enc)
+		// An inline child is carried inside its parent, so emitting it again would leave the
+		// verifier an element it never asks for.
+		if len(proof) == 0 || len(enc) >= length.Hash {
+			proof = append(proof, enc)
+		}
 		elems, _, err := rlp.SplitList(enc)
 		if err != nil {
 			return nil, nil, err
