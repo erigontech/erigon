@@ -3,6 +3,8 @@ package ethapi
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -266,4 +268,78 @@ func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	require.Equal(t, types.BlockNonce{}, block.HeaderNoCopy().Nonce)
 	require.Equal(t, types.Bloom{}, block.HeaderNoCopy().Bloom)
 	require.Equal(t, wantHash, block.Hash())
+}
+
+type jsonSink []byte
+
+func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return len(p), nil }
+
+// fastHeaderJSON renders h through MarshalFastJSONTo on a pooled stream, as the server does.
+func fastHeaderJSON(t *testing.T, h *RPCHeader) string {
+	t.Helper()
+	var b jsonSink
+	s := jsonstream.Get(&b)
+	defer jsonstream.Put(s)
+	require.NoError(t, h.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	return string(b)
+}
+
+func fullRPCHeader() *RPCHeader {
+	num := hexutil.U256(*uint256.NewInt(0x1234))
+	diff := hexutil.U256(*uint256.NewInt(0x11))
+	baseFee := hexutil.U256(*uint256.NewInt(0x7))
+	hash := common.HexToHash("0xaabb")
+	miner := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	nonce := types.BlockNonce{1, 2, 3, 4, 5, 6, 7, 8}
+	bloom := types.Bloom{9, 8, 7}
+	quantity := hexutil.Uint64(0x20)
+	root := common.HexToHash("0xccdd")
+	seal := hexutil.Bytes{0xbe, 0xef}
+	return &RPCHeader{
+		Number: &num, Hash: &hash, ParentHash: common.HexToHash("0x01"),
+		Nonce: &nonce, MixHash: common.HexToHash("0x02"), Sha3Uncles: common.HexToHash("0x03"),
+		LogsBloom: &bloom, StateRoot: common.HexToHash("0x04"), Miner: &miner, Difficulty: &diff,
+		ExtraData: hexutil.Bytes{0xde, 0xad}, GasLimit: 0x5208, GasUsed: 0x5207, Timestamp: 0x64,
+		TransactionsRoot: common.HexToHash("0x05"), ReceiptsRoot: common.HexToHash("0x06"),
+		BaseFeePerGas: &baseFee, WithdrawalsRoot: &root, BlobGasUsed: &quantity, ExcessBlobGas: &quantity,
+		ParentBeaconBlockRoot: &root, RequestsHash: &root, BlockAccessListHash: &root, SlotNumber: &quantity,
+		AuraSeal: &seal, AuraStep: &quantity,
+	}
+}
+
+// TestRPCHeaderMarshalFastJSONTo requires the streamed encoding to be byte-identical to
+// the reflection one; that equality is the only thing that makes it safe to swap in.
+func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
+	bare := fullRPCHeader()
+	bare.BaseFeePerGas, bare.WithdrawalsRoot, bare.BlobGasUsed, bare.ExcessBlobGas = nil, nil, nil, nil
+	bare.ParentBeaconBlockRoot, bare.RequestsHash, bare.BlockAccessListHash, bare.SlotNumber = nil, nil, nil, nil
+	bare.AuraSeal, bare.AuraStep = nil, nil
+
+	pending := fullRPCHeader()
+	pending.Hash, pending.Nonce, pending.Miner = nil, nil, nil
+
+	emptyExtra := fullRPCHeader()
+	emptyExtra.ExtraData = hexutil.Bytes{}
+
+	nilExtra := fullRPCHeader()
+	nilExtra.ExtraData = nil
+
+	for _, tc := range []struct {
+		name string
+		h    *RPCHeader
+	}{
+		{"all fields set", fullRPCHeader()},
+		{"optionals absent", bare},
+		{"pending drops hash, nonce and miner", pending},
+		{"empty extra data", emptyExtra},
+		{"nil extra data", nilExtra},
+		{"zero value", &RPCHeader{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := json.Marshal(tc.h)
+			require.NoError(t, err)
+			require.Equal(t, string(want), fastHeaderJSON(t, tc.h))
+		})
+	}
 }
