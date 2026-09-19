@@ -478,9 +478,6 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
-// RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
-// result carries the block's transactions, as full objects if fullTx is also true and
-// as hashes otherwise.
 // The empty transaction lists, shared so a block without transactions allocates none.
 // Each mode keeps the element type its populated form has, because ots_getBlockTransactions
 // type-asserts this field. Zero capacity makes sharing them safe.
@@ -489,6 +486,9 @@ var (
 	noFullTxs  any = []*RPCTransaction{}
 )
 
+// RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
+// result carries the block's transactions, as full objects if fullTx is also true and
+// as hashes otherwise.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	// A concrete slice type, not []any: boxing each element would heap-allocate
 	// every hash and send the encoder down its reflection path per transaction.
