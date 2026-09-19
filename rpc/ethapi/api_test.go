@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -325,13 +326,15 @@ type jsonSink []byte
 
 func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return len(p), nil }
 
-// fastHeaderJSON renders h through MarshalFastJSONTo on a pooled stream, as the server does.
-func fastHeaderJSON(t *testing.T, h *RPCHeader) string {
+// fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
+func fastJSON[T interface {
+	MarshalFastJSONTo(w jsonw.JSONWriter) error
+}](t *testing.T, v T) string {
 	t.Helper()
 	var b jsonSink
 	s := jsonstream.Get(&b)
 	defer jsonstream.Put(s)
-	require.NoError(t, h.MarshalFastJSONTo(s))
+	require.NoError(t, v.MarshalFastJSONTo(s))
 	require.NoError(t, s.Flush())
 	return string(b)
 }
@@ -390,19 +393,9 @@ func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			want, err := json.Marshal(tc.h)
 			require.NoError(t, err)
-			require.Equal(t, string(want), fastHeaderJSON(t, tc.h))
+			require.Equal(t, string(want), fastJSON(t, tc.h))
 		})
 	}
-}
-
-func fastBlockJSON(t *testing.T, b *RPCBlock) string {
-	t.Helper()
-	var buf jsonSink
-	s := jsonstream.Get(&buf)
-	defer jsonstream.Put(s)
-	require.NoError(t, b.MarshalFastJSONTo(s))
-	require.NoError(t, s.Flush())
-	return string(buf)
 }
 
 // TestRPCBlockMarshalFastJSONTo guards the whole block, not just the header: RPCBlock
@@ -466,7 +459,7 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			want, err := json.Marshal(tc.b)
 			require.NoError(t, err)
-			require.Equal(t, string(want), fastBlockJSON(t, tc.b))
+			require.Equal(t, string(want), fastJSON(t, tc.b))
 		})
 	}
 }

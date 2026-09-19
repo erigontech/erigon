@@ -52,14 +52,14 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	} else {
 		w.WriteQuotedText(h.Number)
 	}
-	writeHashPtr(w, "hash", h.Hash)
+	writeHex(w, "hash", hashOrNull(h.Hash))
 	writeHex(w, "parentHash", h.ParentHash[:])
-	writeHex(w, "nonce", nonceBytes(h.Nonce))
+	writeHex(w, "nonce", nonceOrNull(h.Nonce))
 	writeHex(w, "mixHash", h.MixHash[:])
 	writeHex(w, "sha3Uncles", h.Sha3Uncles[:])
-	writeHex(w, "logsBloom", bloomBytes(h.LogsBloom))
+	writeHex(w, "logsBloom", bloomOrNull(h.LogsBloom))
 	writeHex(w, "stateRoot", h.StateRoot[:])
-	writeHex(w, "miner", addrBytes(h.Miner))
+	writeHex(w, "miner", addrOrNull(h.Miner))
 	field(w, "difficulty")
 	if h.Difficulty == nil {
 		w.WriteNil()
@@ -78,7 +78,7 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 		writeQuoted(w, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		writeHashPtr(w, "withdrawalsRoot", h.WithdrawalsRoot)
+		writeHex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
 		writeQuoted(w, "blobGasUsed", h.BlobGasUsed)
@@ -124,29 +124,30 @@ func writeHex(w jsonw.JSONWriter, name string, b []byte) {
 	field(w, name).WriteHex(b)
 }
 
-func writeHashPtr(w jsonw.JSONWriter, name string, h *common.Hash) {
+// The OrNull helpers turn a nil pointer into the nil slice writeHex renders as JSON null,
+// which is what a nil pointer field marshals to.
+func hashOrNull(h *common.Hash) []byte {
 	if h == nil {
-		field(w, name).WriteNil()
-		return
+		return nil
 	}
-	field(w, name).WriteHex(h[:])
+	return h[:]
 }
 
-func nonceBytes(n *types.BlockNonce) []byte {
+func nonceOrNull(n *types.BlockNonce) []byte {
 	if n == nil {
 		return nil
 	}
 	return n[:]
 }
 
-func bloomBytes(b *types.Bloom) []byte {
+func bloomOrNull(b *types.Bloom) []byte {
 	if b == nil {
 		return nil
 	}
 	return b[:]
 }
 
-func addrBytes(a *common.Address) []byte {
+func addrOrNull(a *common.Address) []byte {
 	if a == nil {
 		return nil
 	}
