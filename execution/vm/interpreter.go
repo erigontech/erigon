@@ -459,10 +459,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if err == nil {
 				return
 			}
-			if !logged && tracer.OnOpcode != nil && tracer.WantsOpcode(byte(op)) {
+			// An opcode already delivered to OnOpcode reports its fault through OnFault,
+			// and so does one the mask excluded: filtering which opcodes a tracer sees
+			// must not cost it the fault itself.
+			switch {
+			case !logged && tracer.OnOpcode != nil && tracer.WantsOpcode(byte(op)):
 				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			}
-			if logged && tracer.OnFault != nil {
+			case tracer.OnFault != nil:
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
