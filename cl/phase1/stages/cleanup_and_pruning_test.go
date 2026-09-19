@@ -20,13 +20,18 @@ import (
 	"math"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -55,10 +60,12 @@ func TestCleanupAndPruningDerivesColumnRetentionFromTheChainConfig(t *testing.T)
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 16
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
 
 	const currentSlot = 20_000*16 + 5
 	cfg, blobStore, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{}, currentSlot)
-	blobStore.EXPECT().PruneBelow(uint64(currentSlot - 128600)).Return(nil)
+	blobStore.EXPECT().PruneBelow(uint64((20_000 - 4096) * 16)).Return(nil)
 	peerDas.EXPECT().PruneBelow(uint64((20_000 - 4096) * 16)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
@@ -68,10 +75,11 @@ func TestCleanupAndPruningDerivesColumnRetentionFromTheChainConfig(t *testing.T)
 func TestCleanupAndPruningKeepsAnExplicitColumnSlotCount(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
 
 	const currentSlot = 500_000
 	cfg, blobStore, peerDas := pruningCfg(t, ctrl, &beaconCfg, clparams.CaplinConfig{ColumnKeepSlots: 4_242}, currentSlot)
-	blobStore.EXPECT().PruneBelow(uint64(currentSlot - 128600)).Return(nil)
+	blobStore.EXPECT().PruneBelow(uint64(368_928)).Return(nil)
 	peerDas.EXPECT().PruneBelow(uint64(currentSlot - 4_242)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
@@ -99,16 +107,17 @@ func TestCleanupAndPruningKeepsAllBlobsWhenPruningIsOff(t *testing.T) {
 // The serving window starts at the first slot of current_epoch - MIN_EPOCHS, and the floor also
 // sets the earliest slot we advertise as servable, so it must never cut above that boundary for
 // any head position inside an epoch.
-func TestSpecColumnFloorNeverCutsAboveTheEpochBoundary(t *testing.T) {
+func TestDataColumnSidecarServeRangeStartSlotNeverCutsAboveTheEpochBoundary(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 16
 	beaconCfg.MinEpochsForDataColumnSidecarsRequests = 4096
+	beaconCfg.FuluForkEpoch = 0
 
 	const epoch = 5000
 	required := (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
 	for offset := uint64(0); offset < beaconCfg.SlotsPerEpoch; offset++ {
 		head := epoch*beaconCfg.SlotsPerEpoch + offset
-		require.LessOrEqual(t, specColumnFloor(head, &beaconCfg), required,
+		require.LessOrEqual(t, beaconCfg.DataColumnSidecarServeRangeStartSlot(head), required,
 			"head %d cuts above the first slot the node must still serve", head)
 	}
 }
@@ -116,7 +125,7 @@ func TestSpecColumnFloorNeverCutsAboveTheEpochBoundary(t *testing.T) {
 // Both inputs arrive as plain uint64 from --caplin.custom-config, so the derived floor must not
 // wrap. A floor at the head is the dangerous outcome: it deletes every bucket below the head and
 // advertises nothing as available, so anything unrepresentable has to fall back to retaining.
-func TestSpecColumnFloorSaturatesInsteadOfWrapping(t *testing.T) {
+func TestDataColumnSidecarServeRangeStartSlotSaturatesInsteadOfWrapping(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		minEpochs     uint64
@@ -128,10 +137,11 @@ func TestSpecColumnFloorSaturatesInsteadOfWrapping(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.FuluForkEpoch = 0
 			beaconCfg.MinEpochsForDataColumnSidecarsRequests = test.minEpochs
 			beaconCfg.SlotsPerEpoch = test.slotsPerEpoch
 
-			require.Zero(t, specColumnFloor(500_000, &beaconCfg),
+			require.Zero(t, beaconCfg.DataColumnSidecarServeRangeStartSlot(500_000),
 				"an unrepresentable window must retain everything, never prune everything")
 		})
 	}
@@ -139,11 +149,12 @@ func TestSpecColumnFloorSaturatesInsteadOfWrapping(t *testing.T) {
 
 // The floor also sets the earliest slot we advertise as servable, so no config may push it past
 // the start of the current epoch.
-func TestSpecColumnFloorStaysAtOrBelowTheCurrentEpoch(t *testing.T) {
+func TestDataColumnSidecarServeRangeStartSlotStaysAtOrBelowTheCurrentEpoch(t *testing.T) {
 	const head = 5_000_000
 	for _, minEpochs := range []uint64{0, 1, 4096, math.MaxUint64 - 1, math.MaxUint64} {
 		for _, slotsPerEpoch := range []uint64{0, 1, 12, 16, 32, math.MaxUint64} {
 			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.FuluForkEpoch = 0
 			beaconCfg.MinEpochsForDataColumnSidecarsRequests = minEpochs
 			beaconCfg.SlotsPerEpoch = slotsPerEpoch
 
@@ -151,9 +162,68 @@ func TestSpecColumnFloorStaysAtOrBelowTheCurrentEpoch(t *testing.T) {
 			if slotsPerEpoch != 0 {
 				epochStart = head / slotsPerEpoch * slotsPerEpoch
 			}
-			require.LessOrEqual(t, specColumnFloor(head, &beaconCfg), epochStart,
+			require.LessOrEqual(t, beaconCfg.DataColumnSidecarServeRangeStartSlot(head), epochStart,
 				"MIN_EPOCHS=%d SLOTS_PER_EPOCH=%d resolved to a destructive floor",
 				minEpochs, slotsPerEpoch)
 		}
 	}
+}
+
+func TestCleanupAndPruningKeepsConfiguredBlobRequestWindowWritable(t *testing.T) {
+	const (
+		head              = uint64(400_015)
+		firstRetainedSlot = uint64(137_856)
+	)
+
+	ctrl := gomock.NewController(t)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	storage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 16
+	beaconCfg.MinEpochsForBlobSidecarsRequests = 16_384
+	beaconCfg.DenebForkEpoch = 0
+	cfg := &Cfg{
+		indiciesDB: db,
+		ethClock:   clock,
+		beaconCfg:  &beaconCfg,
+		blobStore:  storage,
+		peerDas:    peerDas,
+		caplinConfig: clparams.CaplinConfig{
+			ColumnKeepSlots: 1,
+		},
+	}
+
+	clock.EXPECT().GetCurrentSlot().Return(head)
+	peerDas.EXPECT().PruneBelow(head - 1).Return(nil)
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+
+	root := common.Hash{1}
+	sidecar := cltypes.NewBlobSidecar(
+		0,
+		&cltypes.Blob{},
+		common.Bytes48{},
+		common.Bytes48{},
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: firstRetainedSlot}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	_, found, err := storage.ReadBlobSidecars(t.Context(), firstRetainedSlot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	prunedRoot := common.Hash{2}
+	prunedSidecar := cltypes.NewBlobSidecar(
+		0,
+		&cltypes.Blob{},
+		common.Bytes48{},
+		common.Bytes48{},
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: firstRetainedSlot - 1}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), prunedRoot, []*cltypes.BlobSidecar{prunedSidecar}))
+	_, found, err = storage.ReadBlobSidecars(t.Context(), firstRetainedSlot-1, prunedRoot)
+	require.NoError(t, err)
+	require.False(t, found)
 }

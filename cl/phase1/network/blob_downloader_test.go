@@ -75,6 +75,26 @@ func expectSidecarFilesPresent(blobStorage *blobstoragemock.MockBlobStorage) {
 		Return(true, nil).AnyTimes()
 }
 
+func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
+	require.PanicsWithValue(t, "ethClock is required", func() {
+		NewBlobHistoryDownloader(
+			t.Context(),
+			&clparams.MainnetBeaconConfig,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			false,
+			false,
+			log.New(),
+		)
+	})
+}
+
 // A historical fulu block whose PeerDAS data columns are served by no peer (older
 // than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
 // its context is cancelled. Column recovery must be bounded per block so the archive
@@ -454,7 +474,7 @@ func TestBlobHistoryDownloaderCountEqualFuluSkipsDeepScanValidation(t *testing.T
 	require.True(t, notified)
 }
 
-func TestBlobHistoryDownloaderDoesNotRetryIntentionallyPrunedFiles(t *testing.T) {
+func TestBlobHistoryDownloaderRecoversPrunedFilesInsideServeRangeAfterRestart(t *testing.T) {
 	block, sidecar := validDenebRecoverySidecar(t, 100)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -473,15 +493,18 @@ func TestBlobHistoryDownloaderDoesNotRetryIntentionallyPrunedFiles(t *testing.T)
 
 	peer := &countingBlobPeerClient{responses: []*cltypes.BlobSidecar{sidecar}}
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
-	downloader.blobStorage = storage
+	downloader.blobStorage = blob_storage.NewBlobStore(db, fs)
 	downloader.rpc = peer
 	downloader.archiveBlobs = false
 	downloader.immediateBlobsBackfilling = true
 
 	require.NoError(t, downloader.downloadOnce(false))
-	require.Zero(t, peer.requests)
+	require.Equal(t, 1, peer.requests)
 	require.Empty(t, downloader.retryRanges)
 	require.True(t, downloader.backfillCompleted.Load())
+	exists, err = downloader.blobStorage.BlobSidecarExists(t.Context(), block.Block.Slot, blockRoot, 0)
+	require.NoError(t, err)
+	require.True(t, exists)
 }
 
 func TestBlobHistoryDownloaderDoesNotDeepVerifyCountEqualStorage(t *testing.T) {
@@ -1129,7 +1152,7 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
 	}))
 
-	batch, _, err := downloader.collectIncompleteBlocks(slot, slot)
+	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, 0)
 	require.NoError(t, err)
 	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
 }
@@ -1160,7 +1183,7 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testin
 	downloader.blobStorage = storage
 	downloader.archiveBlobs = true
 
-	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "an archive slot whose sidecar files are gone must stay queued")
 }
@@ -1191,9 +1214,53 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *te
 	downloader.blobStorage = storage
 	downloader.archiveBlobs = true
 
-	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "a partially stored archive slot must stay queued")
+}
+
+// A retention expansion can make a previously pruned bucket mandatory again after restart, while
+// its commitment-count row still makes the slot look complete.
+func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t *testing.T) {
+	block, sidecar := validDenebRecoverySidecar(t, 100)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fs := afero.NewMemMapFs()
+	storage := blob_storage.NewBlobStore(db, fs)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
+	require.NoError(t, storage.PruneBelow(10_000))
+	storage = blob_storage.NewBlobStore(db, fs)
+
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = false
+
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "a selected non-archive slot whose sidecar file is gone must stay queued")
+}
+
+func TestCollectIncompleteBlocksSkipsFuluSlotsBeforeDataColumnServeRange(t *testing.T) {
+	const slot = uint64(100)
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = slot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = false
+
+	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, slot+1)
+	require.NoError(t, err)
+	require.Empty(t, batch)
+
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), slot, gomock.Any(), uint64(0)).Return(false, nil)
+	batch, _, err = downloader.collectIncompleteBlocks(slot, slot, slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
 }
 
 // Blocks reach the downloader through ReadBeaconBlockBodyBySlot, which decodes them without their
