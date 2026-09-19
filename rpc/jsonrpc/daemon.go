@@ -34,7 +34,6 @@ func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.BaseApiConfig {
 		return &rpccfg.BaseApiConfig{}
 	}
 	return &rpccfg.BaseApiConfig{
-		SingleNodeMode:    cfg.WithDatadir,
 		EvmCallTimeout:    cfg.EvmCallTimeout,
 		Dirs:              cfg.Dirs,
 		BlockRangeLimit:   cfg.BlockRangeLimit,

@@ -478,20 +478,37 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
+// The empty transaction lists, shared so a block without transactions allocates none.
+// Each mode keeps the element type its populated form has, because ots_getBlockTransactions
+// type-asserts this field. Zero capacity makes sharing them safe.
+var (
+	noTxHashes any = []common.Hash{}
+	noFullTxs  any = []*RPCTransaction{}
+)
+
 // RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
 // result carries the block's transactions, as full objects if fullTx is also true and
 // as hashes otherwise.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
-	transactions := make([]any, 0)
-	if inclTx {
-		txs := block.Transactions()
-		transactions = make([]any, len(txs))
-		for i, txn := range txs {
-			if fullTx {
-				transactions[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
-			} else {
-				transactions[i] = txn.Hash()
+	// A concrete slice type, not []any: boxing each element would heap-allocate
+	// every hash and send the encoder down its reflection path per transaction.
+	transactions := noTxHashes
+	if fullTx {
+		transactions = noFullTxs
+	}
+	if txs := block.Transactions(); inclTx && len(txs) > 0 {
+		if fullTx {
+			full := make([]*RPCTransaction, len(txs))
+			for i, txn := range txs {
+				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
 			}
+			transactions = full
+		} else {
+			hashes := make([]common.Hash, len(txs))
+			for i, txn := range txs {
+				hashes[i] = txn.Hash()
+			}
+			transactions = hashes
 		}
 	}
 
