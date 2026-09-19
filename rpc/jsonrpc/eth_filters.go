@@ -232,7 +232,7 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 			for _, t := range txs {
 				if t != nil {
 					if fullTx {
-						emit(newRPCPendingTransaction(t, nil, nil))
+						emit(newRPCPendingTransaction(t))
 					} else {
 						emit(t.Hash())
 					}
