@@ -25,6 +25,9 @@ type JSONWriter interface {
 	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
 	// escaping: callers pass hex quantities.
 	WriteQuotedText(v encoding.TextAppender)
+	// WriteRawBytes writes already-encoded JSON verbatim. It is the escape hatch for a
+	// value the fast path has no shape for, so it must not be emulated by quoting.
+	WriteRawBytes(content []byte)
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
 	WriteNil()
