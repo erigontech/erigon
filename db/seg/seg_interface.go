@@ -29,12 +29,15 @@ const (
 const (
 	FileCompressionFormatV0 = uint8(0)
 	FileCompressionFormatV1 = uint8(1)
+	FileCompressionFormatV2 = uint8(2)
 )
 
 type FeatureFlag uint8
 
 const (
-	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b001
+	PageLevelCompressionEnabled    FeatureFlag = 1 << iota // 0b001
+	WordLevelKeyCompressionEnabled                         // 0b010
+	WordLevelValCompressionEnabled                         // 0b100
 )
 
 type FeatureFlagBitmask uint8
