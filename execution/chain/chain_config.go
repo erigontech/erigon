@@ -83,6 +83,7 @@ type Config struct {
 	PragueTime    *uint64 `json:"pragueTime,omitempty"`
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -407,6 +408,11 @@ func (c *Config) IsCancun(time uint64) bool {
 // IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
 func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
+}
+
+// IsBogota returns whether time is either equal to the Bogota fork time or greater.
+func (c *Config) IsBogota(time uint64) bool {
+	return isForked(c.BogotaTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.

@@ -269,7 +269,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
@@ -430,13 +430,31 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
+	var il types.Transactions
+	if version >= clparams.HezeVersion {
+		if len(inclusionList) == 0 {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list cannot be empty"}
+		}
+
+		txns := make([][]byte, len(inclusionList))
+		for i, tx := range inclusionList {
+			txns[i] = tx
+		}
+		il, err = types.DecodeTransactions(txns)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot decode inclusion list: %v", err)}
+		}
+	}
+	_ = il
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
+		(!s.config.IsBogota(header.Time) && version >= clparams.HezeVersion) ||
+		(s.config.IsBogota(header.Time) && version < clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
