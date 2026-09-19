@@ -112,7 +112,11 @@ message SyncingReply {
     uint64 block_number = 2;
   }
   repeated StageProgress stages = 5;
-  
+
+  // Block this sync session started from. Held for the session, lowered when an
+  // unwind takes execution below it. Absent from nodes predating the field,
+  // which the interface version does not separate from a genesis pin.
+  optional uint64 starting_block = 6;
 }
 
 message NetPeerCountRequest {}

@@ -413,6 +413,14 @@ type Notifications struct {
 
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
+
+	// Pinned by the first publish. Nil until then: the RPC path serves replies
+	// before the stage loop starts a session, and a zero pin would report
+	// progress from genesis.
+	startingBlock atomic.Pointer[uint64]
+	// Committed execution progress at the last publish, the baseline the pin is
+	// lowered from. Guarded by syncStateLock.
+	lastCommitted uint64
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
