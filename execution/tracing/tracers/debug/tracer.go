@@ -70,7 +70,6 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 		OnExit:        t.OnExit,
 		OnOpcode:      t.OnOpcode,
 		OnFault:       t.OnFault,
-		OnGasChange:   t.OnGasChange,
 		OnGasChangeV2: t.OnGasChangeV2,
 		// Chain events
 		OnBlockchainInit:    t.OnBlockchainInit,
@@ -275,24 +274,6 @@ func (t *Tracer) OnFault(pc uint64, op byte, gas, cost uint64, opContext tracing
 			MemorySize: len(memory),
 			Depth:      depth,
 			Error:      errStr,
-		},
-	})
-}
-
-func (t *Tracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
-	if t.recordOptions.DisableOnGasChangeRecording {
-		return
-	}
-
-	if t.wrapped != nil && t.wrapped.OnGasChange != nil {
-		t.wrapped.OnGasChange(old, new, reason)
-	}
-
-	t.traces.Append(Trace{
-		OnGasChange: &OnGasChangeTrace{
-			OldGas: old,
-			NewGas: new,
-			Reason: fmt.Sprintf("%v", reason),
 		},
 	})
 }
@@ -634,7 +615,6 @@ type Trace struct {
 	OnExit        *OnExitTrace        `json:"onExit,omitempty"`
 	OnOpcode      *OnOpcodeTrace      `json:"onOpcode,omitempty"`
 	OnFault       *OnFaultTrace       `json:"onFault,omitempty"`
-	OnGasChange   *OnGasChangeTrace   `json:"onGasChange,omitempty"`
 	OnGasChangeV2 *OnGasChangeTraceV2 `json:"onGasChangeV2,omitempty"`
 	// Chain events
 	OnBlockchainInit  *OnBlockchainInitTrace  `json:"onBlockchainInit,omitempty"`
@@ -713,12 +693,6 @@ type OnGasChangeTraceV2 struct {
 	Old    mdgas.MdGas `json:"old"`
 	New    mdgas.MdGas `json:"new"`
 	Reason string      `json:"reason"`
-}
-
-type OnGasChangeTrace struct {
-	OldGas uint64 `json:"oldGas,omitempty"`
-	NewGas uint64 `json:"newGas,omitempty"`
-	Reason string `json:"reason,omitempty"`
 }
 
 type OnBlockchainInitTrace struct {

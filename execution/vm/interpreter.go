@@ -278,14 +278,16 @@ func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.H
 	if returnGas.Execution == 0 && returnGas.State == ctx.stateGas {
 		return
 	}
-	if tracer.HasGasChangeHook() {
-		old := ctx.Gas()
-		defer func() {
-			tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallLeftOverRefunded)
-		}()
+	gasTracing := tracer.HasGasChangeHook()
+	var old mdgas.MdGas
+	if gasTracing {
+		old = ctx.Gas()
 	}
 	ctx.stateGas = returnGas.State
 	ctx.gas += returnGas.Execution
+	if gasTracing {
+		tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallLeftOverRefunded)
+	}
 }
 
 func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {

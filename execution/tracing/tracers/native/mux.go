@@ -75,7 +75,6 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 			OnExit:              t.OnExit,
 			OnOpcode:            t.OnOpcode,
 			OnFault:             t.OnFault,
-			OnGasChange:         t.OnGasChange,
 			OnGasChangeV2:       t.OnGasChangeV2,
 			OnBalanceChange:     t.OnBalanceChange,
 			OnNonceChangeV2:     t.OnNonceChangeV2,
@@ -108,17 +107,6 @@ func (t *muxTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.
 		}
 		if t.OnFault != nil {
 			t.OnFault(pc, op, gas, cost, scope, depth, err)
-		}
-	}
-}
-
-func (t *muxTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnGasChange != nil {
-			t.OnGasChange(old, new, reason)
 		}
 	}
 }
