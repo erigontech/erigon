@@ -200,17 +200,23 @@ func (r *ReusableCaller) Close() {
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
-// InitialState builds a fresh state with the request's overrides applied, the
-// state every call runs against. The precompiles come with it because a
-// MovePrecompileTo override changes them. The caller must Close the state.
+// InitialState returns the state every call runs against, rewound to the request's
+// overrides. eth_estimateGas probes the same state several times, so the state object
+// is reused and reset rather than rebuilt: Reset returns its objects to their pools,
+// which is what building a new one would have to allocate again.
+// The precompiles come with it because a MovePrecompileTo override changes them.
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
-	ibs := state.New(r.stateReader)
+	ibs := r.evm.IntraBlockState()
+	if ibs == nil {
+		ibs = state.New(r.stateReader)
+	} else {
+		ibs.Reset()
+	}
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}
 	precompiles := vm.ActivePrecompiledContracts(r.rules)
 	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
-		ibs.Close()
 		return nil, nil, err
 	}
 	return ibs, precompiles, nil
@@ -241,9 +247,6 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	if r.stateOverrides != nil {
 		r.evm.SetPrecompiles(precompiles)
-	}
-	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 
