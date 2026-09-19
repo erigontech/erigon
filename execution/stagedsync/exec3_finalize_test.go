@@ -859,6 +859,39 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 	}
 }
 
+func TestFinalizeTxSimple_SharedFeeDestination(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+
+	writes := s.runFinalizeTx(t, nil)
+
+	balance := findBalance(writes, s.coinbase)
+	require.NotNil(t, balance, "a shared tip and burn destination still needs one balance write")
+	var expected uint256.Int
+	expected.Add(&s.feeTipped, &s.feeBurnt)
+	require.Equal(t, expected, balance.Val, "a shared destination must receive both the tip and the burn")
+}
+
+func TestFinalizeTxSimple_SharedFeeDestinationSelfdestructBurnsBothCredits(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	contract := fMakeAccount(0, 1)
+	contract.CodeHash = accounts.InternCodeHash(common.HexToHash(
+		"0x1122334455667788990011223344556677889900112233445566778899001122"))
+	s.accts[s.coinbase] = contract
+	s.txOut.SetSelfDestruct(s.coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.SelfDestructPath},
+		Val:         true,
+	})
+
+	writes := s.runFinalizeTx(t, nil)
+
+	require.Nil(t, findBalance(writes, s.coinbase),
+		"a pre-Amsterdam SELFDESTRUCT of a shared tip and burn destination drops both credits with the deleted object, as serial does")
+}
+
 // TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
 // fix for the parallel-exec lost-coinbase-fee race. The apply-loop tip
 // credit (calcFees) writes coinbase BalancePath BEFORE validate runs.
@@ -915,6 +948,9 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	// Validate's value-tiebreaker catches the mismatch.
 	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.StorageRead, uint256.Int{}),
 		"a stale read of pre-tip baseline (via stateReader) must be invalidated by validate's value-tiebreaker")
+
+	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.MapRead, uint256.Int{}),
+		"a pre-credit balance read must become invalid even when its writer version is unchanged")
 
 	// Late timing — the dependent worker read after calcFees, recording the
 	// post-tip value at the worker's version (MapRead). Validate passes.
