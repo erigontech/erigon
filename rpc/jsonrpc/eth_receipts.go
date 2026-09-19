@@ -163,7 +163,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		return number, number, nil
 	}
 
-	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -175,7 +175,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			begin = uint64(fromBlock)
 		} else {
 			blockNum := rpc.BlockNumber(fromBlock)
-			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
+			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
 				return 0, 0, err
 			}
@@ -192,7 +192,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			end = uint64(toBlock)
 		} else {
 			blockNum := rpc.BlockNumber(toBlock)
-			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
+			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
 				return 0, 0, err
 			}
@@ -578,7 +578,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, errors.New("pending receipts are not available")
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, nil)
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
