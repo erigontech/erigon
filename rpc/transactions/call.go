@@ -17,6 +17,7 @@
 package transactions
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -295,6 +296,8 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
+	// Every probe of one request reads the same block state, so read it once.
+	stateReader = newMemoReader(stateReader)
 
 	baseFee := header.BaseFee
 
@@ -326,3 +329,104 @@ func NewReusableCaller(
 		message:        msg,
 	}, nil
 }
+
+// memoReader caches what the state reader returns for the lifetime of one request.
+// eth_estimateGas probes the same block state several times and nothing it does can
+// change what the reader answers, so every probe after the first is served from here.
+// Accounts are handed out as copies: callers keep the pointer and may write through it.
+type memoReader struct {
+	inner     state.StateReader
+	accounts  map[accounts.Address]*accounts.Account
+	storage   map[storageSlot]storageValue
+	code      map[accounts.Address][]byte
+	codeSizes map[accounts.Address]int
+}
+
+type storageSlot struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+}
+
+type storageValue struct {
+	val uint256.Int
+	ok  bool
+}
+
+func newMemoReader(inner state.StateReader) *memoReader {
+	return &memoReader{
+		inner:     inner,
+		accounts:  map[accounts.Address]*accounts.Account{},
+		storage:   map[storageSlot]storageValue{},
+		code:      map[accounts.Address][]byte{},
+		codeSizes: map[accounts.Address]int{},
+	}
+}
+
+func (m *memoReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if a, ok := m.accounts[addr]; ok {
+		if a == nil {
+			return nil, nil
+		}
+		cp := *a
+		return &cp, nil
+	}
+	a, err := m.inner.ReadAccountData(addr)
+	if err != nil {
+		return nil, err
+	}
+	m.accounts[addr] = a
+	if a == nil {
+		return nil, nil
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (m *memoReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	k := storageSlot{addr, key}
+	if v, ok := m.storage[k]; ok {
+		return v.val, v.ok, nil
+	}
+	val, found, err := m.inner.ReadAccountStorage(addr, key)
+	if err != nil {
+		return val, found, err
+	}
+	m.storage[k] = storageValue{val, found}
+	return val, found, nil
+}
+
+func (m *memoReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	if c, ok := m.code[addr]; ok {
+		return c, nil
+	}
+	c, err := m.inner.ReadAccountCode(addr)
+	if err != nil {
+		return nil, err
+	}
+	// Cloned before caching: a reader is free to hand back a buffer it reuses for the
+	// next address, which would rewrite an entry already in the map.
+	m.code[addr] = bytes.Clone(c)
+	return c, nil
+}
+
+func (m *memoReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	if n, ok := m.codeSizes[addr]; ok {
+		return n, nil
+	}
+	n, err := m.inner.ReadAccountCodeSize(addr)
+	if err != nil {
+		return 0, err
+	}
+	m.codeSizes[addr] = n
+	return n, nil
+}
+
+func (m *memoReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
+	return m.inner.ReadAccountDataForDebug(addr)
+}
+func (m *memoReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
+	return m.inner.ReadAccountIncarnation(addr)
+}
+func (m *memoReader) SetTrace(trace bool, prefix string) { m.inner.SetTrace(trace, prefix) }
+func (m *memoReader) Trace() bool                        { return m.inner.Trace() }
+func (m *memoReader) TracePrefix() string                { return m.inner.TracePrefix() }
