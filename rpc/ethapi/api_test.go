@@ -382,6 +382,17 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		{"no transactions", RPCMarshalBlock(empty, true, false)},
 		{"uncle form", RPCMarshalBlock(empty, false, false)},
 		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
+		{"typed nil hash slice", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			var none []common.Hash
+			b.Transactions = none // typed nil: a non-nil any that json renders as null
+			return b
+		}()},
+		{"nil uncles", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Uncles = nil
+			return b
+		}()},
 		{"otterscan shape", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
 			b.TransactionCount = count
