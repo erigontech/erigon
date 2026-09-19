@@ -84,11 +84,14 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 		ethClock:     ethClock,
 	}
 	rpc.columnDataPeers = newColumnPeers(
+		ctx,
 		sentinel,
 		beaconConfig,
 		ethClock,
 		beaconState,
 	)
+	// The peer metadata cache's sweep lives as long as the client's ctx, as the refresh loop does.
+	context.AfterFunc(ctx, rpc.columnDataPeers.peerMetaCache.Close)
 	return rpc
 }
 

@@ -61,6 +61,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

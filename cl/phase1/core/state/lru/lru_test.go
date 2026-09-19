@@ -86,19 +86,26 @@ func TestCacheWithTTLCloseIsIdempotent(t *testing.T) {
 	require.NotPanics(t, c.Close)
 }
 
-// TestCacheWithTTLCloseWaitsForRunningSweep pins that no entry is reclaimed after Close returns.
-// A sweep that has already taken its tick and is waiting on the cache lock is still going to
-// remove entries once it gets in, so signalling the goroutine is not enough: Close has to wait for
-// it to finish. The lock is held here for long enough that the sweep can only be waiting on it.
+// TestCacheWithTTLCloseWaitsForRunningSweep pins that Close returns only once the sweep goroutine
+// has stopped. The sweep is driven by a test-owned tick and held, outside the cache lock, between
+// receiving that tick and reclaiming: Close closes done, but the sweep is past its select and has
+// to finish the tick before it can see that, so nothing but the wait on stopped can hold Close.
 func TestCacheWithTTLCloseWaitsForRunningSweep(t *testing.T) {
-	// The ttl leaves the entry live while the lock is held and expired by the time the blocked
-	// sweep gets in, so the sweep has work to do and Close cannot be racing an idle sweep.
-	c := NewWithTTL[uint64, uint64]("close_waits_for_sweep", 16, 100*time.Millisecond)
+	ticks := make(chan time.Time)
+	c := newWithTTL[uint64, uint64]("close_waits_for_sweep", 16, time.Hour, ticks)
 	c.Add(1, 1)
 
+	entered := make(chan struct{})
+	release := make(chan struct{})
 	c.mu.Lock()
-	// The sweep ticks every minSweepInterval and blocks on the lock on its first tick.
-	time.Sleep(200 * time.Millisecond)
+	c.beforeSweep = func() {
+		close(entered)
+		<-release
+	}
+	c.mu.Unlock()
+
+	ticks <- time.Now()
+	<-entered
 
 	returned := make(chan struct{})
 	go func() {
@@ -108,19 +115,21 @@ func TestCacheWithTTLCloseWaitsForRunningSweep(t *testing.T) {
 
 	select {
 	case <-returned:
-		c.mu.Unlock()
-		t.Fatal("Close returned while a sweep was still waiting to run")
+		t.Fatal("Close returned while the sweep was still running")
 	case <-time.After(50 * time.Millisecond):
 	}
+	select {
+	case <-c.stopped:
+		t.Fatal("stopped closed while the sweep was still running")
+	default:
+	}
 
-	c.mu.Unlock()
-
+	close(release)
 	select {
 	case <-returned:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not return once the sweep could finish")
+		t.Fatal("Close did not return once the sweep finished")
 	}
-	// Close returning is not the property: the sweep goroutine itself must be gone by then.
 	select {
 	case <-c.stopped:
 	default:

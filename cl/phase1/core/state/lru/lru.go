@@ -65,9 +65,9 @@ const sweepsPerTTL = 100
 // minSweepInterval keeps a very short ttl from producing a non-positive ticker interval.
 const minSweepInterval = time.Millisecond
 
-// sweepChunk caps how many expired entries one lock hold reclaims. A sweep keeps taking the lock
-// until nothing due is left, so the cap limits the work per lock acquisition, not how much a tick
-// reclaims.
+// sweepChunk caps how many expired entries one lock hold reclaims. A sweep reclaims every entry
+// past its deadline as of the tick's captured time, in batches of at most sweepChunk removals per
+// lock acquisition, releasing the mutex between batches.
 const sweepChunk = 512
 
 // expiryNode is one live entry's place in the expiry order, linked only while the entry is live and
@@ -112,12 +112,25 @@ type CacheWithTTL[K comparable, V any] struct {
 	closeOnce sync.Once
 	done      chan struct{}
 	stopped   chan struct{}
+
+	// ticks is the sweep's tick source when a test drives it; nil means the sweep owns a ticker.
+	// beforeSweep, when set under mu, runs at the start of each tick outside the lock; a test uses
+	// it to hold the sweep between receiving a tick and reclaiming.
+	ticks       <-chan time.Time
+	beforeSweep func()
 }
 
 // NewWithTTL builds a cache of at most size entries that each live for ttl after their last Add. A
 // ttl of zero or less disables expiry. size must be positive, as for New; an invalid size panics.
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
+	return newWithTTL[K, V](metricName, size, ttl, nil)
+}
+
+// newWithTTL is NewWithTTL with the sweep's tick source injectable: nil means a ticker at the sweep
+// interval; a channel means the caller drives every tick.
+func newWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration, ticks <-chan time.Time) *CacheWithTTL[K, V] {
 	c := &CacheWithTTL[K, V]{
+		ticks:         ticks,
 		ttl:           ttl,
 		metric:        metricName,
 		done:          make(chan struct{}),
@@ -271,21 +284,31 @@ func (c *CacheWithTTL[K, V]) expiryLen() int {
 func (c *CacheWithTTL[K, V]) sweep(interval time.Duration) {
 	defer close(c.stopped)
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	ticks := c.ticks
+	if ticks == nil {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
 	for {
 		select {
 		case <-c.done:
 			return
-		case <-ticker.C:
+		case <-ticks:
+			c.mu.Lock()
+			before := c.beforeSweep
+			c.mu.Unlock()
+			if before != nil {
+				before()
+			}
 			c.removeExpired(time.Now())
 		}
 	}
 }
 
-// removeExpired reclaims every entry past its deadline as of now. The work is done in lock holds of
-// at most sweepChunk entries each, so a large burst of expiries is reclaimed in full at this tick
-// without holding readers off for the whole burst.
+// removeExpired reclaims every entry past its deadline as of now, in lock holds of at most
+// sweepChunk removals each, releasing the mutex between batches; a burst of expiries is reclaimed in
+// full at the tick it falls due.
 func (c *CacheWithTTL[K, V]) removeExpired(now time.Time) {
 	for c.removeExpiredUpTo(now, sweepChunk) {
 	}
