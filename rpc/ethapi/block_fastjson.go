@@ -17,6 +17,7 @@
 package ethapi
 
 import (
+	"encoding"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/common"
@@ -60,26 +61,31 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	writeHex(w, "logsBloom", bloomBytes(h.LogsBloom))
 	writeHex(w, "stateRoot", h.StateRoot[:])
 	writeHex(w, "miner", addrBytes(h.Miner))
-	writeU256(w, "difficulty", h.Difficulty)
+	field(w, "difficulty")
+	if h.Difficulty == nil {
+		w.WriteNil()
+	} else {
+		w.WriteQuotedText(h.Difficulty)
+	}
 	writeHexBytes(w, "extraData", h.ExtraData)
-	writeUint64(w, "gasLimit", &h.GasLimit)
-	writeUint64(w, "gasUsed", &h.GasUsed)
-	writeUint64(w, "timestamp", &h.Timestamp)
+	writeQuoted(w, "gasLimit", &h.GasLimit)
+	writeQuoted(w, "gasUsed", &h.GasUsed)
+	writeQuoted(w, "timestamp", &h.Timestamp)
 	writeHex(w, "transactionsRoot", h.TransactionsRoot[:])
 	writeHex(w, "receiptsRoot", h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
-		writeU256(w, "baseFeePerGas", h.BaseFeePerGas)
+		writeQuoted(w, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
 		writeHex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
-		writeUint64(w, "blobGasUsed", h.BlobGasUsed)
+		writeQuoted(w, "blobGasUsed", h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		writeUint64(w, "excessBlobGas", h.ExcessBlobGas)
+		writeQuoted(w, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
 		writeHex(w, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
@@ -91,13 +97,13 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 		writeHex(w, "blockAccessListHash", h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
-		writeUint64(w, "slotNumber", h.SlotNumber)
+		writeQuoted(w, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
 		writeHexBytes(w, "auraSeal", *h.AuraSeal)
 	}
 	if h.AuraStep != nil {
-		writeUint64(w, "auraStep", h.AuraStep)
+		writeQuoted(w, "auraStep", h.AuraStep)
 	}
 }
 
@@ -150,15 +156,10 @@ func addrBytes(a *common.Address) []byte {
 // writeHexBytes writes a hexutil.Bytes field, where nil and empty both render as "0x".
 func writeHexBytes(w jsonw.JSONWriter, name string, b hexutil.Bytes) { field(w, name).WriteHex(b) }
 
-func writeU256(w jsonw.JSONWriter, name string, v *hexutil.U256) {
-	if v == nil {
-		field(w, name).WriteNil()
-		return
-	}
-	field(w, name).WriteQuotedText(v)
-}
-
-func writeUint64(w jsonw.JSONWriter, name string, v *hexutil.Uint64) {
+// writeQuoted writes a hex quantity. Callers pass a field that is either addressable or
+// already known non-nil, so there is no nil case here: a typed nil in the interface would
+// not compare equal to nil anyway.
+func writeQuoted(w jsonw.JSONWriter, name string, v encoding.TextAppender) {
 	field(w, name).WriteQuotedText(v)
 }
 
@@ -196,7 +197,7 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectStart()
 	b.RPCHeader.WriteFieldsTo(w)
 
-	writeUint64(w, "size", &b.Size)
+	writeQuoted(w, "size", &b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
@@ -215,7 +216,7 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		field(w, "transactionCount").WriteRawBytes(txCount)
 	}
 	if b.TotalDifficulty != nil {
-		writeU256(w, "totalDifficulty", b.TotalDifficulty)
+		writeQuoted(w, "totalDifficulty", b.TotalDifficulty)
 	}
 	if calls != nil {
 		field(w, "calls").WriteRawBytes(calls)
