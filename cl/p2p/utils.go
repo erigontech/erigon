@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func ConvertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -34,21 +36,32 @@ func ConvertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 }
 
 func ConvertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, error) {
-	multiAddr, err := ConvertToSingleMultiAddr(node)
+	multiAddrs, err := convertToMultiAddrs(node)
 	if err != nil {
 		return nil, nil, err
 	}
-	info, err := peer.AddrInfoFromP2pAddr(multiAddr)
+	infos, err := peer.AddrInfosFromP2pAddrs(multiAddrs...)
 	if err != nil {
 		return nil, nil, err
 	}
-	return info, multiAddr, nil
+	if len(infos) != 1 {
+		return nil, nil, errors.New("node addresses do not resolve to one peer")
+	}
+	return &infos[0], multiAddrs[0], nil
 }
 
 func ParseStaticPeer(value string) (multiaddr.Multiaddr, error) {
+	addrs, err := ParseStaticPeerAddrs(value)
+	if err != nil {
+		return nil, err
+	}
+	return addrs[0], nil
+}
+
+func ParseStaticPeerAddrs(value string) ([]multiaddr.Multiaddr, error) {
 	node, nodeErr := enode.Parse(enode.ValidSchemes, value)
 	if nodeErr == nil {
-		return ConvertToSingleMultiAddr(node)
+		return convertToMultiAddrs(node)
 	}
 
 	addr, addrErr := multiaddr.NewMultiaddr(value)
@@ -63,21 +76,26 @@ func ParseStaticPeer(value string) (multiaddr.Multiaddr, error) {
 		return nil, errors.New("libp2p static peer does not provide a dial address")
 	}
 	protocols := addr.Protocols()
-	if len(protocols) != 3 || protocols[1].Code != multiaddr.P_TCP || protocols[2].Code != multiaddr.P_P2P {
-		return nil, errors.New("libp2p static peer must use a direct TCP address")
+	portProtocol := multiaddr.P_TCP
+	switch {
+	case len(protocols) == 3 && protocols[1].Code == multiaddr.P_TCP && protocols[2].Code == multiaddr.P_P2P:
+	case len(protocols) == 4 && protocols[1].Code == multiaddr.P_UDP && protocols[2].Code == multiaddr.P_QUIC_V1 && protocols[3].Code == multiaddr.P_P2P:
+		portProtocol = multiaddr.P_UDP
+	default:
+		return nil, errors.New("libp2p static peer must use a direct TCP or QUIC address")
 	}
 	switch protocols[0].Code {
 	case multiaddr.P_IP4, multiaddr.P_IP6, multiaddr.P_DNS, multiaddr.P_DNS4, multiaddr.P_DNS6:
 	default:
 		return nil, errors.New("libp2p static peer must use an IP or DNS address")
 	}
-	portValue, err := addr.ValueForProtocol(multiaddr.P_TCP)
+	portValue, err := addr.ValueForProtocol(portProtocol)
 	if err != nil {
-		return nil, errors.New("libp2p static peer does not provide a TCP address")
+		return nil, errors.New("libp2p static peer does not provide a transport address")
 	}
 	port, err := strconv.ParseUint(portValue, 10, 16)
 	if err != nil || port == 0 {
-		return nil, errors.New("libp2p static peer does not provide a valid TCP port")
+		return nil, errors.New("libp2p static peer does not provide a valid transport port")
 	}
 	for _, protocol := range []int{multiaddr.P_IP4, multiaddr.P_IP6} {
 		ipValue, err := addr.ValueForProtocol(protocol)
@@ -85,7 +103,7 @@ func ParseStaticPeer(value string) (multiaddr.Multiaddr, error) {
 			return nil, errors.New("libp2p static peer uses an unspecified IP address")
 		}
 	}
-	return addr, nil
+	return []multiaddr.Multiaddr{addr}, nil
 }
 
 func ParseBootstrapNodes(values []string) (discoveryNodes, directPeers, unsupportedPeers []string, err error) {
@@ -112,15 +130,20 @@ func ParseBootstrapNodes(values []string) (discoveryNodes, directPeers, unsuppor
 		directPeers = append(directPeers, value)
 	}
 	if len(values) > 0 && len(discoveryNodes) == 0 && len(directPeers) == 0 {
-		return nil, nil, nil, errors.New("bootstrap nodes do not contain a supported ENR or direct TCP libp2p address")
+		return nil, nil, nil, errors.New("bootstrap nodes do not contain a supported ENR or direct TCP or QUIC libp2p address")
 	}
 	return discoveryNodes, directPeers, unsupportedPeers, nil
 }
 
 func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
-	if node.TCP() == 0 {
-		return nil, fmt.Errorf("node %s does not provide a tcp port", node.ID())
+	multiAddrs, err := convertToMultiAddrs(node)
+	if err != nil {
+		return nil, err
 	}
+	return multiAddrs[0], nil
+}
+
+func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 	pubkey := node.Pubkey()
 	assertedKey, err := ConvertToInterfacePubkey(pubkey)
 	if err != nil {
@@ -130,10 +153,76 @@ func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get peer id: %w", err)
 	}
-	return MultiAddressBuilderWithID(node.IP().String(), "tcp", uint(node.TCP()), id)
+
+	var ip4, ip6 netip.Addr
+	_ = node.Load((*enr.IPv4Addr)(&ip4))
+	_ = node.Load((*enr.IPv6Addr)(&ip6))
+	var quic4 enr.QUIC
+	var quic6 enr.QUIC6
+	var tcp4 enr.TCP
+	var tcp6 enr.TCP6
+	_ = node.Load(&quic4)
+	_ = node.Load(&quic6)
+	_ = node.Load(&tcp4)
+	_ = node.Load(&tcp6)
+	if !validEndpointIP(ip4) && validEndpointIP(ip6) && tcp6 == 0 {
+		tcp6 = enr.TCP6(tcp4)
+		tcp4 = 0
+	}
+
+	type familyEndpoints struct {
+		ip   netip.Addr
+		quic uint16
+		tcp  uint16
+	}
+	families := []familyEndpoints{
+		{ip: ip4, quic: uint16(quic4), tcp: uint16(tcp4)},
+		{ip: ip6, quic: uint16(quic6), tcp: uint16(tcp6)},
+	}
+	if preferred := node.IP(); preferred != nil && preferred.To4() == nil {
+		families[0], families[1] = families[1], families[0]
+	}
+
+	multiAddrs := make([]multiaddr.Multiaddr, 0, 4)
+	for _, family := range families {
+		if !validEndpointIP(family.ip) || family.quic == 0 {
+			continue
+		}
+		addr, err := quicMultiAddressBuilderWithID(family.ip.String(), uint(family.quic), id)
+		if err != nil {
+			return nil, err
+		}
+		multiAddrs = append(multiAddrs, addr)
+	}
+	for _, family := range families {
+		if !validEndpointIP(family.ip) || family.tcp == 0 {
+			continue
+		}
+		addr, err := MultiAddressBuilderWithID(family.ip.String(), "tcp", uint(family.tcp), id)
+		if err != nil {
+			return nil, err
+		}
+		multiAddrs = append(multiAddrs, addr)
+	}
+	if len(multiAddrs) == 0 {
+		return nil, fmt.Errorf("node %s does not provide a QUIC or TCP port", node.ID())
+	}
+	return multiAddrs, nil
+}
+
+func validEndpointIP(ip netip.Addr) bool {
+	return ip.IsValid() && !ip.IsUnspecified() && !ip.IsMulticast()
 }
 
 func MultiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
+	return multiAddressBuilderWithTransport(ipAddr, fmt.Sprintf("%s/%d", protocol, port), id)
+}
+
+func quicMultiAddressBuilderWithID(ipAddr string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
+	return multiAddressBuilderWithTransport(ipAddr, fmt.Sprintf("udp/%d/quic-v1", port), id)
+}
+
+func multiAddressBuilderWithTransport(ipAddr, transport string, id peer.ID) (multiaddr.Multiaddr, error) {
 	parsedIP := net.ParseIP(ipAddr)
 	if parsedIP.To4() == nil && parsedIP.To16() == nil {
 		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
@@ -142,9 +231,9 @@ func MultiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (
 		return nil, errors.New("empty peer id given")
 	}
 	if parsedIP.To4() != nil {
-		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))
+		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/p2p/%s", ipAddr, transport, id.String()))
 	}
-	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))
+	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/%s/p2p/%s", ipAddr, transport, id.String()))
 }
 
 func ConvertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
@@ -154,12 +243,12 @@ func ConvertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 		if node.IP() == nil {
 			continue
 		}
-		multiAddr, err := ConvertToSingleMultiAddr(node)
+		nodeAddrs, err := convertToMultiAddrs(node)
 		if err != nil {
 			log.Debug("[Sentinel] Could not convert to multiAddr", "err", err)
 			continue
 		}
-		multiAddrs = append(multiAddrs, multiAddr)
+		multiAddrs = append(multiAddrs, nodeAddrs...)
 	}
 	return multiAddrs
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -36,6 +37,7 @@ type P2PConfig struct {
 	IpAddr        string
 	Port          int
 	TCPPort       uint
+	QUICPort      uint
 
 	// Optional
 	LocalIP        string
@@ -79,6 +81,10 @@ func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
+	if discoveryAndQUICPortConflict(cfg) {
+		return nil, fmt.Errorf("discovery and QUIC ports must differ: %d", cfg.Port)
+	}
+
 	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
 	// the same public address. ExtIP resolves immediately; STUN/UPnP make network calls.
 	if cfg.NAT != nil {
@@ -122,6 +128,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if port := hostTCPPort(host); port != 0 {
 		cfg.TCPPort = port
 	}
+	if port := hostQUICPort(host); port != 0 {
+		cfg.QUICPort = port
+	}
 
 	p := p2pManager{
 		cfg:         cfg,
@@ -130,6 +139,19 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		ethClock:    ethClock,
 		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute),
 	}
+	initialized := false
+	defer func() {
+		if initialized {
+			return
+		}
+		if p.udpv5 != nil {
+			p.udpv5.Close()
+			if localNode := p.udpv5.LocalNode(); localNode != nil {
+				localNode.Database().Close()
+			}
+		}
+		host.Close()
+	}()
 
 	// pubsub
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
@@ -159,12 +181,42 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	go p.updateENR()
 	go p.peerMonitor(ctx)
+	initialized = true
 	return &p, nil
 }
 
+func discoveryAndQUICPortConflict(cfg *P2PConfig) bool {
+	if cfg.Port <= 0 || uint(cfg.Port) != cfg.QUICPort {
+		return false
+	}
+	discoveryIP := net.ParseIP(cfg.IpAddr)
+	quicIP := discoveryIP
+	if cfg.LocalIP != "" {
+		quicIP = net.ParseIP(cfg.LocalIP)
+	}
+	if discoveryIP == nil || quicIP == nil {
+		return false
+	}
+	sameFamily := discoveryIP.To4() != nil == (quicIP.To4() != nil)
+	return discoveryIP.Equal(quicIP) || sameFamily && (discoveryIP.IsUnspecified() || quicIP.IsUnspecified())
+}
+
 func hostTCPPort(h host.Host) uint {
+	return hostPort(h, multiaddr.P_TCP)
+}
+
+func hostQUICPort(h host.Host) uint {
+	return hostPort(h, multiaddr.P_UDP)
+}
+
+func hostPort(h host.Host, protocol int) uint {
 	for _, addr := range h.Network().ListenAddresses() {
-		v, err := addr.ValueForProtocol(multiaddr.P_TCP)
+		if protocol == multiaddr.P_UDP {
+			if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
+				continue
+			}
+		}
+		v, err := addr.ValueForProtocol(protocol)
 		if err != nil {
 			continue
 		}
@@ -197,6 +249,17 @@ func (p *p2pManager) setupENR() error {
 	node := p.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
+	}
+	if p.cfg.QUICPort != 0 {
+		ip := node.Node().IP()
+		if ip == nil {
+			ip = net.ParseIP(p.cfg.IpAddr)
+		}
+		if ip.To4() != nil {
+			node.Set(enr.QUIC(p.cfg.QUICPort))
+		} else if ip.To16() != nil {
+			node.Set(enr.QUIC6(p.cfg.QUICPort))
+		}
 	}
 	forkId, err := p.ethClock.ForkId()
 	if err != nil {
