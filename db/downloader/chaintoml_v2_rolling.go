@@ -57,6 +57,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snaptype"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -864,7 +865,7 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 
 	for i := 0; i < len(r.history)-1; i++ {
 		gen := r.history[i]
-		if isSubsetOf(gen.names, canonical) {
+		if r.allDeliverableLocked(gen.names, canonical) {
 			kept = append(kept, gen)
 			continue
 		}
@@ -914,6 +915,24 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 }
 
 // isSubsetOf reports whether every key in a is also in b.
+// allDeliverableLocked reports whether every name is still servable:
+// either the current generation lists it, or the merge moved its bytes to
+// the merged directory, where the torrent keeps the same info-hash. A
+// generation is only evicted once it promises something that can no
+// longer be delivered. Caller must hold r.mu.
+func (r *RollingV2Publisher) allDeliverableLocked(names, canonical map[string]struct{}) bool {
+	for name := range names {
+		if _, ok := canonical[name]; ok {
+			continue
+		}
+		held := snapshotinv.ResolveExistingPath(filepath.Join(r.snapDir, snaptype.MergedDirName), name)
+		if _, err := os.Stat(held); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func isSubsetOf(a, b map[string]struct{}) bool {
 	for k := range a {
 		if _, ok := b[k]; !ok {

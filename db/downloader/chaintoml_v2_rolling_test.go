@@ -26,6 +26,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/snaptype"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -833,4 +834,54 @@ func TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, gen0ID)),
 		"evicted generation's Content UCAN is removed alongside its .toml")
 	require.FileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, survivorID)))
+}
+
+// TestRollingV2Publisher_KeepsGenerationsWhoseNamesAreHeldInMerged pins
+// the retention that makes a merge survivable for a consumer. Eviction
+// exists so a generation never promises a file the publisher cannot
+// serve, but a merged-over file whose bytes are held in .merged is still
+// servable under the info-hash peers hold. Evicting on retirement alone
+// destroys exactly the generation a mid-download consumer handshaked on,
+// leaving it unable to fetch either the file or the manifest that would
+// tell it the file is gone.
+func TestRollingV2Publisher_KeepsGenerationsWhoseNamesAreHeldInMerged(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	for i := range 2 {
+		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
+		require.NoError(t, err)
+	}
+	oldGenIDs := append([]string(nil), pub.History()...)
+	require.Len(t, oldGenIDs, 2)
+
+	// The merge moved the superseded bytes rather than unlinking them.
+	mergedDir := filepath.Join(snapDir, snaptype.MergedDirName, "domain")
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+	for _, name := range []string{"v1.0-accounts.0-1024.kv", "v1.0-storage.0-1024.kv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(mergedDir, name), []byte("held"), 0o644))
+	}
+
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    0,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.0-2048.kv",
+		TorrentHash: [20]byte{0x21, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv2, 0, nil)
+	require.NoError(t, err)
+
+	require.Len(t, pub.History(), 3,
+		"generations naming only files still held in .merged must survive the merge")
+	for _, oldGenID := range oldGenIDs {
+		oldName := ChainTomlV2FileName(testENRFP, oldGenID)
+		_, err := os.Stat(filepath.Join(snapDir, oldName))
+		require.NoError(t, err, "%s must stay fetchable while its files are held", oldName)
+	}
 }
