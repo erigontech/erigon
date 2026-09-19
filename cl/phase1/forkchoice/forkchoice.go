@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 )
 
 // ForkNode is a struct that represents a node in the fork choice tree.
@@ -135,6 +136,8 @@ type ForkChoiceStore struct {
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 	localValidators    *validator_params.ValidatorParams
+
+	checkpointStateBuilds singleflight.Group
 
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
