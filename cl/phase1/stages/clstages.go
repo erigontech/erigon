@@ -448,6 +448,11 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
 		}
 	}
+	if version >= clparams.GloasVersion {
+		if bid := cfg.state.GetLatestExecutionPayloadBid(); bid != nil {
+			body.SignedExecutionPayloadBid.Message = bid
+		}
+	}
 
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {

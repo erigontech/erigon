@@ -328,7 +328,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 type Account struct {
 	Nonce            *hexutil.Uint64              `json:"nonce"`
 	Code             *hexutil.Bytes               `json:"code"`
-	Balance          **hexutil.Big                `json:"balance"`
+	Balance          **hexutil.U256               `json:"balance"`
 	State            *map[common.Hash]common.Hash `json:"state"`
 	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
 	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`
@@ -439,10 +439,10 @@ func (b *RPCBlock) MarkPending() {
 	b.Hash, b.Nonce, b.Miner = nil, nil, nil
 }
 
-// rpcMarshalHeader converts the given header to the RPC output. The hash is passed
+// RPCMarshalHeader converts the given header to the RPC output. The hash is passed
 // in because types.Block hands out header copies that drop the memoized hash, and
 // recomputing it costs an RLP encode plus a keccak per call.
-func rpcMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
+func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	result := &RPCHeader{
 		Number:           (*hexutil.U256)(&head.Number),
 		Hash:             &hash,
@@ -502,7 +502,7 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	}
 
 	result := &RPCBlock{
-		RPCHeader:    *rpcMarshalHeader(block.Header(), block.Hash()),
+		RPCHeader:    *RPCMarshalHeader(block.Header(), block.Hash()),
 		Size:         hexutil.Uint64(block.Size()),
 		Transactions: transactions,
 		Uncles:       uncleHashes,
@@ -539,10 +539,14 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 		delete(m, k)
 	}
 	nullVal := json.RawMessage("null")
-	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+	for _, k := range []string{"maxFeePerGas", "maxPriorityFeePerGas"} {
 		if _, ok := m[k]; !ok {
 			m[k] = nullVal
 		}
+	}
+	// A dynamic-fee transaction that was only filled has no effective gas price yet.
+	if r.Tx.MaxFeePerGas != nil {
+		m["gasPrice"] = nullVal
 	}
 	zeroHex := json.RawMessage(`"0x0"`)
 	for _, k := range []string{"v", "r", "s"} {
@@ -565,7 +569,7 @@ type RPCTransaction struct {
 	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
-	GasPrice             *hexutil.U256              `json:"gasPrice,omitempty"`
+	GasPrice             *hexutil.U256              `json:"gasPrice"`
 	MaxPriorityFeePerGas *hexutil.U256              `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerGas         *hexutil.U256              `json:"maxFeePerGas,omitempty"`
 	Hash                 common.Hash                `json:"hash"`
@@ -639,7 +643,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		if txn.Type() == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+			result.GasPrice = computeGasPrice(txn, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -676,13 +680,15 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.U256 {
+// computeGasPrice reports the effective gas price of a transaction already in a
+// block, and the fee cap of a pending one, as the execution-apis spec requires.
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.U256)(&price)
 	}
-	return nil
+	return (*hexutil.U256)(txn.GetFeeCap())
 }
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.

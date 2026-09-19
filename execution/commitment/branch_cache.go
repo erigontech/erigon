@@ -543,6 +543,11 @@ func (c *BranchCache) PinnedCount() int {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
+	return c.GetBefore(prefix, ^uint64(0))
+}
+
+// GetBefore rejects newer entries without evicting them from other readers.
+func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
@@ -554,6 +559,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
+		return nil, 0, false
+	}
+	if entry.txN >= txNum {
 		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))

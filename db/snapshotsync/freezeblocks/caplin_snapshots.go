@@ -453,6 +453,29 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	return s.OpenFolder()
 }
 
+// ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
+func (s *CaplinSnapshots) ReadFrozenBeaconBlockBodyForIntegrity(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	sn, ok, closeSegment := s.ViewSingleFile(snaptype.BeaconBlocks, slot)
+	defer closeSegment()
+	if !ok {
+		return nil, nil
+	}
+
+	buf, err := sn.Get(slot)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	reader, err := getZstdReader(bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	defer putZstdReader(reader)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshotForIntegrity(reader, s.beaconCfg)
+}
+
 func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	defer func() {
 		if rec := recover(); rec != nil {

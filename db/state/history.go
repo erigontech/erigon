@@ -421,12 +421,12 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
-		if err := w.historyVals.Collect(historyKey, original); err != nil {
+		if err := w.valsCollector().Collect(historyKey, original); err != nil {
 			return err
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
 				return err
 			}
 		}
@@ -445,11 +445,11 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		panic("History value is too large while largeValues=false")
 	}
 
-	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
+	if err := w.valsCollector().Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
 	if !w.ii.discard {
-		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+		if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
 			return err
 		}
 	}
@@ -491,15 +491,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	w := &historyBufferedWriter{
 		discard: discard,
 
-		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
-	}
-	if !discard {
-		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
@@ -515,11 +510,20 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.historyVals != nil {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+func (w *historyBufferedWriter) valsCollector() *etl.Collector {
+	if w.historyVals == nil {
+		w.historyVals = newWriterCollector(w.ii.filenameBase+".flush.hist", w.ii.tmpdir, w.ii.logger)
+	}
+	return w.historyVals
 }
 
 type HistoryCollation struct {
@@ -933,16 +937,16 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters  []*seg.Reader
-	readers  []*recsplit.IndexReader
-	stepSize uint64
+	files        visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters      []*seg.Reader
+	pagedGetters []*seg.PagedReader
+	readers      []*recsplit.IndexReader
+	stepSize     uint64
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs              []byte
-	blockCompressionBuf []byte
+	_bufTs []byte
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -983,6 +987,19 @@ func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	return ht.getters[i]
 }
+
+// pagedGetter reads one file through its own reader, so a seek keeps the page it decoded: the next seek into the
+// same page skips both the read and the decompression.
+func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
+	if ht.pagedGetters == nil {
+		ht.pagedGetters = make([]*seg.PagedReader, len(ht.files))
+	}
+	if ht.pagedGetters[i] == nil {
+		ht.pagedGetters[i] = seg.NewPagedReader(ht.dataReader(ht.files[i].src.decompressor), pageSize, true)
+	}
+	return ht.pagedGetters[i]
+}
+
 func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	if ht.readers == nil {
 		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
@@ -1164,22 +1181,18 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
-	g := ht.statelessGetter(historyItem.i)
-	g.Reset(offset)
-	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
-	v, _ := g.Next(nil)
-	if traceGetAsOf == ht.h.FilenameBase {
-		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
-	}
-
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
 	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
-
-	if compressedPageValuesCount > 1 {
-		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
+	g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
+	g.Reset(offset)
+	v, err := g.GetFromPage(historyKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if traceGetAsOf == ht.h.FilenameBase {
+		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 	return v, true, nil
 }
