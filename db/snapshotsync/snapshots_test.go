@@ -1668,3 +1668,48 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 		require.False(ok)
 	})
 }
+
+// TestQuarantineOldFiles pins the supersede contract: a merged-over file
+// leaves the canonical scan but its bytes stay where the torrent client
+// can still serve them under the info-hash peers already hold. Preserving
+// the path relative to the snapshots root matters — the torrent's
+// info.Name is that relative path, so a domain file has to land under
+// .old/domain/ for a storage root of .old to resolve it.
+func TestMoveToMerged(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "domain"), 0o755))
+
+	plain := filepath.Join(root, "v1.1-003597-003598-headers.seg")
+	nested := filepath.Join(root, "domain", "v2.0-accounts.0-256.kv")
+	for _, p := range []string{plain, nested} {
+		require.NoError(t, os.WriteFile(p, []byte("payload"), 0o644))
+		require.NoError(t, os.WriteFile(p+".torrent", []byte("meta"), 0o644))
+	}
+
+	moved := moveToMerged(root, []string{plain, nested})
+	require.ElementsMatch(t, []string{plain, nested}, moved)
+
+	for _, p := range []string{plain, nested} {
+		_, err := os.Stat(p)
+		require.True(t, os.IsNotExist(err), "%s must leave the canonical scan", p)
+	}
+
+	for _, rel := range []string{
+		"v1.1-003597-003598-headers.seg",
+		filepath.Join("domain", "v2.0-accounts.0-256.kv"),
+	} {
+		held := filepath.Join(root, mergedDirName, rel)
+		body, err := os.ReadFile(held)
+		require.NoError(t, err, "quarantined bytes must remain servable at %s", held)
+		require.Equal(t, "payload", string(body))
+		_, err = os.Stat(held + ".torrent")
+		require.NoError(t, err, "the .torrent must follow the file so seeding can resume")
+	}
+
+	// ParseDir is the canonical scan; it must not see the quarantine.
+	found, err := snaptype.ParseDir(root)
+	require.NoError(t, err)
+	for _, fi := range found {
+		require.NotContains(t, fi.Path, mergedDirName)
+	}
+}
