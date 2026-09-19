@@ -41,6 +41,215 @@ type gasChange struct {
 	reason tracing.GasChangeReason
 }
 
+func TestFrameV2Gas(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  OpCode
+	}{
+		{name: "call", typ: CALLCODE},
+		{name: "create", typ: CREATE},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			var entered []mdgas.MdGas
+			var exited []mdgas.MdGas
+			hooks := &tracing.Hooks{
+				OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+					t.Fatal("V2 must take precedence")
+				},
+				OnEnterV2: func(depth int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas mdgas.MdGas, _ uint256.Int, _ []byte) {
+					require.Zero(t, depth)
+					require.Equal(t, byte(tc.typ), typ)
+					entered = append(entered, gas)
+				},
+				OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
+					t.Fatal("V2 must take precedence")
+				},
+				OnExitV2: func(depth int, _ []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+					require.Zero(t, depth)
+					require.NoError(t, err)
+					require.False(t, reverted)
+					exited = append(exited, gasLeft)
+				},
+			}
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+			initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}
+			code := []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(STOP)}
+			var remaining mdgas.MdGas
+			var err error
+			if tc.typ == CREATE {
+				_, _, remaining, _, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
+			} else {
+				address := accounts.InternAddress(common.HexToAddress("0x1000"))
+				require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+				_, remaining, _, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
+			}
+			require.NoError(t, err)
+			require.Equal(t, []mdgas.MdGas{initial}, entered)
+			require.Equal(t, []mdgas.MdGas{remaining}, exited)
+			require.Zero(t, remaining.State)
+		})
+	}
+}
+
+func TestFrameV2Selfdestruct(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{name: "before EIP-6780", config: chain.TestChainBerlinConfig},
+		{name: "Amsterdam", config: chain.AllProtocolChanges},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			var enters int
+			var exits int
+			hooks := &tracing.Hooks{
+				OnEnterV2: func(depth int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas mdgas.MdGas, _ uint256.Int, _ []byte) {
+					if OpCode(typ) == SELFDESTRUCT {
+						enters++
+						require.Equal(t, 1, depth)
+						require.Equal(t, mdgas.MdGas{}, gas)
+					}
+				},
+				OnExitV2: func(depth int, _ []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+					if depth == 1 {
+						exits++
+						require.Equal(t, mdgas.MdGas{}, gasLeft)
+						require.NoError(t, err)
+						require.False(t, reverted)
+					}
+				},
+			}
+			address := accounts.InternAddress(common.HexToAddress("0x1000"))
+			require.NoError(t, ibs.SetCode(address, []byte{byte(PUSH1), 0xff, byte(SELFDESTRUCT)}, tracing.CodeChangeUnspecified))
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, tc.config, Config{Tracer: hooks})
+			_, _, _, err := evm.CallCode(address, address, nil, mdgas.MdGas{Execution: 200_000}, uint256.Int{})
+			require.NoError(t, err)
+			require.Equal(t, 1, enters)
+			require.Equal(t, 1, exits)
+		})
+	}
+}
+
+func TestOpcodeV2StateGas(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	type step struct {
+		pc   uint64
+		op   OpCode
+		gas  mdgas.MdGas
+		cost mdgas.MdGas
+	}
+	var steps []step
+	hooks := &tracing.Hooks{OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, _ []byte, depth int, err error) {
+		require.NoError(t, err)
+		require.Equal(t, 1, depth)
+		require.NotNil(t, scope)
+		steps = append(steps, step{pc: pc, op: OpCode(op), gas: gas, cost: cost})
+	}}
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(STOP)}
+	initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}
+	_, remaining, _, err := evm.Run(contract, initial, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, []step{
+		{pc: 0, op: PUSH1, gas: initial, cost: mdgas.MdGas{Execution: 3}},
+		{pc: 2, op: PUSH1, gas: mdgas.MdGas{Execution: initial.Execution - 3, State: initial.State}, cost: mdgas.MdGas{Execution: 3}},
+		{pc: 4, op: SSTORE, gas: mdgas.MdGas{Execution: initial.Execution - 6, State: initial.State}, cost: mdgas.MdGas{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}},
+		{pc: 5, op: STOP, gas: remaining},
+	}, steps)
+}
+
+func TestOpcodeV2ChargeFailure(t *testing.T) {
+	sstoreCost := mdgas.MdGas{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}
+	for _, tc := range []struct {
+		name    string
+		code    []byte
+		initial mdgas.MdGas
+		pc      uint64
+		gas     mdgas.MdGas
+		cost    mdgas.MdGas
+	}{
+		{
+			name: "constant execution cost", code: []byte{byte(PUSH1), 1},
+			initial: mdgas.MdGas{Execution: 2, State: 50},
+			gas:     mdgas.MdGas{Execution: 2, State: 50}, cost: mdgas.MdGas{Execution: 3},
+		},
+		{
+			name: "dynamic execution cost", code: []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(MSTORE)},
+			initial: mdgas.MdGas{Execution: 11, State: 50}, pc: 4,
+			gas: mdgas.MdGas{Execution: 5, State: 50}, cost: mdgas.MdGas{Execution: 6},
+		},
+		{
+			name: "state cost", code: []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE)},
+			initial: mdgas.MdGas{Execution: 6 + sstoreCost.Execution + 10, State: sstoreCost.State - 11}, pc: 4,
+			gas: mdgas.MdGas{Execution: sstoreCost.Execution + 10, State: sstoreCost.State - 11}, cost: sstoreCost,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			var failures int
+			hooks := &tracing.Hooks{
+				OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, err error) {
+					if err == nil {
+						return
+					}
+					failures++
+					require.ErrorIs(t, err, ErrOutOfGas)
+					require.Equal(t, tc.pc, pc)
+					require.Equal(t, tc.code[tc.pc], op)
+					require.Equal(t, tc.gas, gas)
+					require.Equal(t, tc.cost, cost)
+				},
+				OnFaultV2: func(_ uint64, _ byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ int, _ error) {
+					t.Fatal("charging failures must use the opcode hook")
+				},
+			}
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+			contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract.Code = tc.code
+			_, _, _, err := evm.Run(contract, tc.initial, nil, false)
+			require.ErrorIs(t, err, ErrOutOfGas)
+			require.Equal(t, 1, failures)
+		})
+	}
+}
+
+func TestFaultV2(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	var faults int
+	hooks := &tracing.Hooks{
+		OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, err error) {
+			require.NoError(t, err)
+		},
+		OnFault: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+			t.Fatal("V2 must take precedence")
+		},
+		OnFaultV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+			faults++
+			require.Equal(t, uint64(2), pc)
+			require.Equal(t, byte(JUMP), op)
+			require.Equal(t, mdgas.MdGas{Execution: 97, State: 50}, gas)
+			require.Equal(t, mdgas.MdGas{Execution: 8}, cost)
+			require.NotNil(t, scope)
+			require.Equal(t, 1, depth)
+			require.ErrorIs(t, err, ErrInvalidJump)
+		},
+	}
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = []byte{byte(PUSH1), 0xff, byte(JUMP)}
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 100, State: 50}, nil, false)
+	require.ErrorIs(t, err, ErrInvalidJump)
+	require.Equal(t, 1, faults)
+}
+
 func TestGasChangeV2FailedOpcodeCharge(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()

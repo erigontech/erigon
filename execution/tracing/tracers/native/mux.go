@@ -38,8 +38,9 @@ func init() {
 // muxTracer is a go implementation of the Tracer interface which
 // runs multiple tracers in one go.
 type muxTracer struct {
-	names   []string
-	tracers []*tracers.Tracer
+	names    []string
+	tracers  []*tracers.Tracer
+	entryGas []mdgas.MdGas
 }
 
 // newMuxTracer returns a new mux tracer.
@@ -72,9 +73,13 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 			OnTxStart:           t.OnTxStart,
 			OnTxEnd:             t.OnTxEnd,
 			OnEnter:             t.OnEnter,
+			OnEnterV2:           t.OnEnterV2,
 			OnExit:              t.OnExit,
+			OnExitV2:            t.OnExitV2,
 			OnOpcode:            t.OnOpcode,
+			OnOpcodeV2:          t.OnOpcodeV2,
 			OnFault:             t.OnFault,
+			OnFaultV2:           t.OnFaultV2,
 			OnGasChange:         t.OnGasChange,
 			OnGasChangeV2:       t.OnGasChangeV2,
 			OnBalanceChange:     t.OnBalanceChange,
@@ -109,6 +114,18 @@ func (t *muxTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.
 		if t.OnFault != nil {
 			t.OnFault(pc, op, gas, cost, scope, depth, err)
 		}
+	}
+}
+
+func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitOpcode(pc, op, gas, cost, scope, rData, depth, err)
+	}
+}
+
+func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitFault(pc, op, gas, cost, scope, depth, err)
 	}
 }
 
@@ -148,6 +165,24 @@ func (t *muxTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 		if t.OnExit != nil {
 			t.OnExit(depth, output, gasUsed, err, reverted)
 		}
+	}
+}
+
+func (t *muxTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	t.entryGas = append(t.entryGas, gas)
+	for _, child := range t.tracers {
+		child.Hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
+	}
+}
+
+func (t *muxTracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+	var entry mdgas.MdGas
+	if n := len(t.entryGas); n > 0 {
+		entry = t.entryGas[n-1]
+		t.entryGas = t.entryGas[:n-1]
+	}
+	for _, child := range t.tracers {
+		child.Hooks.EmitExit(depth, output, entry, gasLeft, err, reverted)
 	}
 }
 

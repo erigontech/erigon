@@ -20,12 +20,111 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
+
+func TestFrameV2Recording(t *testing.T) {
+	initial := mdgas.MdGas{Execution: 100, State: 200}
+	left := mdgas.MdGas{Execution: 80, State: 210}
+	var legacyEntry []uint64
+	var legacyUsage []uint64
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+			legacyEntry = append(legacyEntry, gas)
+		},
+		OnExit: func(_ int, _ []byte, gasUsed uint64, _ error, _ bool) {
+			legacyUsage = append(legacyUsage, gasUsed)
+		},
+	}}}
+	input := []byte{0xab}
+	recorder.Hooks().EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, input, initial, uint256.Int{}, nil)
+	input[0] = 0
+	recorder.Hooks().EmitExit(0, nil, initial, left, nil, false)
+	require.Equal(t, []uint64{100}, legacyEntry)
+	require.Equal(t, []uint64{20}, legacyUsage)
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	var recorded struct {
+		Traces []map[string]json.RawMessage
+	}
+	require.NoError(t, json.Unmarshal(encoded, &recorded))
+	require.Len(t, recorded.Traces, 2)
+	require.Contains(t, recorded.Traces[0], "onEnterV2")
+	require.Contains(t, recorded.Traces[1], "onExitV2")
+	var enter struct {
+		Gas   mdgas.MdGas
+		Input string
+	}
+	var exit struct {
+		GasLeft mdgas.MdGas
+	}
+	require.NoError(t, json.Unmarshal(recorded.Traces[0]["onEnterV2"], &enter))
+	require.NoError(t, json.Unmarshal(recorded.Traces[1]["onExitV2"], &exit))
+	require.Equal(t, initial, enter.Gas)
+	require.Equal(t, "0xab", enter.Input)
+	require.Equal(t, left, exit.GasLeft)
+}
+
+func TestOpcodeV2Recording(t *testing.T) {
+	gas := mdgas.MdGas{Execution: 100, State: 200}
+	cost := mdgas.MdGas{Execution: 10, State: 50}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope.Memory.Resize(2)
+	scope.Memory.Set(0, 2, []byte{0xab, 0xcd})
+	var received [][2]mdgas.MdGas
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+			t.Fatal("V2 must take precedence")
+		},
+		OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, context tracing.OpContext, rData []byte, depth int, err error) {
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, byte(vm.SSTORE), op)
+			require.Same(t, scope, context)
+			require.Equal(t, []byte{1}, rData)
+			require.Equal(t, 2, depth)
+			require.NoError(t, err)
+			received = append(received, [2]mdgas.MdGas{gas, cost})
+		},
+	}}}
+	recorder.Hooks().EmitOpcode(42, byte(vm.SSTORE), gas, cost, scope, []byte{1}, 2, nil)
+	require.Equal(t, [][2]mdgas.MdGas{{gas, cost}}, received)
+	scope.Memory.Set(0, 2, []byte{0, 0})
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onOpcodeV2":{"pc":42,"op":"SSTORE","gas":{"Execution":100,"State":200},"cost":{"Execution":10,"State":50},"caller":"0x0000000000000000000000000000000000000000","memory":"0xabcd","memSize":2,"returnData":"0x01","depth":2}}]}`, string(encoded))
+}
+
+func TestFaultV2Recording(t *testing.T) {
+	gas := mdgas.MdGas{Execution: 100, State: 200}
+	cost := mdgas.MdGas{Execution: 10, State: 50}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	var received [][2]mdgas.MdGas
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnFault: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+			t.Fatal("V2 must take precedence")
+		},
+		OnFaultV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, context tracing.OpContext, depth int, err error) {
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, byte(vm.JUMP), op)
+			require.Same(t, scope, context)
+			require.Equal(t, 2, depth)
+			require.ErrorIs(t, err, vm.ErrInvalidJump)
+			received = append(received, [2]mdgas.MdGas{gas, cost})
+		},
+	}}}
+	recorder.Hooks().EmitFault(42, byte(vm.JUMP), gas, cost, scope, 2, vm.ErrInvalidJump)
+	require.Equal(t, [][2]mdgas.MdGas{{gas, cost}}, received)
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onFaultV2":{"pc":42,"op":86,"gas":{"Execution":100,"State":200},"cost":{"Execution":10,"State":50},"caller":"0x0000000000000000000000000000000000000000","depth":2,"error":"invalid jump destination"}}]}`, string(encoded))
+}
 
 func TestGasChangeV2Recording(t *testing.T) {
 	old := mdgas.MdGas{Execution: 100}

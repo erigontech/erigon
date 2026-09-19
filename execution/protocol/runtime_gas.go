@@ -162,9 +162,9 @@ func refillGas(remaining *mdgas.MdGas, used *mdgas.MdGasUsage, amount uint64, ty
 func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts.Address, input []byte, startGas mdgas.MdGas, gasRemaining *mdgas.MdGas, value uint256.Int, err error) {
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasGasChangeHook()
-	if tracer != nil && tracer.OnEnter != nil {
+	if tracer.HasEnterHook() {
 		precompile := typ == vm.CALL && slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
-		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Execution, value, nil)
+		tracer.EmitEnter(0, byte(typ), sender, recipient, precompile, input, startGas, value, nil)
 	}
 	var old mdgas.MdGas
 	if gasTracing {
@@ -178,7 +178,7 @@ func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts
 			tracer.EmitGasChange(*gasRemaining, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 		}
 	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(0, nil, startGas.Execution, vm.VMErrorFromErr(err), true)
+	if tracer.HasExitHook() {
+		tracer.EmitExit(0, nil, startGas, *gasRemaining, vm.VMErrorFromErr(err), true)
 	}
 }

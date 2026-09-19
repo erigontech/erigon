@@ -47,9 +47,13 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 			OnTxStart:       t.OnTxStart,
 			OnTxEnd:         t.OnTxEnd,
 			OnEnter:         t.OnEnter,
+			OnEnterV2:       t.OnEnterV2,
 			OnExit:          t.OnExit,
+			OnExitV2:        t.OnExitV2,
 			OnOpcode:        t.OnOpcode,
+			OnOpcodeV2:      t.OnOpcodeV2,
 			OnFault:         t.OnFault,
+			OnFaultV2:       t.OnFaultV2,
 			OnGasChange:     t.OnGasChange,
 			OnGasChangeV2:   t.OnGasChangeV2,
 			OnBalanceChange: t.OnBalanceChange,
@@ -69,6 +73,12 @@ func (t *noopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracin
 func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
 }
 
+func (t *noopTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+}
+
+func (t *noopTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+}
+
 func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
 
 func (t *noopTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {}
@@ -77,6 +87,12 @@ func (t *noopTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 }
 
 func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+}
+
+func (t *noopTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+}
+
+func (t *noopTracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
 }
 
 func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
