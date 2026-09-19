@@ -196,16 +196,14 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		writeArray(w, "transactions", hashes, writeHashElem)
+		writeArray(w, "transactions", &hashes, writeHashElem)
 	case fullTxs != nil:
 		field(w, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	writeArray(w, "uncles", b.Uncles, writeHashElem)
+	writeArray(w, "uncles", &b.Uncles, writeHashElem)
 
-	if b.Withdrawals != nil {
-		writeArray(w, "withdrawals", *b.Withdrawals, writeWithdrawalElem)
-	}
+	writeArray(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
 		field(w, "transactionCount").WriteRawBytes(txCount)
 	}
@@ -219,20 +217,25 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
-// writeArray writes a JSON array field, taking the slice that decides its shape: a nil
-// slice is null and an empty one is [], the way the reflection encoder renders them.
-// Whether the field appears at all is the caller's decision, matching omitempty.
-func writeArray[T any](w jsonw.JSONWriter, name string, items []T, elem func(jsonw.JSONWriter, *T)) {
+// writeArray writes a JSON array field exactly as the reflection encoder would: the
+// pointer decides whether the field appears, the slice decides its shape. A nil pointer
+// omits the field, a nil slice is null, an empty slice is []. So a field declared without
+// omitempty passes &field and is always present, and a *[]T with omitempty passes itself.
+func writeArray[S ~[]E, E any](w jsonw.JSONWriter, name string, items *S, elem func(jsonw.JSONWriter, *E)) {
 	if items == nil {
+		return
+	}
+	if *items == nil {
 		field(w, name).WriteNil()
 		return
 	}
+	s := *items
 	field(w, name).WriteArrayStart()
-	for i := range items {
+	for i := range s {
 		if i > 0 {
 			w.WriteMore()
 		}
-		elem(w, &items[i])
+		elem(w, &s[i])
 	}
 	w.WriteArrayEnd()
 }
