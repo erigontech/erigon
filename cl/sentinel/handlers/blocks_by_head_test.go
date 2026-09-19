@@ -142,12 +142,14 @@ func setupBlocksByHeadTest(
 
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
 		indiciesDB,
 		host,
-		peers.NewPool(host),
+		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,

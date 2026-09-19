@@ -55,6 +55,7 @@ func TestPingRateLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(server)
+	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -114,6 +115,7 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(server)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

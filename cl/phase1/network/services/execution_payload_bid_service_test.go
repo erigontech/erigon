@@ -69,6 +69,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		bidValidationStateCacheSize,
 		bidValidationStateCacheTTL(&beaconCfg),
 	)
+	t.Cleanup(validationStateCache.Close)
 
 	service := &executionPayloadBidService{
 		syncedDataManager: mockSyncedData,

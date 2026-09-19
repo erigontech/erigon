@@ -67,6 +67,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -229,6 +230,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -378,6 +380,7 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -434,6 +437,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
@@ -489,6 +493,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

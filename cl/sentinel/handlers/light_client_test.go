@@ -61,6 +61,7 @@ func TestLightClientOptimistic(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -132,6 +133,7 @@ func TestLightClientFinality(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -205,6 +207,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -288,6 +291,7 @@ func TestLightClientUpdates(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
+	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
