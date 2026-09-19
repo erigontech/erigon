@@ -343,3 +343,56 @@ func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
 		})
 	}
 }
+
+func fastBlockJSON(t *testing.T, b *RPCBlock) string {
+	t.Helper()
+	var buf jsonSink
+	s := jsonstream.Get(&buf)
+	defer jsonstream.Put(s)
+	require.NoError(t, b.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	return string(buf)
+}
+
+// TestRPCBlockMarshalFastJSONTo guards the whole block, not just the header: RPCBlock
+// embeds RPCHeader, so a missing block marshaller would promote the header's and emit a
+// block with no transactions at all.
+func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	signer := types.LatestSignerForChainID(nil)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
+	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	count := 1
+	for _, tc := range []struct {
+		name string
+		b    *RPCBlock
+	}{
+		{"hashes", RPCMarshalBlock(withTx, true, false)},
+		{"full transactions", RPCMarshalBlock(withTx, true, true)},
+		{"no transactions", RPCMarshalBlock(empty, true, false)},
+		{"uncle form", RPCMarshalBlock(empty, false, false)},
+		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
+		{"otterscan shape", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.TransactionCount = count
+			b.LogsBloom = nil
+			return b
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := json.Marshal(tc.b)
+			require.NoError(t, err)
+			require.Equal(t, string(want), fastBlockJSON(t, tc.b))
+		})
+	}
+}
