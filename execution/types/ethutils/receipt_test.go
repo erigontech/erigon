@@ -17,14 +17,18 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -57,4 +61,20 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	receipt.Bloom = types.Bloom{}
 	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
+}
+
+// The backend leaves "from" unset when it cannot recover the sender. The zero
+// address is a valid address, so an unknown sender must marshal to null like
+// "to" and "contractAddress" do, not to 0x00..00.
+func TestMarshalSubscribeReceiptWithoutSender(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	assert.Nil(t, receipt.From)
+
+	encoded, err := json.Marshal(receipt)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"from":null`)
 }
