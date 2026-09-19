@@ -196,15 +196,15 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		writeHashArray(w, "transactions", hashes)
+		writeArray(w, "transactions", hashes, writeHashElem)
 	case fullTxs != nil:
 		field(w, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	writeHashArray(w, "uncles", b.Uncles)
+	writeArray(w, "uncles", b.Uncles, writeHashElem)
 
 	if b.Withdrawals != nil {
-		writeWithdrawals(w, "withdrawals", b.Withdrawals)
+		writeArray(w, "withdrawals", *b.Withdrawals, writeWithdrawalElem)
 	}
 	if txCount != nil {
 		field(w, "transactionCount").WriteRawBytes(txCount)
@@ -219,46 +219,40 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
-// writeHashArray writes a hash slice, distinguishing nil from empty the way the
-// reflection encoder does: a nil slice is null, an empty one is [].
-func writeHashArray(w jsonw.JSONWriter, name string, hashes []common.Hash) {
-	if hashes == nil {
+// writeArray writes a JSON array field, taking the slice that decides its shape: a nil
+// slice is null and an empty one is [], the way the reflection encoder renders them.
+// Whether the field appears at all is the caller's decision, matching omitempty.
+func writeArray[T any](w jsonw.JSONWriter, name string, items []T, elem func(jsonw.JSONWriter, *T)) {
+	if items == nil {
 		field(w, name).WriteNil()
 		return
 	}
 	field(w, name).WriteArrayStart()
-	for i := range hashes {
+	for i := range items {
 		if i > 0 {
 			w.WriteMore()
 		}
-		w.WriteHex(hashes[i][:])
+		elem(w, &items[i])
 	}
 	w.WriteArrayEnd()
 }
 
-// writeWithdrawals writes the withdrawal list. Four fixed-width fields each, so it needs
-// no reflection; encoding it here keeps execution/types free of a JSON dependency.
-func writeWithdrawals(w jsonw.JSONWriter, name string, ws *types.Withdrawals) {
-	field(w, name).WriteArrayStart()
-	for i, wd := range *ws {
-		if i > 0 {
-			w.WriteMore()
-		}
-		if wd == nil {
-			w.WriteNil()
-			continue
-		}
-		w.WriteObjectStart()
-		w.WriteObjectField("index").WriteQuotedText(&wd.Index)
-		w.WriteMore()
-		w.WriteObjectField("validatorIndex").WriteQuotedText(&wd.Validator)
-		w.WriteMore()
-		w.WriteObjectField("address").WriteHex(wd.Address[:])
-		w.WriteMore()
-		w.WriteObjectField("amount").WriteQuotedText(&wd.Amount)
-		w.WriteObjectEnd()
+func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+
+func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
+	if *wd == nil {
+		w.WriteNil()
+		return
 	}
-	w.WriteArrayEnd()
+	w.WriteObjectStart()
+	w.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
+	w.WriteMore()
+	w.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
+	w.WriteMore()
+	w.WriteObjectField("address").WriteHex((*wd).Address[:])
+	w.WriteMore()
+	w.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
+	w.WriteObjectEnd()
 }
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.

@@ -433,6 +433,12 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 			}, nil)
 			return RPCMarshalBlock(wb, true, false)
 		}()},
+		{"withdrawals pointer to nil slice", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			var none types.Withdrawals // non-nil pointer, nil slice: renders null, not []
+			b.Withdrawals = &none
+			return b
+		}()},
 		{"nil withdrawals", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
 			b.Withdrawals = nil
