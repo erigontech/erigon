@@ -338,6 +338,9 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
+	if merr := PremergeDeferredUpdates(cw.trie.branchEncoder.deferred); merr != nil {
+		return fmt.Errorf("fork[%x]: child %x premerge: %w", path, nib, merr)
+	}
 	bit := uint32(1) << nib
 	touched.Or(uint32(cw.trie.touchMap[0]) & bit)
 	present.Or(uint32(cw.trie.afterMap[0]) & bit)
