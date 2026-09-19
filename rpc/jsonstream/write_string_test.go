@@ -88,10 +88,7 @@ func TestWriteStringFastMatchesJsoniter(t *testing.T) {
 // field name comes from a source literal or a hex string, so writeObjectFieldFast
 // does not scan for them.
 func TestWriteObjectFieldFastMatchesJsoniter(t *testing.T) {
-	for _, name := range parityCases() {
-		if escapeIndex(name) < len(name) {
-			continue
-		}
+	for _, name := range escapeFreeCases() {
 		want := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
 		want.WriteObjectField(name)
 
