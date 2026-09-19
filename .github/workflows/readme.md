@@ -404,3 +404,40 @@ All `qa-*` workflows run on self-hosted runners and upload results to a centrali
 | **Result upload** | `upload_test_results.py` – records repo, commit, branch, chain, runner, db_version, outcome |
 | **DB lifecycle** | `pause_production.py` / `resume_production.py` wrap tests that need exclusive DB access |
 | **Artifacts** | Logs, metric plots (PNG), FD-leak analysis, pprof profiles, HDR histogram reports |
+
+### Release QA reference data
+
+Before creating `release/N.N`, provision the release-specific reference on each
+QA runner below. These are separate local databases, not a shared directory.
+
+| Runner labels (in addition to `self-hosted, qa`) | Reference under `/opt/erigon-versions/` |
+|---|---|
+| `Ethereum, rpc-integration-commitment` | `reference-version-N.N` |
+| `Gnosis, rpc-integration` | `gnosis-reference-version-N.N` |
+| `Ethereum, rpc-latest-erigon` | `reference-version-N.N` |
+| `Ethereum, rpc-performance` | `reference-version-N.N` |
+
+1. Use the [QA database producer](https://github.com/erigontech/erigon-qa/tree/main/test_system/db-producer)
+   to create or import a synced production that is compatible with the release.
+2. Register that production with `PUT /reference`, passing its `id` and the
+   release-specific `link_name` from the table. Do not point a release reference
+   at the moving `reference-version` link. Keep the production's `production.ini`
+   alongside its `datadir`.
+3. Check each runner before cutting the branch. For example:
+
+   ```sh
+   python3 .github/workflows/scripts/check_qa_reference.py --branch release/3.7 --chain mainnet
+   ```
+
+   Use `--chain gnosis` on the Gnosis runner. The check requires a non-empty,
+   readable `datadir/chaindata/mdbx.dat`, a `datadir/snapshots` directory and
+   readable `production.ini` metadata with `production.erigon_repo_commit`.
+   This is a file-readiness check, not a database integrity or version check.
+4. Run **Create release branch**. Both normal and dry runs check one runner from
+   each pool before branch creation. If a pool has several runners, provision
+   every runner; each RPC job also checks its own files before starting work.
+
+If the release branch already exists, provision the missing references and rerun
+the failed QA jobs. No branch recreation or code revert is needed. The checks
+do not create databases, change reference links, fall back to another version,
+or skip tests when data is missing.

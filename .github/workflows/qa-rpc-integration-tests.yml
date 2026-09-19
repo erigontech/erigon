@@ -74,20 +74,11 @@ jobs:
           source .github/workflows/scripts/rpc_version.env
           echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
 
-      - name: Set reference data dir based on branch
+      - name: Check QA reference data
         run: |
-          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="$GITHUB_BASE_REF"
-          if [ -z "$BRANCH" ]; then
-            BRANCH="$GITHUB_REF"
-            BRANCH="${BRANCH#refs/heads/}"
-          fi
-          if [[ "$BRANCH" == release/* ]]; then
-            VERSION="${BRANCH#release/}"
-            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${VERSION}/datadir" >> $GITHUB_ENV
-          else
-            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
-          fi
+          python3 .github/workflows/scripts/check_qa_reference.py \
+            --branch "${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}" \
+            --chain "$CHAIN" --github-env "$GITHUB_ENV"
 
       - name: Clean Erigon Build Directory
         run: |
@@ -99,6 +90,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
+        id: pause_production
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
@@ -158,7 +150,7 @@ jobs:
           mkdir -p "$TEST_RESULT_DIR" 2>/dev/null && printf '%s\n' "$SUMMARY" > "$TEST_RESULT_DIR/summary.md" || true
 
       - name: Resume the Erigon instance dedicated to db maintenance
-        if: always()
+        if: always() && steps.pause_production.outcome == 'success'
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
@@ -217,4 +209,3 @@ jobs:
               echo "Skipping cleanup: BUILD_TMP='${BUILD_TMP:-}' is empty or unexpected"
               ;;
           esac
-

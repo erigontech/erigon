@@ -497,6 +497,11 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
+.PHONY: test-qa-reference
+## test-qa-reference:                 test QA reference checks and workflow wiring
+test-qa-reference:
+	python3 .github/workflows/scripts/check_qa_reference.test.py
+
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
 	@$(GOLANGCI) run --config ./.golangci.yml
