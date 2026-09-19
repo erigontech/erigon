@@ -613,29 +613,14 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.versionedReads.SetHeader(addr, path, key, hdr)
 			panic(ErrDependency)
 		}
-		// The value we found may predate a SELFDESTRUCT that erased it. If a
-		// later transaction destroyed this account, the erased fields and
-		// slots must read as zero/empty even though the old value is still in
-		// the map — and asking only for the LATEST SelfDestruct entry is not
-		// enough, because re-creating the account writes SelfDestruct=false
-		// on top of the destruction. So scan the whole range between the
-		// value and this reader for a destruction. Per-path bound, matching
-		// validation: for storage/code/nonce a value written by the same tx
-		// that destroyed the account is erased too (scan includes that
-		// index); for balance and code hash the destroyer's own entries are
-		// what remains AFTER destruction (EIP-8246 keeps the balance, the
-		// code hash is reset) and must be served, so the scan starts above
-		// them. Incarnation alone cannot detect this: a plain CREATE bumps
-		// it without erasing storage. Record what we conclude, twice: the
-		// zero/empty value, stamped with the old entry's version so
-		// validation accepts it as long as nothing new is written there; and
-		// a SelfDestruct=true read of the destruction itself, so the
-		// conclusion is re-checked if that destruction is ever re-executed
-		// away.
-		if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath ||
-			path == CodeHashPath || path == BalancePath {
+		// A later revival can hide a destruct that wiped this field. Scan from
+		// the field's version, keeping the destroyer's own CodeHash cell.
+		// Balance is explicitly written or preserved, so it needs no wipe scan.
+		// Record the wiped value at its original version and the destruct as a
+		// separate dependency, so validation checks both.
+		if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath || path == CodeHashPath {
 			lo := hdr.Version.TxIndex
-			if path == CodeHashPath || path == BalancePath {
+			if path == CodeHashPath {
 				lo++
 			}
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, lo, s.txIndex, true); ok {
