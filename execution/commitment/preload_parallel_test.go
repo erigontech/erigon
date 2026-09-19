@@ -1079,7 +1079,7 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 	rootCost := estimatedEntryCost(rootKey, branchVal(0b110, valSz))
 	stepBudget := rootCost + minEntryBytes
 
-	n, done, err := p.Run(stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
+	n, done, err := p.Run(t.Context(), stepBudget, map[string][]byte{string(r1Key): r1Val}, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1096,7 +1096,7 @@ func TestContractTrunkPreloadParallel_DeferredDbHitSurvivesOverlayRotation(t *te
 		t.Fatalf("resolver called %d times, want 1 (the root wave alone): R1 must land in the db-hit partition, whose reserved bytes leave no file budget for R2", calls)
 	}
 
-	if _, done, err = p.Run(1<<20, nil, resolve, c, nil); err != nil {
+	if _, done, err = p.Run(t.Context(), 1<<20, nil, resolve, c, nil); err != nil {
 		t.Fatal(err)
 	} else if !done {
 		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
