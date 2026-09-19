@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/require"
@@ -884,4 +885,50 @@ func TestRollingV2Publisher_KeepsGenerationsWhoseNamesAreHeldInMerged(t *testing
 		_, err := os.Stat(filepath.Join(snapDir, oldName))
 		require.NoError(t, err, "%s must stay fetchable while its files are held", oldName)
 	}
+}
+
+// TestRollingV2Publisher_ReapsMergedOnceUnreferencedAndOld pins the two
+// conditions that release a held file. Both are needed: dropping it while
+// a retained generation still names it would make that generation
+// undeliverable, and dropping it the moment it falls out of the manifest
+// would race a consumer that is mid-fetch on the previous generation.
+func TestRollingV2Publisher_ReapsMergedOnceUnreferencedAndOld(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+	pub.SetMergedHold(time.Hour)
+
+	mergedDir := filepath.Join(snapDir, snaptype.MergedDirName, "domain")
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+
+	referenced := filepath.Join(mergedDir, "v1.0-accounts.0-1024.kv")
+	unreferencedFresh := filepath.Join(mergedDir, "v1.0-accounts.0-512.kv")
+	unreferencedOld := filepath.Join(mergedDir, "v1.0-accounts.0-256.kv")
+	for _, p := range []string{referenced, unreferencedFresh, unreferencedOld} {
+		require.NoError(t, os.WriteFile(p, []byte("held"), 0o644))
+	}
+	stale := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(unreferencedOld, stale, stale))
+
+	// Generation 0 names accounts.0-1024, so that file stays held even
+	// though a later generation drops it.
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x21), 0, nil)
+	require.NoError(t, err)
+
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 2048,
+		Name: "v1.0-accounts.0-2048.kv", TorrentHash: [20]byte{0x21, 0xcc},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv2, 0, nil)
+	require.NoError(t, err)
+
+	_, err = os.Stat(referenced)
+	require.NoError(t, err, "a retained generation still names this file")
+	_, err = os.Stat(unreferencedFresh)
+	require.NoError(t, err, "inside the hold, a mid-fetch consumer may still want it")
+	_, err = os.Stat(unreferencedOld)
+	require.True(t, os.IsNotExist(err), "unreferenced and past the hold — must be reaped")
 }

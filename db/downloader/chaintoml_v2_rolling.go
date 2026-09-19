@@ -47,11 +47,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 
@@ -228,6 +230,12 @@ type RollingV2Publisher struct {
 	history          []generationEntry // chronological, oldest first
 	delegationSource DelegationSource
 
+	// mergedHold is how long a file stays in the merged directory after
+	// the last generation naming it is gone. It covers the window in
+	// which a consumer that fetched the previous generation is still
+	// working through the files it named. Zero means defaultMergedHold.
+	mergedHold time.Duration
+
 	// enrFP is an explicit ENR-fingerprint override. When empty,
 	// resolveENRFP falls back to downloader.SelfENRFingerprint().
 	// Production leaves this empty (the Downloader carries the
@@ -374,6 +382,56 @@ func (r *RollingV2Publisher) SetContentUCANMinter(fn ContentUCANMinterFn) {
 // SetENRFingerprint sets an explicit ENR fingerprint, overriding the
 // downloader-carried one. Used by the cold-start helper, the harness,
 // and tests — production leaves it unset (the Downloader carries it).
+// defaultMergedHold is sized off the path a consumer takes to notice a
+// merge: one manifest republish, one ENR rescan, one sidecar fetch. That
+// is a few minutes in practice; the default leaves an order of magnitude.
+const defaultMergedHold = 30 * time.Minute
+
+// SetMergedHold overrides how long unreferenced files stay in the merged
+// directory.
+func (r *RollingV2Publisher) SetMergedHold(d time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mergedHold = d
+}
+
+// reapMergedLocked deletes held files that no retained generation names
+// and that have sat unreferenced for longer than the hold. Caller must
+// hold r.mu.
+func (r *RollingV2Publisher) reapMergedLocked() {
+	mergedRoot := filepath.Join(r.snapDir, snaptype.MergedDirName)
+	hold := r.mergedHold
+	if hold <= 0 {
+		hold = defaultMergedHold
+	}
+
+	referenced := make(map[string]struct{})
+	for _, gen := range r.history {
+		for name := range gen.names {
+			referenced[snapshotinv.RelPathForName(name)] = struct{}{}
+		}
+	}
+
+	_ = filepath.WalkDir(mergedRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil //nolint:nilerr // a merged dir we cannot read is not worth failing a publish
+		}
+		rel, err := filepath.Rel(mergedRoot, path)
+		if err != nil {
+			return nil //nolint:nilerr
+		}
+		if _, ok := referenced[strings.TrimSuffix(rel, ".torrent")]; ok {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || time.Since(info.ModTime()) < hold {
+			return nil //nolint:nilerr
+		}
+		_ = dir.RemoveFile(path)
+		return nil
+	})
+}
+
 func (r *RollingV2Publisher) SetENRFingerprint(fp string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -841,6 +899,7 @@ func (r *RollingV2Publisher) Publish(
 	}
 	r.history = append(r.history, generationEntry{genID: genID, names: canonical})
 	r.evictInvalidLocked(enrFP, canonical)
+	r.reapMergedLocked()
 
 	return spec.InfoHash, nil
 }
