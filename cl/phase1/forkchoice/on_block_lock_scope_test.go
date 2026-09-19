@@ -535,10 +535,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 		done <- err
 	}()
 
-	// Taking f.mu proves the helper released it, so it is now parked on the token.
 	awaitSignal(t, locked, "the caller to take the fork-choice lock")
-	store.mu.Lock()
-	store.mu.Unlock()
 	cancel()
 
 	select {
