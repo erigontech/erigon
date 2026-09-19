@@ -298,6 +298,11 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 	}()
 
+	minTxGas := params.TxGas
+	if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+		minTxGas = params.TxBaseEIP2780
+	}
+
 	done := false
 
 LOOP:
@@ -322,8 +327,10 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		if gasPool.Gas() < params.TxGas {
-			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+		// Only the execution dimension bounds this exit: AA txns draw solely on the
+		// execution pool, so a state-gas exit would drop ones that still fit.
+		if gasPool.Gas() < minTxGas {
+			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
 		}
