@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -388,9 +389,10 @@ func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
 // must populate the cache and be byte-identical to the durable on-demand build that reads
 // the same parent commitment from history.
 func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	ctx := context.Background()
@@ -454,9 +456,10 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
 // module and asserts the cached witness bytes are identical to the on-demand build.
 func TestWitnessCacheBuilderParity(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, cancel := context.WithCancel(context.Background())
