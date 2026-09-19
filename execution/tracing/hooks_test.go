@@ -23,7 +23,7 @@ import "testing"
 // because the mask indexes a word per 64 opcodes.
 func TestOpcodeMask(t *testing.T) {
 	var nilMask *OpcodeMask
-	for op := 0; op < 256; op++ {
+	for op := range 256 {
 		if !nilMask.wants(byte(op)) {
 			t.Fatalf("nil mask must want opcode %#x", op)
 		}
@@ -35,7 +35,7 @@ func TestOpcodeMask(t *testing.T) {
 		keys = append(keys, op)
 	}
 	m := NewOpcodeMask(keys...)
-	for op := 0; op < 256; op++ {
+	for op := range 256 {
 		if got := m.wants(byte(op)); got != want[byte(op)] {
 			t.Fatalf("opcode %#x: wants=%v, want %v", op, got, want[byte(op)])
 		}
