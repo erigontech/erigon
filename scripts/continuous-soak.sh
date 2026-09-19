@@ -46,16 +46,22 @@ next_leg() {
 wait_publisher_tip() {
   # Wait until the publisher genuinely reaches hoodi tip: head must be
   # (a) > MIN_TIP_BLOCK — past bootstrap, far past 0, and (b) advancing
-  # by less than TIP_DELTA blocks between polls (chain-cadence, live).
-  # A head that has never moved past 0 is publisher-still-bootstrapping,
-  # NOT at-tip — leg-M consumers hitting that publisher get an empty
-  # manifest + zero seeded files.
-  local prev="" cur="" prev_dec=0 cur_dec=0
+  # at chain cadence, i.e. by at least MIN_TIP_DELTA and less than
+  # TIP_DELTA blocks between polls, for TIP_STABLE_POLLS in a row.
+  #
+  # A head that has never moved past 0 is publisher-still-bootstrapping.
+  # A head that does not move at all is stalled, NOT at-tip: snapshot
+  # bootstrap sets the head long before the node starts following the
+  # chain, and accepting that reading hands leg M a publisher tens of
+  # thousands of blocks behind, advertising files it does not have.
+  local prev="" cur="" prev_dec=0 cur_dec=0 stable=0
   local MIN_TIP_BLOCK="${MIN_TIP_BLOCK:-3000000}"
   local TIP_DELTA="${TIP_DELTA:-10}"
+  local MIN_TIP_DELTA="${MIN_TIP_DELTA:-1}"
+  local TIP_STABLE_POLLS="${TIP_STABLE_POLLS:-2}"
   local MAX_WAIT_MIN="${MAX_WAIT_MIN:-120}"
   local POLL_INTERVAL="${POLL_INTERVAL:-60}"
-  echo "[continuous-soak] waiting for publisher to reach hoodi tip (min>${MIN_TIP_BLOCK}, delta<${TIP_DELTA}, ${MAX_WAIT_MIN}m cap)..."
+  echo "[continuous-soak] waiting for publisher to reach hoodi tip (min>${MIN_TIP_BLOCK}, ${MIN_TIP_DELTA}<=delta<${TIP_DELTA} x${TIP_STABLE_POLLS}, ${MAX_WAIT_MIN}m cap)..."
   for i in $(seq 1 "$MAX_WAIT_MIN"); do
     cur=$(curl -sS -m 5 -X POST -H "Content-Type: application/json" \
       --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
@@ -76,11 +82,20 @@ wait_publisher_tip() {
     fi
     if [[ -n "$prev" ]]; then
       local delta=$(( cur_dec - prev_dec ))
-      if (( delta >= 0 && delta < TIP_DELTA )); then
-        echo "[continuous-soak] publisher at hoodi tip: head=$cur_dec delta=$delta (< $TIP_DELTA)"
-        return 0
+      if (( delta >= MIN_TIP_DELTA && delta < TIP_DELTA )); then
+        stable=$(( stable + 1 ))
+        if (( stable >= TIP_STABLE_POLLS )); then
+          echo "[continuous-soak] publisher at hoodi tip: head=$cur_dec delta=$delta (chain cadence x$stable)"
+          return 0
+        fi
+        echo "[continuous-soak] publisher head=$cur_dec delta=$delta at chain cadence ($stable/$TIP_STABLE_POLLS)"
+      elif (( delta < MIN_TIP_DELTA )); then
+        stable=0
+        echo "[continuous-soak] publisher head=$cur_dec not advancing (delta=$delta), still bootstrapping"
+      else
+        stable=0
+        echo "[continuous-soak] publisher head=$cur_dec (delta=$delta), still catching up"
       fi
-      echo "[continuous-soak] publisher head=$cur_dec (delta=$delta), still advancing"
     else
       echo "[continuous-soak] publisher head=$cur_dec, baseline for next poll"
     fi
