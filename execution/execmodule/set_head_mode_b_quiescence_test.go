@@ -61,8 +61,8 @@ func (u *writeProbeUnwinder) WaitForBuildAndMergeQuiescence(time.Duration) error
 	if err != nil {
 		return nil
 	}
+	defer tx.Rollback()
 	u.writeAcquired = true
-	tx.Rollback()
 	return nil
 }
 
