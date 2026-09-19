@@ -86,3 +86,57 @@ func TestRequeueForDownload(t *testing.T) {
 	require.Equal(t, 2, len(requested), "in-flight re-queue must not double-request")
 	mu.Unlock()
 }
+
+// TestDownloadFailedIsRetried pins that a failed download is re-issued
+// rather than abandoned. A file can fail because it is gone for good
+// (merged away by the publisher) or because the publisher has not
+// produced it yet; dropping it permanently strands the second case,
+// which is what left a consumer with 95 never-fetched segments while
+// the publisher was still catching up.
+func TestDownloadFailedIsRetried(t *testing.T) {
+	bus := newBusForTest()
+	storage := &recordingStorage{inv: snapshot.NewInventory()}
+	o := NewWithStorage(bus, storage, logger())
+	// A long canonical debounce isolates the retry under test: the
+	// canonical recompute also re-requests missing files, but only
+	// when a manifest arrives to trigger it.
+	o.canonicalDebounce = time.Hour
+	o.redownloadBackoff = 50 * time.Millisecond
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	var (
+		mu        sync.Mutex
+		requested []string
+	)
+	require.NoError(t, bus.Subscribe(func(e DownloadRequested) {
+		mu.Lock()
+		requested = append(requested, e.FileName)
+		mu.Unlock()
+	}))
+
+	stateFile := &snapshot.FileEntry{
+		Domain: testDomain, FromStep: 0, ToStep: 256,
+		Name: "v1.0-accounts.0-256.kv",
+	}
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-1",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateFile}},
+	})
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(requested) == 1
+	}, 2*time.Second, "initial DownloadRequested")
+
+	bus.Publish(DownloadFailed{
+		FileName: stateFile.Name,
+		Reason:   "no progress for 20m0s (0 bytes)",
+	})
+
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(requested) >= 2
+	}, 2*time.Second, "failed download to be re-issued without waiting on a new manifest")
+}

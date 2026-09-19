@@ -132,6 +132,14 @@ type Orchestrator struct {
 	peerFiles map[string]*peerFileClaim
 	pending   map[string]*snapshot.FileEntry
 
+	// A failed download cannot tell "gone for good" — merged away by
+	// the publisher — from "in the canonical set but not served yet",
+	// so a file a peer still claims is re-requested on a widening
+	// backoff instead of being abandoned. Guarded by peerMu.
+	redownloadBackoff  time.Duration
+	redownloadTimers   map[string]*time.Timer
+	redownloadAttempts map[string]int
+
 	// peerManifests records the CURRENT file set each trusted peer
 	// advertises — keyed by peerID, valued by (filename → entry). Each
 	// PeerManifestReceived replaces the peer's entry (peers publish
@@ -611,16 +619,18 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		logger = log.Root()
 	}
 	o := &Orchestrator{
-		bus:               bus,
-		storage:           storage,
-		log:               logger,
-		peerFiles:         make(map[string]*peerFileClaim),
-		pending:           make(map[string]*snapshot.FileEntry),
-		peerManifests:     make(map[string]map[string]*snapshot.FileEntry),
-		canonical:         make(map[string]*snapshot.FileEntry),
-		canonicalDebounce: defaultCanonicalDebounce,
-		stateDomainsSeen:  make(map[snapshot.Domain]struct{}),
-		phase1Files:       make(map[string]struct{}),
+		bus:                bus,
+		storage:            storage,
+		log:                logger,
+		peerFiles:          make(map[string]*peerFileClaim),
+		pending:            make(map[string]*snapshot.FileEntry),
+		redownloadTimers:   make(map[string]*time.Timer),
+		redownloadAttempts: make(map[string]int),
+		peerManifests:      make(map[string]map[string]*snapshot.FileEntry),
+		canonical:          make(map[string]*snapshot.FileEntry),
+		canonicalDebounce:  defaultCanonicalDebounce,
+		stateDomainsSeen:   make(map[snapshot.Domain]struct{}),
+		phase1Files:        make(map[string]struct{}),
 	}
 	o.hBlocksFlushed = o.onBlocksFlushed
 	o.hPeerManifestReceived = o.onPeerManifestReceived
@@ -724,6 +734,13 @@ func (o *Orchestrator) Close() error {
 	}
 	o.started = false
 	o.mu.Unlock()
+
+	o.peerMu.Lock()
+	for name, t := range o.redownloadTimers {
+		t.Stop()
+		delete(o.redownloadTimers, name)
+	}
+	o.peerMu.Unlock()
 
 	// Drain async handlers before unsubscribing so handlers can't be racing
 	// with our teardown.
@@ -1285,6 +1302,50 @@ func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
 	// initial set as far as it will go — fire the completion check so
 	// the publish gate is not held shut forever on an un-retried file.
 	o.maybeFireInitialDownloadsComplete()
+	o.scheduleRedownload(e.FileName)
+}
+
+const (
+	defaultRedownloadBackoff = time.Minute
+	redownloadBackoffMax     = 30 * time.Minute
+)
+
+// scheduleRedownload re-issues a failed download after a backoff that
+// widens with each attempt, for as long as a peer still claims the file.
+func (o *Orchestrator) scheduleRedownload(name string) {
+	backoff := o.redownloadBackoff
+	if backoff <= 0 {
+		backoff = defaultRedownloadBackoff
+	}
+
+	o.peerMu.Lock()
+	defer o.peerMu.Unlock()
+	if _, claimed := o.peerFiles[name]; !claimed {
+		return
+	}
+	if _, scheduled := o.redownloadTimers[name]; scheduled {
+		return
+	}
+	for i := 0; i < o.redownloadAttempts[name] && backoff < redownloadBackoffMax; i++ {
+		backoff *= 2
+	}
+	backoff = min(backoff, redownloadBackoffMax)
+	o.redownloadAttempts[name]++
+
+	o.log.Info("[flow] scheduling re-download after failure", "file", name, "in", backoff)
+	o.redownloadTimers[name] = time.AfterFunc(backoff, func() {
+		o.peerMu.Lock()
+		delete(o.redownloadTimers, name)
+		o.peerMu.Unlock()
+
+		o.mu.Lock()
+		running := o.started
+		o.mu.Unlock()
+		if !running {
+			return
+		}
+		o.RequeueForDownload(name)
+	})
 }
 
 // RequeueForDownload re-issues a DownloadRequested for a file the node
@@ -1557,9 +1618,14 @@ func (o *Orchestrator) recordExternalDownload(e DownloadComplete) {
 
 func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	o.log.Debug("[flow] onDownloadComplete", "file", e.FileName, "size", e.Size)
-	o.peerMu.RLock()
+	o.peerMu.Lock()
 	claim, ok := o.peerFiles[e.FileName]
-	o.peerMu.RUnlock()
+	delete(o.redownloadAttempts, e.FileName)
+	if t := o.redownloadTimers[e.FileName]; t != nil {
+		t.Stop()
+		delete(o.redownloadTimers, e.FileName)
+	}
+	o.peerMu.Unlock()
 	if !ok {
 		// Parallel-request artifact: SyncSnapshots'
 		// ReconcilePreverifiedAgainstDisk requests every preverified
