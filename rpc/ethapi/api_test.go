@@ -10,7 +10,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestNewRPCTransaction_NullSignature(t *testing.T) {
@@ -266,4 +269,203 @@ func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	require.Equal(t, types.BlockNonce{}, block.HeaderNoCopy().Nonce)
 	require.Equal(t, types.Bloom{}, block.HeaderNoCopy().Bloom)
 	require.Equal(t, wantHash, block.Hash())
+}
+
+// TestRPCMarshalBlockTransactionsJSON pins the wire shape of the transactions field
+// in each of its three forms, since the field is typed `any` and the element type
+// decides both the JSON and the per-transaction allocation count.
+func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	signer := types.LatestSignerForChainID(nil)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+
+	field := func(inclTx, fullTx bool) string {
+		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx))
+		require.NoError(t, err)
+		var m map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &m))
+		return string(m["transactions"])
+	}
+
+	require.Equal(t, `["`+txn.Hash().Hex()+`"]`, field(true, false),
+		"fullTx=false must emit a flat array of transaction hashes")
+
+	full := field(true, true)
+	require.Contains(t, full, `"hash":"`+txn.Hash().Hex()+`"`,
+		"fullTx=true must emit transaction objects")
+	require.Contains(t, full, `"nonce":"0x1"`)
+
+	require.Equal(t, `[]`, field(false, false),
+		"inclTx=false must still emit an empty array, not null and not an absent field")
+}
+
+// TestRPCMarshalBlockEmptyKeepsElementType pins the element type an empty block
+// carries: ots_getBlockTransactions type-asserts this field, so an empty block must
+// hold the same slice type a populated one does.
+func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
+	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
+
+	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
+	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
+}
+
+type jsonSink []byte
+
+func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return len(p), nil }
+
+// fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
+func fastJSON[T interface {
+	MarshalFastJSONTo(w jsonw.JSONWriter) error
+}](t *testing.T, v T) string {
+	t.Helper()
+	var b jsonSink
+	s := jsonstream.Get(&b)
+	defer jsonstream.Put(s)
+	require.NoError(t, v.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	return string(b)
+}
+
+func fullRPCHeader() *RPCHeader {
+	num := hexutil.U256(*uint256.NewInt(0x1234))
+	diff := hexutil.U256(*uint256.NewInt(0x11))
+	baseFee := hexutil.U256(*uint256.NewInt(0x7))
+	hash := common.HexToHash("0xaabb")
+	miner := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	nonce := types.BlockNonce{1, 2, 3, 4, 5, 6, 7, 8}
+	bloom := types.Bloom{9, 8, 7}
+	quantity := hexutil.Uint64(0x20)
+	root := common.HexToHash("0xccdd")
+	seal := hexutil.Bytes{0xbe, 0xef}
+	return &RPCHeader{
+		Number: &num, Hash: &hash, ParentHash: common.HexToHash("0x01"),
+		Nonce: &nonce, MixHash: common.HexToHash("0x02"), Sha3Uncles: common.HexToHash("0x03"),
+		LogsBloom: &bloom, StateRoot: common.HexToHash("0x04"), Miner: &miner, Difficulty: &diff,
+		ExtraData: hexutil.Bytes{0xde, 0xad}, GasLimit: 0x5208, GasUsed: 0x5207, Timestamp: 0x64,
+		TransactionsRoot: common.HexToHash("0x05"), ReceiptsRoot: common.HexToHash("0x06"),
+		BaseFeePerGas: &baseFee, WithdrawalsRoot: &root, BlobGasUsed: &quantity, ExcessBlobGas: &quantity,
+		ParentBeaconBlockRoot: &root, RequestsHash: &root, BlockAccessListHash: &root, SlotNumber: &quantity,
+		AuraSeal: &seal, AuraStep: &quantity,
+	}
+}
+
+// TestRPCHeaderMarshalFastJSONTo requires the streamed encoding to be byte-identical to
+// the reflection one; that equality is the only thing that makes it safe to swap in.
+func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
+	bare := fullRPCHeader()
+	bare.BaseFeePerGas, bare.WithdrawalsRoot, bare.BlobGasUsed, bare.ExcessBlobGas = nil, nil, nil, nil
+	bare.ParentBeaconBlockRoot, bare.RequestsHash, bare.BlockAccessListHash, bare.SlotNumber = nil, nil, nil, nil
+	bare.AuraSeal, bare.AuraStep = nil, nil
+
+	pending := fullRPCHeader()
+	pending.Hash, pending.Nonce, pending.Miner = nil, nil, nil
+
+	emptyExtra := fullRPCHeader()
+	emptyExtra.ExtraData = hexutil.Bytes{}
+
+	nilExtra := fullRPCHeader()
+	nilExtra.ExtraData = nil
+
+	for _, tc := range []struct {
+		name string
+		h    *RPCHeader
+	}{
+		{"all fields set", fullRPCHeader()},
+		{"optionals absent", bare},
+		{"pending drops hash, nonce and miner", pending},
+		{"empty extra data", emptyExtra},
+		{"nil extra data", nilExtra},
+		{"zero value", &RPCHeader{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := json.Marshal(tc.h)
+			require.NoError(t, err)
+			require.Equal(t, string(want), fastJSON(t, tc.h))
+		})
+	}
+}
+
+// TestRPCBlockMarshalFastJSONTo guards the whole block, not just the header: RPCBlock
+// embeds RPCHeader, so a missing block marshaller would promote the header's and emit a
+// block with no transactions at all.
+func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	signer := types.LatestSignerForChainID(nil)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
+	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	count := 1
+	for _, tc := range []struct {
+		name string
+		b    *RPCBlock
+	}{
+		{"hashes", RPCMarshalBlock(withTx, true, false)},
+		{"full transactions", RPCMarshalBlock(withTx, true, true)},
+		{"no transactions", RPCMarshalBlock(empty, true, false)},
+		{"uncle form", RPCMarshalBlock(empty, false, false)},
+		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
+		{"with withdrawals", func() *RPCBlock {
+			wb := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{
+				{Index: 1, Validator: 2, Address: to, Amount: 3},
+				{Index: 0, Validator: 0, Address: common.Address{}, Amount: 0},
+			}, nil)
+			return RPCMarshalBlock(wb, true, false)
+		}()},
+		{"withdrawals pointer to nil slice", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			var none types.Withdrawals // non-nil pointer, nil slice: renders null, not []
+			b.Withdrawals = &none
+			return b
+		}()},
+		{"nil withdrawals", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Withdrawals = nil
+			return b
+		}()},
+		{"typed nil hash slice", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			var none []common.Hash
+			b.Transactions = none // typed nil: a non-nil any that json renders as null
+			return b
+		}()},
+		{"nil uncles", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Uncles = nil
+			return b
+		}()},
+		{"otterscan shape", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.TransactionCount = count
+			b.LogsBloom = nil
+			return b
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := json.Marshal(tc.b)
+			require.NoError(t, err)
+			require.Equal(t, string(want), fastJSON(t, tc.b))
+		})
+	}
 }
