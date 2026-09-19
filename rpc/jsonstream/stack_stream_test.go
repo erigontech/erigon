@@ -161,16 +161,18 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	ss.WriteMore() // Missing final value
 
 	// Incomplete JSON at this point
-	assert.Equal(t, `[1,2,`, string(ss.Buffer()))
+	// WriteMore is a no-op: the separator is written with the value that follows, so a
+	// value that never arrives leaves no dangling comma to repair.
+	assert.Equal(t, `[1,2`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.Depth()) // Array, Field
+	assert.Equal(t, 1, ss.Depth()) // Array
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
-	assert.Equal(t, `[1,2,null]`, string(ss.Buffer()))
+	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 }
 
@@ -393,7 +395,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 				ss.WriteInt(2)
 				ss.WriteMore()
 			},
-			expected: `[1,2,null]`,
+			expected: `[1,2]`,
 		},
 	}
 
@@ -798,7 +800,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 				ss.WriteInt(1)
 				ss.WriteMore() // Trailing comma
 			},
-			expected: `[1,null]`,
+			expected: `[1]`,
 		},
 		{
 			name: "nested object with missing field in inner object",
@@ -821,7 +823,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 				ss.WriteInt(42)
 				ss.WriteMore()
 			},
-			expected: `{"first":"value","second":42,"":""}`,
+			expected: `{"first":"value","second":42}`,
 		},
 		{
 			name: "multiple nested incomplete structures",
@@ -1061,7 +1063,7 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 			s.WriteInt(1)
 			s.WriteMore()
 			s.WriteArrayEnd()
-		}, `[1,null]`},
+		}, `[1]`},
 		{"field with no value", func(s *StackStream) {
 			s.WriteObjectStart()
 			s.WriteObjectField("a")
@@ -1325,4 +1327,87 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 				"a failed write must not accumulate, buffer holds %d", len(s.Buffer()))
 		})
 	}
+}
+
+// TestStackStream_SeparatorsAreAutomatic pins the contract: the stream writes the comma a
+// value needs, so a caller that never calls WriteMore still produces valid JSON.
+func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*StackStream)
+		want  string
+	}{
+		{"array elements", func(s *StackStream) {
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteInt(2)
+			s.WriteInt(3)
+			s.WriteArrayEnd()
+		}, `[1,2,3]`},
+		{"object fields", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteInt(1)
+			s.WriteObjectField("b")
+			s.WriteString("x")
+			s.WriteObjectEnd()
+		}, `{"a":1,"b":"x"}`},
+		{"nested containers", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("list")
+			s.WriteArrayStart()
+			s.WriteObjectStart()
+			s.WriteObjectField("k")
+			s.WriteInt(7)
+			s.WriteObjectEnd()
+			s.WriteObjectStart()
+			s.WriteObjectEnd()
+			s.WriteArrayEnd()
+			s.WriteObjectField("after")
+			s.WriteBool(true)
+			s.WriteObjectEnd()
+		}, `{"list":[{"k":7},{}],"after":true}`},
+		{"empty containers", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("o")
+			s.WriteObjectStart()
+			s.WriteObjectEnd()
+			s.WriteObjectField("a")
+			s.WriteArrayStart()
+			s.WriteArrayEnd()
+			s.WriteObjectEnd()
+		}, `{"o":{},"a":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ss := newStackStream(nil, InitialBufferSize)
+			tc.write(ss)
+			require.Equal(t, tc.want, string(ss.Buffer()))
+			require.True(t, json.Valid(ss.Buffer()))
+			require.True(t, ss.IsComplete())
+		})
+	}
+}
+
+// TestStackStream_WriteMoreIsNoop pins that WriteMore writes nothing, however often a
+// caller written against the old manual API calls it.
+func TestStackStream_WriteMoreIsNoop(t *testing.T) {
+	withMore := newStackStream(nil, InitialBufferSize)
+	withMore.WriteArrayStart()
+	withMore.WriteInt(1)
+	withMore.WriteMore()
+	withMore.WriteMore()
+	withMore.WriteInt(2)
+	withMore.WriteMore()
+	withMore.WriteArrayEnd()
+
+	without := newStackStream(nil, InitialBufferSize)
+	without.WriteArrayStart()
+	without.WriteInt(1)
+	without.WriteInt(2)
+	without.WriteArrayEnd()
+
+	require.Equal(t, `[1,2]`, string(without.Buffer()))
+	require.Equal(t, string(without.Buffer()), string(withMore.Buffer()),
+		"WriteMore must not change the bytes")
+	require.Equal(t, without.Depth(), withMore.Depth(), "WriteMore must not change the stack")
 }

@@ -43,8 +43,9 @@ const (
 // StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
 // It implements the Stream interface
 type StackStream struct {
-	stream *jsoniter.Stream
-	stack  []stackItem
+	wroteValue bool
+	stream     *jsoniter.Stream
+	stack      []stackItem
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
@@ -74,22 +75,25 @@ func (s *StackStream) Reset(out io.Writer) {
 	// later Flush without draining.
 	s.stream.Error = nil
 	s.stack = s.stack[:0]
+	s.wroteValue = false
 }
 
 // WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
 // FlushThreshold goes straight to the writer. Such a response commits the HTTP
 // status either way, since flushIfFull drains the buffer the moment this returns.
 func (s *StackStream) WriteRawBytes(content []byte) {
+	s.beforeValue()
 	if s.out != nil && len(content) >= FlushThreshold {
 		s.writeThrough(content)
-		s.popCommaOrField()
+		s.afterValue()
 		return
 	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 func (s *StackStream) WriteHex(b []byte) {
+	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
@@ -99,7 +103,7 @@ func (s *StackStream) WriteHex(b []byte) {
 	} else {
 		s.stream.SetBuffer(buf)
 	}
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
@@ -122,116 +126,136 @@ func (s *StackStream) writeThrough(content []byte) {
 
 // WriteRaw writes raw content to the stream
 func (s *StackStream) WriteRaw(content string) {
+	s.beforeValue()
 	s.stream.WriteRaw(content)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteNil writes a null value to the stream
 func (s *StackStream) WriteNil() {
+	s.beforeValue()
 	s.stream.WriteNil()
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteTrue writes a true value to the stream
 func (s *StackStream) WriteTrue() {
+	s.beforeValue()
 	s.stream.WriteTrue()
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteFalse writes a false value to the stream
 func (s *StackStream) WriteFalse() {
+	s.beforeValue()
 	s.stream.WriteFalse()
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteBool writes a boolean value to the stream
 func (s *StackStream) WriteBool(val bool) {
+	s.beforeValue()
 	s.stream.WriteBool(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteInt writes an int value to the stream
 func (s *StackStream) WriteInt(val int) {
+	s.beforeValue()
 	s.stream.WriteInt(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteInt8 writes an int8 value to the stream
 func (s *StackStream) WriteInt8(val int8) {
+	s.beforeValue()
 	s.stream.WriteInt8(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteInt16 writes an int16 value to the stream
 func (s *StackStream) WriteInt16(val int16) {
+	s.beforeValue()
 	s.stream.WriteInt16(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteInt32 writes an int32 value to the stream
 func (s *StackStream) WriteInt32(val int32) {
+	s.beforeValue()
 	s.stream.WriteInt32(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteInt64 writes an int64 value to the stream
 func (s *StackStream) WriteInt64(val int64) {
+	s.beforeValue()
 	s.stream.WriteInt64(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteUint writes an uint value to the stream
 func (s *StackStream) WriteUint(val uint) {
+	s.beforeValue()
 	s.stream.WriteUint(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteUint8 writes an uint8 value to the stream
 func (s *StackStream) WriteUint8(val uint8) {
+	s.beforeValue()
 	s.stream.WriteUint8(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteUint16 writes an uint16 value to the stream
 func (s *StackStream) WriteUint16(val uint16) {
+	s.beforeValue()
 	s.stream.WriteUint16(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteUint32 writes an uint32 value to the stream
 func (s *StackStream) WriteUint32(val uint32) {
+	s.beforeValue()
 	s.stream.WriteUint32(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteUint64 writes an uint64 value to the stream
 func (s *StackStream) WriteUint64(val uint64) {
+	s.beforeValue()
 	s.stream.WriteUint64(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteFloat32 writes a float32 value to the stream
 func (s *StackStream) WriteFloat32(val float32) {
+	s.beforeValue()
 	s.stream.WriteFloat32(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteFloat64 writes a float64 value to the stream
 func (s *StackStream) WriteFloat64(val float64) {
+	s.beforeValue()
 	s.stream.WriteFloat64(val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
+	s.beforeValue()
 	writeStringFast(s.stream, val)
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
 func (s *StackStream) WriteObjectStart() {
+	s.beforeValue()
 	s.stream.WriteObjectStart()
-	s.popCommaOrField()
+	s.consumeField()
+	s.wroteValue = false
 	s.push(ItemObject)
 }
 
@@ -240,12 +264,16 @@ func (s *StackStream) WriteObjectEnd() {
 	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
+	s.wroteValue = true
+	flushIfFull(s.stream)
 }
 
 // WriteArrayStart writes the start of an array and adds it to the stack
 func (s *StackStream) WriteArrayStart() {
+	s.beforeValue()
 	s.stream.WriteArrayStart()
-	s.popCommaOrField()
+	s.consumeField()
+	s.wroteValue = false
 	s.push(ItemArray)
 }
 
@@ -254,18 +282,19 @@ func (s *StackStream) WriteArrayEnd() {
 	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
+	s.wroteValue = true
+	flushIfFull(s.stream)
 }
 
-// WriteMore writes a comma for arrays and objects
-func (s *StackStream) WriteMore() {
-	s.stream.WriteMore()
-	s.push(ItemComma)
-}
+// WriteMore is a no-op: the stream emits the separator each value needs. It stays so a
+// caller written against the manual API still produces valid JSON.
+func (s *StackStream) WriteMore() {}
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) {
+	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
-	s.pop(ItemComma)
+	s.wroteValue = false
 	s.push(ItemField)
 }
 
@@ -285,14 +314,16 @@ func (s *StackStream) BufferAsString() (string, error) {
 
 // WriteEmptyArray writes an empty array into the underlying stream
 func (s *StackStream) WriteEmptyArray() {
+	s.beforeValue()
 	s.stream.WriteEmptyArray()
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteEmptyObject writes an empty object into the underlying stream
 func (s *StackStream) WriteEmptyObject() {
+	s.beforeValue()
 	s.stream.WriteEmptyObject()
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // IsComplete checks if the JSON structure is currently complete without open elements
@@ -353,6 +384,12 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	}
 
 	s.stack = s.stack[:targetDepth]
+	// Whatever was closed is a finished value in the container that survives, so the next
+	// member there needs a separator. These writes go straight to the stream, so nothing
+	// else records it.
+	if targetDepth < uint(stackLen) && targetDepth > 0 {
+		s.wroteValue = true
+	}
 	return s.stream.Error
 }
 
@@ -386,6 +423,30 @@ func (s *StackStream) pop(item stackItem) {
 // popCommaOrField pops ItemComma or ItemField after a value was written, and
 // hands the buffer over if that value filled it. Every writer goes through here,
 // so the bound holds for numbers and raw bytes as much as for strings.
+// beforeValue writes the separator the current container needs before its next member.
+func (s *StackStream) beforeValue() {
+	if s.wroteValue {
+		s.stream.WriteMore()
+	}
+}
+
+// consumeField drops the pending field name once its value has been written. A container
+// is a value too, so it consumes the field when it opens, not when it closes: otherwise
+// the field outlives its own value and ClosePending fills it with a second null.
+func (s *StackStream) consumeField() {
+	if n := len(s.stack); n > 0 && s.stack[n-1] == ItemField {
+		s.stack = s.stack[:n-1]
+	}
+}
+
+// afterValue records that the container now holds a member, so the next one is preceded
+// by a separator, and hands the buffer over if this value filled it.
+func (s *StackStream) afterValue() {
+	s.consumeField()
+	s.wroteValue = true
+	flushIfFull(s.stream)
+}
+
 func (s *StackStream) popCommaOrField() {
 	if len(s.stack) > 0 {
 		top := s.stack[len(s.stack)-1]
