@@ -63,7 +63,10 @@ func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
 		if s.prependSeparator {
-			s.inner.WriteMore()
+			// This stream writes a fragment into an object someone else opened, so its
+			// stack is empty and it cannot know a sibling precedes this field. The
+			// separator is the caller's assertion, not something to infer.
+			s.inner.MarkSeparatorPending()
 		}
 		s.inner.WriteObjectField(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
@@ -114,3 +117,5 @@ func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
 }
+
+func (s *LazyFieldStream) MarkSeparatorPending() { s.ensure(); s.inner.MarkSeparatorPending() }

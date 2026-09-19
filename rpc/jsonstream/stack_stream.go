@@ -43,9 +43,10 @@ const (
 // StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
 // It implements the Stream interface
 type StackStream struct {
-	wroteValue bool
-	stream     *jsoniter.Stream
-	stack      []stackItem
+	wroteValue     bool
+	forceSeparator bool
+	stream         *jsoniter.Stream
+	stack          []stackItem
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
@@ -76,6 +77,7 @@ func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Error = nil
 	s.stack = s.stack[:0]
 	s.wroteValue = false
+	s.forceSeparator = false
 }
 
 // WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
@@ -425,10 +427,18 @@ func (s *StackStream) pop(item stackItem) {
 // so the bound holds for numbers and raw bytes as much as for strings.
 // beforeValue writes the separator the current container needs before its next member.
 func (s *StackStream) beforeValue() {
-	if s.wroteValue {
+	// Only members of a container are separated; consecutive top-level values are not, so
+	// a stream that carries several responses does not get a comma between them. A
+	// fragment writer asserts the separator itself, since its stack is empty.
+	if s.forceSeparator || (s.wroteValue && len(s.stack) > 0) {
 		s.stream.WriteMore()
+		s.forceSeparator = false
 	}
 }
+
+// MarkSeparatorPending states that a sibling value precedes what is written next. It is for
+// a fragment written into a container this stream did not open, where the stack cannot say.
+func (s *StackStream) MarkSeparatorPending() { s.forceSeparator = true }
 
 // consumeField drops the pending field name once its value has been written. A container
 // is a value too, so it consumes the field when it opens, not when it closes: otherwise

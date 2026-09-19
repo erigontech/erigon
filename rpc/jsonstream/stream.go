@@ -66,6 +66,9 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
+	// MarkSeparatorPending states that a sibling value precedes what is written next, for a
+	// fragment written into a container this stream did not open.
+	MarkSeparatorPending()
 	WriteObjectField(fieldName string)
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
