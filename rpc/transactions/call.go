@@ -188,15 +188,13 @@ type ReusableCaller struct {
 	rules          *chain.Rules
 	callTimeout    time.Duration
 	message        *types.Message
-	ibs            *state.IntraBlockState
 }
 
 // Close returns the state built by the last DoCallWithNewGas to its pools.
 // r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
-	if r.ibs != nil {
-		r.ibs.Close()
-		r.ibs = nil
+	if ibs := r.evm.IntraBlockState(); ibs != nil {
+		ibs.Close()
 	}
 }
 
@@ -208,19 +206,20 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 // which is what building a new one would have to allocate again.
 // The precompiles come with it because a MovePrecompileTo override changes them.
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
-	if r.ibs == nil {
-		r.ibs = state.New(r.stateReader)
+	ibs := r.evm.IntraBlockState()
+	if ibs == nil {
+		ibs = state.New(r.stateReader)
 	} else {
-		r.ibs.Reset()
+		ibs.Reset()
 	}
 	if r.stateOverrides == nil {
-		return r.ibs, nil, nil
+		return ibs, nil, nil
 	}
 	precompiles := vm.ActivePrecompiledContracts(r.rules)
-	if err := r.stateOverrides.Override(r.ibs, precompiles, r.rules); err != nil {
+	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
 		return nil, nil, err
 	}
-	return r.ibs, precompiles, nil
+	return ibs, precompiles, nil
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
