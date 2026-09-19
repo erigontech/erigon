@@ -205,9 +205,10 @@ If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both 
 
 note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
 
-### HTTPS, HTTP2, and H2C
+### HTTPS and HTTP2
 
-Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
+Erigon serves HTTP/1.1 on the plain HTTP port and negotiates HTTP/2 over TLS via ALPN. Cleartext HTTP/2 is not
+served: a client that offers it, such as `curl --http2`, is answered on HTTP/1.1.
 
 To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`

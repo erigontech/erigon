@@ -627,3 +627,23 @@ func TestBranchCache_UnpinContractDoesNotResurrectTheTail(t *testing.T) {
 	require.Falsef(t, ok, "demote must miss, not republish the shadowed tail copy (got %q)", got)
 	require.Zero(t, c.PinnedCount())
 }
+
+func TestBranchCache_GetBeforeDoesNotEvict(t *testing.T) {
+	c := NewBranchCache(twoTailKeyCapacity)
+	key := []byte{0x1a, 0xb0, 0x00}
+	c.Put(key, []byte("canonical"), 3, 100)
+	for _, bound := range []uint64{0, 99, 100} {
+		_, _, ok := c.GetBefore(key, bound)
+		require.False(t, ok)
+	}
+	got, step, ok := c.GetBefore(key, 101)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), step)
+	require.Equal(t, []byte("canonical"), got)
+	got, _, ok = c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("canonical"), got)
+	c.Unwind(100)
+	_, _, ok = c.GetBefore(key, 101)
+	require.False(t, ok, "a local bound must still honor canonical invalidation")
+}
