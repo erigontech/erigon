@@ -574,7 +574,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, err
 	}
 	defer roTx.Rollback()
-	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithLocalCacheUnwind())
 	if err != nil {
 		return ValidationResult{}, err
 	}
@@ -639,12 +639,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// An invalid payload needs no additional cache cleanup. Validation never
-	// publishes its writes, staged-unwind reads cannot fill, and an unwind has
-	// already performed its own cache invalidation.
-	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
-	// its rollback. By design we do not persist validation-run writes — there
-	// is no Flush/Commit on this path.
+	// Validation writes and cache unwind remain local until adoption.
 	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {
 		validationStatus = ExecutionStatusMissingSegment

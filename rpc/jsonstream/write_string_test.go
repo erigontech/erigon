@@ -58,6 +58,16 @@ func parityCases() []string {
 	return cases
 }
 
+func escapeFreeCases() []string {
+	var cases []string
+	for _, val := range parityCases() {
+		if escapeIndex(val) == len(val) {
+			cases = append(cases, val)
+		}
+	}
+	return cases
+}
+
 // TestWriteStringFastMatchesJsoniter pins that bulk-copying escape-free runs
 // produces exactly what jsoniter's per-byte path would, including the escapes it
 // deliberately does not apply (HTML characters are left alone: Erigon uses
