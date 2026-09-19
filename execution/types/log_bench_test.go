@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -73,4 +74,78 @@ func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 			}
 		}
 	})
+}
+
+// marshalLogsOneGrow sizes the buffer once from the largest log, so the encode never
+// grows: one allocation per response, deterministic regardless of log order.
+func marshalLogsOneGrow(logs RPCLogs, w *jsonstream.StackStream) {
+	maxLen := 0
+	for _, l := range logs {
+		if n := l.JSONLen(); n > maxLen {
+			maxLen = n
+		}
+	}
+	buf := make([]byte, 0, maxLen)
+	w.WriteArrayStart()
+	for i, l := range logs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		buf = l.AppendJSON(buf[:0])
+		w.WriteRawBytes(buf)
+	}
+	w.WriteArrayEnd()
+}
+
+// marshalLogsNoHint lets append find its own steady state, with no size hint at all.
+func marshalLogsNoHint(logs RPCLogs, w *jsonstream.StackStream) {
+	var buf []byte
+	w.WriteArrayStart()
+	for i, l := range logs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		buf = l.AppendJSON(buf[:0])
+		w.WriteRawBytes(buf)
+	}
+	w.WriteArrayEnd()
+}
+
+func BenchmarkRPCLogsGrowStrategy(b *testing.B) {
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	for _, n := range []int{100, 1000, 10000} {
+		logs := make(RPCLogs, n)
+		for i := range logs {
+			// vary data size so the max is not the first log
+			logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32+(i%7)*16)}}
+		}
+		enc, _ := json.Marshal(logs)
+		size := int64(len(enc))
+		for _, v := range []struct {
+			name string
+			fn   func(RPCLogs, *jsonstream.StackStream)
+		}{
+			{"perLogGrow", func(l RPCLogs, s *jsonstream.StackStream) { _ = l.MarshalFastJSONTo(s) }},
+			{"oneGrow", marshalLogsOneGrow},
+			{"noHint", marshalLogsNoHint},
+		} {
+			b.Run(fmt.Sprintf("logs=%d/%s", n, v.name), func(b *testing.B) {
+				w := httptest.NewRecorder()
+				b.SetBytes(size)
+				b.ReportAllocs()
+				for b.Loop() {
+					w.Body.Reset()
+					s := jsonstream.Get(w)
+					v.fn(logs, s)
+					if err := s.Flush(); err != nil {
+						b.Fatal(err)
+					}
+					jsonstream.Put(s)
+				}
+				if w.Body.Len() != int(size) {
+					b.Fatalf("wrote %d bytes, want %d", w.Body.Len(), size)
+				}
+			})
+		}
+	}
 }
