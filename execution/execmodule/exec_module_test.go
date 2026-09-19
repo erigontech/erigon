@@ -221,9 +221,8 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
-	extendingHash, extendingNum, extendingSd := m.ForkValidator.ExtendingFork()
-	require.Equal(t, chainPack.Blocks[0].Hash(), extendingHash)
-	require.Equal(t, uint64(1), extendingNum)
+	extendingSd := m.ForkValidator.ValidatedState(chainPack.Blocks[0].Hash())
+	require.NotNil(t, extendingSd)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
