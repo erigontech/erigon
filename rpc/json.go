@@ -125,6 +125,9 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 	if err := fm.MarshalFastJSONTo(s); err != nil {
 		return nil, err
 	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
 	return bytes.Clone(s.Buffer()), nil
 }
 
@@ -136,7 +139,10 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
 		}
 		if fm, ok := result.(fastJSONMarshalerTo); ok {
-			return fm.MarshalFastJSONTo(rs)
+			if err := fm.MarshalFastJSONTo(rs); err != nil {
+				return err
+			}
+			return rs.Err() // a latched write error left a placeholder in the stream
 		}
 		if fm, ok := result.(fastJSONResult); ok {
 			enc, err := fm.MarshalFastJSON()
