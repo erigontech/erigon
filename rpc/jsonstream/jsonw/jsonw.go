@@ -39,3 +39,56 @@ type JSONWriter interface {
 	WriteMore()
 	WriteArrayEnd()
 }
+
+// Field writes the comma a following field needs, then the field name. The first field of
+// an object uses WriteObjectField directly.
+func Field(w JSONWriter, name string) JSONWriter {
+	w.WriteMore()
+	return w.WriteObjectField(name)
+}
+
+// Hex writes b as a hex string field, or null when b is nil.
+func Hex(w JSONWriter, name string, b []byte) {
+	if b == nil {
+		Field(w, name).WriteNil()
+		return
+	}
+	Field(w, name).WriteHex(b)
+}
+
+type textPtr[T any] interface {
+	*T
+	encoding.TextAppender
+}
+
+// Quoted writes *v as a quoted hex quantity, or null when v is nil.
+func Quoted[T any, P textPtr[T]](w JSONWriter, name string, v P) {
+	if v == nil {
+		Field(w, name).WriteNil()
+		return
+	}
+	Field(w, name).WriteQuotedText(v)
+}
+
+// Array writes a JSON array field exactly as the reflection encoder would: the pointer
+// decides whether the field appears, the slice decides its shape. A nil pointer omits the
+// field, a nil slice is null, an empty slice is []. So a field declared without omitempty
+// passes &field and is always present, and a *[]T with omitempty passes itself.
+func Array[S ~[]E, E any](w JSONWriter, name string, items *S, elem func(JSONWriter, *E)) {
+	if items == nil {
+		return
+	}
+	if *items == nil {
+		Field(w, name).WriteNil()
+		return
+	}
+	s := *items
+	Field(w, name).WriteArrayStart()
+	for i := range s {
+		if i > 0 {
+			w.WriteMore()
+		}
+		elem(w, &s[i])
+	}
+	w.WriteArrayEnd()
+}

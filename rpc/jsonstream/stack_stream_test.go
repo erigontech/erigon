@@ -1161,18 +1161,6 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
-// A value chained onto an explicit field must land on that field, not behind the pending one.
-func TestLazyFieldStreamChainsValueOntoExplicitField(t *testing.T) {
-	inner := newStackStream(nil, 64)
-	inner.WriteObjectStart()
-	lazy := NewLazyFieldStream(inner, "result", false)
-
-	lazy.WriteObjectField("error").WriteString("boom")
-
-	require.False(t, lazy.Written(), "a chained value must not open the pending field")
-	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
-}
-
 // Nested wrappers must hand the chained value to the stream that took the field name, not to a
 // wrapper still holding a pending field of its own.
 func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {

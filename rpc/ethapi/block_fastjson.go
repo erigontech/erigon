@@ -17,7 +17,6 @@
 package ethapi
 
 import (
-	"encoding"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/common"
@@ -43,89 +42,62 @@ func (h *RPCHeader) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 // struct declares them so the bytes match reflection exactly. The caller owns the braces,
 // which is how RPCBlock flattens the embedded header into its own object.
 func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
-
-	// The first field of the object opens it without a comma; every helper below writes
-	// the separator its field needs.
 	w.WriteObjectField("number")
 	if h.Number == nil {
 		w.WriteNil()
 	} else {
 		w.WriteQuotedText(h.Number)
 	}
-	writeHex(w, "hash", hashOrNull(h.Hash))
-	writeHex(w, "parentHash", h.ParentHash[:])
-	writeHex(w, "nonce", nonceOrNull(h.Nonce))
-	writeHex(w, "mixHash", h.MixHash[:])
-	writeHex(w, "sha3Uncles", h.Sha3Uncles[:])
-	writeHex(w, "logsBloom", bloomOrNull(h.LogsBloom))
-	writeHex(w, "stateRoot", h.StateRoot[:])
-	writeHex(w, "miner", addrOrNull(h.Miner))
-	field(w, "difficulty")
-	if h.Difficulty == nil {
-		w.WriteNil()
-	} else {
-		w.WriteQuotedText(h.Difficulty)
-	}
-	field(w, "extraData").WriteHex(h.ExtraData)
-	writeQuoted(w, "gasLimit", &h.GasLimit)
-	writeQuoted(w, "gasUsed", &h.GasUsed)
-	writeQuoted(w, "timestamp", &h.Timestamp)
-	writeHex(w, "transactionsRoot", h.TransactionsRoot[:])
-	writeHex(w, "receiptsRoot", h.ReceiptsRoot[:])
+	jsonw.Hex(w, "hash", hashOrNull(h.Hash))
+	jsonw.Hex(w, "parentHash", h.ParentHash[:])
+	jsonw.Hex(w, "nonce", nonceOrNull(h.Nonce))
+	jsonw.Hex(w, "mixHash", h.MixHash[:])
+	jsonw.Hex(w, "sha3Uncles", h.Sha3Uncles[:])
+	jsonw.Hex(w, "logsBloom", bloomOrNull(h.LogsBloom))
+	jsonw.Hex(w, "stateRoot", h.StateRoot[:])
+	jsonw.Hex(w, "miner", addrOrNull(h.Miner))
+	jsonw.Quoted(w, "difficulty", h.Difficulty)
+	jsonw.Field(w, "extraData").WriteHex(h.ExtraData)
+	jsonw.Quoted(w, "gasLimit", &h.GasLimit)
+	jsonw.Quoted(w, "gasUsed", &h.GasUsed)
+	jsonw.Quoted(w, "timestamp", &h.Timestamp)
+	jsonw.Hex(w, "transactionsRoot", h.TransactionsRoot[:])
+	jsonw.Hex(w, "receiptsRoot", h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
-		writeQuoted(w, "baseFeePerGas", h.BaseFeePerGas)
+		jsonw.Quoted(w, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		writeHex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
+		jsonw.Hex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
-		writeQuoted(w, "blobGasUsed", h.BlobGasUsed)
+		jsonw.Quoted(w, "blobGasUsed", h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		writeQuoted(w, "excessBlobGas", h.ExcessBlobGas)
+		jsonw.Quoted(w, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		writeHex(w, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
+		jsonw.Hex(w, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
-		writeHex(w, "requestsHash", h.RequestsHash[:])
+		jsonw.Hex(w, "requestsHash", h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
-		writeHex(w, "blockAccessListHash", h.BlockAccessListHash[:])
+		jsonw.Hex(w, "blockAccessListHash", h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
-		writeQuoted(w, "slotNumber", h.SlotNumber)
+		jsonw.Quoted(w, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
-		field(w, "auraSeal").WriteHex(*h.AuraSeal)
+		jsonw.Field(w, "auraSeal").WriteHex(*h.AuraSeal)
 	}
 	if h.AuraStep != nil {
-		writeQuoted(w, "auraStep", h.AuraStep)
+		jsonw.Quoted(w, "auraStep", h.AuraStep)
 	}
 }
 
-// field writes the comma a following field needs, then the field name. The first field of
-// an object uses WriteObjectField directly.
-func field(w jsonw.JSONWriter, name string) jsonw.JSONWriter {
-	w.WriteMore()
-	return w.WriteObjectField(name)
-}
-
-// writeHex writes b as hex, or null when it is nil, which is what a nil pointer field
-// marshals to. Go cannot express one generic over arrays of different lengths, so the
-// callers slice their own array and this takes the result.
-func writeHex(w jsonw.JSONWriter, name string, b []byte) {
-	if b == nil {
-		field(w, name).WriteNil()
-		return
-	}
-	field(w, name).WriteHex(b)
-}
-
-// The OrNull helpers turn a nil pointer into the nil slice writeHex renders as JSON null,
-// which is what a nil pointer field marshals to.
+// The OrNull helpers turn a nil pointer into the nil slice jsonw.Hex renders as null.
 func hashOrNull(h *common.Hash) []byte {
 	if h == nil {
 		return nil
@@ -152,13 +124,6 @@ func addrOrNull(a *common.Address) []byte {
 		return nil
 	}
 	return a[:]
-}
-
-// writeQuoted writes a hex quantity. Callers pass a field that is either addressable or
-// already known non-nil, so there is no nil case here: a typed nil in the interface would
-// not compare equal to nil anyway.
-func writeQuoted(w jsonw.JSONWriter, name string, v encoding.TextAppender) {
-	field(w, name).WriteQuotedText(v)
 }
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
@@ -191,53 +156,30 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectStart()
 	b.RPCHeader.WriteFieldsTo(w)
 
-	writeQuoted(w, "size", &b.Size)
+	jsonw.Quoted(w, "size", &b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		writeArray(w, "transactions", &hashes, writeHashElem)
+		jsonw.Array(w, "transactions", &hashes, writeHashElem)
 	case fullTxs != nil:
-		field(w, "transactions").WriteRawBytes(fullTxs)
+		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	writeArray(w, "uncles", &b.Uncles, writeHashElem)
+	jsonw.Array(w, "uncles", &b.Uncles, writeHashElem)
 
-	writeArray(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
+	jsonw.Array(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
-		field(w, "transactionCount").WriteRawBytes(txCount)
+		jsonw.Field(w, "transactionCount").WriteRawBytes(txCount)
 	}
 	if b.TotalDifficulty != nil {
-		writeQuoted(w, "totalDifficulty", b.TotalDifficulty)
+		jsonw.Quoted(w, "totalDifficulty", b.TotalDifficulty)
 	}
 	if calls != nil {
-		field(w, "calls").WriteRawBytes(calls)
+		jsonw.Field(w, "calls").WriteRawBytes(calls)
 	}
 	w.WriteObjectEnd()
 	return nil
-}
-
-// writeArray writes a JSON array field exactly as the reflection encoder would: the
-// pointer decides whether the field appears, the slice decides its shape. A nil pointer
-// omits the field, a nil slice is null, an empty slice is []. So a field declared without
-// omitempty passes &field and is always present, and a *[]T with omitempty passes itself.
-func writeArray[S ~[]E, E any](w jsonw.JSONWriter, name string, items *S, elem func(jsonw.JSONWriter, *E)) {
-	if items == nil {
-		return
-	}
-	if *items == nil {
-		field(w, name).WriteNil()
-		return
-	}
-	s := *items
-	field(w, name).WriteArrayStart()
-	for i := range s {
-		if i > 0 {
-			w.WriteMore()
-		}
-		elem(w, &s[i])
-	}
-	w.WriteArrayEnd()
 }
 
 func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }

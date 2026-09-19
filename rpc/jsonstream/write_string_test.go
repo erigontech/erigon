@@ -58,16 +58,6 @@ func parityCases() []string {
 	return cases
 }
 
-func escapeFreeCases() []string {
-	var cases []string
-	for _, val := range parityCases() {
-		if escapeIndex(val) == len(val) {
-			cases = append(cases, val)
-		}
-	}
-	return cases
-}
-
 // TestWriteStringFastMatchesJsoniter pins that bulk-copying escape-free runs
 // produces exactly what jsoniter's per-byte path would, including the escapes it
 // deliberately does not apply (HTML characters are left alone: Erigon uses
@@ -88,7 +78,10 @@ func TestWriteStringFastMatchesJsoniter(t *testing.T) {
 // field name comes from a source literal or a hex string, so writeObjectFieldFast
 // does not scan for them.
 func TestWriteObjectFieldFastMatchesJsoniter(t *testing.T) {
-	for _, name := range escapeFreeCases() {
+	for _, name := range parityCases() {
+		if escapeIndex(name) < len(name) {
+			continue
+		}
 		want := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
 		want.WriteObjectField(name)
 

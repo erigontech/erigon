@@ -478,9 +478,8 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
-// The empty transaction lists, shared so a block without transactions allocates none.
-// Each mode keeps the element type its populated form has, because ots_getBlockTransactions
-// type-asserts this field. Zero capacity makes sharing them safe.
+// ots_getBlockTransactions type-asserts this field, so each mode keeps the element type its
+// populated form has.
 var (
 	noTxHashes any = []common.Hash{}
 	noFullTxs  any = []*RPCTransaction{}
