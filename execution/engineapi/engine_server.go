@@ -270,7 +270,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
-) (*engine_types.PayloadStatus, error) {
+) (any, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -527,23 +527,49 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
-	if err != nil {
-		if errors.Is(err, rules.ErrInvalidBlock) {
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(err),
-			}, nil
+
+	if version < clparams.HezeVersion {
+		payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, nil)
+		if err != nil {
+			if errors.Is(err, rules.ErrInvalidBlock) {
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedError(err),
+				}, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+		s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
-	if payloadStatus.CriticalError != nil {
-		return nil, payloadStatus.CriticalError
+		ret := payloadStatus.(*engine_types.PayloadStatus)
+
+		if ret.CriticalError != nil {
+			return nil, ret.CriticalError
+		}
+
+		return ret, nil
+	} else {
+		payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, il)
+		if err != nil {
+			if errors.Is(err, rules.ErrInvalidBlock) {
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedError(err),
+				}, nil
+			}
+			return nil, err
+		}
+		s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+
+		ret := payloadStatus.(*engine_types.PayloadStatusV2)
+
+		if ret.CriticalError != nil {
+			return nil, ret.CriticalError
+		}
+
+		return ret, nil
 	}
 
-	return payloadStatus, nil
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -979,7 +1005,8 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-) (*engine_types.PayloadStatus, error) {
+	inclusionList types.Transactions,
+) (any, error) {
 	e.engineLogSpamer.RecordRequest()
 
 	header := block.Header()

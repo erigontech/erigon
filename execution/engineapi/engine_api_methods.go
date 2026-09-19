@@ -194,43 +194,71 @@ func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.BellatrixVersion)
+	resp, err := e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.BellatrixVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatus)
+	return ret, nil
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.CapellaVersion)
+	resp, err := e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.CapellaVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatus)
+	return ret, nil
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, nil, clparams.DenebVersion)
+	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, nil, clparams.DenebVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatus)
+	return ret, nil
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.ElectraVersion)
+	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.ElectraVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatus)
+	return ret, nil
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.GloasVersion)
+	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.GloasVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatus)
+	return ret, nil
 }
-
-// @todo extend newPayload function
 
 // NewPayloadV6 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests, block access list and inclusion list.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5
 func (e *EngineServer) NewPayloadV6(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion)
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes) (*engine_types.PayloadStatusV2, error) {
+	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.(*engine_types.PayloadStatusV2)
+	return ret, nil
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
