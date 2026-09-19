@@ -22,8 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 
@@ -41,7 +41,7 @@ func pageAligned(m []byte) []byte {
 	if len(m) == 0 {
 		return nil
 	}
-	start := reflect.ValueOf(m).Pointer()
+	start := uintptr(unsafe.Pointer(unsafe.SliceData(m)))
 	skip := int((osPageSize - start%osPageSize) % osPageSize)
 	if skip >= len(m) {
 		return nil
