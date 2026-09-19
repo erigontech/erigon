@@ -262,10 +262,15 @@ func (s *StackStream) WriteMore() {
 	s.push(ItemComma)
 }
 
-// WriteObjectField writes a field name for an object and adds it to the stack
+// WriteObjectField writes a field name for an object and adds it to the stack. A field
+// always supersedes the comma before it, so the top slot is rewritten rather than popped
+// and pushed: fields are the most frequent stack operation in an encode.
 func (s *StackStream) WriteObjectField(fieldName string) {
 	writeObjectFieldFast(s.stream, fieldName)
-	s.pop(ItemComma)
+	if n := len(s.stack); n > 0 && s.stack[n-1] == ItemComma {
+		s.stack[n-1] = ItemField
+		return
+	}
 	s.push(ItemField)
 }
 
@@ -387,10 +392,9 @@ func (s *StackStream) pop(item stackItem) {
 // hands the buffer over if that value filled it. Every writer goes through here,
 // so the bound holds for numbers and raw bytes as much as for strings.
 func (s *StackStream) popCommaOrField() {
-	if len(s.stack) > 0 {
-		top := s.stack[len(s.stack)-1]
-		if top == ItemComma || top == ItemField {
-			s.stack = s.stack[:len(s.stack)-1]
+	if n := len(s.stack); n > 0 {
+		if top := s.stack[n-1]; top == ItemComma || top == ItemField {
+			s.stack = s.stack[:n-1]
 		}
 	}
 	flushIfFull(s.stream)
