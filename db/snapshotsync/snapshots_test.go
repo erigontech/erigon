@@ -1698,7 +1698,7 @@ func TestMoveToMerged(t *testing.T) {
 		"v1.1-003597-003598-headers.seg",
 		filepath.Join("domain", "v2.0-accounts.0-256.kv"),
 	} {
-		held := filepath.Join(root, mergedDirName, rel)
+		held := filepath.Join(root, snaptype.MergedDirName, rel)
 		body, err := os.ReadFile(held)
 		require.NoError(t, err, "quarantined bytes must remain servable at %s", held)
 		require.Equal(t, "payload", string(body))
@@ -1710,6 +1710,6 @@ func TestMoveToMerged(t *testing.T) {
 	found, err := snaptype.ParseDir(root)
 	require.NoError(t, err)
 	for _, fi := range found {
-		require.NotContains(t, fi.Path, mergedDirName)
+		require.NotContains(t, fi.Path, snaptype.MergedDirName)
 	}
 }

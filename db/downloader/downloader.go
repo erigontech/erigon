@@ -2525,6 +2525,45 @@ func (d *Downloader) Delete(name string) error {
 	return err
 }
 
+// Supersede retires name from the canonical set without making its bytes
+// unfetchable. A peer that handshaked on an earlier manifest generation
+// asks for the file by info-hash, and that hash comes from the .torrent
+// metadata rather than the file's location, so the torrent is re-added
+// against a storage root in the merged directory — where the merge moved
+// the bytes. The canonical name is dropped, so nothing advertises it.
+//
+// A file whose metainfo is not loaded cannot be re-registered; it is
+// simply unseeded.
+func (d *Downloader) Supersede(name string) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	t, ok := d.torrentsByName[name]
+	if !ok {
+		return nil
+	}
+	infoHash := t.InfoHash()
+	infoBytes := t.Metainfo().InfoBytes
+
+	t.Drop()
+	g.MustDelete(d.torrentsByName, name)
+	delete(d.downloads, t)
+
+	if len(infoBytes) == 0 {
+		return nil
+	}
+
+	opts := d.makeAddTorrentOpts(infoHash)
+	opts.InfoBytes = infoBytes
+	opts.Storage = storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir: filepath.Join(d.snapDir(), snaptype.MergedDirName),
+	})
+	held, _ := d.torrentClient.AddTorrentOpt(opts)
+	held.SetDisplayName(name)
+	d.afterAdd(held)
+	return nil
+}
+
 func (d *Downloader) filePathForName(name string) string {
 	return filepath.Join(d.snapDir(), filepath.FromSlash(name))
 }

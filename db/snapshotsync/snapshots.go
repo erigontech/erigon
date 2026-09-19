@@ -1946,15 +1946,6 @@ func removeOldFilesWith(toDel []string, remove func(path string) error) (deleted
 	return deleted
 }
 
-// mergedDirName holds files a merge has superseded. Peers that
-// handshaked on an earlier manifest generation still ask for these by
-// info-hash, and the hash is fixed in the .torrent metadata rather than
-// derived from the current location, so moving the bytes here keeps them
-// servable from a storage root of the same name. Directory entries are
-// skipped by the ReadDir-based scans, which is what takes the file out of
-// the canonical set.
-const mergedDirName = ".merged"
-
 // moveToMerged moves superseded files under root's merged directory,
 // preserving each path relative to root because that relative path is the
 // torrent's info.Name. Returns the sources that were moved.
@@ -1969,7 +1960,7 @@ func moveToMerged(root string, toDel []string) (moved []string) {
 			_ = dir.RemoveFile(f + ".torrent")
 			continue
 		}
-		held := filepath.Join(root, mergedDirName, rel)
+		held := filepath.Join(root, snaptype.MergedDirName, rel)
 		if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
 			continue
 		}

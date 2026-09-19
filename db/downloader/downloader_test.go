@@ -449,3 +449,40 @@ func TestShouldEmitV2Generation(t *testing.T) {
 	// V1 unchanged and a V2 generation already exists → no-op republish.
 	assert.False(t, shouldEmitV2Generation(false, set))
 }
+
+// TestSupersedeKeepsSeedingFromMergedDir pins the contract that lets a
+// merged-over file stay deliverable: a peer that handshaked on an earlier
+// manifest generation asks for it by info-hash, and that hash lives in the
+// .torrent metadata rather than in the file's location. Superseding drops
+// the canonical name so nothing advertises the file, but re-registers the
+// same info-hash against the merged directory so the bytes still serve.
+func TestSupersedeKeepsSeedingFromMergedDir(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	name := "v1-000000-000001-headers.seg"
+
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), []byte("payload"), 0o644))
+	require.NoError(t, d.AddNewSeedableFile(t.Context(), name))
+
+	d.lock.Lock()
+	before, ok := d.torrentsByName[name]
+	d.lock.Unlock()
+	require.True(t, ok, "file must be seeded under its canonical name to begin with")
+	infoHash := before.InfoHash()
+
+	// The merge has moved the bytes; the torrent must follow them.
+	held := filepath.Join(test.dirs.Snap, snaptype.MergedDirName, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(held), 0o755))
+	require.NoError(t, os.Rename(filepath.Join(test.dirs.Snap, name), held))
+
+	require.NoError(t, d.Supersede(name))
+
+	d.lock.Lock()
+	_, stillNamed := d.torrentsByName[name]
+	d.lock.Unlock()
+	require.False(t, stillNamed, "a superseded file must not stay in the canonical name set")
+
+	_, serving := d.torrentClient.Torrent(infoHash)
+	require.True(t, serving,
+		"the info-hash peers hold must still resolve, or a stale-manifest peer can never fetch it")
+}

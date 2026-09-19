@@ -441,6 +441,15 @@ func IsSeedableExtension(name string) bool {
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
 const CaplinMergeLimit = 10_000
+
+// MergedDirName holds files a merge has superseded. Peers that
+// handshaked on an earlier manifest generation still ask for these by
+// info-hash, which lives in the .torrent metadata rather than being
+// derived from the file's location, so the bytes stay servable from a
+// storage root of this name. The ReadDir-based scans skip directories,
+// which is what takes the file out of the canonical set.
+const MergedDirName = ".merged"
+
 const Erigon2MinSegmentSize = 1_000
 
 var MergeSteps = []uint64{100_000, 10_000}
