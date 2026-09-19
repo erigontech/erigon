@@ -1946,6 +1946,13 @@ func removeOldFilesWith(toDel []string, remove func(path string) error) (deleted
 	return deleted
 }
 
+// MoveSupersededToMerged is moveToMerged for callers outside the package:
+// the merge and overlap-removal paths move a file's bytes before telling
+// the seeder, so the seeder can re-point the torrent instead of dropping it.
+func MoveSupersededToMerged(root string, toDel []string) (moved []string) {
+	return moveToMerged(root, toDel)
+}
+
 // moveToMerged moves superseded files under root's merged directory,
 // preserving each path relative to root because that relative path is the
 // torrent's info.Name. Returns the sources that were moved.

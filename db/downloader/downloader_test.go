@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -485,4 +486,49 @@ func TestSupersedeKeepsSeedingFromMergedDir(t *testing.T) {
 	_, serving := d.torrentClient.Torrent(infoHash)
 	require.True(t, serving,
 		"the info-hash peers hold must still resolve, or a stale-manifest peer can never fetch it")
+}
+
+// TestDeleteSupersedesWhenMergedCopyPresent pins the seam the merge path
+// relies on: the merge moves a superseded file's bytes into .merged and
+// then reports it deleted. The seeder must recognise that and keep the
+// info-hash resolvable, because peers holding the previous manifest
+// generation are still asking for it. A genuine delete — no merged copy —
+// must still drop the torrent.
+func TestDeleteSupersedesWhenMergedCopyPresent(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		mergedCopy  bool
+		stillServes bool
+	}{
+		{name: "superseded by merge", mergedCopy: true, stillServes: true},
+		{name: "genuine delete", mergedCopy: false, stillServes: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newDownloaderTest(t)
+			d := test.downloader
+			name := "v1-000000-000001-headers.seg"
+
+			require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), []byte("payload"), 0o644))
+			require.NoError(t, d.AddNewSeedableFile(t.Context(), name))
+
+			d.lock.Lock()
+			before := d.torrentsByName[name]
+			d.lock.Unlock()
+			require.NotNil(t, before)
+			infoHash := before.InfoHash()
+
+			if tc.mergedCopy {
+				held := filepath.Join(test.dirs.Snap, snaptype.MergedDirName, name)
+				require.NoError(t, os.MkdirAll(filepath.Dir(held), 0o755))
+				require.NoError(t, os.Rename(filepath.Join(test.dirs.Snap, name), held))
+			} else {
+				require.NoError(t, dir.RemoveFile(filepath.Join(test.dirs.Snap, name)))
+			}
+
+			require.NoError(t, d.Delete(name))
+
+			_, serving := d.torrentClient.Torrent(infoHash)
+			require.Equal(t, tc.stillServes, serving)
+		})
+	}
 }

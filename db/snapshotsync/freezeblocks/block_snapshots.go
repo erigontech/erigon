@@ -641,6 +641,11 @@ func (br *BlockRetire) MergeBlocks(
 	// stale per-step entries pointing at consolidated-away files.
 	var deletedSubChunks []string
 	captureDelete := func(ctx context.Context, names []string) error {
+		// Move before notifying: the seeder decides between dropping the
+		// torrent and re-pointing it at the merged copy by looking for the
+		// bytes there, so they have to have arrived first. The later
+		// close-and-unlink then finds nothing, which it treats as removed.
+		snapshotsync.MoveSupersededToMerged(snapshots.Dir(), names)
 		// Convert to basenames so the eventual NotifyOnFilesDelete →
 		// Provider.onDelete → inv.RemoveFile lookup matches the entry
 		// keys (Inventory stores basenames). merger.Merge passes the
@@ -657,6 +662,7 @@ func (br *BlockRetire) MergeBlocks(
 
 	// remove old garbage files
 	if err = snapshots.RemoveOverlaps(func(l []string) error {
+		snapshotsync.MoveSupersededToMerged(snapshots.Dir(), l)
 		for _, p := range l {
 			deletedSubChunks = append(deletedSubChunks, filepath.Base(p))
 		}

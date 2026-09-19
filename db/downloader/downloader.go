@@ -2500,6 +2500,14 @@ func (d *Downloader) DropTorrentByName(name string) {
 
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
 func (d *Downloader) Delete(name string) error {
+	// The merge moves a superseded file's bytes into the merged directory
+	// before reporting it deleted, so their presence is what distinguishes
+	// "consolidated away" from "gone". The former stays fetchable for peers
+	// still holding the previous manifest generation.
+	if _, err := os.Stat(filepath.Join(d.snapDir(), snaptype.MergedDirName, filepath.FromSlash(name))); err == nil {
+		return d.Supersede(name)
+	}
+
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	// The ordering here no longer matters. As long as the .torrent file is deleted and torrent
