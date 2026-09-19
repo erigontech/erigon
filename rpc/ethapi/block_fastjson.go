@@ -175,15 +175,10 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// the reflection encoder. That is done up front: the contract is that a marshaller
 	// reports failure before its first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
-	var fullTxs, withdrawals, txCount, calls []byte
+	var fullTxs, txCount, calls []byte
 	var err error
 	if !hashesOK && b.Transactions != nil {
 		if fullTxs, err = json.Marshal(b.Transactions); err != nil {
-			return err
-		}
-	}
-	if b.Withdrawals != nil {
-		if withdrawals, err = json.Marshal(b.Withdrawals); err != nil {
 			return err
 		}
 	}
@@ -213,8 +208,8 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 	writeHashArray(w, "uncles", b.Uncles)
 
-	if withdrawals != nil {
-		field(w, "withdrawals").WriteRawBytes(withdrawals)
+	if b.Withdrawals != nil {
+		writeWithdrawals(w, "withdrawals", b.Withdrawals)
 	}
 	if txCount != nil {
 		field(w, "transactionCount").WriteRawBytes(txCount)
@@ -242,6 +237,35 @@ func writeHashArray(w jsonw.JSONWriter, name string, hashes []common.Hash) {
 			w.WriteMore()
 		}
 		w.WriteHex(hashes[i][:])
+	}
+	w.WriteArrayEnd()
+}
+
+// writeWithdrawals writes the withdrawal list. Four fixed-width fields each, so it needs
+// no reflection; encoding it here keeps execution/types free of a JSON dependency.
+func writeWithdrawals(w jsonw.JSONWriter, name string, ws *types.Withdrawals) {
+	if ws == nil {
+		field(w, name).WriteNil()
+		return
+	}
+	field(w, name).WriteArrayStart()
+	for i, wd := range *ws {
+		if i > 0 {
+			w.WriteMore()
+		}
+		if wd == nil {
+			w.WriteNil()
+			continue
+		}
+		w.WriteObjectStart()
+		w.WriteObjectField("index").WriteQuotedText(&wd.Index)
+		w.WriteMore()
+		w.WriteObjectField("validatorIndex").WriteQuotedText(&wd.Validator)
+		w.WriteMore()
+		w.WriteObjectField("address").WriteHex(wd.Address[:])
+		w.WriteMore()
+		w.WriteObjectField("amount").WriteQuotedText(&wd.Amount)
+		w.WriteObjectEnd()
 	}
 	w.WriteArrayEnd()
 }

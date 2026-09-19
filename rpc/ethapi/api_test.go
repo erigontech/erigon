@@ -382,6 +382,18 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		{"no transactions", RPCMarshalBlock(empty, true, false)},
 		{"uncle form", RPCMarshalBlock(empty, false, false)},
 		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
+		{"with withdrawals", func() *RPCBlock {
+			wb := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{
+				{Index: 1, Validator: 2, Address: to, Amount: 3},
+				{Index: 0, Validator: 0, Address: common.Address{}, Amount: 0},
+			}, nil)
+			return RPCMarshalBlock(wb, true, false)
+		}()},
+		{"nil withdrawals", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Withdrawals = nil
+			return b
+		}()},
 		{"typed nil hash slice", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
 			var none []common.Hash
