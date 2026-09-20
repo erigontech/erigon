@@ -21,7 +21,6 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var (
@@ -101,6 +100,12 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+// Open writes the field this stream is holding and returns the stream that owns the buffer.
+func (s *LazyFieldStream) Open() *StackStream {
+	s.ensure()
+	return s.inner.(*StackStream)
+}
+
 func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 	s.ensure()
 	s.inner.WriteQuotedText(v)
@@ -110,7 +115,7 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.assertOpened(); s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
+func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
 	s.assertOpened()
 	return s.inner.WriteObjectField(name)
 }

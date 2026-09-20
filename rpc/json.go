@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 const (
@@ -115,7 +114,7 @@ type fastJSONResult interface {
 // implementation reports an error before its first call to w: once it writes, the stream already
 // holds part of the result and the response carries both result and error.
 type fastJSONMarshalerTo interface {
-	MarshalFastJSONTo(w jsonw.JSONWriter) error
+	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
 
 // marshalFastJSONTo encodes fm into a byte slice the caller owns.
@@ -134,12 +133,12 @@ func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
-	return writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+	return writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
 		if isNilPointer(result) {
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
 		}
 		if fm, ok := result.(fastJSONMarshalerTo); ok {
-			if err := fm.MarshalFastJSONTo(rs); err != nil {
+			if err := fm.MarshalFastJSONTo(rs.Open()); err != nil {
 				return err
 			}
 			return rs.Err() // a latched write error left a placeholder in the stream
@@ -158,7 +157,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 // writeLazyResponse writes the response envelope and lets write fill "result", which opens on its first value.
 // An error from write becomes "error", after closing whatever part of the result was written, and is returned
 // for the caller's metrics and logs.
-func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(jsonstream.Stream) error) error {
+func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(*jsonstream.LazyFieldStream) error) error {
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(vsn)
