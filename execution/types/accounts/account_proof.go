@@ -42,9 +42,9 @@ func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectStart()
 	w.WriteObjectField("address").WriteHex(r.Address[:])
 	jsonw.Array(w, "accountProof", &r.AccountProof, writeHexElem)
-	jsonw.Quoted(w, "balance", r.Balance)
+	jsonw.Text(w, "balance", r.Balance)
 	jsonw.Hex(w, "codeHash", r.CodeHash[:])
-	jsonw.Quoted(w, "nonce", &r.Nonce)
+	jsonw.Text(w, "nonce", &r.Nonce)
 	jsonw.Hex(w, "storageHash", r.StorageHash[:])
 	jsonw.Array(w, "storageProof", &r.StorageProof, writeStorProofElem)
 	w.WriteObjectEnd()
@@ -56,7 +56,7 @@ func writeHexElem(w jsonw.JSONWriter, b *hexutil.Bytes) { w.WriteHex(*b) }
 func writeStorProofElem(w jsonw.JSONWriter, sp *StorProofResult) {
 	w.WriteObjectStart()
 	w.WriteObjectField("key").WriteString(sp.Key)
-	jsonw.Quoted(w, "value", sp.Value)
+	jsonw.Text(w, "value", sp.Value)
 	jsonw.Array(w, "proof", &sp.Proof, writeHexElem)
 	w.WriteObjectEnd()
 }
