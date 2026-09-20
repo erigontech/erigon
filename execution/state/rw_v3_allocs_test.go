@@ -65,6 +65,8 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	cache.PutCommittedStorage(addr, key, make([]byte, 32))
 	cache.PutCommittedAccount(addr, &acc)
 	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
+	addrValue := addr.Value()
+	c3 := NewCachedReader3(stubCacheView{string(addrValue[:]): accEnc}, nil)
 
 	for _, tc := range []struct {
 		name string
@@ -77,23 +79,93 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
 		{"ReaderV3.ReadAccountIncarnation", 0, func() { _, _ = r.ReadAccountIncarnation(addr) }},
+		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addr) }}, // 0: answers from the encoded length
 
 		{"HistoryReaderV3.ReadAccountStorage", 0, func() { _, _, _ = hr.ReadAccountStorage(addr, key) }},
 		{"HistoryReaderV3.ReadAccountCode", 0, func() { _, _ = hr.ReadAccountCode(addr) }},
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
+		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addr) }},                           // 0: answers from the encoded length
 
 		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
 		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
 		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
+
+		{"CachedReader3.ReadAccountData", 1, func() { _, _ = c3.ReadAccountData(addr) }}, // 1: returns *accounts.Account
+		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addr) }},           // 0: answers from the encoded length
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)
 			require.Equal(t, tc.want, allocs, "%s: alloc count changed", tc.name)
 		})
 	}
+}
+
+// HasAccount must answer the same question ReadAccountData's nil check answered, both ways.
+func TestStateReader_HasAccount_Existence(t *testing.T) {
+	var acc accounts.Account
+	acc.Nonce = 1
+	accEnc := accounts.SerialiseV3(&acc)
+	present := accounts.InternAddress(common.Address{0x11})
+	absent := accounts.InternAddress(common.Address{0x22})
+	presentValue := present.Value()
+
+	for name, r := range map[string]StateReader{
+		"CachedReader3":   NewCachedReader3(stubCacheView{string(presentValue[:]): accEnc}, nil),
+		"ReaderV3":        NewReaderV3(execctx.NewTemporalTxStateGetter(addrTemporalTx{present: presentValue, val: accEnc})),
+		"HistoryReaderV3": NewHistoryReaderV3(addrHistTx{present: presentValue, val: accEnc}, 0),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				addr accounts.Address
+				want bool
+			}{{present, true}, {absent, false}} {
+				got, err := HasAccount(r, tc.addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, got)
+
+				data, err := r.ReadAccountData(tc.addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, data != nil, "HasAccount must agree with ReadAccountData")
+			}
+		})
+	}
+}
+
+// addrTemporalTx answers only for one address, so an absent account reads empty.
+type addrTemporalTx struct {
+	kv.TemporalTx
+	present common.Address
+	val     []byte
+}
+
+func (g addrTemporalTx) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if string(k) == string(g.present[:]) {
+		return g.val, 0, nil
+	}
+	return nil, 0, nil
+}
+func (g addrTemporalTx) GetLatestValSize(_ kv.Domain, k []byte) (int, bool, error) {
+	if string(k) == string(g.present[:]) {
+		return len(g.val), true, nil
+	}
+	return 0, false, nil
+}
+func (g addrTemporalTx) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+type addrHistTx struct {
+	kv.TemporalTx
+	present common.Address
+	val     []byte
+}
+
+func (m addrHistTx) GetAsOf(_ kv.Domain, key []byte, _ uint64) ([]byte, bool, error) {
+	if string(key) == string(m.present[:]) {
+		return m.val, true, nil
+	}
+	return nil, false, nil
 }
 
 func cacheReadTestAccount() *accounts.Account {
