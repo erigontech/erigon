@@ -464,4 +464,10 @@ func TestExecutionPayloadEnvelopeHashSSZRejectsIncompleteEnvelope(t *testing.T) 
 	require.Error(t, errNilMessage)
 	_, errNilPayload := (&SignedExecutionPayloadEnvelope{Message: &ExecutionPayloadEnvelope{}}).HashSSZ()
 	require.Error(t, errNilPayload)
+	// A payload without execution requests reaches the second guard, which the case
+	// above short-circuits.
+	_, errNilRequests := (&SignedExecutionPayloadEnvelope{
+		Message: &ExecutionPayloadEnvelope{Payload: &Eth1Block{}},
+	}).HashSSZ()
+	require.Error(t, errNilRequests)
 }
