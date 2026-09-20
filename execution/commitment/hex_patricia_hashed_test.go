@@ -1225,7 +1225,7 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 	}
 
 	hph.keccak2.Reset()
-	cellData, err := hph.hashRow(row, depth)
+	cellData, err := hph.hashRow(row, depth, hph.keccak2)
 	require.NoError(t, err)
 
 	var newHash [32]byte
@@ -1265,7 +1265,7 @@ func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
 	hph.afterMap[0] = 0
 
 	hph.keccak2.Reset()
-	cellData, err := hph.hashRow(0, 0)
+	cellData, err := hph.hashRow(0, 0, hph.keccak2)
 	require.NoError(t, err)
 
 	for nibble := range 16 {
