@@ -25,7 +25,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -154,39 +154,24 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
-	if !hexText(v) && indexEscapable(buf[start+1:]) >= 0 {
-		// Not hex after all: hand the text to the escaping writer rather than emit it raw.
-		text := string(buf[start+1:])
-		s.stream.SetBuffer(buf[:start])
-		s.WriteString(text)
-		return
-	}
+	assertNoEscapes(buf[start+1:])
 	buf = append(buf, '"')
 	s.commit(buf, start)
 	s.popCommaOrField()
 }
 
-// hexText reports whether v's text is a hex quantity, which never needs escaping. Anything
-// else is scanned, so a result type from outside these packages still comes out valid JSON.
-func hexText(v encoding.TextAppender) bool {
-	switch v.(type) {
-	case hexutil.Bytes, *hexutil.Bytes,
-		hexutil.Uint, *hexutil.Uint, hexutil.Uint64, *hexutil.Uint64,
-		hexutil.U256, *hexutil.U256, hexutil.Big, *hexutil.Big,
-		common.Hash, *common.Hash, common.Address, *common.Address:
-		return true
+// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes out
+// unscanned, so a byte JSON would escape would leave the response malformed. Every appender the
+// RPC can answer with today is a hex quantity; this is what catches the next one that is not.
+func assertNoEscapes(text []byte) {
+	if !dbg.AssertEnabled {
+		return
 	}
-	return false
-}
-
-// indexEscapable reports the first byte JSON would have to escape, or -1.
-func indexEscapable(text []byte) int {
-	for i, c := range text {
+	for _, c := range text {
 		if c == '"' || c == '\\' || c < 0x20 {
-			return i
+			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
 		}
 	}
-	return -1
 }
 
 // commit takes the buffer a value was appended to, handing anything past FlushThreshold
