@@ -136,14 +136,15 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		return nil
 	}
 
-	// The `any` fields carry whatever concrete type their caller set, so they go through
-	// the reflection encoder. That is done up front: the contract is that a marshaller
-	// reports failure before its first write, never with half a result already streamed.
+	// An `any` field holding a type with no fast path falls back to the reflection encoder.
+	// That is done up front: the contract is that a marshaller reports failure before its
+	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
-	var fullTxs, txCount, calls []byte
+	full, fullOK := b.Transactions.([]*RPCTransaction)
+	var rawTxs, txCount, calls []byte
 	var err error
-	if !hashesOK {
-		if fullTxs, err = marshalIfSet(b.Transactions); err != nil {
+	if !hashesOK && !fullOK {
+		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
@@ -163,8 +164,10 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	switch {
 	case hashesOK:
 		writeHashes(w, "transactions", hashes)
-	case fullTxs != nil:
-		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
+	case fullOK:
+		jsonw.Array(w, "transactions", &full, writeTxElem)
+	case rawTxs != nil:
+		jsonw.Field(w, "transactions").WriteRawBytes(rawTxs)
 	}
 
 	writeHashes(w, "uncles", b.Uncles)
@@ -200,6 +203,9 @@ func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
 	jsonw.Field(w, name)
 	jsonstream.WriteHexes(s, hashes)
 }
+
+// writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
+func writeTxElem(w jsonw.JSONWriter, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(w) }
 
 func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
 	if *wd == nil {
