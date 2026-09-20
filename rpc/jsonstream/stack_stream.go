@@ -27,7 +27,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -178,7 +177,7 @@ func (s *StackStream) WriteHexUint(v uint64) {
 // WriteHexes writes hashes as an array of hex strings. The whole array is one value:
 // it grows the buffer once and runs the separator bookkeeping once, where a value write per
 // element would do both per hash.
-func (s *StackStream) WriteHexes(hashes []common.Hash) {
+func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, hashes S) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
