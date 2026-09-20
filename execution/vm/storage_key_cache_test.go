@@ -48,6 +48,13 @@ var internMemoWords = []uint256.Int{
 // compared by identity: the codebase keys maps and access lists on the pointer
 // inside, so a value-equal handle from another allocation is a different
 // account.
+// Warmup counts the tables no longer need in production: pooling hands every EVM a table
+// on its first op. The tests keep them as "enough ops to have filled it".
+const (
+	storageKeyCacheMinOps = 128
+	addressCacheMinOps    = 32
+)
+
 func assertMemoMatches[H comparable](t *testing.T, rounds int, memo func(*uint256.Int) H, intern func(*uint256.Int) H) {
 	t.Helper()
 	for round := range rounds {
@@ -70,28 +77,32 @@ func TestInternAddressMatchesInternAddress(t *testing.T) {
 		func(w *uint256.Int) accounts.Address { return accounts.InternAddress(w.Bytes20()) })
 }
 
-func TestStorageKeyCacheNotAllocatedForShortLivedEVM(t *testing.T) {
+// The table serves the very first op now: pooling means no EVM pays to build one, so
+// there is nothing left for a warmup threshold to protect.
+func TestInternCachesServeTheFirstOp(t *testing.T) {
 	evm := &EVM{}
 	word := uint256.NewInt(7)
-	for range storageKeyCacheMinOps {
-		evm.internStorageKey(word)
-	}
-	assert.Nil(t, evm.internCache)
-
 	evm.internStorageKey(word)
+	evm.internAddress(word)
 	assert.NotNil(t, evm.internCache)
+	assert.NotNil(t, evm.addrCache)
 }
 
-func TestAddressCacheNotAllocatedForShortLivedEVM(t *testing.T) {
-	evm := &EVM{}
-	word := uint256.NewInt(7)
-	for range addressCacheMinOps {
-		evm.internAddress(word)
-	}
-	assert.Nil(t, evm.addrCache)
+// A released table goes back to the pool and keeps serving: its entries stay valid
+// because interning is pure and a live handle keeps its entry alive.
+func TestReleasedInternCachesAreReused(t *testing.T) {
+	word := uint256.NewInt(0x1234)
 
-	evm.internAddress(word)
-	assert.NotNil(t, evm.addrCache)
+	first := &EVM{}
+	want := first.internStorageKey(word)
+	wantAddr := first.internAddress(word)
+	first.ReleaseInternCaches()
+	assert.Nil(t, first.internCache)
+	assert.Nil(t, first.addrCache)
+
+	second := &EVM{}
+	assert.Equal(t, want, second.internStorageKey(word))
+	assert.Equal(t, wantAddr, second.internAddress(word))
 }
 
 // poisonEntry replaces the table entry holding want with sentinel and returns
@@ -111,9 +122,7 @@ func poisonEntry[H comparable](handles []H, want, sentinel H) int {
 func TestInternAddressServesHitsFromTheTable(t *testing.T) {
 	evm := &EVM{}
 	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
-	for range addressCacheMinOps + 1 {
-		evm.internAddress(&word)
-	}
+	evm.internAddress(&word)
 	require.NotNil(t, evm.addrCache)
 
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))

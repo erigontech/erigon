@@ -31,9 +31,6 @@ func BenchmarkInternAddressHit(b *testing.B) {
 		words[i] = uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) & 0xffffffff, 0}
 	}
 	requireDistinctBuckets(b, words, addrIndex)
-	for range addressCacheMinOps + 1 {
-		evm.internAddress(&words[0])
-	}
 	for i := range words {
 		evm.internAddress(&words[i])
 	}
@@ -53,9 +50,6 @@ func BenchmarkInternStorageKeyHit(b *testing.B) {
 		words[i] = w
 	}
 	requireDistinctBuckets(b, words, slotIndex)
-	for range storageKeyCacheMinOps + 1 {
-		evm.internStorageKey(&words[0])
-	}
 	for i := range words {
 		evm.internStorageKey(&words[i])
 	}
@@ -77,5 +71,25 @@ func requireDistinctBuckets(b *testing.B, words []uint256.Int, index func(*uint2
 	if len(buckets) != len(words) {
 		b.Fatalf("%d words occupy %d buckets, so %d of them take the miss path",
 			len(words), len(buckets), len(words)-len(buckets))
+	}
+}
+
+// A short call is the case the per-EVM table could never serve: it ended before the
+// warmup threshold let the table exist, so every key went through unique.Make. Pooling
+// hands it a warm table on the first op instead.
+func BenchmarkInternStorageKeyShortCall(b *testing.B) {
+	words := make([]uint256.Int, 32)
+	for i := range words {
+		w := uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) * 0x165667b19e3779f9, 0}
+		w[3] = w[0] ^ w[1] ^ w[2] ^ uint64(i)
+		words[i] = w
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		evm := &EVM{}
+		for i := range words {
+			keySink = evm.internStorageKey(&words[i])
+		}
+		evm.ReleaseInternCaches()
 	}
 }
