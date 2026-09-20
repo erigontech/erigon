@@ -19,8 +19,10 @@ package types
 import (
 	"strconv"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
@@ -121,4 +123,48 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 		out = l.appendFastJSON(out)
 	}
 	return append(out, ']'), nil
+}
+
+// MarshalFastJSONTo writes the same bytes as appendFastJSON straight into the response
+// stream, so a result never needs a buffer of its own.
+func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	if l == nil {
+		w.WriteNil()
+		return nil
+	}
+	w.WriteObjectStart()
+	w.WriteObjectField("address").WriteHex(l.Address[:])
+	jsonw.Array(w, "topics", &l.Topics, writeTopic)
+	// A nil Data is "0x", not null, so it bypasses jsonw.Hex.
+	jsonw.Field(w, "data").WriteHex(l.Data)
+	jsonw.Text(w, "blockNumber", &l.BlockNumber)
+	jsonw.Hex(w, "transactionHash", l.TxHash[:])
+	jsonw.Text(w, "transactionIndex", &l.TxIndex)
+	jsonw.Hex(w, "blockHash", l.BlockHash[:])
+	jsonw.Text(w, "logIndex", &l.Index)
+	jsonw.Field(w, "removed").WriteBool(l.Removed)
+	jsonw.Text(w, "blockTimestamp", &l.BlockTimestamp)
+	w.WriteObjectEnd()
+	return nil
+}
+
+func writeTopic(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+
+// MarshalFastJSONTo writes the logs as the bare array eth_getLogs returns.
+func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	if logs == nil {
+		w.WriteNil()
+		return nil
+	}
+	w.WriteArrayStart()
+	for i, l := range logs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		if err := l.MarshalFastJSONTo(w); err != nil {
+			return err
+		}
+	}
+	w.WriteArrayEnd()
+	return nil
 }
