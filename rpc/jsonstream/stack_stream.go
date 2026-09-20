@@ -508,10 +508,10 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	}
 
 	s.stack = s.stack[:targetDepth]
-	// What was closed is a finished value in the surviving container, and these writes
-	// bypass afterValue, so record it here.
-	if targetDepth < uint(stackLen) && targetDepth > 0 {
-		s.separatorPending = true
+	// What was closed is a finished value, and these writes bypass afterValue, so record it
+	// here: a separator for the container that survives, none once the root is reached.
+	if targetDepth < uint(stackLen) {
+		s.separatorPending = targetDepth > 0
 	}
 	return s.stream.Error
 }
