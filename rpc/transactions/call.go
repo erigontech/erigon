@@ -17,6 +17,7 @@
 package transactions
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -407,7 +408,9 @@ func (m *memoReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.code[addr] = c
+	// Cloned before caching: a reader is free to hand back a buffer it reuses for the
+	// next address, which would rewrite an entry already in the map.
+	m.code[addr] = bytes.Clone(c)
 	return c, nil
 }
 
