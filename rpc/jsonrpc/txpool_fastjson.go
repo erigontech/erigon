@@ -46,16 +46,11 @@ func (c TxPoolContentFrom) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
+// A nil transaction writes itself as null, so the map's values go straight to the marshaller.
 func writeNonceMap(w jsonw.JSONWriter, byNonce map[string]*ethapi.RPCTransaction) {
-	writeSortedMap(w, byNonce, writeTxValue)
-}
-
-func writeTxValue(w jsonw.JSONWriter, txn *ethapi.RPCTransaction) {
-	if txn == nil {
-		w.WriteNil()
-		return
-	}
-	_ = txn.MarshalFastJSONTo(w)
+	writeSortedMap(w, byNonce, func(w jsonw.JSONWriter, txn *ethapi.RPCTransaction) {
+		_ = txn.MarshalFastJSONTo(w)
+	})
 }
 
 // writeSortedMap writes a map as a JSON object with its keys in the order encoding/json
@@ -103,25 +98,23 @@ func (v StorageValues) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		if i > 0 {
 			w.WriteMore()
 		}
-		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase.
+		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase. jsonw.Array
+		// writes the field's separator too, which an object's first field must not have.
 		w.WriteObjectField(hexutil.Encode(addrs[i][:]))
-		writeHexList(w, v[addrs[i]])
+		slots := v[addrs[i]]
+		if slots == nil {
+			w.WriteNil()
+			continue
+		}
+		w.WriteArrayStart()
+		for j := range slots {
+			if j > 0 {
+				w.WriteMore()
+			}
+			w.WriteHex(slots[j])
+		}
+		w.WriteArrayEnd()
 	}
 	w.WriteObjectEnd()
 	return nil
-}
-
-func writeHexList(w jsonw.JSONWriter, items []hexutil.Bytes) {
-	if items == nil {
-		w.WriteNil()
-		return
-	}
-	w.WriteArrayStart()
-	for i := range items {
-		if i > 0 {
-			w.WriteMore()
-		}
-		w.WriteHex(items[i])
-	}
-	w.WriteArrayEnd()
 }
