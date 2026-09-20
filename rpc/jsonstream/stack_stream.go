@@ -23,8 +23,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
-
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
@@ -107,31 +105,15 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.popCommaOrField()
 }
 
-// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
-// holding, so a marshaller can write values without an interface call each time.
-func Concrete(w jsonw.JSONWriter) *StackStream {
-	for {
-		switch t := w.(type) {
-		case *StackStream:
-			return t
-		case *LazyFieldStream:
-			t.ensure()
-			w = t.inner
-		default:
-			return nil
-		}
-	}
-}
-
 // HexesField writes a hash array as one field: one buffer growth for the whole array,
 // where a value write per element grows once per hash.
-func HexesField(w jsonw.JSONWriter, name string, hashes []common.Hash) {
-	jsonw.Field(w, name)
+func HexesField(s *StackStream, name string, hashes []common.Hash) {
+	Field(s, name)
 	if hashes == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return
 	}
-	WriteHexes(Concrete(w), hashes)
+	WriteHexes(s, hashes)
 }
 
 // WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
@@ -347,7 +329,7 @@ func (s *StackStream) WriteMore() {
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
+func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)

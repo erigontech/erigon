@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var bytesT = reflect.TypeFor[Bytes]()
@@ -46,12 +45,6 @@ func (b Bytes) MarshalText() ([]byte, error) {
 func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	dst = append(dst, HexPrefix...)
 	return hex.AppendEncode(dst, b), nil
-}
-
-// MarshalFastJSONTo writes b as a JSON string without the escape scan json does: hex never needs escaping.
-func (b Bytes) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	w.WriteHex(b)
-	return nil
 }
 
 // QuotedLen is the length of n bytes encoded by AppendQuoted.

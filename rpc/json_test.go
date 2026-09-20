@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -574,7 +573,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(jsonw.JSONWriter) error {
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
 	return errors.New("encode failed")
 }
 
@@ -688,7 +687,7 @@ func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.N
 
 type failingMidWrite struct{}
 
-func (failingMidWrite) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
 	w.WriteObjectField("balance")
 	w.WriteQuotedText(failingAppender{})
