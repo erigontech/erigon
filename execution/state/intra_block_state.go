@@ -27,6 +27,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -391,6 +392,33 @@ func (sdb *IntraBlockState) Close() {
 	sdb.versionedWrites.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
+}
+
+var ibsPool sync.Pool
+
+// GetPooled returns an IntraBlockState bound to r, reusing a pooled one when there is one.
+// PutPooled returns it. A caller that keeps nothing from the state after the call — one
+// eth_call, not a block — saves the maps and journal New allocates every time.
+func GetPooled(r StateReader) *IntraBlockState {
+	v := ibsPool.Get()
+	if v == nil {
+		return New(r)
+	}
+	sdb := v.(*IntraBlockState)
+	sdb.Reset()
+	sdb.stateReader = r
+	return sdb
+}
+
+// PutPooled returns sdb for reuse. Anything the caller still holds from it — a log, a
+// state object — belongs to the next user after this.
+func PutPooled(sdb *IntraBlockState) {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
+	}
+	sdb.Reset()
+	sdb.stateReader = nil
+	ibsPool.Put(sdb)
 }
 
 // The noMaterialize path never releases what it takes, so a pool draw there
