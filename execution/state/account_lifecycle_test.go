@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -146,4 +147,50 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 		writeFor(vm, a, BalancePath, accounts.NilKey, Version{TxIndex: 3}, *uint256.NewInt(1), true)
 		require.False(t, ibs.accountLifecycle(a))
 	})
+}
+
+// stubCacheView answers from a map keyed by the composite key, so a reader that reused a
+// buffer the cache had kept would read back the wrong slot.
+type stubCacheView map[string][]byte
+
+func (s stubCacheView) Get(k []byte) ([]byte, error)     { return s[string(k)], nil }
+func (s stubCacheView) GetCode(k []byte) ([]byte, error) { return s[string(k)], nil }
+
+// The composite key a storage read builds lives on the reader, so a read must not allocate
+// and consecutive reads of different slots must not bleed into each other.
+func TestCachedReader3StorageKeyIsReused(t *testing.T) {
+	addr1 := accounts.InternAddress(common.HexToAddress("0x01"))
+	addr2 := accounts.InternAddress(common.HexToAddress("0x02"))
+	slot1 := accounts.InternKey(common.HexToHash("0x0a"))
+	slot2 := accounts.InternKey(common.HexToHash("0x0b"))
+
+	key := func(a accounts.Address, k accounts.StorageKey) string {
+		av, kv := a.Value(), k.Value()
+		return string(av[:]) + string(kv[:])
+	}
+	view := stubCacheView{
+		key(addr1, slot1): {0x11},
+		key(addr2, slot2): {0x22},
+	}
+	r := NewCachedReader3(view, nil)
+
+	for _, tc := range []struct {
+		addr accounts.Address
+		slot accounts.StorageKey
+		want uint64
+	}{
+		{addr1, slot1, 0x11},
+		{addr2, slot2, 0x22},
+		{addr1, slot2, 0},
+		{addr1, slot1, 0x11},
+	} {
+		v, _, err := r.ReadAccountStorage(tc.addr, tc.slot)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, v.Uint64())
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _, _ = r.ReadAccountStorage(addr1, slot1)
+	})
+	require.Zero(t, allocs, "the composite key must not allocate")
 }
