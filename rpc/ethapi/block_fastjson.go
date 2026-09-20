@@ -49,14 +49,34 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	} else {
 		w.WriteQuotedText(h.Number)
 	}
-	jsonw.Hex(w, "hash", hashOrNull(h.Hash))
+	jsonw.Field(w, "hash")
+	if h.Hash == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Hash[:])
+	}
 	jsonw.Hex(w, "parentHash", h.ParentHash[:])
-	jsonw.Hex(w, "nonce", nonceOrNull(h.Nonce))
+	jsonw.Field(w, "nonce")
+	if h.Nonce == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Nonce[:])
+	}
 	jsonw.Hex(w, "mixHash", h.MixHash[:])
 	jsonw.Hex(w, "sha3Uncles", h.Sha3Uncles[:])
-	jsonw.Hex(w, "logsBloom", bloomOrNull(h.LogsBloom))
+	jsonw.Field(w, "logsBloom")
+	if h.LogsBloom == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.LogsBloom[:])
+	}
 	jsonw.Hex(w, "stateRoot", h.StateRoot[:])
-	jsonw.Hex(w, "miner", addrOrNull(h.Miner))
+	jsonw.Field(w, "miner")
+	if h.Miner == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Miner[:])
+	}
 	jsonw.Text(w, "difficulty", h.Difficulty)
 	jsonw.Field(w, "extraData").WriteHex(h.ExtraData)
 	jsonw.Text(w, "gasLimit", &h.GasLimit)
@@ -96,35 +116,6 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	if h.AuraStep != nil {
 		jsonw.Text(w, "auraStep", h.AuraStep)
 	}
-}
-
-// The OrNull helpers turn a nil pointer into the nil slice jsonw.Hex renders as null.
-func hashOrNull(h *common.Hash) []byte {
-	if h == nil {
-		return nil
-	}
-	return h[:]
-}
-
-func nonceOrNull(n *types.BlockNonce) []byte {
-	if n == nil {
-		return nil
-	}
-	return n[:]
-}
-
-func bloomOrNull(b *types.Bloom) []byte {
-	if b == nil {
-		return nil
-	}
-	return b[:]
-}
-
-func addrOrNull(a *common.Address) []byte {
-	if a == nil {
-		return nil
-	}
-	return a[:]
 }
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
@@ -183,22 +174,15 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
-func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
-
 // writeHashes writes a hash array as one value when the stream allows it, which costs one
 // buffer growth instead of one per hash.
 func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
-	s := jsonstream.Concrete(w)
-	if s == nil {
-		jsonw.Array(w, name, &hashes, writeHashElem)
-		return
-	}
-	if hashes == nil {
-		jsonw.Field(w, name).WriteNil()
-		return
-	}
 	jsonw.Field(w, name)
-	jsonstream.WriteHexes(s, hashes)
+	if hashes == nil {
+		w.WriteNil()
+		return
+	}
+	jsonstream.WriteHexes(jsonstream.Concrete(w), hashes)
 }
 
 func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
