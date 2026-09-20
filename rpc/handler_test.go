@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -133,7 +134,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			stream := jsonstream.New(&buf)
 
 			h := handler{}
-			h.runMethod(context.Background(), &msg, cb, args, stream)
+			_, _ = h.runMethod(context.Background(), &msg, cb, args, stream)
 
 			stream.Flush()
 
@@ -176,6 +177,36 @@ func TestRunMethodStreamable(t *testing.T) {
 
 	h := handler{}
 	assert.NotPanics(t, func() {
-		h.runMethod(ctx, &msg, cb, args, stream)
+		_, _ = h.runMethod(ctx, &msg, cb, args, stream)
 	})
+}
+
+// runMethod answers inside the stream, so the error it reports is the only signal left for the
+// failure metric and the "[rpc] served" warning.
+func TestRunMethodReportsAnsweredError(t *testing.T) {
+	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
+	for name, cb := range map[string]*callback{
+		"streamable": {
+			fn:         reflect.ValueOf(func(stream jsonstream.Stream) error { return errors.New("boom") }),
+			errPos:     0,
+			streamable: true,
+		},
+		"result encode failure": {
+			fn:     reflect.ValueOf(func() (any, error) { return failingFastJSON{}, nil }),
+			errPos: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			h := handler{}
+
+			answer, err := h.runMethod(context.Background(), &msg, cb, nil, stream)
+
+			require.Error(t, err)
+			require.Nil(t, answer, "the response is already in the stream")
+			require.NoError(t, stream.Flush())
+			require.Contains(t, buf.String(), `"error":`)
+		})
+	}
 }

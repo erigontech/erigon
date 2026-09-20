@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
@@ -72,14 +72,14 @@ func (e EthError) Error() string {
 
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
-	GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetBalance(address common.Address, blockRef rpc.BlockReference) (*uint256.Int, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockRef rpc.BlockReference) (*accounts.AccProofResult, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error)
 	TraceTransaction(hash common.Hash) ([]TransactionTrace, error)
-	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*uint256.Int, error)
 	BlockNumber() (uint64, error)
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error)
@@ -88,12 +88,13 @@ type RequestGenerator interface {
 	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
 	UnsubscribeAll()
 	TxpoolContent() (int, int, int, error)
+	TxpoolPendingHashesFrom(address common.Address) (map[common.Hash]struct{}, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
 	EstimateGas(args bind.CallMsg, blockNum BlockNumber) (uint64, error)
-	GasPrice() (*big.Int, error)
+	GasPrice() (*uint256.Int, error)
 	GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error)
 }
 
@@ -137,6 +138,8 @@ var Methods = struct {
 	AdminNodeInfo RPCMethod
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod
+	// TxpoolContentFrom represents the txpool_contentFrom method
+	TxpoolContentFrom RPCMethod
 	// OTSGetBlockDetails represents the ots_getBlockDetails method
 	OTSGetBlockDetails RPCMethod
 	// ETHNewHeads represents the eth_newHeads sub method
@@ -164,6 +167,7 @@ var Methods = struct {
 	ETHBlockNumber:            "eth_blockNumber",
 	AdminNodeInfo:             "admin_nodeInfo",
 	TxpoolContent:             "txpool_content",
+	TxpoolContentFrom:         "txpool_contentFrom",
 	OTSGetBlockDetails:        "ots_getBlockDetails",
 	ETHNewHeads:               "eth_newHeads",
 	ETHLogs:                   "eth_logs",

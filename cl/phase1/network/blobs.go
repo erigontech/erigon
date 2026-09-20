@@ -40,6 +40,34 @@ const (
 
 // This is just a bunch of functions to handle blobs
 
+// blobsIdentifiersFromRootedBlocks builds by-root identifiers from the roots the caller supplies;
+// see incompleteBlock for why the block cannot supply its own.
+func blobsIdentifiersFromRootedBlocks(blocks []incompleteBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
+	for _, item := range blocks {
+		block := item.block
+		if block.Version() < clparams.DenebVersion {
+			continue
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			log.Debug("[BlobsIdentifiers] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
+			continue
+		}
+		kzgCommitments := commitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
+		for i := range kzgCommitments {
+			ids.Append(&cltypes.BlobIdentifier{
+				BlockRoot: item.root,
+				Index:     uint64(i),
+			})
+		}
+	}
+	return ids, nil
+}
+
 // BlobsIdentifiersFromBlocks returns a list of blob identifiers from a list of blocks, which should then be forwarded to the network.
 func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)

@@ -166,10 +166,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 }
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+	// No blobHashes: an AA txn carries no blobs, and a non-nil slice would make
+	// the message look blob-carrying to EIP-4844 validation.
 	return &Message{
-		to:         accounts.NilAddress,
-		gasPrice:   *tx.FeeCap,
-		blobHashes: []common.Hash{},
+		to:       accounts.NilAddress,
+		gasPrice: *tx.FeeCap,
 	}, nil
 }
 

@@ -305,6 +305,20 @@ func TestRegisterTxTypeCollisions(t *testing.T) {
 	})
 }
 
+func TestRegisterTxTypeNilNew(t *testing.T) {
+	const nilNewType = 0x79
+
+	require.Panics(t, func() {
+		RegisterTxType(nilNewType, TxTypeSpec{})
+	})
+
+	// The guard runs before the registry write, so the rejected id stays free.
+	require.NotPanics(t, func() {
+		RegisterTxType(nilNewType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
+	})
+	t.Cleanup(func() { unregisterTxType(nilNewType) })
+}
+
 func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
 	const unknownType = 0x7f
 

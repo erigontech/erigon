@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -38,6 +39,7 @@ type ForkChoiceStorageReader interface {
 	Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
+	AnchorExecutionPayloadBuilderIndex() (uint64, bool)
 	Engine() execution_client.ExecutionEngine
 	FinalizedCheckpoint() solid.Checkpoint
 	FinalizedSlot() uint64
@@ -46,7 +48,9 @@ type ForkChoiceStorageReader interface {
 	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
+	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
+	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
@@ -54,6 +58,7 @@ type ForkChoiceStorageReader interface {
 		blockRoot common.Hash,
 		alwaysCopy bool,
 	) (*state.CachingBeaconState, error)
+	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
@@ -73,9 +78,12 @@ type ForkChoiceStorageReader interface {
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
+	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] IsPayloadVerified checks whether the execution payload was accepted by the EL.
+	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
+	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -87,15 +95,12 @@ type ForkChoiceStorageReader interface {
 	// (b) PeerDAS confirms all custody columns are locally available.
 	// Returns false if the envelope does not exist or blob data is missing.
 	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
-	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
-	GetHeadPayloadStatus() cltypes.PayloadStatus
 	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
-	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
-	ShouldBuildOnFull(head ForkChoiceNode) bool
+	// the full payload for the given head node at proposalSlot.
+	ShouldBuildOnFull(head ForkChoiceNode, proposalSlot uint64) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
@@ -133,10 +138,25 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+	OnBlockWithEquivocationCheck(
+		ctx context.Context,
+		block *cltypes.SignedBeaconBlock,
+		newPayload bool,
+		fullValidation bool,
+		checkDataAvaibility bool,
+	) error
+	ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error
 	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
+	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
+	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
+	ForgetExecutionPayloadEnvelopeForGossip(common.Hash, uint64)
+	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.

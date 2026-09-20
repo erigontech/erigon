@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -278,8 +279,16 @@ func (a *wsConnAdapter) encode(v any) error {
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
 	}
-	data, ok := v.(rawResponse)
-	if !ok {
+	var data []byte
+	switch r := v.(type) {
+	case rawResponse:
+		data = r
+	case rawBatch:
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		r.writeTo(s)
+		data = s.Buffer()
+	default:
 		marshaled, err := json.Marshal(v)
 		if err != nil {
 			return err
@@ -289,13 +298,12 @@ func (a *wsConnAdapter) encode(v any) error {
 	return a.conn.Write(ctx, websocket.MessageText, data)
 }
 
-func (a *wsConnAdapter) decode(v any) error {
+// readFrame returns the next message. Every websocket frame is one message, so
+// it can be read in one go and checked once.
+func (a *wsConnAdapter) readFrame() ([]byte, error) {
 	// Uses context.Background() — dead connections are detected via the ping loop.
 	_, data, err := a.conn.Read(context.Background())
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
+	return data, err
 }
 
 type websocketCodec struct {
@@ -313,7 +321,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn}
 	wc := &websocketCodec{
-		jsonCodec: NewFuncCodec(adapter, adapter.encode, adapter.decode).(*jsonCodec),
+		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
 		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{

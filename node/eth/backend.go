@@ -299,9 +299,6 @@ func New(
 	}
 
 	// Assemble the Ethereum object
-	if config.ExperimentalParallelCommitment {
-		statecfg.ExperimentalParallelCommitment = true
-	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
@@ -924,6 +921,7 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
@@ -1299,12 +1297,12 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder(db)
-		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			_ = temporalDb.OpenStateSnapshots(ctx)
 		}
 	}
 

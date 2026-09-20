@@ -166,10 +166,39 @@ jobs:
         name: fd-leak-analysis-${{ env.CHAIN }}-exec-from-zero
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
-    # Erigon has stopped by now, so the .torrent files it wrote for the state
-    # snapshots it built are final. Their infohashes are what the published
-    # preverified.toml lists, which makes the comparison a plain name-to-hash
-    # lookup rather than a re-hash of the datadir.
+    - name: List the files in the Erigon data directory
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      run: |
+        python3 - "$ERIGON_DATA_DIR" "$GITHUB_WORKSPACE/datadir-files-$CHAIN.txt" <<'EOF'
+        import datetime, os, sys
+        root, out = sys.argv[1], sys.argv[2]
+        rows = []
+        for base, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(base, name)
+                st = os.stat(path)
+                mtime = datetime.datetime.fromtimestamp(st.st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                rows.append((os.path.relpath(path, root).replace(os.sep, "/"), st.st_size, mtime))
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(f"# {len(rows)} files, {sum(r[1] for r in rows)} bytes in {root}\n")
+            fh.write("# size_bytes\tmtime_utc\tpath\n")
+            for path, size, mtime in sorted(rows):
+                fh.write(f"{size}\t{mtime}\t{path}\n")
+        EOF
+
+    - name: Upload the Erigon data directory file list
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: datadir-files-${{ env.CHAIN }}-exec-from-zero
+        path: |
+          ${{ github.workspace }}/datadir-files-${{ env.CHAIN }}.txt
+          ${{ env.ERIGON_DATA_DIR }}/snapshots/preverified.toml
+
+    # Without --rebuild, torrent_hashes reads only the .torrent files already in
+    # the datadir, which need not cover every snapshot on disk. --rebuild recreates
+    # them from the snapshot files, so every built snapshot gets an infohash
+    # comparable with the ones in the published preverified.toml.
     #
     # Restricted to the data files: accessors and indexes are salt-seeded and so
     # are not comparable across nodes (see STATE_DATA_EXTS in the compare script).
@@ -179,7 +208,7 @@ jobs:
       run: |
         set +e # Disable exit on error
 
-        "$GITHUB_WORKSPACE/build/bin/downloader" torrent_hashes \
+        "$GITHUB_WORKSPACE/build/bin/downloader" torrent_hashes --rebuild \
           --datadir "$ERIGON_DATA_DIR" --chain "$CHAIN" > "$GITHUB_WORKSPACE/hashes-$CHAIN.txt"
         hashes_exit_status=$?
 
