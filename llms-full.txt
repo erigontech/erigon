@@ -1993,9 +1993,14 @@ The choice is recorded per datadir as `references_in_commitment_branches` in `sn
 Nothing breaks, and nothing is rewritten eagerly:
 
 - **Existing referenced files stay readable.** Whether a commitment file carries shortened references is a property of *that file* — its version stamp and step range — not of the current setting. The commitment domain reads `v2.1` and `v2.2` alike.
-- **Conversion happens lazily, during merges.** When a merge has any referenced input, Erigon attaches a value transformer that expands the references; because new files are now written plain, the merged output lands as `v2.2`. Ordinary background merging therefore migrates the datadir on its own, with no operator action and no downtime.
+- **Conversion happens lazily, during merges — but only for files that merge again.** When a merge has any referenced input, Erigon attaches a value transformer that expands the references; because new files are written plain, the merged output lands as `v2.2`. No operator action, no downtime.
 
-For most operators upgrading from v3.5 the correct action is **none**. The commands below exist for operators who want the plain format sooner than merging will deliver it, and who are prepared to pay for it.
+Lazy conversion is not a guarantee that the datadir ends up fully plain. Two conditions have to hold, and neither is automatic:
+
+- **Plain writes must actually be selected for this datadir.** The compiled default is plain from v3.6, but `references_in_commitment_branches` in `snapshots/erigondb.toml` overrides it, and an explicit `true` survives the upgrade. While it is set, merges keep writing *referenced* output and nothing migrates, however long the node runs.
+- **The file has to take part in a later merge.** Under the default cap, merge spans stop at `stepSize * steps_in_frozen_file` (`findMergeRange` in `db/state/aggregator.go`), and a file that already covers the whole candidate range is skipped (`findMergeRangeInFiles` in `db/state/merge.go`). A commitment file already at the frozen span therefore has nothing left to merge into and stays referenced indefinitely. `--erigondb.domain.steps-in-frozen-file` raises that cap (or lifts it entirely), which lets frozen files merge again — but that is an explicit operator choice, not something an upgrade does.
+
+So the two paths below are not simply a faster route to where merging would arrive anyway: short of raising the merge cap yourself, they are the only route for files that are already frozen. For most operators upgrading from v3.5 the correct action is still **none** — referenced files stay readable, and the encoding is a performance property, not a correctness one. Take a path below only if you want plain across the whole datadir, and are prepared to pay for it.
 
 :::warning
 Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported** — the new snapshot and accessor formats are incompatible with v3.5. Back up your `--datadir` before taking either migration path below.
@@ -2003,7 +2008,7 @@ Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported
 
 ### Path 1 — re-download the snapshot set (`erigon seg reset`)
 
-Discards the local snapshot set and lets the next start pull the published v3.6 set, which is already plain.
+Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing in the published v3.6 form, which is already plain. Files whose names appear in the preverified set are kept; at the default `--local=true` the ones removed are those the set does not describe, plus any file whose `.torrent` carries the wrong infohash or cannot be read at all.
 
 ```bash
 erigon seg reset --datadir /your/datadir
@@ -2054,14 +2059,37 @@ Both encoding flags default to `false`, and `false` is the target state that mat
 
 The flag value is the **target** state, not a direction: the tool detects each file's current encoding and converts only what needs it. A file is skipped only when **both** axes already match the target — `st.keysV2 == TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze` — so a mismatch on either axis rewrites the file.
 
-**Is it reversible?** Yes — this is the one path with a real undo. The originals are moved to `snapshots/backup/domains/`, and `--restore` puts them back. Restore is filesystem-only and runs even when the datadir is too broken for Erigon to open it. Because a leftover backup blocks a second conversion, restore or clear `snapshots/backup/domains/` before converting again.
+**Is it reversible?** Yes — this is the one path with a real undo. The originals are moved to `snapshots/backup/domains/`, and `--restore` puts them back, removing from `snapshots/domain/` the converted files that had already been moved in. Restore is filesystem-only and runs even when the datadir is too broken for Erigon to open it, and it tolerates a partially completed restore, so it can be re-run. It then tries to remove the backup directory itself, which is what unblocks the next conversion — but a failure there is only logged as a warning and restore still reports success, so confirm `snapshots/backup/domains/` is actually gone — or at least empty, which is all pre-flight requires — before converting again. It does not touch `snapshots/rebuild/domain/`.
+
+:::danger
+A non-empty `snapshots/backup/domains/` blocks the next conversion, and pre-flight's own error message suggests `rm -rf`-ing it. **Do not.** If the run stopped before the converted files were moved into `snapshots/domain/`, the originals exist nowhere but that backup, and a re-run without `--continue` can wipe `snapshots/rebuild/domain/` on pre-flight — so clearing the backup and retrying can leave you with neither set. (If promotion had already finished, the converted files are live and only the originals go, which is survivable but still irreversible.) Empty it with `--restore` instead, and delete it by hand only after a run has printed `DONE` and you have started the node on the converted datadir.
+:::
+
+**Does it stick?** Only if this datadir is set to write plain. The command flips the referencing flag for the duration of the run and puts it back on exit; it never rewrites `snapshots/erigondb.toml` (an existing one is read verbatim and left alone). So on a datadir whose toml carries `references_in_commitment_branches = true`, the next Erigon start reads that `true` again and later merges re-shorten their output — you pay for the conversion and merging gradually undoes it. Check that field before converting.
 
 **Is the node stopped?** Yes. The command opens the chaindata DB read-write and applies migrations.
 
 **What does it cost?** Every commitment `.kv` file that is not already plain is rewritten and its accessors (`.kvi` / `.bt` / `.kvei`) rebuilt. Converted output is written into `snapshots/rebuild/domain/` while the originals are still in place, so at peak you need free space for a second copy of the commitment domain — use the `commitment` row of `erigon seg du --datadir <path> -v` to size it. Plain output is larger than the referenced input.
 
+### If a run is interrupted
+
+What to do depends on how far it got, and `snapshots/backup/domains/` is what tells you:
+
+- **Backup still empty — interrupted while converting.** The originals are untouched in `snapshots/domain/` and the partial output is in `snapshots/rebuild/domain/`. Resume with `--continue`, which keeps the shards that completed and redoes only the rest, or re-run without it to start over — pre-flight wipes `snapshots/rebuild/domain/` only when `--continue` is absent. Nothing is at risk either way.
+
+  `--continue` can refuse with a `non-contiguous shards` error even though nothing is wrong: it needs the finished shards to form an unbroken prefix of the input, and a file that was already at the target encoding produces no shard at all, which reads as a gap. Re-run without `--continue` when that happens. The originals have not moved yet, so the only cost is redoing the work.
+- **Backup non-empty — interrupted while moving the originals out or the converted files in.** The two cases look different on disk: the converted files are moved in only after every original has been moved out, so if `snapshots/domain/` still holds originals the run died while backing up, and if it holds converted files it died while promoting. Either way, take the copy described below, then run `--restore` and let it finish.
+
+  A non-empty backup does not always mean the conversion failed — it is also what you see if the run finished the rewrite and then failed to reload the files. Restoring in that case undoes a conversion that had actually completed. It costs time, not data.
+
+:::danger
+**Copy `snapshots/domain/`, `snapshots/backup/domains/` and `snapshots/rebuild/domain/` aside before you restore.** Restore decides what to sweep out of `snapshots/domain/` by comparing against the files it finds in the backup, and it cannot tell an original that had not been moved yet from a converted file that had already been moved in. If the run died midway through moving one step range's files out, restore deletes the part of that range still sitting in `snapshots/domain/` — and reports success.
+
+At that moment the only remaining copy of that range is the converted one in `snapshots/rebuild/domain/`, which the next conversion discards on pre-flight. So do not convert again straight after a restore: check first that every commitment step range present before the interrupted run is back in `snapshots/domain/`, and if one is short, recover it from your copy before running anything else.
+:::
+
 :::warning
-If a run is interrupted and you resume with `--continue`, you **must** pass the same `--squeeze` and `--nibbles.v2` values as the original run. A mismatch silently produces mixed-encoding output. Without `--continue`, a restart simply discards `snapshots/rebuild/domain/` and redoes the conversion from scratch.
+When you resume with `--continue`, you **must** pass the same `--squeeze` and `--nibbles.v2` values as the original run. A mismatch silently produces mixed-encoding output.
 :::
 
 ### Prerequisite for pre-3.4 step sizes (`erigon seg step-rebase`)
