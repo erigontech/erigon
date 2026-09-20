@@ -152,25 +152,25 @@ func (l *RPCLog) writeTo(s *jsonstream.StackStream) {
 	if l.Topics == nil {
 		s.WriteNil()
 	} else {
-		s.WriteHashArray(l.Topics)
+		s.WriteHexes(l.Topics)
 	}
 	// A nil Data is "0x", not null, so it is written rather than skipped.
 	s.WriteObjectField("data")
 	s.WriteHex(l.Data)
 	s.WriteObjectField("blockNumber")
-	s.WriteQuotedText(&l.BlockNumber)
+	s.WriteHexUint(uint64(l.BlockNumber))
 	s.WriteObjectField("transactionHash")
 	s.WriteHex(l.TxHash[:])
 	s.WriteObjectField("transactionIndex")
-	s.WriteQuotedText(&l.TxIndex)
+	s.WriteHexUint(uint64(l.TxIndex))
 	s.WriteObjectField("blockHash")
 	s.WriteHex(l.BlockHash[:])
 	s.WriteObjectField("logIndex")
-	s.WriteQuotedText(&l.Index)
+	s.WriteHexUint(uint64(l.Index))
 	s.WriteObjectField("removed")
 	s.WriteBool(l.Removed)
 	s.WriteObjectField("blockTimestamp")
-	s.WriteQuotedText(&l.BlockTimestamp)
+	s.WriteHexUint(uint64(l.BlockTimestamp))
 	s.WriteObjectEnd()
 }
 

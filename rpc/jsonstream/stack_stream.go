@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -109,10 +110,20 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.afterValue()
 }
 
-// WriteHashArray writes hashes as an array of hex strings. The whole array is one value:
+// WriteHexUint writes v as a quoted hex quantity. It is WriteQuotedText without the
+// interface: a quantity is four fields of every log, and boxing each one to call AppendText
+// costs more than the digits do.
+func (s *StackStream) WriteHexUint(v uint64) {
+	s.beforeValue()
+	buf := append(s.stream.Buffer(), '"', '0', 'x')
+	s.stream.SetBuffer(append(strconv.AppendUint(buf, v, 16), '"'))
+	s.afterValue()
+}
+
+// WriteHexes writes hashes as an array of hex strings. The whole array is one value:
 // it grows the buffer once and runs the separator bookkeeping once, where a value write per
 // element would do both per hash.
-func (s *StackStream) WriteHashArray(hashes []common.Hash) {
+func (s *StackStream) WriteHexes(hashes []common.Hash) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
