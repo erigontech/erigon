@@ -19,9 +19,9 @@ package types
 import (
 	"strconv"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
@@ -134,7 +134,7 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 	w.WriteObjectStart()
 	w.WriteObjectField("address").WriteHex(l.Address[:])
-	jsonw.Array(w, "topics", &l.Topics, writeTopic)
+	jsonstream.HexesField(w, "topics", l.Topics)
 	// A nil Data is "0x", not null, so it bypasses jsonw.Hex.
 	jsonw.Field(w, "data").WriteHex(l.Data)
 	jsonw.Text(w, "blockNumber", &l.BlockNumber)
@@ -147,8 +147,6 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectEnd()
 	return nil
 }
-
-func writeTopic(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
 // pointer method RPCLogs itself would not satisfy the fast-JSON interface.
