@@ -69,10 +69,13 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 	}()
 
 	var maxReadLatency time.Duration
+	var readCount int
 	for {
 		select {
 		case <-writerDone:
 			require.NoError(t, writeErr)
+			require.GreaterOrEqual(t, readCount, 100,
+				"too few ViewHeadState calls overlapped the writer for this assertion to be meaningful")
 			require.Less(t, maxReadLatency, 5*time.Millisecond,
 				"a ViewHeadState call blocked for close to the full head-state copy duration")
 			return
@@ -80,6 +83,7 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 		}
 		start := time.Now()
 		require.NoError(t, manager.ViewHeadState(func(*state.CachingBeaconState) error { return nil }))
+		readCount++
 		if elapsed := time.Since(start); elapsed > maxReadLatency {
 			maxReadLatency = elapsed
 		}
@@ -124,6 +128,42 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 	}))
 	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
 		require.Equal(t, uint64(100), headState.Slot())
+		return nil
+	}))
+}
+
+// TestOnHeadStateWithBlockRootSerializesConcurrentWriters verifies that a
+// writer copying a large state cannot be overtaken and overwritten by a
+// writer that starts later but copies a smaller, faster state. Copying
+// outside the reader lock must not let arrival order at the swap depend on
+// copy duration.
+func TestOnHeadStateWithBlockRootSerializesConcurrentWriters(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
+
+	slow := bigValidatorState(t, 500_000)
+	require.NoError(t, slow.SetSlot(100))
+	fast := bigValidatorState(t, 1)
+	require.NoError(t, fast.SetSlot(200))
+
+	var wg sync.WaitGroup
+	var slowErr, fastErr error
+	slowStarted := make(chan struct{})
+	wg.Go(func() {
+		close(slowStarted)
+		slowErr = manager.OnHeadStateWithBlockRoot(slow, common.Hash{0xaa})
+	})
+	<-slowStarted
+	time.Sleep(time.Millisecond) // let the slow writer start its copy first
+	wg.Go(func() {
+		fastErr = manager.OnHeadStateWithBlockRoot(fast, common.Hash{0xbb})
+	})
+	wg.Wait()
+	require.NoError(t, slowErr)
+	require.NoError(t, fastErr)
+
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(200), headState.Slot(), "the writer that started later must not be overwritten by the slower writer that started first")
 		return nil
 	}))
 }

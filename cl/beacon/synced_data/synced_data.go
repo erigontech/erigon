@@ -49,6 +49,7 @@ type SyncedDataManager struct {
 
 	accessLock sync.RWMutex // lock used for accessing atomic methods
 	mu         sync.RWMutex
+	writeLock  sync.Mutex // serializes publishHeadState callers; held across the copy so writers cannot overtake each other
 }
 
 type headIdentity struct {
@@ -106,10 +107,15 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 
 // publishHeadState materializes newState into a standalone copy and swaps it
 // in as the head state, demoting the current head state to previous. The
-// copy runs without holding mu/accessLock, so it never blocks ViewHeadState,
-// ViewPreviousHeadState, or the single-field accessors below - they only
-// wait for the pointer swap.
+// copy runs under writeLock rather than mu/accessLock, so concurrent callers
+// are still serialized in arrival order - a writer copying a large state
+// cannot be overtaken and overwritten by a writer that started later but
+// copies a smaller state faster - while ViewHeadState, ViewPreviousHeadState,
+// and the single-field accessors below only ever wait for the pointer swap.
 func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+
 	copied, err := newState.Copy()
 	if err != nil {
 		return err
