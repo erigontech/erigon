@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -1430,11 +1431,14 @@ func TestGetRawReceipts(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true // stateless verification of every witness runs only under assert
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
 		statecfg.Schema = previousSchema
+		dbg.AssertEnabled = previousAssert
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
