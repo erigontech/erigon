@@ -17,6 +17,7 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -29,6 +30,9 @@ import (
 type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
+	// storageKey is the address+slot the next storage read looks up. The cache clones a key
+	// it keeps, and one reader serves one request, so the same bytes are reused every time.
+	storageKey [length.Addr + length.Hash]byte
 }
 
 // NewCachedReader3 wraps a given state reader into the cached reader
@@ -66,10 +70,9 @@ func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	compositeKey := make([]byte, 0, len(addressValue)+len(keyValue))
-	compositeKey = append(compositeKey, addressValue[:]...)
-	compositeKey = append(compositeKey, keyValue[:]...)
-	enc, err := r.cache.Get(compositeKey)
+	copy(r.storageKey[:], addressValue[:])
+	copy(r.storageKey[length.Addr:], keyValue[:])
+	enc, err := r.cache.Get(r.storageKey[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}

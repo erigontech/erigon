@@ -22,6 +22,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -146,4 +148,89 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 		writeFor(vm, a, BalancePath, accounts.NilKey, Version{TxIndex: 3}, *uint256.NewInt(1), true)
 		require.False(t, ibs.accountLifecycle(a))
 	})
+}
+
+// stubCacheView answers from a map keyed by the composite key, so a reader that reused a
+// buffer the cache had kept would read back the wrong slot.
+type stubCacheView map[string][]byte
+
+func (s stubCacheView) Get(k []byte) ([]byte, error)     { return s[string(k)], nil }
+func (s stubCacheView) GetCode(k []byte) ([]byte, error) { return s[string(k)], nil }
+
+// The composite key a storage read builds lives on the reader, so a read must not allocate
+// and consecutive reads of different slots must not bleed into each other.
+func TestCachedReader3StorageKeyIsReused(t *testing.T) {
+	addr1 := accounts.InternAddress(common.HexToAddress("0x01"))
+	addr2 := accounts.InternAddress(common.HexToAddress("0x02"))
+	slot1 := accounts.InternKey(common.HexToHash("0x0a"))
+	slot2 := accounts.InternKey(common.HexToHash("0x0b"))
+
+	key := func(a accounts.Address, k accounts.StorageKey) string {
+		av, kv := a.Value(), k.Value()
+		return string(av[:]) + string(kv[:])
+	}
+	view := stubCacheView{
+		key(addr1, slot1): {0x11},
+		key(addr2, slot2): {0x22},
+	}
+	r := NewCachedReader3(view, nil)
+
+	for _, tc := range []struct {
+		addr accounts.Address
+		slot accounts.StorageKey
+		want uint64
+	}{
+		{addr1, slot1, 0x11},
+		{addr2, slot2, 0x22},
+		{addr1, slot2, 0},
+		{addr1, slot1, 0x11},
+	} {
+		v, _, err := r.ReadAccountStorage(tc.addr, tc.slot)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, v.Uint64())
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _, _ = r.ReadAccountStorage(addr1, slot1)
+	})
+	require.Zero(t, allocs, "the composite key must not allocate")
+}
+
+// stubPutDel records the composite keys it is handed, as a string, which is what the real
+// domains do when they keep one.
+type stubPutDel struct {
+	kv.TemporalPutDel
+	keys []string
+}
+
+func (s *stubPutDel) DomainPut(_ kv.Domain, k, _ []byte, _ uint64, _ []byte) error {
+	if s.keys == nil {
+		return nil
+	}
+	s.keys = append(s.keys, string(k))
+	return nil
+}
+
+func (s *stubPutDel) DomainDel(_ kv.Domain, k []byte, _ uint64, _ []byte) error {
+	s.keys = append(s.keys, string(k))
+	return nil
+}
+
+// The writer builds its storage key once and refills it, so writing different slots must
+// still address different keys and must not allocate.
+func TestWriterStorageKeyIsReused(t *testing.T) {
+	put := &stubPutDel{keys: make([]string, 0, 2)}
+	w := NewWriter(put, nil, 1)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	slot1 := accounts.InternKey(common.HexToHash("0x0a"))
+	slot2 := accounts.InternKey(common.HexToHash("0x0b"))
+
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(1)))
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot2, uint256.Int{}, *uint256.NewInt(2)))
+	require.Len(t, put.keys, 2)
+	require.NotEqual(t, put.keys[0], put.keys[1], "each slot must address its own key")
+
+	// Writing slot1 again must address slot1, not whatever the buffer last held.
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(3)))
+	require.Equal(t, put.keys[0], put.keys[2])
 }
