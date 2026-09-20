@@ -462,14 +462,10 @@ func executionPayloadBidWithCommitments(count int) *ExecutionPayloadBid {
 func TestExecutionPayloadEnvelopeHashSSZRejectsIncompleteEnvelope(t *testing.T) {
 	_, errNilMessage := (&SignedExecutionPayloadEnvelope{}).HashSSZ()
 	require.Error(t, errNilMessage)
-	// Each guard is covered on its own: this envelope has requests but no payload, the one
-	// below has a payload but no requests.
 	_, errNilPayload := (&SignedExecutionPayloadEnvelope{
 		Message: &ExecutionPayloadEnvelope{ExecutionRequests: &ExecutionRequests{}},
 	}).HashSSZ()
 	require.Error(t, errNilPayload)
-	// A payload without execution requests reaches the second guard, which the case
-	// above short-circuits.
 	_, errNilRequests := (&SignedExecutionPayloadEnvelope{
 		Message: &ExecutionPayloadEnvelope{Payload: &Eth1Block{}},
 	}).HashSSZ()
