@@ -1761,7 +1761,10 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	// A proof fold keeps the stored hash of a branch below the top branch: the top one is still hashed and checked.
+	// A proof fold keeps the stored hash of a branch below the top branch. The top branch is
+	// still hashed, so the root check stands, but it can no longer catch a row that disagrees
+	// with its parent's stored hash: that row folds to the stored hash and only the emitted
+	// proof node is wrong. Assert builds hash every row.
 	storedHash := hph.readOnlyWitness && upCell.hashLen == length.Hash && slices.Contains(hph.branchBefore[:row], true) && !dbg.AssertEnabled
 	var rowHasher io.Writer = hph.keccak2
 	if storedHash {
@@ -1774,7 +1777,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 	hph.witness.beginBranch(hph.hashAuxBuffer[:pt])
 
-	// Single pass: feed keccak2 + extract cellEncodeData
+	// Single pass: feed rowHasher + extract cellEncodeData
 	cellData, err := hph.hashRow(row, depth, rowHasher)
 	if err != nil {
 		return err
@@ -1821,7 +1824,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) ([
 
 	for bitset, lastNib := hph.afterMap[row], 0; ; {
 		if bitset == 0 {
-			// Write remaining empty cells to keccak2 (up to slot 16 inclusive = terminator)
+			// Write remaining empty cells to hasher (up to slot 16 inclusive = terminator)
 			for i := lastNib; i < 17; i++ {
 				if _, err := hasher.Write(emptyBranchSlotBytes); err != nil {
 					return cellData, err
