@@ -174,24 +174,6 @@ func (s *StackStream) WriteHexUint(v uint64) {
 	s.afterValue()
 }
 
-// WriteHexes writes hashes as an array of hex strings. The whole array is one value:
-// it grows the buffer once and runs the separator bookkeeping once, where a value write per
-// element would do both per hash.
-func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, hashes S) {
-	s.beforeValue()
-	buf := s.stream.Buffer()
-	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
-	buf = append(buf, '[')
-	for i := range hashes {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = hexutil.AppendQuoted(buf, hashes[i][:])
-	}
-	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
-}
-
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
