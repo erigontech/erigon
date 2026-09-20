@@ -18,6 +18,7 @@ package ethapi
 
 import (
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
@@ -70,7 +71,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 	// A plain slice with omitempty: empty is omitted, not [].
 	if len(t.BlobVersionedHashes) > 0 {
-		writeHashes(w, "blobVersionedHashes", t.BlobVersionedHashes)
+		jsonstream.HexesField(w, "blobVersionedHashes", t.BlobVersionedHashes)
 	}
 	if t.Authorizations != nil {
 		jsonw.Array(w, "authorizationList", t.Authorizations, writeAuthorization)
@@ -88,7 +89,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 func writeAccessTuple(w jsonw.JSONWriter, a *types.AccessTuple) {
 	w.WriteObjectStart()
 	w.WriteObjectField("address").WriteHex(a.Address[:])
-	writeHashes(w, "storageKeys", a.StorageKeys)
+	jsonstream.HexesField(w, "storageKeys", a.StorageKeys)
 	w.WriteObjectEnd()
 }
 

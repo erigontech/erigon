@@ -27,6 +27,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -120,6 +121,17 @@ func Concrete(w jsonw.JSONWriter) *StackStream {
 			return nil
 		}
 	}
+}
+
+// HexesField writes a hash array as one field: one buffer growth for the whole array,
+// where a value write per element grows once per hash.
+func HexesField(w jsonw.JSONWriter, name string, hashes []common.Hash) {
+	jsonw.Field(w, name)
+	if hashes == nil {
+		w.WriteNil()
+		return
+	}
+	WriteHexes(Concrete(w), hashes)
 }
 
 // WriteHexes writes fixed-size values as an array of hex strings. The whole array is one

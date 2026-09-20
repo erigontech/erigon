@@ -154,14 +154,14 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		writeHashes(w, "transactions", hashes)
+		jsonstream.HexesField(w, "transactions", hashes)
 	case fullOK:
 		jsonw.Array(w, "transactions", &full, writeTxElem)
 	case rawTxs != nil:
 		jsonw.Field(w, "transactions").WriteRawBytes(rawTxs)
 	}
 
-	writeHashes(w, "uncles", b.Uncles)
+	jsonstream.HexesField(w, "uncles", b.Uncles)
 
 	jsonw.Array(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
@@ -175,17 +175,6 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 	w.WriteObjectEnd()
 	return nil
-}
-
-// writeHashes writes a hash array as one value when the stream allows it, which costs one
-// buffer growth instead of one per hash.
-func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
-	jsonw.Field(w, name)
-	if hashes == nil {
-		w.WriteNil()
-		return
-	}
-	jsonstream.WriteHexes(jsonstream.Concrete(w), hashes)
 }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
