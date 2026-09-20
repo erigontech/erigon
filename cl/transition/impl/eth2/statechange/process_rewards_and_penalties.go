@@ -103,7 +103,7 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
 
-	return threading.ParallellForLoop(1, 0, len(eligibleValidators), func(i int) error {
+	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {

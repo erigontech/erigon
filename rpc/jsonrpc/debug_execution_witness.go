@@ -216,33 +216,6 @@ func (s *RecordingState) ReadAccountStorage(address accounts.Address, key accoun
 	return val, ok, err
 }
 
-func (s *RecordingState) HasStorage(address accounts.Address) (bool, error) {
-	addr := address.Value()
-	s.AccessedAccounts[addr] = struct{}{}
-	// Check overlay for any non-zero storage
-	if mods, ok := s.storageOverlay[addr]; ok {
-		for _, val := range mods {
-			if !val.IsZero() {
-				if s.tracing(addr) {
-					fmt.Printf("[TRACE] HasStorage %s -> overlay true\n", addr.Hex())
-				}
-				return true, nil
-			}
-		}
-	}
-	if _, deleted := s.DeletedAccounts[addr]; deleted {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE] HasStorage %s -> deleted false\n", addr.Hex())
-		}
-		return false, nil
-	}
-	has, err := s.inner.HasStorage(address)
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE] HasStorage %s -> inner %v (err=%v)\n", addr.Hex(), has, err)
-	}
-	return has, err
-}
-
 func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
 	s.AccessedAccounts[addr] = struct{}{}
@@ -1365,6 +1338,9 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
+	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
 
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
@@ -1452,9 +1428,10 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
+// result.Keys. It runs only under ERIGON_ASSERT. Without it a build still checks the parent state root, and
+// for a non-empty accessed set the block-end commitment as well; what the gate removes is the stateless
+// replay, which is what covers Codes, Keys and node sufficiency.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1462,7 +1439,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	block *types.Block,
 	fullEngine rules.Engine,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if !dbg.AssertEnabled {
 		return nil
 	}
 
@@ -1792,43 +1769,6 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 	return 0, nil
 }
 
-func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
-	addr := address.Value()
-	addrHash := crypto.Keccak256Hash(addr[:])
-	// Check if account has been deleted
-	if _, ok := s.deleted[addr]; ok {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE-S] HasStorage %s -> deleted false\n", addr.Hex())
-		}
-		return false, nil
-	}
-
-	// Check if we know about any storage updates with non-empty values
-	for _, v := range s.storageWrites[addr] {
-		if !v.IsZero() {
-			if s.tracing(addr) {
-				fmt.Printf("[TRACE-S] HasStorage %s -> writes true\n", addr.Hex())
-			}
-			return true, nil
-		}
-	}
-
-	// Check account in trie
-	acc, ok := s.t.GetAccount(addrHash[:])
-	if !ok {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE-S] HasStorage %s -> trie not found false\n", addr.Hex())
-		}
-		return false, nil
-	}
-
-	has := acc != nil && acc.Root != trie.EmptyRoot
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE-S] HasStorage %s -> trie root=%x has=%v\n", addr.Hex(), acc.Root, has)
-	}
-	return has, nil
-}
-
 // StateWriter interface implementation
 
 func (s *witnessStateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
@@ -1989,7 +1929,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
-			s.t.DeepHash(addrHash[:])
+			if _, _, err := s.t.DeepHash(addrHash[:]); err != nil {
+				return common.Hash{}, err
+			}
 		}
 	}
 
@@ -2013,7 +1955,10 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	for addr := range updatedAccounts {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash := crypto.Keccak256Hash(addr[:])
-			gotRoot, root := s.t.DeepHash(addrHash[:])
+			gotRoot, root, err := s.t.DeepHash(addrHash[:])
+			if err != nil {
+				return common.Hash{}, err
+			}
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root

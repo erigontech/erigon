@@ -181,6 +181,22 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 	return ok
 }
 
+// mergeChildStateGas takes over the child's state-gas spill, then absorbs state
+// gas the child left in the reservoir, up to the spill available in this frame.
+func (c *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	c.stateGasSpill += childSpill
+	misplaced := min(c.stateGas, c.stateGasSpill)
+	if misplaced == 0 {
+		return
+	}
+	c.stateGas -= misplaced
+	before := c.gas
+	c.refillStateGas(misplaced) // capped by the spill, so LIFO returns all to gas_left
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(before, c.gas, tracing.GasChangeCallStateGasReturned)
+	}
+}
+
 func (c *CallContext) refillStateGas(amount uint64) {
 	remaining := c.Gas()
 	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
@@ -303,6 +319,11 @@ func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 func copyJumpTable(jt *JumpTable) *JumpTable {
 	copy := *jt
 	return &copy
+}
+
+// LookupInstructionSet returns a copy of the jump table active under rules.
+func LookupInstructionSet(rules *chain.Rules) JumpTable {
+	return *jumpTable(rules, Config{})
 }
 
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
@@ -438,10 +459,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if err == nil {
 				return
 			}
-			if !logged && tracer.OnOpcode != nil {
+			// An opcode already delivered to OnOpcode reports its fault through OnFault,
+			// and so does one the mask excluded: filtering which opcodes a tracer sees
+			// must not cost it the fault itself. The fault stays tied to OnOpcode, so a
+			// tracer that sets only OnFault takes neither path.
+			switch {
+			case !logged && tracer.OnOpcode != nil && tracer.WantsOpcode(byte(op)):
 				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			}
-			if logged && tracer.OnFault != nil {
+			case tracer.OnOpcode != nil && tracer.OnFault != nil:
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
@@ -543,7 +568,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if tracer.OnGasChange != nil {
 				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
-			if tracer.OnOpcode != nil {
+			if tracer.OnOpcode != nil && tracer.WantsOpcode(byte(op)) {
 				tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 				logged = true
 			}

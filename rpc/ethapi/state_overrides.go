@@ -18,9 +18,7 @@ package ethapi
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -51,11 +49,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				return errors.New("account.Balance higher than 2^256-1")
-			}
-			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+			if err := ibs.SetBalance(addr, uint256.Int(**account.Balance), tracing.BalanceChangeUnspecified); err != nil {
 				return err
 			}
 		}
@@ -134,18 +128,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		}
 	}
 
-	// Disable EIP-161 empty-account removal when finalizing state overrides.
-	// FinalizeTx with a NoopWriter commits dirty storage into originStorage
-	// (needed for correct SSTORE gas), but EIP-161 would also mark any account
-	// that becomes empty (nonce=0, code=0x, balance=0) as deleted in the IBS —
-	// even though the deletion is never written to the DB.  That spurious
-	// deleted=true flag causes IntraBlockState.HasStorage to short-circuit to
-	// false before reaching the state reader, breaking EIP-7610 collision
-	// detection in multi-block eth_simulateV1 when a prior simulated block
-	// deployed a contract at the overridden address.
-	// State overrides are simulation-only mutations and must not trigger
-	// EIP-161 empty-account clearing.
-	noEIP161Rules := *rules
-	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
+	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	overrideRules := *rules
+	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
+	return ibs.FinalizeTx(&overrideRules, state.NewNoopWriter())
 }

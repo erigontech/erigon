@@ -1376,3 +1376,13 @@ func TestGetterDataOffsetIsFileOffset(t *testing.T) {
 
 	require.Equal(t, want, d.MakeGetter().dataOffset)
 }
+
+// A word-length position of 0 is only produced by a corrupt or misaligned file:
+// the encoder writes wordLen+1, so 0 underflows wordLen to MaxUint64. Next must
+// report it, not panic, whatever the caller's buffer already holds.
+func TestGetterNextRejectsUnderflowedWordLen(t *testing.T) {
+	g := &Getter{fName: "corrupt.seg", posEntries: []posEntry{{pos: 0}}}
+	buf, offset := g.Next([]byte{1, 2, 3})
+	require.Nil(t, buf)
+	require.Zero(t, offset)
+}

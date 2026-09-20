@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -1383,4 +1384,76 @@ func TestStreamResetSliceRdrCoherency(t *testing.T) {
 		s.Reset(struct{ io.Reader }{bytes.NewReader(data)}, uint64(len(data)))
 		check(t, s, false)
 	})
+}
+
+func TestDecodeListSliceNoAmplification(t *testing.T) {
+	t.Parallel()
+	type big struct{ A, B, C, D, E, F, G, H uint64 } // 64 bytes
+	elem := reflect.TypeFor[big]()
+	items := 4 * maxSliceHintBytes / 64 // enough that the budget must bind
+	list := append([]byte{0xfa, byte(items >> 16), byte(items >> 8), byte(items)},
+		make([]byte, items)...)
+	s := NewBytesStream(list)
+	defer PutStream(s)
+	size, err := s.List()
+	require.NoError(t, err)
+	require.Equal(t, items, countItems(s.Peek()[:size]), "payload really is one-byte items")
+	require.LessOrEqual(t, sliceHint(s, elem, size)*int(elem.Size()), maxSliceHintBytes,
+		"a pre-allocation must stay within the hint budget")
+}
+
+func TestSliceHintDoesNotChangeDecoding(t *testing.T) {
+	t.Parallel()
+	type item struct {
+		A uint64
+		B []byte
+		C []uint
+	}
+	for _, tc := range []any{
+		[]uint{},
+		[]uint{0, 1, 127, 128, 1 << 20},
+		[]string{"", "a", string(make([]byte, 300))},
+		[][]uint{{}, {1}, {2, 3, 4}},
+		[]item{{1, []byte("x"), []uint{1, 2}}, {}, {1 << 40, nil, []uint{9}}},
+	} {
+		enc, err := EncodeToBytes(tc)
+		require.NoError(t, err)
+
+		hinted := reflect.New(reflect.TypeOf(tc))
+		require.NoError(t, DecodeBytes(enc, hinted.Interface()))
+
+		// Pre-seeded capacity makes the top-level slice skip the hint. Nested
+		// slices are still allocated during the decode and take it, so the arms
+		// contrast a hinted outer slice against an unhinted one, not hint
+		// against no hint.
+		control := reflect.New(reflect.TypeOf(tc))
+		control.Elem().Set(reflect.MakeSlice(reflect.TypeOf(tc), 0, 1))
+		require.NoError(t, DecodeBytes(enc, control.Interface()))
+
+		require.Equal(t, control.Elem().Interface(), hinted.Elem().Interface())
+	}
+}
+
+func TestSliceHintOnCorruptInput(t *testing.T) {
+	t.Parallel()
+	enc, err := EncodeToBytes([][]uint{{1, 2}, {3}, {}})
+	require.NoError(t, err)
+	for i := range enc {
+		for _, b := range []byte{0x00, 0x7f, 0x80, 0xb8, 0xc0, 0xf7, 0xf8, 0xff} {
+			corrupt := append([]byte(nil), enc...)
+			corrupt[i] = b
+
+			var hinted [][]uint
+			errHint := DecodeBytes(corrupt, &hinted)
+
+			control := make([][]uint, 0, 1) // has capacity, so the outer hint is skipped
+			errCtl := DecodeBytes(corrupt, &control)
+
+			require.Equal(t, errCtl == nil, errHint == nil,
+				"byte %d = %#x: hint and control disagree on success", i, b)
+			if errHint == nil {
+				require.Equal(t, control, hinted, "byte %d = %#x", i, b)
+			}
+		}
+	}
 }

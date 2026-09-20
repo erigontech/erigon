@@ -187,6 +187,13 @@ func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	}
 	return nil, false, nil
 }
+func (r *memBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
+	if err != nil || !ok {
+		return common.Hash{}, false, err
+	}
+	return txn.Hash(), true, nil
+}
 func (r *memBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) ([][]byte, error) {
 	return nil, nil
 }
@@ -213,6 +220,7 @@ func (r *memBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash
 // --- misc / freezing ---
 
 func (r *memBlockReader) FrozenBlocks() uint64                      { return 0 }
+func (r *memBlockReader) FrozenBlocksObserved() (uint64, bool)      { return 0, true }
 func (r *memBlockReader) FrozenBlocksInView(tx kv.Getter) uint64    { return 0 }
 func (r *memBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { return ethconfig.BlocksFreezing{} }
 func (r *memBlockReader) CanPruneTo(currentBlockInDB uint64) uint64 { return 0 }

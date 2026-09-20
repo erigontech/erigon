@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -29,6 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func (s *StackStream) closeAllPendingElements() error {
@@ -1158,11 +1161,38 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
+// A value chained onto an explicit field must land on that field, not behind the pending one.
+func TestLazyFieldStreamChainsValueOntoExplicitField(t *testing.T) {
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	lazy := NewLazyFieldStream(inner, "result", false)
+
+	lazy.WriteObjectField("error").WriteString("boom")
+
+	require.False(t, lazy.Written(), "a chained value must not open the pending field")
+	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
+}
+
+// Nested wrappers must hand the chained value to the stream that took the field name, not to a
+// wrapper still holding a pending field of its own.
+func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	outer := NewLazyFieldStream(inner, "outer", false)
+	nested := NewLazyFieldStream(outer, "inner", false)
+
+	nested.WriteObjectField("error").WriteString("boom")
+
+	require.False(t, nested.Written(), "a chained value must not open the nested pending field")
+	require.False(t, outer.Written(), "a chained value must not open the outer pending field")
+	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
+}
+
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteString("pending")
 	Put(s)
 
@@ -1174,11 +1204,182 @@ func TestPutReleasesWriterAndBytes(t *testing.T) {
 // A response above the bound is dropped rather than pooled, so one outsized
 // value cannot pin its peak per goroutine.
 func TestPutDropsOversizedBuffer(t *testing.T) {
-	s := Get(nil).(*StackStream)
+	s := Get(nil)
 	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
 
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
-	require.NotSame(t, s, Get(nil).(*StackStream))
+	require.NotSame(t, s, Get(nil))
+}
+
+// WriteHex matches json.Marshal of hexutil.Bytes inside a container, whether the value
+// stays buffered or is written through.
+func TestWriteHex(t *testing.T) {
+	t.Parallel()
+	for name, b := range map[string][]byte{
+		"nil":             nil,
+		"empty":           {},
+		"one":             {0xab},
+		"below-threshold": bytes.Repeat([]byte{0x5a}, FlushThreshold/2-3),
+		"at-threshold":    bytes.Repeat([]byte{0x5a}, FlushThreshold/2-2),
+		"far-above":       bytes.Repeat([]byte{0x5a}, 4*FlushThreshold),
+	} {
+		want, err := json.Marshal(hexutil.Bytes(b))
+		require.NoError(t, err)
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			t.Run(fmt.Sprintf("%s/writer=%t", name, out != nil), func(t *testing.T) {
+				s := New(out)
+				s.WriteObjectStart()
+				s.WriteObjectField("result")
+				s.WriteArrayStart()
+				s.WriteHex(b)
+				s.WriteMore()
+				s.WriteHex(b)
+				s.WriteArrayEnd()
+				s.WriteObjectEnd()
+				require.NoError(t, s.Flush())
+
+				got := s.Buffer()
+				if b, ok := out.(*bytes.Buffer); ok {
+					got = b.Bytes()
+				}
+				require.Equal(t, `{"result":[`+string(want)+`,`+string(want)+`]}`, string(got))
+			})
+		}
+	}
+}
+
+// A raw payload at or above FlushThreshold goes to the writer instead of being
+// copied into the buffer. Both branches emit the same bytes, so the buffer is the
+// only thing that shows which one ran.
+func TestWriteRawBytesLargePayloadWritesThrough(t *testing.T) {
+	t.Parallel()
+	// Sizes are pre-quoting; two quote bytes are added, so these land the quoted
+	// length exactly on FlushThreshold and exactly one byte below it.
+	for name, tc := range map[string]struct {
+		size          int
+		writesThrough bool
+	}{
+		"below-threshold": {FlushThreshold - 3, false},
+		"at-threshold":    {FlushThreshold - 2, true},
+		"far-above":       {32 * FlushThreshold, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := append([]byte(`"`), bytes.Repeat([]byte("a"), tc.size)...)
+			payload = append(payload, '"')
+
+			var out bytes.Buffer
+			s := New(&out)
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteRawBytes(payload)
+			s.WriteObjectEnd()
+			require.NoError(t, s.Flush())
+
+			require.Equal(t, `{"result":`+string(payload)+`}`, out.String())
+
+			if tc.writesThrough {
+				require.Less(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+					"payload must reach the writer without being copied into the buffer")
+			} else {
+				require.GreaterOrEqual(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+					"a payload below the threshold must still be buffered")
+			}
+		})
+	}
+}
+
+// With no writer the caller reads the response back out of Buffer, so everything
+// must still be buffered no matter how large.
+func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
+	t.Parallel()
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4*FlushThreshold)...)
+	payload = append(payload, '"')
+
+	s := New(nil)
+	s.WriteObjectStart()
+	s.WriteObjectField("result")
+	s.WriteRawBytes(payload)
+	s.WriteObjectEnd()
+
+	require.Equal(t, `{"result":`+string(payload)+`}`, string(s.Buffer()))
+}
+
+// The mirror of TestPutDropsOversizedBuffer: a large result no longer grows the
+// buffer, so the stream survives Put instead of being dropped by the size check.
+func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
+	var out bytes.Buffer
+	s := Get(&out)
+	s.WriteObjectStart()
+	s.WriteObjectField("result")
+	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))
+	s.WriteObjectEnd()
+	require.NoError(t, s.Flush())
+
+	require.LessOrEqual(t, cap(s.Buffer()), maxPooledBufferSize,
+		"a written-through result must not grow the buffer past the pool limit")
+
+	Put(s)
+	// sync.Pool may drop an admitted stream at any time, so admission is observed
+	// through the reset Put does on the way in, not through what Get hands back.
+	require.Empty(t, s.Buffer(), "an admitted stream is reset by Put")
+	require.Nil(t, s.out, "an admitted stream pins no writer")
+}
+
+// The write-through path must surface a writer failure the same way the buffered
+// path does, and must not let the failed bytes accumulate.
+func TestWriteRawBytesWriteThroughError(t *testing.T) {
+	t.Parallel()
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4*FlushThreshold)...)
+	payload = append(payload, '"')
+
+	for name, out := range map[string]io.Writer{
+		// Fails on the prefix flush, before the payload is handed over.
+		"prefix-flush": goneWriter{},
+		// Takes the prefix, then fails on the direct write of the payload.
+		"direct-write": &failingWriter{failAfter: len(payload) - 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := New(out).(*StackStream)
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteRawBytes(payload)
+			s.WriteObjectEnd()
+
+			require.Error(t, s.Flush(), "the writer failure must reach the caller")
+			require.Less(t, len(s.Buffer()), FlushThreshold,
+				"a failed write must not accumulate, buffer holds %d", len(s.Buffer()))
+		})
+	}
+}
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText(dst []byte) ([]byte, error) {
+	return nil, errors.New("append failed")
+}
+
+// A failing appender must not truncate what the stream already holds.
+func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	s := New(&out)
+	s.WriteObjectStart()
+	s.WriteObjectField("balance")
+	s.WriteQuotedText(failingAppender{})
+	s.WriteObjectEnd()
+	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
+	require.Error(t, s.Flush())
+}
+
+// A latched write error must reach the caller. Flush cannot report it on a writerless stream,
+// so marshalFastJSONTo would otherwise clone a buffer holding the empty-string placeholder.
+func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
+	s := Get(nil)
+	defer Put(s)
+	s.WriteQuotedText(failingAppender{})
+
+	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
+	require.Error(t, s.Err(), "the latched appender error must stay reachable")
 }
