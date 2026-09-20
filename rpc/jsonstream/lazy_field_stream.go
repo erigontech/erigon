@@ -70,7 +70,7 @@ func (s *LazyFieldStream) ensure() {
 			// This stream writes a fragment into an object someone else opened, so its
 			// stack is empty and it cannot know a sibling precedes this field. The
 			// separator is the caller's assertion, not something to infer.
-			s.inner.markSeparatorPending()
+			markSeparator(s.inner)
 		}
 		s.inner.WriteObjectField(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
@@ -130,4 +130,18 @@ func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.written = false
 }
 
-func (s *LazyFieldStream) markSeparatorPending() { s.inner.markSeparatorPending() }
+func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
+
+// separatorMarker is the streams that write separators themselves. It stays off Stream so
+// an implementation outside this package still satisfies it.
+type separatorMarker interface{ markSeparatorPending() }
+
+// markSeparator asserts a sibling precedes the next value, falling back to the manual
+// comma for a stream that does not write separators itself.
+func markSeparator(s Stream) {
+	if m, ok := s.(separatorMarker); ok {
+		m.markSeparatorPending()
+		return
+	}
+	s.WriteMore()
+}
