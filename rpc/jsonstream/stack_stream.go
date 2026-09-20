@@ -104,6 +104,43 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.popCommaOrField()
 }
 
+// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
+// holding, so a marshaller can write values without an interface call each time.
+func Concrete(w jsonw.JSONWriter) *StackStream {
+	for {
+		switch t := w.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			w = t.inner
+		default:
+			return nil
+		}
+	}
+}
+
+// WriteHexBytes writes byte slices as an array of hex strings. The whole array is one
+// value, so the buffer grows once and the stack is touched once, where a write per element
+// does both per item. It is a function rather than a method because jsonw cannot name the
+// element types without an import cycle, and Go has no generic methods.
+func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+	size := 2 + len(items)
+	for i := range items {
+		size += hexutil.QuotedLen(len(items[i]))
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
+	s.popCommaOrField()
+}
+
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
