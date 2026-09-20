@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
@@ -48,14 +49,34 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	} else {
 		w.WriteQuotedText(h.Number)
 	}
-	jsonw.Hex(w, "hash", hashOrNull(h.Hash))
+	jsonw.Field(w, "hash")
+	if h.Hash == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Hash[:])
+	}
 	jsonw.Hex(w, "parentHash", h.ParentHash[:])
-	jsonw.Hex(w, "nonce", nonceOrNull(h.Nonce))
+	jsonw.Field(w, "nonce")
+	if h.Nonce == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Nonce[:])
+	}
 	jsonw.Hex(w, "mixHash", h.MixHash[:])
 	jsonw.Hex(w, "sha3Uncles", h.Sha3Uncles[:])
-	jsonw.Hex(w, "logsBloom", bloomOrNull(h.LogsBloom))
+	jsonw.Field(w, "logsBloom")
+	if h.LogsBloom == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.LogsBloom[:])
+	}
 	jsonw.Hex(w, "stateRoot", h.StateRoot[:])
-	jsonw.Hex(w, "miner", addrOrNull(h.Miner))
+	jsonw.Field(w, "miner")
+	if h.Miner == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(h.Miner[:])
+	}
 	jsonw.Text(w, "difficulty", h.Difficulty)
 	jsonw.Field(w, "extraData").WriteHex(h.ExtraData)
 	jsonw.Text(w, "gasLimit", &h.GasLimit)
@@ -97,35 +118,6 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	}
 }
 
-// The OrNull helpers turn a nil pointer into the nil slice jsonw.Hex renders as null.
-func hashOrNull(h *common.Hash) []byte {
-	if h == nil {
-		return nil
-	}
-	return h[:]
-}
-
-func nonceOrNull(n *types.BlockNonce) []byte {
-	if n == nil {
-		return nil
-	}
-	return n[:]
-}
-
-func bloomOrNull(b *types.Bloom) []byte {
-	if b == nil {
-		return nil
-	}
-	return b[:]
-}
-
-func addrOrNull(a *common.Address) []byte {
-	if a == nil {
-		return nil
-	}
-	return a[:]
-}
-
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
@@ -161,12 +153,12 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		jsonw.Array(w, "transactions", &hashes, writeHashElem)
+		writeHashes(w, "transactions", hashes)
 	case fullTxs != nil:
 		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	jsonw.Array(w, "uncles", &b.Uncles, writeHashElem)
+	writeHashes(w, "uncles", b.Uncles)
 
 	jsonw.Array(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
@@ -182,7 +174,16 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
-func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+// writeHashes writes a hash array as one value when the stream allows it, which costs one
+// buffer growth instead of one per hash.
+func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
+	jsonw.Field(w, name)
+	if hashes == nil {
+		w.WriteNil()
+		return
+	}
+	jsonstream.WriteHexes(jsonstream.Concrete(w), hashes)
+}
 
 func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
 	if *wd == nil {
