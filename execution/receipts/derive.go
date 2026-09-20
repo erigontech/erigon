@@ -102,20 +102,12 @@ func DeriveForRange(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
-		// Cancel watcher: abort mid-opcode if the context is cancelled
-		// (e.g. RPC timeout). Without this, a gas-heavy transaction would
-		// run to completion even after the caller has given up.
-		txDone := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				evm.Cancel()
-			case <-txDone:
-			}
-		}()
+		// Abort mid-opcode if the context is cancelled (e.g. RPC timeout). Without this, a
+		// gas-heavy transaction would run to completion after the caller has given up.
+		stop := context.AfterFunc(ctx, evm.Cancel)
 
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
-		close(txDone)
+		stop()
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
