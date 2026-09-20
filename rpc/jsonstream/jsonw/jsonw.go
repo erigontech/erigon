@@ -79,17 +79,23 @@ func Array[S ~[]E, E any](w JSONWriter, name string, items *S, elem func(JSONWri
 	if items == nil {
 		return
 	}
-	if *items == nil {
-		Field(w, name).WriteNil()
+	Field(w, name)
+	ArrayValue(w, *items, elem)
+}
+
+// ArrayValue writes the array itself, with no field name, for a result that is a bare
+// array. A nil slice is null and an empty one is [].
+func ArrayValue[S ~[]E, E any](w JSONWriter, items S, elem func(JSONWriter, *E)) {
+	if items == nil {
+		w.WriteNil()
 		return
 	}
-	s := *items
-	Field(w, name).WriteArrayStart()
-	for i := range s {
+	w.WriteArrayStart()
+	for i := range items {
 		if i > 0 {
 			w.WriteMore()
 		}
-		elem(w, &s[i])
+		elem(w, &items[i])
 	}
 	w.WriteArrayEnd()
 }

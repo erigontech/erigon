@@ -150,21 +150,12 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 func writeTopic(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
 
-// MarshalFastJSONTo writes the logs as the bare array eth_getLogs returns.
+// MarshalFastJSONTo writes the logs as the bare array eth_getLogs returns. The receiver is
+// a value: rpchelper hands RPCLogs around unboxed, and a pointer method would leave it
+// outside the interface the RPC layer asserts, silently falling back to reflection.
 func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	if logs == nil {
-		w.WriteNil()
-		return nil
-	}
-	w.WriteArrayStart()
-	for i, l := range logs {
-		if i > 0 {
-			w.WriteMore()
-		}
-		if err := l.MarshalFastJSONTo(w); err != nil {
-			return err
-		}
-	}
-	w.WriteArrayEnd()
+	jsonw.ArrayValue(w, logs, writeLogElem)
 	return nil
 }
+
+func writeLogElem(w jsonw.JSONWriter, l **RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
