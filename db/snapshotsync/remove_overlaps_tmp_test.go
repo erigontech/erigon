@@ -52,6 +52,24 @@ func TestRemoveOverlapsKeepsTmpOfForeignTypes(t *testing.T) {
 	require.NoFileExists(t, own, "this collection's own leftover .tmp must still be cleaned up")
 }
 
+// An index's file name segment (e.g. "transactions-to-block") differs from its owning type's
+// name (e.g. "transactions"). Ownership must be decided on the resolved type, not that raw
+// segment, or a killed index build's .tmp is misattributed to nobody and never cleaned up.
+func TestRemoveOverlapsCleansOwnIndexTmp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},
+		dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+
+	ownIdx := filepath.Join(dir, "v1.0-000000-000500-transactions-to-block.idx.987654321.tmp")
+	require.NoError(t, os.WriteFile(ownIdx, []byte("in progress"), 0o644))
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, ownIdx, "an index .tmp of a type this collection owns must be cleaned up, even though the index's own name differs from the type's name")
+}
+
 // A .tmp whose name does not parse cannot be attributed to any type. Deleting it risks the same
 // cross-component damage, so it is left for whoever created it.
 func TestRemoveOverlapsKeepsUnparsableTmp(t *testing.T) {

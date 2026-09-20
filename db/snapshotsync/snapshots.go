@@ -1683,17 +1683,16 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 // ownsTmpFile reports whether a .tmp in the snapshot dir could have been produced by this
 // collection. A name that does not parse is attributed to nobody and is left alone.
+//
+// Match on the resolved Type, not TypeString: TypeString is the raw name segment from the
+// filename, which for an index .tmp is the index's own name (e.g. "transactions-to-block"),
+// not its owning type's name (e.g. "transactions") — those two only coincide for segment files.
 func (s *BaseRoSnapshots) ownsTmpFile(path string) bool {
 	fileInfo, _, ok := snaptype.ParseFileName(s.dir, filepath.Base(path))
-	if !ok {
+	if !ok || fileInfo.Type == nil {
 		return false
 	}
-	for _, t := range s.types {
-		if t.Name() == fileInfo.TypeString {
-			return true
-		}
-	}
-	return false
+	return s.HasType(fileInfo.Type)
 }
 
 // removeOrphanedIdx unlinks the superseded index files neither a dirty segment nor a pinned
