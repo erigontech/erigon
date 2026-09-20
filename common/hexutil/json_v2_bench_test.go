@@ -50,6 +50,27 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 		}
 	})
 
+	b.Run("quoted_text", func(b *testing.B) {
+		w := httptest.NewRecorder()
+		serve := func() {
+			w.Body.Reset()
+			stream := jsonstream.Get(w)
+			defer jsonstream.Put(stream)
+			stream.WriteQuotedText(&code)
+			if err := stream.Flush(); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			serve()
+		}
+		if w.Body.Len() != int(size) {
+			b.Fatalf("wrote %d bytes, want %d", w.Body.Len(), size)
+		}
+	})
+
 	b.Run("fast_v2_stream", func(b *testing.B) {
 		w := httptest.NewRecorder()
 		serve := func() {
