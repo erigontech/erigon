@@ -82,54 +82,37 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
-func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err error) {
+func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) error {
 	if !s.enabled {
-		return
+		return nil
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.accessLock.Lock()
-	defer s.accessLock.Unlock()
-
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	var blkRoot common.Hash
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(s.headState)
-	}
+	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
-	blkRoot, err = newState.BlockRoot()
-	if err != nil {
-		return err
-	}
-	s.stateHead.Store(&headIdentity{root: blkRoot, slot: newState.Slot()})
-	return nil
+	return s.publishHeadState(newState, blkRoot)
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
 // avoiding recomputation of BlockRoot() which can produce incorrect results
 // when the state's incremental hashing cache has been dirtied by operations
 // like unrealized justification/finality processing.
-func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) (err error) {
+func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
 	if !s.enabled {
-		return
+		return nil
+	}
+	return s.publishHeadState(newState, blockRoot)
+}
+
+// publishHeadState materializes newState into a standalone copy and swaps it
+// in as the head state, demoting the current head state to previous. The
+// copy runs without holding mu/accessLock, so it never blocks ViewHeadState,
+// ViewPreviousHeadState, or the single-field accessors below - they only
+// wait for the pointer swap.
+func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	copied, err := newState.Copy()
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -137,27 +120,8 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
-	// Save current state as previous state, if available.
-	if s.headState != nil {
-		if s.previousHeadState != nil {
-			err = s.headState.CopyInto(s.previousHeadState)
-		} else {
-			s.previousHeadState, err = s.headState.Copy()
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	// Update headState with the new state.
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
-	} else {
-		err = newState.CopyInto(s.headState)
-	}
-	if err != nil {
-		return err
-	}
+	s.previousHeadState = s.headState
+	s.headState = copied
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
 }
