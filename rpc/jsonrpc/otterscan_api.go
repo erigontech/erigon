@@ -425,9 +425,8 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 
 	// Crop txn input to 4bytes
-	txs := getBlockRes.Transactions.([]any)
-	for _, rawTx := range txs {
-		rpcTx := rawTx.(*ethapi.RPCTransaction)
+	txs := getBlockRes.Transactions.([]*ethapi.RPCTransaction)
+	for _, rpcTx := range txs {
 		if len(rpcTx.Input) >= 4 {
 			rpcTx.Input = rpcTx.Input[:4]
 		}
