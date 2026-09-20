@@ -230,7 +230,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return common.Hash{}, err
 	}
 
-	location := accounts.InternKey(common.HexToHash(index))
+	location := accounts.InternKey(common.BytesToHash(indexBytes))
 	res, _, err := reader.ReadAccountStorage(addr, location)
 	if err != nil {
 		return common.Hash{}, err
