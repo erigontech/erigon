@@ -30,6 +30,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 const (
@@ -108,21 +111,93 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
-	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
+// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. An
+// implementation reports an error before its first call to w: once it writes, the stream already
+// holds part of the result and the response carries both result and error.
+type fastJSONMarshalerTo interface {
+	MarshalFastJSONTo(w jsonw.JSONWriter) error
+}
+
+// marshalFastJSONTo encodes fm into a byte slice the caller owns.
+func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	if err := fm.MarshalFastJSONTo(s); err != nil {
+		return nil, err
 	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
+	return bytes.Clone(s.Buffer()), nil
+}
+
+// writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
+// The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
+func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
+	return writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+		if isNilPointer(result) {
+			return json.NewEncoder(encoderWriter{rs}).Encode(result)
+		}
+		if fm, ok := result.(fastJSONMarshalerTo); ok {
+			if err := fm.MarshalFastJSONTo(rs); err != nil {
+				return err
+			}
+			return rs.Err() // a latched write error left a placeholder in the stream
+		}
+		if fm, ok := result.(fastJSONResult); ok {
+			enc, err := fm.MarshalFastJSON()
+			if err == nil && len(enc) > 0 {
+				rs.WriteRawBytes(enc)
+			}
+			return err
+		}
+		return json.NewEncoder(encoderWriter{rs}).Encode(result)
+	})
+}
+
+// writeLazyResponse writes the response envelope and lets write fill "result", which opens on its first value.
+// An error from write becomes "error", after closing whatever part of the result was written, and is returned
+// for the caller's metrics and logs.
+func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(jsonstream.Stream) error) error {
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString(vsn)
+	stream.WriteMore()
+	if id != nil {
+		stream.WriteObjectField("id")
+		stream.WriteRawBytes(id)
+		stream.WriteMore()
+	}
+	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
+	err := write(rs)
 	if err != nil {
-		// TODO: wrap with 'internal server error'
-		return msg.errorResponse(err)
+		if rs.Written() {
+			rs.CloseIfOpen()
+			stream.WriteMore()
+		}
+		HandleError(err, stream)
+	} else if !rs.Written() {
+		// A response carries exactly one of result and error, so a callback that
+		// succeeded without writing still owes a result.
+		rs.WriteNil()
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	stream.WriteObjectEnd()
+	return err
+}
+
+// encoderWriter hands the stream json.Encoder output without its trailing newline. Encode writes once, after
+// the whole value has encoded.
+type encoderWriter struct{ stream jsonstream.Stream }
+
+func (w encoderWriter) Write(b []byte) (int, error) {
+	w.stream.WriteRawBytes(bytes.TrimSuffix(b, []byte{'\n'}))
+	return len(b), nil
+}
+
+// isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -207,15 +282,10 @@ type jsonCodec struct {
 	conn      deadlineCloser
 }
 
-// NewFuncCodec creates a codec which uses the given functions to read and write. If conn
-// implements ConnRemoteAddr, log messages will use it to include the remote address of
-// the connection. decode must reject invalid JSON, reading a message relies on it.
-func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerCodec {
-	return newFuncCodec(conn, encode, decode, nil)
-}
-
-// newFuncCodec is NewFuncCodec plus the frame reader the built-in transports use.
-// A transport with a frame reader never calls decode, so it may be nil.
+// newFuncCodec creates a codec that uses the given functions to read and write. If conn
+// implements ConnRemoteAddr, log messages include the remote address. decode must reject
+// invalid JSON, reading a message relies on it. A transport with a frame reader never calls
+// decode, so it may be nil.
 func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:   make(chan any),
@@ -234,8 +304,20 @@ func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFra
 // skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
 type rawResponse []byte
 
-// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
-func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
+// rawBatch is a batch response kept as its already-encoded answers in request order, so a
+// transport can stream them instead of first joining them into one buffer.
+type rawBatch [][]byte
+
+func (b rawBatch) writeTo(s jsonstream.Stream) {
+	s.WriteArrayStart()
+	for i, answer := range b {
+		if i > 0 {
+			s.WriteMore()
+		}
+		s.WriteRawBytes(answer)
+	}
+	s.WriteArrayEnd()
+}
 
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
@@ -249,12 +331,19 @@ func NewCodec(conn Conn) ServerCodec {
 func newJSONEncoder(conn Conn) func(v any) error {
 	enc := json.NewEncoder(conn)
 	return func(v any) error {
-		raw, ok := v.(rawResponse)
-		if !ok {
+		switch r := v.(type) {
+		case rawResponse:
+			_, err := conn.Write(append(r, '\n'))
+			return err
+		case rawBatch:
+			s := jsonstream.Get(conn)
+			defer jsonstream.Put(s)
+			r.writeTo(s)
+			s.WriteRaw("\n")
+			return s.Flush()
+		default:
 			return enc.Encode(v)
 		}
-		_, err := conn.Write(append(raw, '\n'))
-		return err
 	}
 }
 
@@ -323,7 +412,9 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 	if !ok {
 		deadline = time.Now().Add(defaultWriteTimeout)
 	}
-	c.conn.SetWriteDeadline(deadline)
+	if err := c.conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
 	return c.encode(v)
 }
 

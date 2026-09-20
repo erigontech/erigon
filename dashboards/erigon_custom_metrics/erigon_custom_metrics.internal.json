@@ -9421,20 +9421,9 @@
               "legendFormat": "fold {{instance}}",
               "range": true,
               "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "grafanacloud-prom"
-              },
-              "editorMode": "code",
-              "expr": "rate(commitment_unfolds_total{instance=~\"$instance\"}[$__rate_interval])",
-              "legendFormat": "unfold {{instance}}",
-              "range": true,
-              "refId": "B"
             }
           ],
-          "title": "Commitment: fold/unfold rate (ops/sec)",
+          "title": "Commitment: fold rate (ops/sec)",
           "type": "timeseries"
         },
         {

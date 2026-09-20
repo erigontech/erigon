@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -278,8 +279,16 @@ func (a *wsConnAdapter) encode(v any) error {
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
 	}
-	data, ok := v.(rawResponse)
-	if !ok {
+	var data []byte
+	switch r := v.(type) {
+	case rawResponse:
+		data = r
+	case rawBatch:
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		r.writeTo(s)
+		data = s.Buffer()
+	default:
 		marshaled, err := json.Marshal(v)
 		if err != nil {
 			return err

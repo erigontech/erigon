@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimit uint64, gasPrice uint256.Int) *types.LegacyTx {
@@ -365,6 +364,16 @@ func TestTxnByIdxInBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Nil(t, got)
+
+	// txn ids are global: an index past the block's end must not reach the next block's transactions
+	nextTxn := types.NewTransaction(1, common.HexToAddress("0x5678"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), nil)
+	require.NoError(t, rawdb.WriteBody(tx, common.HexToHash("0xb10d"), blockNum+1, &types.Body{Transactions: []types.Transaction{nextTxn}}))
+	for _, i := range []int{-1, 1, 2, 3, 4} {
+		got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, i)
+		require.NoError(t, err)
+		require.False(t, ok, "index %d", i)
+		require.Nil(t, got, "index %d", i)
+	}
 
 	got, ok, err = rawdb.TxnByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
 	require.NoError(t, err)
@@ -1229,7 +1238,7 @@ func TestBlockAccessListStorage(t *testing.T) {
 
 	nonEmpty := types.BlockAccessList{
 		{
-			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+			Address: common.HexToAddress("0x00000000000000000000000000000000000000aa"),
 		},
 	}
 	nonEmptyBytes, err := types.EncodeBlockAccessListBytes(nonEmpty)
