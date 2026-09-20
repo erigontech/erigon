@@ -26,7 +26,9 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -101,6 +103,39 @@ func (s *StackStream) WriteHex(b []byte) {
 	} else {
 		s.stream.SetBuffer(buf)
 	}
+	s.popCommaOrField()
+}
+
+// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
+// holding, so a marshaller can write values without an interface call each time.
+func Concrete(w jsonw.JSONWriter) *StackStream {
+	for {
+		switch t := w.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			w = t.inner
+		default:
+			return nil
+		}
+	}
+}
+
+// WriteHexes writes hashes as an array of hex strings. The whole array is one value, so the
+// buffer grows once and the stack is touched once, where a write per element does both per
+// hash.
+func (s *StackStream) WriteHexes(hashes []common.Hash) {
+	buf := s.stream.Buffer()
+	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(buf, '[')
+	for i := range hashes {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, hashes[i][:])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.popCommaOrField()
 }
 
