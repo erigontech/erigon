@@ -81,10 +81,6 @@ func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key account
 	return v, true, nil
 }
 
-func (r *CachedReader3) HasStorage(address accounts.Address) (bool, error) {
-	return r.cache.HasStorage(address.Value())
-}
-
 func (r *CachedReader3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addressValue := address.Value()
 	code, err := r.cache.GetCode(addressValue[:])

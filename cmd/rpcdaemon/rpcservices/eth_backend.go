@@ -119,6 +119,9 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
+	return back.blockReader.FrozenBlocksObserved()
+}
 func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
 	return back.blockReader.FrozenBlocksInView(tx)
 }
@@ -352,6 +355,9 @@ func (back *RemoteBackend) IsCanonical(ctx context.Context, tx kv.Getter, hash c
 }
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
+}
+func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

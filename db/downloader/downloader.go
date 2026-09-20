@@ -412,8 +412,8 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 			}
 			t, complete, new, err := d.addTorrentIfComplete(name)
 			if err != nil {
-				err = fmt.Errorf("adding torrent for %v: %w", path, err)
-				return err
+				d.log(log.LvlWarn, "add torrents from disk: skipping malformed torrent", "path", path, "err", err)
+				return nil
 			}
 			if !complete {
 				d.log(log.LvlDebug, "add torrents from disk: skipping incomplete torrent",
@@ -1794,14 +1794,14 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
 		if strings.Contains(h, "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
-			w.Write(buf.Bytes())
+			_, _ = w.Write(buf.Bytes())
 		} else {
 			gzR, err := gzip.NewReader(&buf)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			io.Copy(w, gzR)
+			_, _ = io.Copy(w, gzR)
 			gzR.Close()
 		}
 	})

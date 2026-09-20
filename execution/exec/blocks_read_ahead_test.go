@@ -95,10 +95,6 @@ func (s stubTemporalGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([
 	return s.v, s.step, nil
 }
 
-func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
-
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -116,10 +112,6 @@ func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ kv.Ge
 func (s *sharedCodeTemporalGetter) GetLatestValSize(domain kv.Domain, key []byte) (int, bool, error) {
 	value, _, err := s.GetLatest(domain, key, kv.GetLatestOptions{})
 	return len(value), len(value) > 0, err
-}
-
-func (s *sharedCodeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
 }
 
 func (s *sharedCodeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
@@ -172,7 +164,7 @@ func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
 	dbg.SetReadAhead(true)
 	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{19: 1})}}
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	balHash := bal.Hash()
 	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
 	readAheader := NewBlockReadAheader()
@@ -255,7 +247,7 @@ func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
 			if test.destination {
 				destinations[address] = struct{}{}
 			}
-			accountChanges := &types.AccountChanges{Address: address}
+			accountChanges := &types.AccountChanges{Address: address.Value()}
 			if test.codeChanges {
 				accountChanges.CodeChanges = []*types.CodeChange{{Bytecode: code}}
 			}
@@ -274,7 +266,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	address := accounts.InternAddress(common.Address{19: 1})
-	accountChanges := &types.AccountChanges{Address: address, StorageReads: make([]accounts.StorageKey, 65)}
+	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]accounts.StorageKey, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
 	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
@@ -298,7 +290,7 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{19: 1})}}
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	err := NewBlockReadAheader().warmBAL(ctx, db, bal, nil, balCodeWarmupNone, 1)
 	require.ErrorIs(t, err, context.Canceled)
 }
@@ -312,8 +304,8 @@ func TestWarmBALContinuesAfterReadError(t *testing.T) {
 	tx := &firstAccountReadErrorTx{TemporalTx: baseTx}
 	readDB := &singleTxRoDB{RoDB: db, tx: tx}
 	bal := types.BlockAccessList{
-		{Address: accounts.InternAddress(common.Address{19: 1})},
-		{Address: accounts.InternAddress(common.Address{19: 2})},
+		{Address: common.Address{19: 1}},
+		{Address: common.Address{19: 2}},
 	}
 	require.NoError(t, NewBlockReadAheader().warmBAL(ctx, readDB, bal, nil, balCodeWarmupNone, 1))
 	require.Equal(t, 2, tx.accountReads)
@@ -358,7 +350,7 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, address[:], accountBytes, 1, nil))
 	require.NoError(t, domains.Commit(ctx, rwTx))
 	domains.Close()
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(address)}}
+	bal := types.BlockAccessList{{Address: address}}
 	balBytes, err := types.EncodeBlockAccessListBytes(bal)
 	require.NoError(t, err)
 	balHash := bal.Hash()

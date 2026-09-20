@@ -32,15 +32,13 @@ import (
 // trie now does the same. Publishing from the executor's log ticker instead
 // would both mis-difference that snapshot and drop every round between ticks.
 var (
-	mxRounds = metrics.GetOrCreateCounter("commitment_rounds_total")
-
-	// Buckets span a fast incremental block through a whale fold.
+	// Buckets span a fast incremental block through a whale fold. The histogram's
+	// _count is the round count; a separate counter for it would restate it.
 	mxRoundDuration = metrics.NewHistogram("commitment_round_duration_seconds",
 		[]float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60})
 
 	mxKeys       = metrics.GetOrCreateCounter("commitment_keys_total")
 	mxFolds      = metrics.GetOrCreateCounter("commitment_folds_total")
-	mxUnfolds    = metrics.GetOrCreateCounter("commitment_unfolds_total")
 	mxBranchPuts = metrics.GetOrCreateCounter("commitment_branch_writes_total")
 	mxReadBytes  = metrics.GetOrCreateCounter("commitment_branch_read_bytes_total")
 	mxWriteBytes = metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
@@ -88,7 +86,6 @@ func publishBranchWrites(n, bytesOut int, m *Metrics) {
 // observeRound publishes one finished round. Branch writes are not published
 // here — publishBranchWrites bills those where they land.
 func observeRound(m *Metrics, start time.Time) {
-	mxRounds.Inc()
 	mxRoundDuration.ObserveDuration(start)
 	if m == nil {
 		return
@@ -96,7 +93,6 @@ func observeRound(m *Metrics, start time.Time) {
 	v := m.AsValues()
 	addU64(mxKeys, v.RoundKeys)
 	addU64(mxFolds, v.Folds)
-	addU64(mxUnfolds, v.Unfolds)
 	addU64(mxReadBytes, v.BranchReadBytes)
 	addVec(mxTraversals, "address", v.AddressKeys)
 	addVec(mxTraversals, "storage", v.StorageKeys)

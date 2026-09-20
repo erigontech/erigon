@@ -65,6 +65,16 @@ type ErrExecAbortError struct {
 	OriginError       error
 }
 
+// ErrExecPanic is a recovered non-dependency panic during transaction execution.
+// It is an operational failure, not evidence that the block is invalid.
+type ErrExecPanic struct {
+	message string
+}
+
+func (e *ErrExecPanic) Error() string {
+	return e.message
+}
+
 func (e ErrExecAbortError) Error() string {
 	if e.DependencyTxIndex >= 0 {
 		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
@@ -76,13 +86,11 @@ func (e ErrExecAbortError) Error() string {
 	}
 }
 
-// IsError reports whether the abort carries a genuine, non-dependency
-// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
-// ErrDependency panic when a versioned read observes an unsettled predecessor)
-// carries no OriginError and is resolved by re-execution. An IsError abort, by
-// contrast, must be validated before it can be attributed to genuinely invalid
-// block data rather than stale speculative input — the two are mutually
-// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
+// IsError reports whether the abort carries an execution error rather than only
+// a speculative dependency. Dependency aborts raised by state.ErrDependency
+// carry no OriginError and are retried; DependencyTxIndex is scheduling
+// metadata, not the classifier. An OriginError must be validated against settled
+// input before it can be attributed to block data rather than stale state.
 func (e ErrExecAbortError) IsError() bool {
 	return e.OriginError != nil
 }
@@ -350,6 +358,17 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			}
 		}
 	}
+
+	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
+	if st.msg.AccessList() != nil && !rules.IsBerlin {
+		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
+	}
+	if st.msg.BlobHashes() != nil {
+		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {
+			return upfrontTxnFees{}, err
+		}
+	}
+
 	// EIP-4844.
 	var maxFeePerBlobGas uint256.Int
 	hasBlobGas := rules.IsCancun && blobGas > 0
@@ -561,17 +580,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Recover from dependency panic and retry the execution.
-				if err, ok := r.(error); !ok || !errors.Is(err, state.ErrDependency) {
-					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+				panicErr, isError := r.(error)
+				if isError && errors.Is(panicErr, state.ErrDependency) {
+					err = ErrExecAbortError{DependencyTxIndex: st.evm.IntraBlockState().DepTxIndex()}
+					return
 				}
-				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-				if depTxIndex < 0 {
-					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-				}
-				err = ErrExecAbortError{
-					DependencyTxIndex: depTxIndex,
-					OriginError:       err}
+				stack := dbg.Stack()
+				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", stack)
+				err = &ErrExecPanic{message: fmt.Sprintf("transition exec panic: %v at: %s", r, stack)}
 			}
 		}()
 	}
@@ -619,7 +635,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
+		if err := st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall); err != nil {
+			return nil, err
+		}
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
@@ -680,7 +698,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, vmerr
 		}
 		if contractCreation {
-			st.state.SetNonce(sender, createNonce+1, tracing.NonceChangeContractCreator)
+			if err := st.state.SetNonce(sender, createNonce+1, tracing.NonceChangeContractCreator); err != nil {
+				return nil, err
+			}
 		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 		gasUsed.consumeAllExecutionGas(runtimeGas.Execution)
@@ -726,7 +746,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
-		st.refundGas()
+		if err := st.refundGas(); err != nil {
+			return nil, err
+		}
 	case rules.IsAmsterdam:
 		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
@@ -782,7 +804,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			}
 
 			if !st.noFeeBurnAndTip {
-				st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+				if err := st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -963,13 +987,13 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) refundGas() {
+func (st *TxnExecutor) refundGas() error {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	return st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 }
 
 func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {

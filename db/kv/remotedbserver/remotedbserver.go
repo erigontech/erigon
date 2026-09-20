@@ -65,7 +65,8 @@ const MaxTxTTL = 60 * time.Second
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
 // 7.2.0 - Add MaxPrunableStepsBacklog
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 2, Patch: 0}
+// 7.3.0 - Remove HasPrefix from the remote KV service
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -474,11 +475,12 @@ func (s *KvServer) MaxPrunableStepsBacklog(context.Context, *emptypb.Empty) (*re
 	return &remoteproto.MaxPrunableStepsBacklogReply{Steps: s.kv.MaxPrunableStepsBacklog()}, nil
 }
 
-func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
+func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, _ error) {
 	reply = &remoteproto.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		reply.Value, err = tx.ReadSequence(req.Table)
-		return nil
+		return err
 	}); err != nil {
 		return nil, err
 	}
@@ -537,13 +539,14 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, _ error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		if req.Latest {
 			opts := kv.GetLatestOptions{}
 			if req.MaxStep != nil {
@@ -566,24 +569,6 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	}); err != nil {
 		return nil, err
 	}
-	return reply, nil
-}
-
-func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (*remoteproto.HasPrefixReply, error) {
-	domain, err := kv.String2Domain(req.Table)
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &remoteproto.HasPrefixReply{}
-	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	return reply, nil
 }
 

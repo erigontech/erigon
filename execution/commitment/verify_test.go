@@ -208,9 +208,9 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	branchData := encodeCellToBranch(t, hph, c, depth, int(c.hashedExtension[0]))
 
 	keccak.Reset()
-	keccak.Write(addr[:])
+	_, _ = keccak.Write(addr[:])
 	var hashBuf2 [32]byte
-	keccak.Read(hashBuf2[:])
+	_, _ = keccak.Read(hashBuf2[:])
 	var nib [64]byte
 	for i := range 32 {
 		nib[i*2] = hashBuf2[i] >> 4
