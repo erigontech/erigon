@@ -26,7 +26,9 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -104,6 +106,24 @@ func (s *StackStream) WriteHex(b []byte) {
 	} else {
 		s.stream.SetBuffer(buf)
 	}
+	s.afterValue()
+}
+
+// WriteHashArray writes hashes as an array of hex strings. The whole array is one value:
+// it grows the buffer once and runs the separator bookkeeping once, where a value write per
+// element would do both per hash.
+func (s *StackStream) WriteHashArray(hashes []common.Hash) {
+	s.beforeValue()
+	buf := s.stream.Buffer()
+	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(buf, '[')
+	for i := range hashes {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, hashes[i][:])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
 
@@ -302,6 +322,23 @@ func (s *StackStream) WriteArrayEnd() {
 // WriteMore is a no-op: the stream emits the separator each value needs. It stays so a
 // caller written against the manual API still produces valid JSON.
 func (s *StackStream) WriteMore() {}
+
+// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
+// holding. A marshaller takes it to write its fields without an interface call each time,
+// so it must write a value: the field is open by the time it returns.
+func Concrete(w jsonw.JSONWriter) *StackStream {
+	for {
+		switch t := w.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			w = t.inner
+		default:
+			return nil
+		}
+	}
+}
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
