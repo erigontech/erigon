@@ -640,9 +640,9 @@ func TestExecutionPayloadBidServiceUsesCoherentHeadNodeSnapshot(t *testing.T) {
 	defer ctrl.Finish()
 	service, _, _, fc, _ := setupExecutionPayloadBidService(t, ctrl)
 	headRoot := fc.HeadVal
-	fc.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
+	fc.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		fc.HeadVal = common.HexToHash("0xdead")
-		return forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, nil
+		return forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, fc.HeadSlotVal, nil
 	}
 	compatible, err := service.isBidCompatibleWithHead(&cltypes.ExecutionPayloadBid{
 		Slot: 100, ParentBlockRoot: headRoot, ParentBlockHash: common.HexToHash("0xdddd"),
@@ -716,8 +716,8 @@ func TestExecutionPayloadBidServiceHeadUnavailableDoesNotFetchValidationState(t 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	addPreferencesToPool(epbsPool, 100)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
-	fcMock.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
-		return forkchoice.ForkChoiceNode{}, errors.New("head unavailable")
+	fcMock.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{}, 0, errors.New("head unavailable")
 	}
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 

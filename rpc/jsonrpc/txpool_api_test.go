@@ -53,7 +53,7 @@ func TestTxPoolContent(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), txPool)
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
@@ -130,7 +130,7 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 		}},
 		status: &txpoolproto.StatusReply{PendingCount: 2, BaseFeeCount: 1, QueuedCount: 1},
 	}
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, pool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), pool)
 
 	addr := m.Address.String()
 
@@ -162,7 +162,7 @@ func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
 	pool := &stubPoolContentClient{
 		status: &txpoolproto.StatusReply{PendingCount: math.MaxUint32, BaseFeeCount: 1, QueuedCount: 0},
 	}
-	api := NewTxPoolAPI(nil, nil, pool)
+	api := NewTxPoolAPI(nil, pool)
 
 	status, err := api.Status(context.Background())
 	require.NoError(err)
