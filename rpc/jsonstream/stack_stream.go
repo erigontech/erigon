@@ -124,11 +124,12 @@ func (s *StackStream) fieldPrefix(buf []byte, name string) []byte {
 	return append(buf, '"', ':')
 }
 
-// fieldWritten records the member and hands the buffer over if it is full.
+// fieldWritten records the member. It does not test the flush bound: a field is small and
+// the object it belongs to tests the bound when it closes, so one value cannot outrun the
+// buffer by more than the object it sits in.
 func (s *StackStream) fieldWritten(buf []byte) {
 	s.stream.SetBuffer(buf)
 	s.separatorPending = true
-	flushIfFull(s.stream)
 }
 
 // WriteHexField writes a field and its hex value in one go: one growth, one buffer update,
