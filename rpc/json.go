@@ -22,6 +22,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -138,12 +138,6 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 		if isNilPointer(result) {
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
 		}
-		// hexutil.Bytes cannot carry a marshaller of its own: the concrete stream type
-		// lives in a package that already imports hexutil.
-		if b, ok := result.(hexutil.Bytes); ok {
-			rs.Open().WriteHex(b)
-			return nil
-		}
 		if fm, ok := result.(fastJSONMarshalerTo); ok {
 			if err := fm.MarshalFastJSONTo(rs.Open()); err != nil {
 				return err
@@ -156,6 +150,12 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 				rs.WriteRawBytes(enc)
 			}
 			return err
+		}
+		// The hex quantities in common and common/hexutil cannot carry a marshaller: the
+		// package that owns the stream type imports them. They append their own text.
+		if ta, ok := result.(encoding.TextAppender); ok {
+			rs.Open().WriteQuotedText(ta)
+			return rs.Err()
 		}
 		return json.NewEncoder(encoderWriter{rs}).Encode(result)
 	})

@@ -29,6 +29,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -547,7 +550,13 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 
 func TestResponseWritesJSONToStream(t *testing.T) {
 	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
-	for _, result := range []any{hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil)} {
+	results := []any{
+		hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil),
+		hexutil.Uint64(0x1234), hexutil.Uint(7), (*hexutil.Uint)(nil),
+		common.HexToHash("0xdead"), common.HexToAddress("0xbeef"),
+		(*hexutil.U256)(uint256.NewInt(255)),
+	}
+	for _, result := range results {
 		want, err := json.Marshal(result)
 		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
