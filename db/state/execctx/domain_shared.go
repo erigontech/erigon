@@ -281,9 +281,10 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
 	// cacheApplier is its authoritative writer handle (commit/unwind only).
-	stateCache   *cache.StateCache
-	cacheApplier cache.Applier
-	cacheUnwind  cacheUnwindState
+	stateCache       *cache.StateCache
+	cacheApplier     cache.Applier
+	cacheUnwind      cacheUnwindState
+	localCacheUnwind bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -377,6 +378,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		baseViewID:       generationTx.ViewID(),
 		baseTxWritable:   baseTxWritable,
 		baseStateVersion: stateVersion,
+		localCacheUnwind: o.localCacheUnwind,
 	}
 
 	if o.mem != nil {
@@ -476,10 +478,11 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 		return err
 	}
 	if other.cacheUnwind.pending {
-		// A shared cache was invalidated when the child staged the unwind;
-		// otherwise invalidate the parent's cache before it serves merged state.
-		if sd.stateCache != other.stateCache {
-			sd.cacheApplier.Unwind(other.cacheUnwind.toTxNum)
+		if other.localCacheUnwind || sd.stateCache != other.stateCache {
+			sd.invalidateCaches(other.cacheUnwind.toTxNum)
+		}
+		if other.localCacheUnwind && sd.stateCache != other.stateCache {
+			other.cacheApplier.Unwind(other.cacheUnwind.toTxNum)
 		}
 		sd.stageCacheUnwind(other.cacheUnwind.toTxNum)
 	}
@@ -852,30 +855,30 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// Tx/epoch-aware unwind of the commitment BranchCache: every cached branch
-	// whose bytes belong to the rolled-back window (txN at/above the unwind
-	// point, superseded epoch) is now stale vs the post-unwind canonical state.
-	// Unwind(txNum) bumps the epoch and lowers the floor (O(1), no scan); those
-	// entries are dropped lazily on their next Get — covering entries seeded by
-	// the read-pop and the trunk preload that the changeset-gated Invalidate
-	// below misses (which is what left stale committed branches a fork-validation
-	// then read as a wrong trie root). The explicit Invalidate of the unwound
-	// changeset keys is a redundant fast path for keys known dead right now.
-	if sd.branchCache != nil {
-		sd.branchCache.Unwind(txNumUnwindTo)
-		if changeset != nil {
+	if !sd.localCacheUnwind {
+		sd.invalidateCaches(txNumUnwindTo)
+		if sd.branchCache != nil && changeset != nil {
 			for _, diff := range changeset[kv.CommitmentDomain] {
 				sd.branchCache.Invalidate([]byte(diff.Key))
 			}
 		}
 	}
-	// Invalidate the state cache for everything above the unwind point. txNum/epoch
-	// based and diffset-free (see Applier.Unwind), so it runs unconditionally —
-	// independent of whether changesets were generated for the unwound range, which
-	// they are not below the reorg window. Commit repeats the invalidation at the
-	// durable state-version boundary, so no fill admitted while staged survives.
-	sd.cacheApplier.Unwind(txNumUnwindTo)
 	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+func (sd *SharedDomains) invalidateCaches(txNum uint64) {
+	if sd.branchCache != nil {
+		sd.branchCache.Unwind(txNum)
+	}
+	sd.cacheApplier.Unwind(txNum)
+}
+
+func (sd *SharedDomains) hasLocalCacheUnwind() bool {
+	return sd.localCacheUnwind && sd.cacheUnwind.pending
+}
+
+func (sd *SharedDomains) rejectedByLocalUnwind(cTxNum uint64) bool {
+	return sd.hasLocalCacheUnwind() && cTxNum >= sd.cacheUnwind.toTxNum
 }
 
 // stageCacheUnwind retains the lowest boundary so every staged discarded
@@ -1287,7 +1290,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// the preload sees the just-flushed bytes.
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			provider := func(contractHash []byte) map[string][]byte {
+			provider := func(contractHash []byte, budget int) map[string][]byte {
 				m := map[string][]byte{}
 				c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
 				if cerr != nil {
@@ -1295,11 +1298,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				}
 				defer c.Close()
 				evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
-				// Bound the scan by the per-contract pin ceiling — the preload can't
-				// pin more than that, so gathering further is pure waste on the
-				// Commit path. A nil `to` (all-0xff prefix) means scan to the range's
-				// natural end, not stop immediately.
-				budget := sd.adaptivePinController.PerContractBudgetBytes()
+				// Bound the scan by what this step can pin — gathering further is
+				// pure waste on the Commit path, and a key left out of the hint
+				// still resolves authoritatively through pinBranchResolver. A nil
+				// `to` (all-0xff prefix) means scan to the range's natural end, not
+				// stop immediately.
 				scanned := 0
 				scan := func(from, to []byte) {
 					for k, v, err := c.Seek(from); k != nil; k, v, err = c.NextNoDup() {
@@ -1331,6 +1334,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	if sd.hasLocalCacheUnwind() && sd.branchCache != nil {
+		sd.branchCache.Unwind(sd.cacheUnwind.toTxNum)
+	}
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
 		if len(u.val) == 0 {
@@ -1345,8 +1351,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		} else {
 			sd.cacheApplier.Publish(sourceStateVersion, committedStateVersion, pendingState)
 		}
-		sd.cacheUnwind = cacheUnwindState{}
 	}
+	sd.cacheUnwind = cacheUnwindState{}
 	return nil
 }
 
@@ -1433,7 +1439,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		// A negative uses the last txNum included by its read-view frontier, not
 		// the step of a deletion.
 		cStep := kv.Step(cTxNum / sd.StepSize())
-		if ok && !servableUnderBound(cStep, maxStep) {
+		if ok && (!servableUnderBound(cStep, maxStep) || sd.rejectedByLocalUnwind(cTxNum)) {
 			ok = false
 		}
 		if wm != nil {
@@ -1476,7 +1482,11 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// concurrent commits can advance the cache beyond their transaction view.
 	useBranchCache := domain == kv.CommitmentDomain && sd.branchCache != nil
 	if useBranchCache {
-		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
+		branchBound := uint64(math.MaxUint64)
+		if sd.hasLocalCacheUnwind() {
+			branchBound = sd.cacheUnwind.toTxNum
+		}
+		if cv, cStepU64, ok := sd.branchCache.GetBefore(k, branchBound); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
 			// StepSize (that double-division collapsed cStep to ~0, defeating the
 			// gate).
@@ -1494,10 +1504,10 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if maxStep != kv.NoStepBound {
 		getOpts = getOpts.WithMaxStep(maxStep)
 	}
-	if useBranchCache {
+	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
 	if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
@@ -1603,7 +1613,7 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 		return len(v), true, true, nil
 	}
 	if sd.stateCache != nil {
-		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) {
+		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) && !sd.rejectedByLocalUnwind(txNum) {
 			return len(v), true, true, nil
 		}
 	}
@@ -1699,7 +1709,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
-	if maxStep != kv.NoStepBound {
+	if maxStep != kv.NoStepBound || sd.hasLocalCacheUnwind() {
 		// A staged unwind bounds the committed lookup. Reuse the normal account
 		// path so every cache and database source observes the same bound.
 		v, _, err := sd.getLatest(kv.AccountsDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{})

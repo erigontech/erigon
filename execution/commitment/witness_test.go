@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func nodeSet(nodes [][]byte) map[string]struct{} {
@@ -327,4 +328,61 @@ func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 
 func storageKey(account, slot []byte) []byte {
 	return append(bytes.Clone(account), slot...)
+}
+
+func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
+	accts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 1, 24)
+	slots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 1, 12)
+	builder := NewUpdateBuilder()
+	for i, a := range accts {
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+	}
+	for _, sk := range slots {
+		builder.Storage(common.Bytes2Hex(accts[0]), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+	}
+	plainKeys, updates := builder.Build()
+	hph, root := processFreshTrie(t, plainKeys, updates)
+	ms := hph.ctx.(*MockState)
+
+	proven := [][]byte{accts[0], accts[5]}
+	provenSlots := [][]byte{storageKey(accts[0], slots[0]), storageKey(accts[0], slots[7])}
+	full, _, _, err := hph.Witnesses(context.Background(), touchUpdates(proven, provenSlots), false, "")
+	require.NoError(t, err)
+	fullTrie, err := trie.RLPDecode(full)
+	require.NoError(t, err)
+	writes := ms.putBranches
+	_, _, err = hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	require.Error(t, err, "pending deferred updates would be flushed by the fold")
+	require.Equal(t, writes, ms.putBranches)
+
+	require.NoError(t, hph.branchEncoder.ApplyDeferredUpdates(16, ms.PutBranch))
+	hph.branchEncoder.ClearDeferred()
+	writes = ms.putBranches
+	byHash, rootRO, err := hph.WitnessNodesByHash(context.Background(), touchUpdates(proven, provenSlots))
+	require.NoError(t, err)
+	require.Equal(t, root, rootRO)
+	require.Equal(t, writes, ms.putBranches, "a read-only fold writes no branch")
+	require.Empty(t, hph.branchEncoder.deferred, "a read-only fold queues no deferred update")
+	require.Less(t, len(byHash), len(full), "nodes off the proven paths are referenced by hash")
+
+	for _, a := range proven {
+		key := crypto.Keccak256(a)
+		want, err := fullTrie.Prove(key, 0, false)
+		require.NoError(t, err)
+		got, _, err := trie.ProofFromNodes(byHash, root, key)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "account %x", a)
+	}
+	accountProof, accountRLP, err := trie.ProofFromNodes(byHash, root, crypto.Keccak256(accts[0]))
+	require.NoError(t, err)
+	var acc accounts.Account
+	require.NoError(t, acc.DecodeForHashing(accountRLP))
+	for _, sk := range []int{0, 7} {
+		fullKey := append(crypto.Keccak256(accts[0]), crypto.Keccak256(slots[sk])...)
+		want, err := fullTrie.Prove(fullKey, len(accountProof), true)
+		require.NoError(t, err)
+		got, _, err := trie.ProofFromNodes(byHash, acc.Root[:], crypto.Keccak256(slots[sk]))
+		require.NoError(t, err)
+		require.Equal(t, want, got, "slot %x", slots[sk])
+	}
 }

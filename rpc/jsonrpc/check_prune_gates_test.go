@@ -88,6 +88,27 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+// TestCallBundleGatesTxBlockAndStateBlockSeparately pins the two blocks eth_callBundle
+// reads apart: the bundle's transactions come from the bodies of the blocks that hold
+// them, the state they run against comes from the block the caller names. A retention
+// that took away one of the two refuses only that one.
+func TestCallBundleGatesTxBlockAndStateBlockSeparately(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode},
+	})
+	ctx := t.Context()
+
+	_, err := apis.eth.CallBundle(ctx, []common.Hash{chainInfo.old.txHash},
+		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.recent.num)), nil)
+	require.NoError(t, err, "the body of the old block is kept and the state asked for is inside the window")
+
+	_, err = apis.eth.CallBundle(ctx, []common.Hash{chainInfo.recent.txHash},
+		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)), nil)
+	require.ErrorIs(t, err, state.PrunedError, "the state asked for is outside the history window")
+}
+
 // TestPruneGateArchive pins that an archive node never gates, including at
 // genesis: its distances are sentinels that report themselves as disabled.
 func TestPruneGateArchive(t *testing.T) {

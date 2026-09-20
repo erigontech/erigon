@@ -384,6 +384,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		buckets:      kv.TableCfg{},
 		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
 		roTxsLimiter: opts.roTxsLimiter,
+		roTxPool:     make(chan *mdbx.Txn, roTxPoolSize),
 
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
@@ -395,6 +396,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
+
+	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
+	// defer then no-ops, because mdbx Env.Close is idempotent.
+	defer func() {
+		if err != nil {
+			db.Close()
+		}
+	}()
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	// copy map to avoid changing global variable
@@ -457,15 +466,22 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
+// roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
+// Growing it is not free: a pooled txn holds its reader slot, and libmdbx never shrinks
+// the reader-table length, so every later slot scan and oldest-reader walk stays longer.
+var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
+
 type MdbxKV struct {
 	log          log.Logger
 	env          *mdbx.Env
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
-	opts         MdbxOpts
-	txSize       uint64
-	closed       atomic.Bool
-	path         string
+	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
+	roTxPool chan *mdbx.Txn
+	opts     MdbxOpts
+	txSize   uint64
+	closed   atomic.Bool
+	path     string
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -723,9 +739,12 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
+	db.drainRoTxPool()
 
-	db.env.Close()
-	db.env = nil
+	if db.env != nil {
+		db.env.Close()
+		db.env = nil
+	}
 
 	if db.opts.autoRemove {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
@@ -767,7 +786,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
+	tx, err := db.beginRoTxn()
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
@@ -781,6 +800,40 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	db.registerLiveTx(mt, true)
 	return mt, nil
+}
+
+func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
+	select {
+	case tx := <-db.roTxPool:
+		if err := tx.Renew(); err == nil {
+			return tx, nil
+		}
+		tx.Abort()
+	default:
+	}
+	return db.env.BeginTxn(nil, mdbx.Readonly)
+}
+
+func (db *MdbxKV) drainRoTxPool() {
+	for {
+		select {
+		case tx := <-db.roTxPool:
+			tx.Abort()
+		default:
+			return
+		}
+	}
+}
+
+func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
+	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
+		select {
+		case db.roTxPool <- tx:
+			return
+		default:
+		}
+	}
+	tx.Abort()
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -1379,9 +1432,16 @@ func (tx *MdbxTx) Rollback() {
 		return
 	}
 	tx.closeCursors()
-	tx.tx.Abort()
-	tx.db.unregisterLiveTx(tx, "ROLLBACK")
+	t := tx.tx
 	tx.tx = nil
+	// The pool send stays ahead of trackTxEnd: Close waits on that count before closing
+	// the env, and mdbx Reset has no close guard of its own.
+	if tx.readOnly {
+		tx.db.releaseRoTxn(t)
+	} else {
+		t.Abort()
+	}
+	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)

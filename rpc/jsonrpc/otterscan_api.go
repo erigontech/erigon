@@ -310,11 +310,11 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(blockReward.ToBig())
-	ret.UncleReward = hexutil.EncodeBig(uncleReward.ToBig())
+	ret.BlockReward = blockReward.Hex()
+	ret.UncleReward = uncleReward.Hex()
 
 	blockReward.Add(blockReward, uncleReward)
-	ret.Issuance = hexutil.EncodeBig(blockReward.ToBig())
+	ret.Issuance = blockReward.Hex()
 	return ret, nil
 }
 
@@ -425,9 +425,8 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 
 	// Crop txn input to 4bytes
-	txs := getBlockRes.Transactions.([]any)
-	for _, rawTx := range txs {
-		rpcTx := rawTx.(*ethapi.RPCTransaction)
+	txs := getBlockRes.Transactions.([]*ethapi.RPCTransaction)
+	for _, rpcTx := range txs {
 		if len(rpcTx.Input) >= 4 {
 			rpcTx.Input = rpcTx.Input[:4]
 		}
