@@ -157,8 +157,9 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 	s.popCommaOrField()
 }
 
-// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes
-// out unscanned, so a byte that JSON would escape would leave the response malformed.
+// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes out
+// unscanned, so a byte JSON would escape would leave the response malformed. Every appender the
+// RPC can answer with today is a hex quantity; this is what catches the next one that is not.
 func assertNoEscapes(text []byte) {
 	if !dbg.AssertEnabled {
 		return
