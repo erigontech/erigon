@@ -19,7 +19,6 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strconv"
@@ -407,25 +406,8 @@ func (s *StackStream) WriteArrayEnd() {
 // caller written against the manual API still produces valid JSON.
 func (s *StackStream) WriteMore() {}
 
-// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
-// holding. A marshaller takes it to write its fields without an interface call each time,
-// so it must write a value: the field is open by the time it returns.
-func Concrete(w jsonw.JSONWriter) *StackStream {
-	for {
-		switch t := w.(type) {
-		case *StackStream:
-			return t
-		case *LazyFieldStream:
-			t.ensure()
-			w = t.inner
-		default:
-			return nil
-		}
-	}
-}
-
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
+func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	writeObjectFieldFast(s.stream, fieldName, s.separatorPending)
 	s.separatorPending = false
 	s.push(ItemField)

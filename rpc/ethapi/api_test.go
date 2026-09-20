@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestNewRPCTransaction_NullSignature(t *testing.T) {
@@ -328,7 +327,7 @@ func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return 
 
 // fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
 func fastJSON[T interface {
-	MarshalFastJSONTo(w jsonw.JSONWriter) error
+	MarshalFastJSONTo(w *jsonstream.StackStream) error
 }](t *testing.T, v T) string {
 	t.Helper()
 	var b jsonSink

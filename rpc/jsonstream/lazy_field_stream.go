@@ -21,7 +21,6 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var (
@@ -113,7 +112,7 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.assertOpened(); s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
+func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
 	s.assertOpened()
 	return s.inner.WriteObjectField(name)
 }
@@ -137,6 +136,23 @@ func (s *LazyFieldStream) Err() error                     { return s.inner.Err()
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
+}
+
+// Open resolves a stream to the one that owns the buffer, opening any field a wrapper is
+// still holding. It is for the dispatch site: a marshaller takes the concrete stream and so
+// must write a value, since the field is open by the time this returns.
+func Open(s Stream) *StackStream {
+	for {
+		switch t := s.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			s = t.inner
+		default:
+			return nil
+		}
+	}
 }
 
 func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }

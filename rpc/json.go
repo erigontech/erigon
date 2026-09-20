@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 const (
@@ -115,7 +114,7 @@ type fastJSONResult interface {
 // implementation reports an error before its first call to w: once it writes, the stream already
 // holds part of the result and the response carries both result and error.
 type fastJSONMarshalerTo interface {
-	MarshalFastJSONTo(w jsonw.JSONWriter) error
+	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
 
 // marshalFastJSONTo encodes fm into a byte slice the caller owns.
@@ -139,7 +138,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
 		}
 		if fm, ok := result.(fastJSONMarshalerTo); ok {
-			if err := fm.MarshalFastJSONTo(rs); err != nil {
+			if err := fm.MarshalFastJSONTo(jsonstream.Open(rs)); err != nil {
 				return err
 			}
 			return rs.Err() // a latched write error left a placeholder in the stream

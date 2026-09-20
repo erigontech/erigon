@@ -1,4 +1,4 @@
-// Copyright 2026 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,46 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package jsonw
+package jsonstream
 
 import "encoding"
 
-// JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
-type JSONWriter interface {
-	// WriteHex writes b as a 0x-prefixed hex string.
-	WriteHex(b []byte)
-	// WriteQuotedText writes v.AppendText's output as a JSON string. The text must need no
-	// escaping: callers pass hex quantities.
-	WriteQuotedText(v encoding.TextAppender)
-	// WriteRawBytes writes already-encoded JSON verbatim. It is the escape hatch for a
-	// value the fast path has no shape for, so it must not be emulated by quoting.
-	WriteRawBytes(content []byte)
-	// WriteString writes s as an escaped JSON string.
-	WriteString(s string)
-	WriteBool(v bool)
-	WriteNil()
-	WriteObjectStart()
-	// WriteObjectField returns the writer, so a field and its value can be chained.
-	WriteObjectField(name string) JSONWriter
-	WriteObjectEnd()
-	WriteArrayStart()
-	WriteMore()
-	WriteArrayEnd()
-}
-
 // Field writes the comma a following field needs, then the field name. The first field of
 // an object uses WriteObjectField directly.
-func Field(w JSONWriter, name string) JSONWriter {
-	return w.WriteObjectField(name)
+func Field(s *StackStream, name string) *StackStream {
+	return s.WriteObjectField(name)
 }
 
 // Hex writes b as a hex string field, or null when b is nil.
-func Hex(w JSONWriter, name string, b []byte) {
+func Hex(s *StackStream, name string, b []byte) {
 	if b == nil {
-		Field(w, name).WriteNil()
+		Field(s, name).WriteNil()
 		return
 	}
-	Field(w, name).WriteHex(b)
+	Field(s, name).WriteHex(b)
 }
 
 type textPtr[T any] interface {
@@ -62,36 +39,36 @@ type textPtr[T any] interface {
 }
 
 // Text writes v's text as a JSON string field, or null when v is nil.
-func Text[T any, P textPtr[T]](w JSONWriter, name string, v P) {
+func Text[T any, P textPtr[T]](s *StackStream, name string, v P) {
 	if v == nil {
-		Field(w, name).WriteNil()
+		Field(s, name).WriteNil()
 		return
 	}
-	Field(w, name).WriteQuotedText(v)
+	Field(s, name).WriteQuotedText(v)
 }
 
 // Array writes a JSON array field exactly as the reflection encoder would: the pointer
 // decides whether the field appears, the slice decides its shape. A nil pointer omits the
 // field, a nil slice is null, an empty slice is []. So a field declared without omitempty
 // passes &field and is always present, and a *[]T with omitempty passes itself.
-func Array[S ~[]E, E any](w JSONWriter, name string, items *S, elem func(JSONWriter, *E)) {
+func Array[S ~[]E, E any](s *StackStream, name string, items *S, elem func(*StackStream, *E)) {
 	if items == nil {
 		return
 	}
-	Field(w, name)
-	ArrayValue(w, *items, elem)
+	Field(s, name)
+	ArrayValue(s, *items, elem)
 }
 
 // ArrayValue writes the array itself, with no field name, for a result that is a bare
 // array. A nil slice is null and an empty one is [].
-func ArrayValue[S ~[]E, E any](w JSONWriter, items S, elem func(JSONWriter, *E)) {
+func ArrayValue[S ~[]E, E any](s *StackStream, items S, elem func(*StackStream, *E)) {
 	if items == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return
 	}
-	w.WriteArrayStart()
+	s.WriteArrayStart()
 	for i := range items {
-		elem(w, &items[i])
+		elem(s, &items[i])
 	}
-	w.WriteArrayEnd()
+	s.WriteArrayEnd()
 }
