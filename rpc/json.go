@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -136,6 +137,12 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 	return writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
 		if isNilPointer(result) {
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
+		}
+		// hexutil.Bytes cannot carry a marshaller of its own: the concrete stream type
+		// lives in a package that already imports hexutil.
+		if b, ok := result.(hexutil.Bytes); ok {
+			rs.Open().WriteHex(b)
+			return nil
 		}
 		if fm, ok := result.(fastJSONMarshalerTo); ok {
 			if err := fm.MarshalFastJSONTo(rs.Open()); err != nil {
