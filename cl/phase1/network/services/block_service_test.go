@@ -763,14 +763,26 @@ func TestBlockServiceQueuesClockBoundaryBlockForRetry(t *testing.T) {
 	queuedValue, queued := impl.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, queued)
 	job := queuedValue.(*blockJob)
+	// The service's own loop retries the job too, and a retry that finds it running returns at once,
+	// so wait for whichever runner takes the pending attempt.
+	retry := func() {
+		job.mu.Lock()
+		attempt := job.attempt
+		job.mu.Unlock()
+		impl.processScheduledBlock(t.Context(), root, job, time.Now())
+		<-attempt.done
+	}
 
-	impl.processScheduledBlock(t.Context(), root, job, time.Now())
+	retry()
 	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, queued)
 	require.GreaterOrEqual(t, calls.Load(), int32(2))
 
 	ready.Store(true)
-	impl.processScheduledBlock(t.Context(), root, job, time.Now())
+	retry()
+	if _, queued = impl.blocksScheduledForLaterExecution.Load(root); queued {
+		retry() // the attempt above may have started before ready was set
+	}
 	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
 }

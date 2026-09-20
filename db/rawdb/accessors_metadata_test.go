@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type testL2Config struct {
@@ -83,4 +85,26 @@ func TestChainConfigAcceptsNullBorSection(t *testing.T) {
 	got, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
 	require.NotNil(t, got)
+}
+
+// A spec with no difficulty must still be readable back: the field is
+// gencodec:"required", so storing it as null makes ReadGenesis fail.
+func TestGenesisWithoutDifficultyRoundTrip(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	spec := &types.Genesis{Config: chain.AllProtocolChanges}
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, spec))
+
+	got, err := rawdb.ReadGenesis(tx)
+	require.NoError(t, err)
+	require.Equal(t, params.GenesisDifficulty, got.Difficulty)
+}
+
+func TestWriteGenesisDoesNotMutateSpec(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	spec := &types.Genesis{Config: chain.AllProtocolChanges}
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, spec))
+
+	require.Nil(t, spec.Difficulty)
 }

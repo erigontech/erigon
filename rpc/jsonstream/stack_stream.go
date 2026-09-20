@@ -17,12 +17,16 @@
 package jsonstream
 
 import (
+	"encoding"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -84,6 +88,34 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 		return
 	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.popCommaOrField()
+}
+
+func (s *StackStream) WriteHex(b []byte) {
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	if s.out != nil && len(buf)-start >= FlushThreshold {
+		s.stream.SetBuffer(buf[:start])
+		s.writeThrough(buf[start:])
+	} else {
+		s.stream.SetBuffer(buf)
+	}
+	s.popCommaOrField()
+}
+
+// WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
+// for hex quantities, which never need escaping.
+func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
+	if err != nil {
+		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
+		buf = append(s.stream.Buffer(), '"')
+		if s.stream.Error == nil {
+			s.stream.Error = err
+		}
+	}
+	s.stream.SetBuffer(append(buf, '"'))
 	s.popCommaOrField()
 }
 
@@ -248,10 +280,11 @@ func (s *StackStream) WriteMore() {
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) {
+func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
+	return s
 }
 
 // Flush flushes the underlying stream
@@ -340,6 +373,10 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	s.stack = s.stack[:targetDepth]
 	return s.stream.Error
 }
+
+// Err reports a write error the stream latched. Flush cannot stand in for it on a stream with no
+// writer: jsoniter returns nil for that case before it looks at the latched error.
+func (s *StackStream) Err() error { return s.stream.Error }
 
 func (s *StackStream) Depth() int { return len(s.stack) }
 
