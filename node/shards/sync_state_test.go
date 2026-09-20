@@ -472,20 +472,23 @@ func TestSyncingReplyKeepsAGenesisStartingBlock(t *testing.T) {
 	require.Equal(t, uint64(0), reply.GetStartingBlock(), "a session started at genesis keeps a zero pin")
 }
 
-// The lowered pin outlives the unwind: once execution restarts from below it,
-// progress is measured from where the restart happened.
-func TestSyncingReplyStartingBlockStaysDownAfterAnUnwind(t *testing.T) {
+// An unwind below the pin is reported through the clamp while execution is down
+// there; the pin itself is where the session began and survives the recovery.
+func TestSyncingReplyStartingBlockSurvivesAnUnwindBelowThePin(t *testing.T) {
 	n, tx := newSyncStateFixture(t, 100)
 	n.NewLastBlockSeen(500)
 	require.NoError(t, n.PublishSyncState(tx, 0))
 
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 50))
 	require.NoError(t, n.PublishSyncState(tx, 0))
-
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 150))
 	reply, err := n.BuildSyncingReply(tx, 0)
 	require.NoError(t, err)
 	require.Equal(t, uint64(50), reply.GetStartingBlock())
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 150))
+	reply, err = n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), reply.GetStartingBlock())
 }
 
 // Dropping the download pin makes the reported current block fall back to
@@ -500,6 +503,33 @@ func TestSyncingReplyStartingBlockSurvivesTheDownloadPinDrop(t *testing.T) {
 
 	n.SetSnapshotDownloadHandoff(20_000_000)
 	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	n.ClearSnapshotDownloadPin()
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 20_000_100))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8_000_000), reply.GetStartingBlock())
+}
+
+// The snapshots stage raises Execution to the commitment block in the pipeline's
+// own rw tx, and the pipeline publishes from it. A failure before the first commit
+// rolls that bump back, so the next publish reads a far lower committed progress
+// without any unwind having happened.
+func TestSyncingReplyStartingBlockSurvivesARolledBackExecutionBump(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(20_000_000)
+
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	n.SetSnapshotDownloadHandoff(20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 20_000_000))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 0))
 
 	n.ClearSnapshotDownloadPin()
 	require.NoError(t, n.PublishSyncState(tx, 0))
