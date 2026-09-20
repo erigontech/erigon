@@ -159,7 +159,21 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
+}
+
+// The wire form is a 0x-prefixed 32-byte hex string, whatever Go type carries it.
+func TestGetStorageAtJSONShape(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.NoError(t, err)
+
+	enc, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Regexp(t, `^"0x[0-9a-f]{64}"$`, string(enc))
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
@@ -173,7 +187,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
@@ -187,7 +201,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
@@ -252,7 +266,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 		t.Error("error expected")
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
@@ -610,11 +624,11 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
 	written, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn-1), at)
 	require.NoError(t, err)
-	require.Equal(t, ch.Blocks[bn-2].Hash(), common.HexToHash(written))
+	require.Equal(t, ch.Blocks[bn-2].Hash(), written)
 
 	notYetWritten, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn), at)
 	require.NoError(t, err)
-	require.Equal(t, common.Hash{}, common.HexToHash(notYetWritten), "slot %d is written by block %d", bn, bn+1)
+	require.Equal(t, common.Hash{}, notYetWritten, "slot %d is written by block %d", bn, bn+1)
 
 	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
 	require.NoError(t, err)
