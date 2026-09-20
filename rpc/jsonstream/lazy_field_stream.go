@@ -104,6 +104,11 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+func (s *LazyFieldStream) AppendJSON(v jsonw.JSONAppender) {
+	s.ensure()
+	s.inner.AppendJSON(v)
+}
+
 func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 	s.ensure()
 	s.inner.WriteQuotedText(v)

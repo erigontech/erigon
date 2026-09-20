@@ -72,6 +72,8 @@ type Stream interface {
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// AppendJSON lets a value encode itself with plain appends into the stream buffer.
+	AppendJSON(v jsonw.JSONAppender)
 	// WriteQuotedText writes v.AppendText's output as a JSON string, with no escape scan.
 	WriteQuotedText(v encoding.TextAppender)
 

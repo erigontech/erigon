@@ -18,6 +18,9 @@ package jsonw
 
 import "encoding"
 
+// JSONAppender encodes itself by appending to dst, with no call per field.
+type JSONAppender interface{ AppendJSON(dst []byte) []byte }
+
 // JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
 type JSONWriter interface {
 	// WriteHex writes b as a 0x-prefixed hex string.
@@ -31,6 +34,9 @@ type JSONWriter interface {
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
 	WriteBool(v bool)
+	// AppendJSON hands the stream's buffer to a value that encodes itself with plain
+	// appends, so a whole value costs one call instead of one per field.
+	AppendJSON(v JSONAppender)
 	WriteNil()
 	WriteObjectStart()
 	// WriteObjectField returns the writer, so a field and its value can be chained.
