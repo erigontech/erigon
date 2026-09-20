@@ -201,7 +201,7 @@ func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
 		return
 	}
 	jsonw.Field(w, name)
-	s.WriteHexes(hashes)
+	jsonstream.WriteHexes(s, hashes)
 }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
