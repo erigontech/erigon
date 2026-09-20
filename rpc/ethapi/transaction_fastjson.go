@@ -50,7 +50,12 @@ func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// A nil Input is "0x", not null, so it bypasses jsonw.Hex.
 	jsonw.Field(w, "input").WriteHex(t.Input)
 	jsonw.Text(w, "nonce", &t.Nonce)
-	jsonw.Hex(w, "to", addrOrNull(t.To))
+	jsonw.Field(w, "to")
+	if t.To == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(t.To[:])
+	}
 	jsonw.Text(w, "transactionIndex", t.TransactionIndex)
 	jsonw.Text(w, "value", t.Value)
 	jsonw.Text(w, "type", &t.Type)
@@ -65,7 +70,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 	// A plain slice with omitempty: empty is omitted, not [].
 	if len(t.BlobVersionedHashes) > 0 {
-		jsonw.Array(w, "blobVersionedHashes", &t.BlobVersionedHashes, writeHashElem)
+		writeHashes(w, "blobVersionedHashes", t.BlobVersionedHashes)
 	}
 	if t.Authorizations != nil {
 		jsonw.Array(w, "authorizationList", t.Authorizations, writeAuthorization)
@@ -83,7 +88,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 func writeAccessTuple(w jsonw.JSONWriter, a *types.AccessTuple) {
 	w.WriteObjectStart()
 	w.WriteObjectField("address").WriteHex(a.Address[:])
-	jsonw.Array(w, "storageKeys", &a.StorageKeys, writeHashElem)
+	writeHashes(w, "storageKeys", a.StorageKeys)
 	w.WriteObjectEnd()
 }
 
