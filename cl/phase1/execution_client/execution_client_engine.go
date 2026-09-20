@@ -254,7 +254,7 @@ func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash commo
 	// eth_getBlockByHash returns non-canonical blocks too — verify canonicality
 	// by fetching the canonical block at this height and comparing hashes.
 	var canonical *types.Header
-	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeBig(header.Number.ToBig()), false); err != nil {
+	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeUint64(header.Number.Uint64()), false); err != nil {
 		return false, fmt.Errorf("eth_getBlockByNumber failed: %w", err)
 	}
 	return canonical != nil && canonical.Hash() == hash, nil
@@ -453,8 +453,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	}
 
 	if ep.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		_, _ = (*uint256.Int)(ep.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 
 	if ep.BlobGasUsed != nil {
@@ -480,10 +479,10 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
 		for _, w := range ep.Withdrawals {
 			block.Withdrawals.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
+				Index:     uint64(w.Index),
+				Validator: uint64(w.Validator),
 				Address:   w.Address,
-				Amount:    w.Amount,
+				Amount:    uint64(w.Amount),
 			})
 		}
 	}

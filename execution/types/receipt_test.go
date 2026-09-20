@@ -21,15 +21,19 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -124,7 +128,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 
 func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 	w := bytes.NewBuffer(nil)
-	casted := ReceiptForStorage(*want)
+	casted := (*ReceiptForStorage)(want)
 	err := casted.EncodeRLP(w)
 	if err != nil {
 		return nil, err
@@ -631,4 +635,77 @@ func TestTypedReceiptDecodersAgree(t *testing.T) {
 			require.Equal(t, uint64(7), r.CumulativeGasUsed)
 		}
 	})
+}
+
+func TestReceiptSizeCountsLogs(t *testing.T) {
+	r := &Receipt{Logs: Logs{{Topics: make([]common.Hash, 2), Data: make([]byte, 100)}}}
+	withLog := r.Size()
+	require.Greater(t, withLog, (&Receipt{}).Size())
+
+	r.Logs[0].Data = make([]byte, 1100)
+	r.Logs[0].Topics = append(r.Logs[0].Topics, common.Hash{})
+	require.Equal(t, withLog+1000+length.Hash, r.Size())
+}
+
+func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
+	empty := (&Receipt{}).Size()
+	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
+}
+
+func TestReceiptLogsBloomCachesDerivedBloom(t *testing.T) {
+	t.Parallel()
+	r := &Receipt{Logs: Logs{{Address: common.Address{1}, Topics: []common.Hash{{2}}}}}
+	want := CreateBloom(Receipts{r})
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { assert.Equal(t, want, r.LogsBloom()) })
+	}
+	wg.Wait()
+	require.True(t, r.Bloom.IsEmpty(), "LogsBloom must not write the shared Bloom field")
+
+	r.Logs[0].Topics[0] = common.Hash{3}
+	require.Equal(t, want, r.LogsBloom(), "a derived bloom is cached")
+
+	withBloom := &Receipt{Bloom: Bloom{1}, Logs: r.Logs}
+	require.Equal(t, Bloom{1}, withBloom.LogsBloom())
+}
+
+func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
+	t.Parallel()
+	next := &Receipt{Status: ReceiptStatusSuccessful, TxHash: common.Hash{9},
+		Logs: Logs{{Address: common.Address{2}, Topics: []common.Hash{{3}}, Data: []byte{}}}}
+	rlpEnc, err := rlp.EncodeToBytes(next)
+	require.NoError(t, err)
+	binEnc, err := next.MarshalBinary()
+	require.NoError(t, err)
+	jsonEnc, err := json.Marshal(next)
+	require.NoError(t, err)
+
+	for name, decode := range map[string]func(*Receipt) error{
+		"DecodeRLP":       func(r *Receipt) error { return rlp.DecodeBytes(rlpEnc, r) },
+		"UnmarshalBinary": func(r *Receipt) error { return r.UnmarshalBinary(binEnc) },
+		"UnmarshalJSON":   func(r *Receipt) error { return json.Unmarshal(jsonEnc, r) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := &Receipt{Logs: Logs{{Address: common.Address{1}}}}
+			_ = r.LogsBloom()
+			require.NoError(t, decode(r))
+			require.Equal(t, CreateBloom(Receipts{next}), r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
+		})
+	}
+}
+
+func TestReceiptJSONBlockNumber(t *testing.T) {
+	enc, err := json.Marshal(&Receipt{BlockNumber: uint256.NewInt(0x1234)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x1234"`)
+	enc, err = json.Marshal(&Receipt{BlockNumber: new(uint256.Int)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x0"`)
+	enc, err = json.Marshal(&Receipt{})
+	require.NoError(t, err)
+	require.NotContains(t, string(enc), "blockNumber")
 }

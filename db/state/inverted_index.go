@@ -329,6 +329,8 @@ type InvertedIndexBufferedWriter struct {
 
 	discard      bool
 	filenameBase string
+	tmpdir       string
+	logger       log.Logger
 
 	indexTable, indexKeysTable string
 
@@ -354,8 +356,11 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
+	if err := w.keysCollector().Collect(w.txNumBytes[:], key); err != nil {
 		return err
+	}
+	if w.index == nil {
+		w.index = newWriterCollector(w.filenameBase+".ii.vals", w.tmpdir, w.logger)
 	}
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
@@ -367,15 +372,32 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
-
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.index != nil {
+		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.indexKeys != nil {
+		if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+func (w *InvertedIndexBufferedWriter) keysCollector() *etl.Collector {
+	if w.indexKeys == nil {
+		w.indexKeys = newWriterCollector(w.filenameBase+".ii.keys", w.tmpdir, w.logger)
+	}
+	return w.indexKeys
+}
+
+// newWriterCollector is called on the first write: most mem batches never write.
+func newWriterCollector(logPrefix, tmpdir string, logger log.Logger) *etl.Collector {
+	// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
+	return etl.NewCollectorWithAllocator(logPrefix, tmpdir, etl.SmallSortableBuffers, logger).
+		LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 }
 
 func (w *InvertedIndexBufferedWriter) close() {
@@ -398,17 +420,12 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		name:         iit.name,
 		discard:      discard,
 		filenameBase: iit.ii.FilenameBase,
+		tmpdir:       tmpdir,
+		logger:       iit.ii.logger,
 		stepSize:     iit.stepSize,
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
-	}
-	if !discard {
-		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		w.indexKeys = etl.NewCollectorWithAllocator(w.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
-		w.index = etl.NewCollectorWithAllocator(w.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
@@ -562,8 +579,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 		g := iit.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
+		if g.MatchCmp(key) != 0 { // MPH false-positives protection
 			continue
 		}
 		encodedSeq, _ := g.Next(nil)

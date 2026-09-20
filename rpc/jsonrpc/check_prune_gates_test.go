@@ -88,6 +88,27 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+// TestCallBundleGatesTxBlockAndStateBlockSeparately pins the two blocks eth_callBundle
+// reads apart: the bundle's transactions come from the bodies of the blocks that hold
+// them, the state they run against comes from the block the caller names. A retention
+// that took away one of the two refuses only that one.
+func TestCallBundleGatesTxBlockAndStateBlockSeparately(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode},
+	})
+	ctx := t.Context()
+
+	_, err := apis.eth.CallBundle(ctx, []common.Hash{chainInfo.old.txHash},
+		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.recent.num)), nil)
+	require.NoError(t, err, "the body of the old block is kept and the state asked for is inside the window")
+
+	_, err = apis.eth.CallBundle(ctx, []common.Hash{chainInfo.recent.txHash},
+		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)), nil)
+	require.ErrorIs(t, err, state.PrunedError, "the state asked for is outside the history window")
+}
+
 // TestPruneGateArchive pins that an archive node never gates, including at
 // genesis: its distances are sentinels that report themselves as disabled.
 func TestPruneGateArchive(t *testing.T) {
@@ -1220,6 +1241,35 @@ func TestCapabilitiesFollowTheResolvedBlocksBoundary(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, pruneGatingMergeHeight, uint64(*caps.Blocks.OldestBlock))
 	})
+
+	t.Run("expiry_starting_mid_chain", func(t *testing.T) {
+		t.Parallel()
+		apis, _ := setupPruneGating(t, cfg)
+		ctx := t.Context()
+
+		rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		for num := uint64(1); num <= 2; num++ {
+			hash, ok, err := apis.eth._blockReader.CanonicalHash(ctx, rwTx, num)
+			require.NoError(t, err)
+			require.True(t, ok)
+			rawdb.DeleteBody(rwTx, hash, num)
+		}
+		require.NoError(t, rwTx.Commit())
+
+		tx, err := apis.eth.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
+		require.NoError(t, err)
+		require.Less(t, oldest, pruneGatingMergeHeight)
+
+		caps, err := apis.eth.Capabilities(ctx)
+		require.NoError(t, err)
+		require.Equal(t, oldest, uint64(*caps.Blocks.OldestBlock),
+			"what is advertised is the block the gate serves from, not the merge point above it")
+	})
 }
 
 // TestCapabilitiesOmitTheStrategyForKeptReceipts pins that an explicit keep-all
@@ -1245,8 +1295,8 @@ func TestCapabilitiesOmitTheStrategyForKeptReceipts(t *testing.T) {
 // TestBlocksGateAppliesExpiryWhenOldestIsMidChain pins the settled expiry shape: the
 // transaction segment spanning the merge point starts below it, so the oldest fully
 // available block lands mid-chain while older bodies are still on disk. Data starting
-// mid-chain is not evidence of an archive datadir, and the gate must refuse below the
-// merge point.
+// mid-chain is not evidence of an archive datadir, and the boundary the gate serves from
+// is that oldest block, not the merge point above it.
 func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
 	t.Parallel()
 
@@ -1282,11 +1332,12 @@ func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
 		"the oldest available block must land strictly inside the pre-merge range")
 	require.Less(t, oldest, chainInfo.old.num, "the probed block's body must still be on disk")
 
-	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	err = apis.eth.checkPruneBlocks(ctx, tx, oldest-1)
 	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", oldest))
 
-	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, oldest))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num))
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
 }
 
@@ -1375,7 +1426,7 @@ func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
 	// The verdict is cached for a short TTL, which is what keeps a widening snapshot
 	// set from being read on every request. This test is about the later observation
 	// winning, not about how long the previous one lingers.
-	apis.eth._preMergeDataTTL = 0
+	apis.eth._preMergeData.SetTTL(0)
 
 	gateOnOldBlock := func() error {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
@@ -1619,7 +1670,7 @@ func TestBlocksGateCachesTheVerdictForAShortWhile(t *testing.T) {
 	dropTransactions(t, apis.rwDB, 1, pruneGatingMergeHeight)
 	require.NoError(t, gateOnOldBlock(), "within the window the remembered verdict answers")
 
-	apis.eth._preMergeDataTTL = 0
+	apis.eth._preMergeData.SetTTL(0)
 	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError, "past the window the datadir is read again")
 }
 
@@ -1699,4 +1750,87 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 
 	_, err = apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, withTxns, eth.ReceiptsOpts{})
 	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
+}
+
+// TestFeeHistoryGateTakesTheOldestBlockOfTheRange pins that the reward-percentile gate
+// looks at where the requested range starts, not where it ends: a range that reaches
+// below the cutoff is refused even when its newest block is retained. The header series
+// is served for the same range.
+func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	head := chainInfo.head
+	oldest := pruneGatingDistance.PruneTo(head)
+	retained := rpc.DecimalOrHex(head - oldest + 1)
+
+	_, err := apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), []float64{50})
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), "blocks are available")
+
+	_, err = apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), nil)
+	require.NoError(t, err, "the header series reaches past the blocks cutoff")
+
+	res, err := apis.eth.FeeHistory(ctx, retained, rpc.BlockNumber(head), []float64{50})
+	require.NoError(t, err)
+	require.Equal(t, oldest, res.OldestBlock.ToInt().Uint64())
+}
+
+// TestReceiptCacheServesBlocksWhoseHistoryIsRetired pins that a keep-all receipt retention
+// is served from the cache and not by re-execution: state history is retired on disk above
+// the block, so an endpoint that still answers can only be reading the cache. The shared
+// fixture cannot show this — it keeps every history and stores the prune mode afterwards.
+func TestReceiptCacheServesBlocksWhoseHistoryIsRetired(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prunedHistoryDistance,
+			Blocks:      prune.KeepAllBlocksPruneMode,
+			Receipts:    prune.KeepAllReceiptsPruneMode,
+		},
+		receiptCache: true,
+	})
+	ctx := t.Context()
+
+	bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
+	_, err := apis.eth.GetBalance(ctx, testAddr, &bnh)
+	require.ErrorIs(t, err, state.PrunedError, "the history window must already refuse state for this block")
+
+	for _, ep := range receiptGatedEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			res, err := ep.call(ctx, apis, chainInfo.old)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+		})
+	}
+}
+
+// TestReceiptsWithoutCacheStopAtRetiredHistory is the control for the test above: the
+// same fixture with the cache off refuses the block, which is what attributes the answers
+// there to the cache. The refusal here is the history-window comparison, not a read of
+// the retired files.
+func TestReceiptsWithoutCacheStopAtRetiredHistory(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prunedHistoryDistance,
+			Blocks:      prune.KeepAllBlocksPruneMode,
+			Receipts:    prune.KeepAllReceiptsPruneMode,
+		},
+	})
+	ctx := t.Context()
+
+	for _, ep := range receiptGatedEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			_, err := ep.call(ctx, apis, chainInfo.old)
+			require.ErrorIs(t, err, state.PrunedError)
+		})
+	}
 }

@@ -257,7 +257,10 @@ func TestDeepHash(t *testing.T) {
 			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value))
 		}
 
-		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
+		got2, hash2, err := prefixTrie.DeepHash([]byte(prefix))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !got2 {
 			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)
 		}
@@ -574,8 +577,10 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	}
 
 	// Get the storage root hashes via DeepHash
-	_, storageRoot1 := stateTrie.DeepHash(contract1AddrHash[:])
-	_, storageRoot2 := stateTrie.DeepHash(contract2AddrHash[:])
+	_, storageRoot1, err := stateTrie.DeepHash(contract1AddrHash[:])
+	require.NoError(t, err)
+	_, storageRoot2, err := stateTrie.DeepHash(contract2AddrHash[:])
+	require.NoError(t, err)
 
 	// Update expected accounts with computed storage roots
 	// (storage was added via Update, so the trie's AccountNode.Root is updated)

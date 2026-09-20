@@ -228,16 +228,10 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 	if len(applied) >= size {
 		return applied
 	}
-	if cap(applied) >= size {
-		oldLen := len(applied)
-		applied = applied[:size]
-		clear(applied[oldLen:])
-		return applied
-	}
-	nextCap := max(cap(applied)*2, size)
-	next := make([]gloasVoteContribution, size, nextCap)
-	copy(next, applied)
-	return next
+	oldLen := len(applied)
+	applied = slices.Grow(applied, size-oldLen)[:size]
+	clear(applied[oldLen:])
+	return applied
 }
 
 func (t *gloasWeightTree) addValidatorContribution(validatorIndex uint64, cs *checkpointState) {
@@ -392,8 +386,8 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 	}
 }
 
-func (t *gloasWeightTree) GetWeight(node ForkChoiceNode) uint64 {
-	return getWeight(t, t.f, node)
+func (t *gloasWeightTree) GetWeight(node ForkChoiceNode, currentSlot uint64) uint64 {
+	return getWeight(t, t.f, node, currentSlot)
 }
 
 func (t *gloasWeightTree) GetAttestationScore(node ForkChoiceNode) uint64 {

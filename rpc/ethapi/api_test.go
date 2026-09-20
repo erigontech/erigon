@@ -10,7 +10,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -232,32 +231,90 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
-// RPCMarshalHeader aliases the header it is given: the U256 quantities and the
-// extraData slice point straight at it. The block marshallers must therefore
-// hand it a copy — the map they return is mutable and exported, and the block
-// keeps its memoized hash, so a caller writing through the map would otherwise
-// leave the block describing itself wrongly.
+// RPCMarshalHeader aliases the header it is given: the U256 quantities, the
+// extraData slice and the fields callers may null out all point straight at it.
+// RPCMarshalBlock must therefore hand it a copy — the result is mutable and
+// exported, and the block keeps its memoized hash, so a caller writing through
+// the result would otherwise leave the block describing itself wrongly.
 func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	header := &types.Header{
 		Number:     *uint256.NewInt(7),
 		Difficulty: *uint256.NewInt(11),
 		BaseFee:    uint256.NewInt(13),
 		Extra:      []byte{1, 2, 3},
+		Coinbase:   common.HexToAddress("0x1234567890123456789012345678901234567890"),
 	}
 	block := types.NewBlock(header, nil, nil, nil, nil, nil)
 	wantHash := block.Hash()
+	wantMiner := block.Coinbase()
 
-	fields, err := RPCMarshalBlockDeprecated(block, false, false)
-	require.NoError(t, err)
+	fields := RPCMarshalBlock(block, false, false)
 
-	(*uint256.Int)(fields["number"].(*hexutil.U256)).SetUint64(99)
-	(*uint256.Int)(fields["difficulty"].(*hexutil.U256)).SetUint64(99)
-	(*uint256.Int)(fields["baseFeePerGas"].(*hexutil.U256)).SetUint64(99)
-	fields["extraData"].(hexutil.Bytes)[0] = 0xff
+	(*uint256.Int)(fields.Number).SetUint64(99)
+	(*uint256.Int)(fields.Difficulty).SetUint64(99)
+	(*uint256.Int)(fields.BaseFeePerGas).SetUint64(99)
+	fields.ExtraData[0] = 0xff
+	fields.Miner[0] = 0xff
+	fields.Nonce[0] = 0xff
+	fields.LogsBloom[0] = 0xff
 
 	require.Equal(t, uint64(7), block.NumberU64())
 	require.Equal(t, uint64(11), block.HeaderNoCopy().Difficulty.Uint64())
 	require.Equal(t, uint64(13), block.BaseFee().Uint64())
 	require.Equal(t, []byte{1, 2, 3}, block.Extra())
+	require.Equal(t, wantMiner, block.Coinbase())
+	require.Equal(t, types.BlockNonce{}, block.HeaderNoCopy().Nonce)
+	require.Equal(t, types.Bloom{}, block.HeaderNoCopy().Bloom)
 	require.Equal(t, wantHash, block.Hash())
+}
+
+// TestRPCMarshalBlockTransactionsJSON pins the wire shape of the transactions field
+// in each of its three forms, since the field is typed `any` and the element type
+// decides both the JSON and the per-transaction allocation count.
+func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	signer := types.LatestSignerForChainID(nil)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+
+	field := func(inclTx, fullTx bool) string {
+		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx))
+		require.NoError(t, err)
+		var m map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &m))
+		return string(m["transactions"])
+	}
+
+	require.Equal(t, `["`+txn.Hash().Hex()+`"]`, field(true, false),
+		"fullTx=false must emit a flat array of transaction hashes")
+
+	full := field(true, true)
+	require.Contains(t, full, `"hash":"`+txn.Hash().Hex()+`"`,
+		"fullTx=true must emit transaction objects")
+	require.Contains(t, full, `"nonce":"0x1"`)
+
+	require.Equal(t, `[]`, field(false, false),
+		"inclTx=false must still emit an empty array, not null and not an absent field")
+}
+
+// TestRPCMarshalBlockEmptyKeepsElementType pins the element type an empty block
+// carries: ots_getBlockTransactions type-asserts this field, so an empty block must
+// hold the same slice type a populated one does.
+func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
+	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
+
+	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
+	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
 }

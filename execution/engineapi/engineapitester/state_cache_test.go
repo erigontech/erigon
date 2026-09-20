@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -41,9 +40,8 @@ func (c viewOnlyCache) View(context.Context, kv.TemporalTx) (kvcache.CacheView, 
 
 type stubCacheView struct{}
 
-func (*stubCacheView) Get([]byte) ([]byte, error)              { return nil, nil }
-func (*stubCacheView) GetCode([]byte) ([]byte, error)          { return nil, nil }
-func (*stubCacheView) HasStorage(common.Address) (bool, error) { return false, nil }
+func (*stubCacheView) Get([]byte) ([]byte, error)     { return nil, nil }
+func (*stubCacheView) GetCode([]byte) ([]byte, error) { return nil, nil }
 
 func TestRPCViewObserverRunsSynchronouslyAfterBinding(t *testing.T) {
 	type observation struct {

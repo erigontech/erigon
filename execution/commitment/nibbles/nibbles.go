@@ -23,6 +23,8 @@
 // cycle that previously forced duplicated implementations.
 package nibbles
 
+import "encoding/binary"
+
 // Terminator is the hex nibble terminator byte (0x10 = 16).
 const Terminator byte = 0x10
 
@@ -89,6 +91,20 @@ func KeybytesToHex(str []byte) []byte {
 	return nibbles
 }
 
+func Expand(src, dst []byte) {
+	for len(src) >= 4 {
+		v := uint64(binary.LittleEndian.Uint32(src))
+		v = (v | v<<16) & 0x0000ffff0000ffff
+		v = (v | v<<8) & 0x00ff00ff00ff00ff
+		v = (v<<8 | v>>4) & 0x0f0f0f0f0f0f0f0f
+		binary.LittleEndian.PutUint64(dst, v)
+		src, dst = src[4:], dst[8:]
+	}
+	for i, b := range src {
+		dst[2*i], dst[2*i+1] = b>>4, b&0x0f
+	}
+}
+
 // HexToKeybytes turns hex nibbles into key bytes.
 // This can only be used for keys of even length.
 func HexToKeybytes(hex []byte) []byte {
@@ -125,6 +141,14 @@ func CommonPrefixLen(a, b []byte) int {
 func decodeNibbles(nibbles []byte, bytes []byte) {
 	if HasTerm(nibbles) {
 		nibbles = nibbles[:len(nibbles)-1]
+	}
+
+	for len(nibbles) >= 8 {
+		v := binary.LittleEndian.Uint64(nibbles)
+		v = (v<<4)&0x00f000f000f000f0 | (v>>8)&0x00ff00ff00ff00ff
+		v = (v | v>>8) & 0x0000ffff0000ffff
+		binary.LittleEndian.PutUint32(bytes, uint32(v|v>>16))
+		nibbles, bytes = nibbles[8:], bytes[4:]
 	}
 
 	nl := len(nibbles)

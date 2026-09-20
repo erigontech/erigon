@@ -17,22 +17,28 @@
 package commitment
 
 import (
-	"bytes"
 	"fmt"
 )
 
+const witnessNodeChunk = 8 * 1024
+
 type witnessNodeSet struct {
 	byHash map[string][]byte
+	buf    []byte
 }
 
 func newWitnessNodeSet() *witnessNodeSet { return &witnessNodeSet{byHash: make(map[string][]byte)} }
 
 func (s *witnessNodeSet) onNode(rlp, hash []byte) {
-	k := string(hash)
-	if _, ok := s.byHash[k]; ok {
+	if _, ok := s.byHash[string(hash)]; ok {
 		return
 	}
-	s.byHash[k] = bytes.Clone(rlp)
+	if cap(s.buf)-len(s.buf) < len(rlp) {
+		s.buf = make([]byte, 0, max(len(rlp), witnessNodeChunk))
+	}
+	start := len(s.buf)
+	s.buf = append(s.buf, rlp...)
+	s.byHash[string(hash)] = s.buf[start:len(s.buf):len(s.buf)]
 }
 
 func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {

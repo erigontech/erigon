@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -91,10 +92,10 @@ func (tr *TRand) RandBloom() Bloom {
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
 	return &Withdrawal{
-		Index:     tr.rnd.Uint64(),
-		Validator: tr.rnd.Uint64(),
+		Index:     hexutil.Uint64(tr.rnd.Uint64()),
+		Validator: hexutil.Uint64(tr.rnd.Uint64()),
 		Address:   tr.RandAddress(),
-		Amount:    tr.rnd.Uint64(),
+		Amount:    hexutil.Uint64(tr.rnd.Uint64()),
 	}
 }
 
@@ -517,9 +518,10 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
@@ -534,10 +536,10 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func TestTransactionEncodeDecodeRLP(t *testing.T) {

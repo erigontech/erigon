@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -33,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -67,11 +67,11 @@ type TraceCallParam struct {
 	From                 *common.Address   `json:"from"`
 	To                   *common.Address   `json:"to"`
 	Gas                  *hexutil.Uint64   `json:"gas"`
-	GasPrice             *hexutil.Big      `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big      `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big      `json:"value"`
+	GasPrice             *hexutil.U256     `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.U256     `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
+	Value                *hexutil.U256     `json:"value"`
 	Data                 hexutil.Bytes     `json:"data"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
@@ -96,8 +96,8 @@ type StateDiffAccount struct {
 }
 
 type StateDiffBalance struct {
-	From *hexutil.Big `json:"from"`
-	To   *hexutil.Big `json:"to"`
+	From *hexutil.U256 `json:"from"`
+	To   *hexutil.U256 `json:"to"`
 }
 
 type StateDiffCode struct {
@@ -178,37 +178,24 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		// If there's no basefee, then it must be a non-1559 execution
 		gasPrice = new(uint256.Int)
 		if args.GasPrice != nil {
-			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice.Set((*uint256.Int)(args.GasPrice))
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
 	} else {
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
-			var overflow bool
 			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice, overflow = uint256.FromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice = new(uint256.Int).Set((*uint256.Int)(args.GasPrice))
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
 			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
-				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasFeeCap.Set((*uint256.Int)(args.MaxFeePerGas))
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
-				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasTipCap.Set((*uint256.Int)(args.MaxPriorityFeePerGas))
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
@@ -221,15 +208,12 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas = uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt())
+			maxFeePerBlobGas = new(uint256.Int).Set((*uint256.Int)(args.MaxFeePerBlobGas))
 		}
 	}
 	value := new(uint256.Int)
 	if args.Value != nil {
-		overflow := value.SetFromBig(args.Value.ToInt())
-		if overflow {
-			return nil, errors.New("args.Value higher than 2^256-1")
-		}
+		value.Set((*uint256.Int)(args.Value))
 	}
 	var data []byte
 	if args.Data != nil {
@@ -418,7 +402,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
-		trace.Result = &TraceResult{GasUsed: (*hexutil.Big)(big.NewInt(0))}
+		trace.Result = &TraceResult{GasUsed: new(hexutil.U256)}
 		trace.Type = CALL
 	}
 	if deep {
@@ -429,9 +413,11 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		if typ == vm.DELEGATECALL {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
-				value, _ = uint256.FromBig(action.Value.ToInt())
+				v := uint256.Int(action.Value)
+				value = &v
 			case *CallTraceAction:
-				value, _ = uint256.FromBig(action.Value.ToInt())
+				v := uint256.Int(action.Value)
+				value = &v
 			}
 		}
 		if typ == vm.STATICCALL {
@@ -445,9 +431,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
-		action.Gas.ToInt().SetUint64(gas)
+		action.Gas = hexutil.U256(*uint256.NewInt(gas))
 		action.Init = bytes.Clone(input)
-		action.Value.ToInt().Set(value.ToBig())
+		action.Value = hexutil.U256(*value)
 		trace.Action = &action
 	case typ == vm.SELFDESTRUCT:
 		trace.Type = SUICIDE
@@ -455,7 +441,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := &SuicideTraceAction{}
 		action.Address = from.Value()
 		action.RefundAddress = to.Value()
-		action.Balance.ToInt().Set(value.ToBig())
+		action.Balance = hexutil.U256(*value)
 		trace.Action = action
 	default:
 		action := CallTraceAction{}
@@ -471,9 +457,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		action.From = from.Value()
 		action.To = to.Value()
-		action.Gas.ToInt().SetUint64(gas)
+		action.Gas = hexutil.U256(*uint256.NewInt(gas))
 		action.Input = bytes.Clone(input)
-		action.Value.ToInt().Set(value.ToBig())
+		action.Value = hexutil.U256(*value)
 		trace.Action = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
@@ -520,12 +506,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			topTrace.Error = "Reverted"
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 				topTrace.Result.(*TraceResult).Output = bytes.Clone(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 				topTrace.Result.(*CreateTraceResult).Code = bytes.Clone(output)
 			}
 		} else {
@@ -543,11 +527,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		}
 		switch topTrace.Type {
 		case CALL:
-			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 		case CREATE:
-			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -587,7 +569,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				vm.ADD, vm.EXP, vm.CALLER, vm.KECCAK256, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL, vm.CLZ,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
-				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD:
+				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -598,7 +580,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			// Set the "mem" of the last operation
 			var setMem bool
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -666,7 +648,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = 1
 			}
-		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.MCOPY:
 			if len(st) > 2 {
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 2).Uint64()
@@ -775,17 +757,15 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				fromBalance := ifromBalance.ToBig()
 				itoBalance, err := ibs.GetBalance(addr)
 				if err != nil {
 					return err
 				}
-				toBalance := itoBalance.ToBig()
-				if fromBalance.Cmp(toBalance) == 0 {
+				if ifromBalance.Eq(&itoBalance) {
 					accountDiff.Balance = "="
 				} else {
 					m := make(map[string]*StateDiffBalance)
-					m["*"] = &StateDiffBalance{From: (*hexutil.Big)(fromBalance), To: (*hexutil.Big)(toBalance)}
+					m["*"] = &StateDiffBalance{From: (*hexutil.U256)(&ifromBalance), To: (*hexutil.U256)(&itoBalance)}
 					accountDiff.Balance = m
 					allEqual = false
 				}
@@ -830,8 +810,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					if err != nil {
 						return err
 					}
-					m := make(map[string]*hexutil.Big)
-					m["-"] = (*hexutil.Big)(balance.ToBig())
+					m := make(map[string]*hexutil.U256)
+					m["-"] = (*hexutil.U256)(&balance)
 					accountDiff.Balance = m
 				}
 				{
@@ -859,8 +839,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				m := make(map[string]*hexutil.Big)
-				m["+"] = (*hexutil.Big)(balance.ToBig())
+				m := make(map[string]*hexutil.U256)
+				m["+"] = (*hexutil.U256)(&balance)
 				accountDiff.Balance = m
 			}
 			{
@@ -919,7 +899,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -968,7 +948,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,16 +1009,14 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			if entry, ok := sdMap[addr]; ok {
 				if wd.existed {
 					bal := entry.Balance.(map[string]*StateDiffBalance)["*"]
-					var cur uint256.Int
-					cur.SetFromBig(bal.To.ToInt())
+					cur := uint256.Int(*bal.To)
 					cur.Add(&cur, &wd.amount)
-					bal.To = (*hexutil.Big)(cur.ToBig())
+					bal.To = (*hexutil.U256)(&cur)
 				} else {
-					balMap := entry.Balance.(map[string]*hexutil.Big)
-					var cur uint256.Int
-					cur.SetFromBig(balMap["+"].ToInt())
+					balMap := entry.Balance.(map[string]*hexutil.U256)
+					cur := uint256.Int(*balMap["+"])
 					cur.Add(&cur, &wd.amount)
-					balMap["+"] = (*hexutil.Big)(cur.ToBig())
+					balMap["+"] = (*hexutil.U256)(&cur)
 				}
 			} else {
 				var to uint256.Int
@@ -1047,8 +1025,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 					sdMap[addr] = &StateDiffAccount{
 						Balance: map[string]*StateDiffBalance{
 							"*": {
-								From: (*hexutil.Big)(wd.prev.ToBig()),
-								To:   (*hexutil.Big)(to.ToBig()),
+								From: (*hexutil.U256)(&wd.prev),
+								To:   (*hexutil.U256)(&to),
 							},
 						},
 						Code:    "=",
@@ -1057,7 +1035,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 					}
 				} else {
 					sdMap[addr] = &StateDiffAccount{
-						Balance: map[string]*hexutil.Big{"+": (*hexutil.Big)(to.ToBig())},
+						Balance: map[string]*hexutil.U256{"+": (*hexutil.U256)(&to)},
 						Code:    map[string]hexutil.Bytes{"+": {}},
 						Nonce:   map[string]hexutil.Uint64{"+": 0},
 						Storage: map[common.Hash]map[string]any{},
@@ -1119,7 +1097,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,9 +1163,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	var precompiles vm.PrecompiledContracts
 	if traceConfig != nil && traceConfig.StateOverrides != nil {
-		rules := blockCtx.Rules(chainConfig)
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+		precompiles, err = applyStateOverrides(ibs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig))
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -1227,6 +1204,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
+		if traceConfig != nil && traceConfig.StateOverrides != nil {
+			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
+				return nil, err
+			}
+		}
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
@@ -1241,6 +1223,16 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	return traceResult, nil
+}
+
+// applyStateOverrides applies overrides as synthetic pre-state. Each call needs its own
+// precompile set: Override consumes it via MovePrecompileTo, so a reused set fails.
+func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOverrides, rules *chain.Rules) (vm.PrecompiledContracts, error) {
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	if err := overrides.Override(ibs, precompiles, rules); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
 }
 
 // CallMany implements trace_callMany.
@@ -1353,15 +1345,18 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, traceConfig)
+		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
 
 	return trace, err
 }
 
+// advanceTxNum moves the history reader with the transaction index. Block
+// replay needs it; an ad-hoc bundle must not, or a call reads state left by a
+// real transaction it never executed.
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1398,7 +1393,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var tracingHooks *tracing.Hooks
 
 	for txIndex, msg := range msgs {
-		if isHistoricalStateReader {
+		if isHistoricalStateReader && advanceTxNum {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := common.Stopped(ctx.Done()); err != nil {
@@ -1451,9 +1446,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			if isHistoricalStateReader {
-				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
-			}
 			sdMap := make(map[accounts.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}

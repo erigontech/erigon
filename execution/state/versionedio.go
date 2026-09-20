@@ -1317,6 +1317,9 @@ func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+	if len(m) == 0 {
+		return true
+	}
 	for _, vw := range m {
 		if !yield(vw.WriteHeader) {
 			return false
@@ -1732,30 +1735,6 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	}
 
 	return uint256.Int{}, false, nil
-}
-
-func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
-	// recordWipedRead stores the zero a destruct left behind, so only a non-zero
-	// recorded read proves storage.
-	for _, r := range vr.reads.storage[address] {
-		if !r.Val.IsZero() {
-			return true, nil
-		}
-	}
-
-	// Ask the domain before walking the map: a contract with pre-block storage
-	// answers here, and only an account the domain does not answer for — which is
-	// the CREATE case this serves — pays for the per-slot scan.
-	wipedAt, wiped := vr.versionMap.storageWipedAt(address, vr.txIndex)
-	if !wiped && vr.stateReader != nil {
-		has, err := vr.stateReader.HasStorage(address)
-		if has || err != nil {
-			return has, err
-		}
-	}
-	// Either the destruct erased whatever the domain holds, or the domain holds
-	// nothing and only an in-block write can still make this true.
-	return vr.versionMap.hasLiveSlot(address, wipedAt, wiped, vr.txIndex), nil
 }
 
 // versionedCode resolves code from the read set and the version map, reporting
@@ -2566,7 +2545,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
 		// reads (Empty() in statefulGasCall). Keep it when it has actual state
 		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
 		bal = append(bal, *account.changes)
@@ -2716,7 +2695,7 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{
-		changes: &types.AccountChanges{Address: addr},
+		changes: &types.AccountChanges{Address: addr.Value()},
 		balance: newBalanceTracker(),
 		nonce:   newNonceTracker(),
 		code:    newCodeTracker(),

@@ -129,6 +129,45 @@ func TestWebsocketLargeCall(t *testing.T) {
 	}
 }
 
+// TestWebsocketBatchKeepsRequestOrder checks the exact batch answer, because some clients
+// match batch responses by position instead of by id.
+func TestWebsocketBatchKeepsRequestOrder(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["one"]},` +
+		`{"jsonrpc":"2.0","method":"test_echo","params":["notification",0]},` +
+		`{"jsonrpc":"2.0","id":2,"method":"test_echo","params":["two",2]},` +
+		`{"jsonrpc":"2.0","id":3,"method":"no_such_method"}]`
+	if err := conn.Write(t.Context(), websocket.MessageText, []byte(batch)); err != nil {
+		t.Fatal(err)
+	}
+	_, got, err := conn.Read(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"jsonrpc":"2.0","id":1,"result":"one"},` +
+		`{"jsonrpc":"2.0","id":2,"result":{"String":"two","Int":2,"Args":null}},` +
+		`{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"the method no_such_method does not exist/is not available"}}]`
+	if string(got) != want {
+		t.Fatalf("batch answer:\n got  %s\n want %s", got, want)
+	}
+}
+
 // This test checks that client handles WebSocket ping frames correctly.
 func TestClientWebsocketPing(t *testing.T) {
 	if testing.Short() {
@@ -148,7 +187,7 @@ func TestClientWebsocketPing(t *testing.T) {
 		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	)
 	defer cancel()
-	defer server.Shutdown(ctx)
+	defer func() { _ = server.Shutdown(ctx) }()
 
 	client, err := DialContext(ctx, "ws://"+server.Addr, logger)
 	if err != nil {
@@ -232,7 +271,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 			t.Errorf("server WS upgrade error: %v", err)
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 
 		// Handle the connection.
 		wsPingTestHandler(t, conn, shutdown, sendPing)
@@ -244,7 +283,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 		t.Fatal("can't listen:", err)
 	}
 	srv.Addr = listener.Addr().String()
-	go srv.Serve(listener)
+	go func() { _ = srv.Serve(listener) }()
 	return &srv
 }
 
@@ -391,7 +430,7 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 		}
 		t.Fatalf("failed to dial: %v", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte("invalid json")); err != nil {
 		t.Fatalf("failed to write: %v", err)
