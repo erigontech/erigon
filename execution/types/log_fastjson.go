@@ -157,10 +157,7 @@ func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		return nil
 	}
 	w.WriteArrayStart()
-	for i, l := range logs {
-		if i > 0 {
-			w.WriteMore()
-		}
+	for _, l := range logs {
 		if err := l.MarshalFastJSONTo(w); err != nil {
 			return err
 		}

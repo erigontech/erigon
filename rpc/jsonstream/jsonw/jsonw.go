@@ -44,7 +44,6 @@ type JSONWriter interface {
 // Field writes the comma a following field needs, then the field name. The first field of
 // an object uses WriteObjectField directly.
 func Field(w JSONWriter, name string) JSONWriter {
-	w.WriteMore()
 	return w.WriteObjectField(name)
 }
 
@@ -86,9 +85,6 @@ func Array[S ~[]E, E any](w JSONWriter, name string, items *S, elem func(JSONWri
 	s := *items
 	Field(w, name).WriteArrayStart()
 	for i := range s {
-		if i > 0 {
-			w.WriteMore()
-		}
 		elem(w, &s[i])
 	}
 	w.WriteArrayEnd()
