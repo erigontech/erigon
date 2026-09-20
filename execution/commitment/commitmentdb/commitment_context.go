@@ -341,7 +341,7 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Contex
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
-func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if !ok {
 		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
@@ -363,8 +363,8 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 // superset Witness() returns is for consumers that do their own per-key selection.
 // The returned nodes are the raw lean set (root first, no code attached), suitable for
 // feeding a node-set stateless verifier directly.
-func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
-	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
+	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, nil, err
 	}

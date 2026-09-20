@@ -541,9 +541,6 @@ type ExecutionWitnessResult struct {
 	// witness cache stores a shell carrying only this, so a hit serves the bytes
 	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
 	cachedJSON []byte
-
-	// codeHashes is keyed by the code itself, so a hit is the hash of exactly these bytes.
-	codeHashes map[string]common.Hash
 }
 
 // MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
@@ -883,7 +880,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		Codes:          accessed.SortedCodes,
 		Keys:           accessed.WitnessKeys,
 		headerByNumber: make(map[uint64]*types.Header),
-		codeHashes:     accessed.codeHashes,
 	}
 
 	// Build merkle proofs for all accessed accounts
@@ -987,7 +983,6 @@ type accessedState struct {
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
 	Deleted     map[common.Address]struct{}
-	codeHashes  map[string]common.Hash
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1061,7 +1056,6 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		WitnessKeys: []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
 		Deleted:     make(map[common.Address]struct{}),
-		codeHashes:  rs.codeHashes,
 	}
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
@@ -1325,7 +1319,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1591,11 +1585,7 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
-		codeHash, ok := result.codeHashes[string(code)]
-		if !ok {
-			codeHash = crypto.Keccak256Hash(code)
-		}
-		codeMap[codeHash] = code
+		codeMap[crypto.Keccak256Hash(code)] = code
 	}
 
 	return &witnessStateless{
