@@ -616,14 +616,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-			// On context cancellation evm.Cancel() aborts the EVM mid-opcode, so even a
-			// gas-heavy transaction answers an RPC timeout promptly. Deregistered per
-			// transaction: they share one ctx, so callbacks would otherwise pile up on it.
-			stop := context.AfterFunc(ctx, evm.Cancel)
-
 			genEnv.ibs.SetTxContext(blockNum, i)
-			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
-			stop()
+			receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
+				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 			}
@@ -791,4 +787,12 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 	}
 	baseBlockNum := blockNum - 1
 	return g.commitmentReplay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, receiptComputeCommitment)
+}
+
+// applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
+// mid-opcode, so a gas-heavy transaction does not run on after the caller has given up. The
+// callback is deregistered when apply returns, which a defer in the caller's loop would not do.
+func applyCancellable(ctx context.Context, evm *vm.EVM, apply func() (*types.Receipt, error)) (*types.Receipt, error) {
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	return apply()
 }
