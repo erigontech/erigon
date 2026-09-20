@@ -476,18 +476,21 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	if l == 0 {
 		return Logs{}, s.ListEnd()
 	}
-	// One arena backs every Log, so a log costs no allocation of its own.
-	// CountItems is exact for a well-formed list but counts items, not logs, so
-	// minStoredLogSize bounds what a crafted payload can size.
+	// One arena backs arenaChunk Logs, so a log costs no allocation of its own.
+	// A retained log pins its whole chunk, including every sibling's Topics and
+	// Data, which is what bounds the chunk. CountItems is exact for a well-formed
+	// list but counts items, not logs, so minStoredLogSize caps a crafted payload.
 	const minStoredLogSize = 24 // list header, 21-byte address, empty topics, empty data
-	var arena []Log
+	const arenaChunk = 32
+	n := 0
 	if raw := s.Peek(); uint64(len(raw)) >= l {
-		arena = make([]Log, min(rlp.CountItems(raw[:l]), int(l/minStoredLogSize)))
+		n = min(rlp.CountItems(raw[:l]), int(l/minStoredLogSize))
 	}
-	logs := make(Logs, 0, len(arena))
+	logs := make(Logs, 0, n)
+	var arena []Log
 	for s.MoreDataInList() {
 		if len(arena) == 0 {
-			arena = make([]Log, 1)
+			arena = make([]Log, max(min(n-len(logs), arenaChunk), 1))
 		}
 		log := &arena[0]
 		arena = arena[1:]
