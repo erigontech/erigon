@@ -63,8 +63,8 @@ func DoCall(
 		}
 	*/
 
-	ibs := state.GetPooled(stateReader)
-	defer state.PutPooled(ibs)
+	state := state.New(stateReader)
+	defer state.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -94,9 +94,10 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
-	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
-	// this EVM is not reused, so a callback already running needs no join.
+	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
+	// The callback is deregistered on return, before cancel() runs (LIFO), so it can never
+	// fire for a later call. This EVM is not reused, so a callback already running is
+	// harmless and stop() need not be joined.
 	var timedOut atomic.Bool
 	stop := context.AfterFunc(ctx, func() {
 		timedOut.Store(true)
@@ -108,7 +109,7 @@ func DoCall(
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
+		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
