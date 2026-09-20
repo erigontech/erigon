@@ -313,8 +313,7 @@ func (s *StackStream) WriteMore() {}
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
-	s.beforeValue()
-	writeObjectFieldFast(s.stream, fieldName)
+	writeObjectFieldFast(s.stream, fieldName, s.separatorPending)
 	s.separatorPending = false
 	s.push(ItemField)
 	return s

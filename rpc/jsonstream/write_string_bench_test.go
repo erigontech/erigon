@@ -62,7 +62,7 @@ func BenchmarkWriteObjectField(b *testing.B) {
 				benchWriteString(b, (*jsoniter.Stream).WriteObjectField, tc.val)
 			})
 			b.Run("impl=fast", func(b *testing.B) {
-				benchWriteString(b, writeObjectFieldFast, tc.val)
+				benchWriteString(b, func(s *jsoniter.Stream, v string) { writeObjectFieldFast(s, v, false) }, tc.val)
 			})
 		})
 	}

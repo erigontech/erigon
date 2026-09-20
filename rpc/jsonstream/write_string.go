@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"encoding/binary"
 	"math/bits"
+	"slices"
 	"strconv"
 
 	jsoniter "github.com/json-iterator/go"
@@ -96,11 +97,26 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 // writeObjectFieldFast writes a field name and its colon, without the escape scan
 // a value gets: every field name Erigon writes is a source literal or a hex string.
 // The bare colon is correct only at jsoniter's IndentionStep 0, which newStackStream pins.
-func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
+func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string, comma bool) {
 	if dbg.AssertEnabled && escapeIndex(fieldName) < len(fieldName) {
 		panic("jsonstream: field name needs escaping: " + strconv.Quote(fieldName))
 	}
-	buf := append(stream.Buffer(), '"')
-	buf = append(buf, fieldName...)
-	stream.SetBuffer(append(buf, '"', ':'))
+	// One grow and one copy: the separator belongs to the same write, so a field costs a
+	// single capacity check instead of one per fragment.
+	buf := stream.Buffer()
+	n := len(buf)
+	size := len(fieldName) + 3
+	if comma {
+		size++
+	}
+	buf = slices.Grow(buf, size)[:n+size]
+	if comma {
+		buf[n] = ','
+		n++
+	}
+	buf[n] = '"'
+	n += 1 + copy(buf[n+1:], fieldName)
+	buf[n] = '"'
+	buf[n+1] = ':'
+	stream.SetBuffer(buf)
 }
