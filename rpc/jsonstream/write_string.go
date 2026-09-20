@@ -19,11 +19,13 @@ package jsonstream
 import (
 	"encoding/binary"
 	"math/bits"
+	"strconv"
 
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 const hexDigits = "0123456789abcdef"
@@ -91,8 +93,14 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 	stream.SetBuffer(appendJSONString(stream.Buffer(), val))
 }
 
-// writeObjectFieldFast writes a field name and its colon. The bare colon is
-// correct only at jsoniter's IndentionStep 0, which newStackStream pins.
+// writeObjectFieldFast writes a field name and its colon, without the escape scan
+// a value gets: every field name Erigon writes is a source literal or a hex string.
+// The bare colon is correct only at jsoniter's IndentionStep 0, which newStackStream pins.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
-	stream.SetBuffer(append(appendJSONString(stream.Buffer(), fieldName), ':'))
+	if dbg.AssertEnabled && escapeIndex(fieldName) < len(fieldName) {
+		panic("jsonstream: field name needs escaping: " + strconv.Quote(fieldName))
+	}
+	buf := append(stream.Buffer(), '"')
+	buf = append(buf, fieldName...)
+	stream.SetBuffer(append(buf, '"', ':'))
 }
