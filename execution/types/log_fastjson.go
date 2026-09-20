@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
@@ -127,32 +126,32 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 
 // MarshalFastJSONTo writes the same bytes as appendFastJSON straight into the response
 // stream, so a result never needs a buffer of its own.
-func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if l == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return nil
 	}
-	w.WriteObjectStart()
-	w.WriteObjectField("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(w, "topics", l.Topics)
+	s.WriteObjectStart()
+	s.WriteObjectField("address").WriteHex(l.Address[:])
+	jsonstream.HexesField(s, "topics", l.Topics)
 	// A nil Data is "0x", not null, so it bypasses jsonw.Hex.
-	jsonw.Field(w, "data").WriteHex(l.Data)
-	jsonw.Text(w, "blockNumber", &l.BlockNumber)
-	jsonw.Hex(w, "transactionHash", l.TxHash[:])
-	jsonw.Text(w, "transactionIndex", &l.TxIndex)
-	jsonw.Hex(w, "blockHash", l.BlockHash[:])
-	jsonw.Text(w, "logIndex", &l.Index)
-	jsonw.Field(w, "removed").WriteBool(l.Removed)
-	jsonw.Text(w, "blockTimestamp", &l.BlockTimestamp)
-	w.WriteObjectEnd()
+	jsonstream.Field(s, "data").WriteHex(l.Data)
+	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
+	jsonstream.Field(s, "transactionHash").WriteHex(l.TxHash[:])
+	jsonstream.Text(s, "transactionIndex", &l.TxIndex)
+	jsonstream.Field(s, "blockHash").WriteHex(l.BlockHash[:])
+	jsonstream.Text(s, "logIndex", &l.Index)
+	jsonstream.Field(s, "removed").WriteBool(l.Removed)
+	jsonstream.Text(s, "blockTimestamp", &l.BlockTimestamp)
+	s.WriteObjectEnd()
 	return nil
 }
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
 // pointer method RPCLogs itself would not satisfy the fast-JSON interface.
-func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	jsonw.ArrayValue(w, logs, writeLogElem)
+func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, logs, writeLogElem)
 	return nil
 }
 
-func writeLogElem(w jsonw.JSONWriter, l **RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
+func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }

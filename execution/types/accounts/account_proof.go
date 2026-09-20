@@ -19,7 +19,7 @@ package accounts
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Result structs for GetProof
@@ -38,73 +38,73 @@ type StorProofResult struct {
 	Proof []hexutil.Bytes `json:"proof"`
 }
 
-func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	w.WriteObjectStart()
+func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	s.WriteObjectStart()
 	{
-		w.WriteObjectField("address")
-		w.WriteHex(r.Address[:])
-		writeField(w, "accountProof")
-		writeHexArray(w, r.AccountProof)
-		writeField(w, "balance")
-		writeU256(w, r.Balance)
-		writeField(w, "codeHash")
-		w.WriteHex(r.CodeHash[:])
-		writeField(w, "nonce")
-		w.WriteQuotedText(&r.Nonce)
-		writeField(w, "storageHash")
-		w.WriteHex(r.StorageHash[:])
-		writeField(w, "storageProof")
+		s.WriteObjectField("address")
+		s.WriteHex(r.Address[:])
+		writeField(s, "accountProof")
+		writeHexArray(s, r.AccountProof)
+		writeField(s, "balance")
+		writeU256(s, r.Balance)
+		writeField(s, "codeHash")
+		s.WriteHex(r.CodeHash[:])
+		writeField(s, "nonce")
+		s.WriteQuotedText(&r.Nonce)
+		writeField(s, "storageHash")
+		s.WriteHex(r.StorageHash[:])
+		writeField(s, "storageProof")
 		if r.StorageProof == nil {
-			w.WriteNil()
+			s.WriteNil()
 		} else {
-			w.WriteArrayStart()
+			s.WriteArrayStart()
 			for i := range r.StorageProof {
 				if i > 0 {
-					w.WriteMore()
+					s.WriteMore()
 				}
 				sp := &r.StorageProof[i]
-				w.WriteObjectStart()
+				s.WriteObjectStart()
 				{
-					w.WriteObjectField("key")
-					w.WriteString(sp.Key)
-					writeField(w, "value")
-					writeU256(w, sp.Value)
-					writeField(w, "proof")
-					writeHexArray(w, sp.Proof)
+					s.WriteObjectField("key")
+					s.WriteString(sp.Key)
+					writeField(s, "value")
+					writeU256(s, sp.Value)
+					writeField(s, "proof")
+					writeHexArray(s, sp.Proof)
 				}
-				w.WriteObjectEnd()
+				s.WriteObjectEnd()
 			}
-			w.WriteArrayEnd()
+			s.WriteArrayEnd()
 		}
 	}
-	w.WriteObjectEnd()
+	s.WriteObjectEnd()
 	return nil
 }
 
-func writeField(w jsonw.JSONWriter, name string) {
-	w.WriteMore()
-	w.WriteObjectField(name)
+func writeField(s *jsonstream.StackStream, name string) {
+	s.WriteMore()
+	s.WriteObjectField(name)
 }
 
-func writeHexArray(w jsonw.JSONWriter, items []hexutil.Bytes) {
+func writeHexArray(s *jsonstream.StackStream, items []hexutil.Bytes) {
 	if items == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return
 	}
-	w.WriteArrayStart()
+	s.WriteArrayStart()
 	for i, item := range items {
 		if i > 0 {
-			w.WriteMore()
+			s.WriteMore()
 		}
-		w.WriteHex(item)
+		s.WriteHex(item)
 	}
-	w.WriteArrayEnd()
+	s.WriteArrayEnd()
 }
 
-func writeU256(w jsonw.JSONWriter, v *hexutil.U256) {
+func writeU256(s *jsonstream.StackStream, v *hexutil.U256) {
 	if v == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return
 	}
-	w.WriteQuotedText(v)
+	s.WriteQuotedText(v)
 }

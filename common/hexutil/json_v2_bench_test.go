@@ -55,9 +55,7 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 			w.Body.Reset()
 			stream := jsonstream.Get(w)
 			defer jsonstream.Put(stream)
-			if err := code.MarshalFastJSONTo(stream); err != nil {
-				b.Fatal(err)
-			}
+			stream.WriteHex(code)
 			if err := stream.Flush(); err != nil {
 				b.Fatal(err)
 			}
