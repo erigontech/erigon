@@ -75,14 +75,16 @@ func BenchmarkRPCMarshalBlock(b *testing.B) {
 		block := types.NewBlock(benchHeader(true), txs, nil, nil, types.Withdrawals{}, nil)
 		block.Hash()
 
-		b.Run(fmt.Sprintf("txs=%d", txCount), func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				out, err := json.Marshal(RPCMarshalBlock(block, true, true))
-				if err != nil || len(out) == 0 {
-					b.Fatal(err)
+		for _, fullTx := range []bool{true, false} {
+			b.Run(fmt.Sprintf("txs=%d/fullTx=%t", txCount, fullTx), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := json.Marshal(RPCMarshalBlock(block, true, fullTx))
+					if err != nil || len(out) == 0 {
+						b.Fatal(err)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }

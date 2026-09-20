@@ -128,12 +128,13 @@ type HexPatriciaHashed struct {
 	// Columns of the grid correspond to pointers to the nodes further from the root
 	grid          [128][16]cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
 	stitchScratch [16]cell
-	currentKey    [128]byte   // For each row indicates which column is currently selected
-	depths        [128]int16  // For each row, the depth of cells in that row
-	branchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
-	witnessPath   [128]uint16 // For each row, bitmap of cells on a proven key's path
+	cellData      [16]cellEncodeData // hashRow output; stale entries outside afterMap are never read
+	currentKey    [128]byte          // For each row indicates which column is currently selected
+	depths        [128]int16         // For each row, the depth of cells in that row
+	branchBefore  [128]bool          // For each row, whether there was a branch node in the database loaded in unfold
+	touchMap      [128]uint16        // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	afterMap      [128]uint16        // For each row, bitmap of cells that were present after modification
+	witnessPath   [128]uint16        // For each row, bitmap of cells on a proven key's path
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -290,6 +291,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
+	clear(hph.cellData[:])
 
 	// branch encoder: clear deferred updates, reset buffer
 	hph.branchEncoder.ClearDeferred()
@@ -1788,7 +1790,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		if err != nil {
 			return err
 		}
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, prev); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellData, prev); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 	}
@@ -1817,9 +1819,9 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 
 // hashRow performs a single pass over all 17 branch slots (16 nibbles + terminator),
 // feeding cell hashes to hasher for present cells (per afterMap) and writing 0x80
-// for empty slots. It simultaneously extracts cellEncodeData for each present cell.
-func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) ([16]cellEncodeData, error) {
-	var cellData [16]cellEncodeData
+// for empty slots. It simultaneously extracts cellEncodeData for each present cell into hph.cellData.
+func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) (*[16]cellEncodeData, error) {
+	cellData := &hph.cellData
 	capture := hph.witness.active()
 
 	for bitset, lastNib := hph.afterMap[row], 0; ; {
