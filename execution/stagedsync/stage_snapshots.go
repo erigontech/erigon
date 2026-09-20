@@ -397,7 +397,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
-		if err := agg.OpenFolder(cfg.db); err != nil {
+		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
 			return err
 		}
 

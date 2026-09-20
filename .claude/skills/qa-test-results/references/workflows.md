@@ -88,7 +88,8 @@ Common shapes:
 | `metric-plots*` | `metrics-<chain>-plots_<metric>_*.png` and `_data.json` |
 | `fd-leak-analysis*` | `fd-leak-analysis-<chain>.md`, sampled every 60 s against a baseline |
 | `torrent-client-status*` | downloader torrent state at the end of the run |
-| `state-snapshot-hashes-<chain>` | exec-from-zero only: `hashes-<chain>.txt` (the local infohashes from `downloader torrent_hashes`), the datadir's `preverified.toml`, and `result-state-hashes-<chain>.json` |
+| `state-snapshot-hashes-<chain>` | exec-from-zero only: `hashes-<chain>.txt` (the local infohashes from `downloader torrent_hashes --rebuild`, recomputed from every snapshot file on disk), the datadir's `preverified.toml`, and `result-state-hashes-<chain>.json` |
+| `datadir-files-<chain>-exec-from-zero` | exec-from-zero only, uploaded even when the test fails: `datadir-files-<chain>.txt` (every file in the datadir as `size_bytes`, `mtime_utc`, `path`) and the datadir's `preverified.toml`. Taken before the hash check rebuilds the `.torrent` files, so it shows which snapshots Erigon itself wrote a `.torrent` for |
 | `rpc-test-results-<chain>` | the RPC suite's result dir (`results/test_report.json`, `output.log`, `summary.md`) |
 
 ## The job log

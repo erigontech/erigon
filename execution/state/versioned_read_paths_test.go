@@ -155,7 +155,7 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 	blockAccessList := io.AsBlockAccessList()
 	require.Len(t, blockAccessList, 1)
-	require.Equal(t, addr, blockAccessList[0].Address)
+	require.Equal(t, addr.Value(), blockAccessList[0].Address)
 	require.Equal(t, []accounts.StorageKey{key}, blockAccessList[0].StorageReads)
 }
 
@@ -519,7 +519,6 @@ func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Acc
 func (r *refreshReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *refreshReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *refreshReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *refreshReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *refreshReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }

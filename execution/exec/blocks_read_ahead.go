@@ -283,10 +283,11 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 }
 
 func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
+	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
 		var err error
-		accountData, err = stateReader.ReadAccountData(account.Address)
+		accountData, err = stateReader.ReadAccountData(address)
 		if err != nil {
 			return err
 		}
@@ -299,7 +300,7 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 		} else {
 			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(account.Address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
 			return err
 		}
 	}
@@ -309,11 +310,11 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	warmCode := false
 	if codeMode == balCodeWarmupAll {
 		warmCode = len(account.CodeChanges) > 0 || (accountData != nil && !accountData.CodeHash.IsEmpty())
-	} else if _, ok := txCodeDestinations[account.Address]; ok {
+	} else if _, ok := txCodeDestinations[address]; ok {
 		warmCode = accountData != nil && !accountData.CodeHash.IsEmpty()
 	}
 	if warmCode {
-		_, err := stateReader.ReadAccountCode(account.Address)
+		_, err := stateReader.ReadAccountCode(address)
 		return err
 	}
 	return nil
@@ -593,10 +594,10 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			}
 
 			for _, list := range txn.GetAccessList() {
-				stateReader.ReadAccountData(accounts.InternAddress(list.Address))
+				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
+						_, _, _ = stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
 					}
 				}
 			}

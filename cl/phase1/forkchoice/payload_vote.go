@@ -55,7 +55,8 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 	// Pre-compute PTC per unique blockRoot to avoid redundant state lookups
 	// for every attesting validator (PtcSize can be 512).
 	type cachedPTC struct {
-		ptc []uint64
+		ptc       []uint64
+		positions map[uint64][]int
 	}
 	ptcCache := make(map[common.Hash]*cachedPTC)
 
@@ -69,18 +70,27 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 
 		cached, ok := ptcCache[blockRoot]
 		if !ok {
-			blockState, err := f.forkGraph.GetState(blockRoot, false)
-			if err != nil || blockState == nil {
+			header, ok := f.forkGraph.GetHeader(blockRoot)
+			if !ok || header == nil || data.Slot != header.Slot {
 				continue
 			}
-			if data.Slot != blockState.Slot() {
-				continue
-			}
-			ptc, err := blockState.GetPTCFromWindow(data.Slot)
+			ptc, err := s.GetPTCFromWindow(data.Slot)
 			if err != nil {
 				continue
 			}
-			cached = &cachedPTC{ptc: ptc}
+			ptcSize := f.beaconCfg.PtcSize
+			if ptcSize == 0 {
+				ptcSize = clparams.MaxPtcSize
+			}
+			ptcSize = min(ptcSize, clparams.MaxPtcSize)
+			if uint64(len(ptc)) > ptcSize {
+				ptc = ptc[:int(ptcSize)]
+			}
+			positions := make(map[uint64][]int, len(ptc))
+			for position, validatorIndex := range ptc {
+				positions[validatorIndex] = append(positions[validatorIndex], position)
+			}
+			cached = &cachedPTC{ptc: ptc, positions: positions}
 			ptcCache[blockRoot] = cached
 		}
 
@@ -88,18 +98,25 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			continue
 		}
 
-		for j := range cached.ptc {
-			if payloadAttestation.AggregationBits.GetBitAt(j) {
-				f.applyPayloadAttestationVote(j, data, blockRoot)
+		selectedValidators := make(map[uint64]struct{}, len(cached.ptc))
+		for position, validatorIndex := range cached.ptc {
+			if payloadAttestation.AggregationBits.GetBitAt(position) {
+				selectedValidators[validatorIndex] = struct{}{}
 			}
 		}
+		if len(selectedValidators) == 0 {
+			continue
+		}
+		ptcIndices := make([]int, 0, len(cached.ptc))
+		for validatorIndex := range selectedValidators {
+			ptcIndices = append(ptcIndices, cached.positions[validatorIndex]...)
+		}
+		f.applyPayloadAttestationVotes(ptcIndices, data, blockRoot)
 	}
 }
 
-// applyPayloadAttestationVote updates PTC vote tracking for a single PTC position.
-// ptcIndex is the position in the PTC (the aggregation bit index).
-func (f *ForkChoiceStore) applyPayloadAttestationVote(
-	ptcIndex int,
+func (f *ForkChoiceStore) applyPayloadAttestationVotes(
+	ptcIndices []int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
 ) {
@@ -115,8 +132,10 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
-	timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
-	dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
+	for _, ptcIndex := range ptcIndices {
+		timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
+		dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
+	}
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
@@ -132,10 +151,8 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 		return false
 	}
 
-	// If the payload has not been accepted by the execution layer, the payload
-	// is not considered available regardless of the PTC vote.
-	if !f.IsPayloadVerified(root) {
-		return false
+	if !f.isPayloadAvailable(root) {
+		return !timely
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
 	target := boolToVote(timely)
@@ -157,10 +174,8 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 		return false
 	}
 
-	// If the payload has not been accepted by the execution layer, the blob data
-	// is not considered available regardless of the PTC vote.
-	if !f.IsPayloadVerified(root) {
-		return false
+	if !f.isPayloadAvailable(root) {
+		return !available
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
 	target := boolToVote(available)
@@ -269,7 +284,7 @@ func (f *ForkChoiceStore) isAncestor(node ForkChoiceNode, ancestor ForkChoiceNod
 // isPreviousSlotPayloadDecision identifies the special GLOAS fork-choice case
 // where EMPTY/FULL variants of a previous-slot block are decided by the payload
 // tiebreaker rather than by weight.
-func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) bool {
+func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode, proposalSlot uint64) bool {
 	if node.PayloadStatus != cltypes.PayloadStatusEmpty && node.PayloadStatus != cltypes.PayloadStatusFull {
 		return false
 	}
@@ -277,7 +292,7 @@ func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) boo
 	if !has || block == nil {
 		return false
 	}
-	return block.Block.Slot+1 == f.Slot()
+	return block.Block.Slot+1 == proposalSlot
 }
 
 // ShouldExtendPayload returns whether the payload for the given root should be extended.
@@ -289,7 +304,7 @@ func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) boo
 // Used by prepare_execution_payload to decide FULL vs EMPTY path.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
-	if !f.IsPayloadVerified(root) {
+	if !f.isPayloadAvailable(root) {
 		return false
 	}
 
@@ -321,20 +336,28 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 	return f.isParentNodeFull(proposerBlock.Block)
 }
 
-// ShouldBuildOnFull returns whether the proposer should build on the full payload
-// for the given head node. Returns false for EMPTY heads. For FULL heads, returns
-// true unless the PTC voted the payload as late or blob data as unavailable.
+// ShouldBuildOnFull requires a known FULL head. Only a head from the slot immediately before the
+// proposal is rechecked for payload timeliness and blob availability; older FULL heads keep their
+// resolved status. The proposal slot is explicit because preparation can run before the store
+// advances.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode) bool {
+func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool {
+	header, has := f.forkGraph.GetHeader(head.Root)
+	if !has || header == nil {
+		return false
+	}
+	if header.Slot+1 != slot {
+		return head.PayloadStatus == cltypes.PayloadStatusFull
+	}
 	if head.PayloadStatus == cltypes.PayloadStatusEmpty {
 		return false
 	}
 	if head.PayloadStatus == cltypes.PayloadStatusPending {
 		return false
 	}
-	if !f.isPreviousSlotPayloadDecision(head) {
-		return true
-	}
+	// The vote arrays form one decision; separate sync.Map loads are not a snapshot.
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 	if f.payloadDataAvailability(head.Root, false) {
 		return false
 	}
@@ -347,8 +370,8 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode) bool {
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
 // Used to decide between chains with different payload statuses.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 {
-	if !f.isPreviousSlotPayloadDecision(node) {
+func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode, currentSlot uint64) uint8 {
+	if !f.isPreviousSlotPayloadDecision(node, currentSlot) {
 		return uint8(node.PayloadStatus)
 	}
 
@@ -371,7 +394,7 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
 		}
-		if f.IsPayloadVerified(node.Root) {
+		if f.isPayloadAvailable(node.Root) {
 			children = append(children, ForkChoiceNode{
 				Root: node.Root, PayloadStatus: cltypes.PayloadStatusFull,
 			})
@@ -400,18 +423,27 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 	return result
 }
 
-// validateParentPayloadPath validates that the block builds on the correct parent payload path.
-// If parent is FULL, the parent must have an execution payload state.
-// If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
-// Also validates that the parent execution payload is not invalidated.
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) error {
+func (f *ForkChoiceStore) isPayloadAvailable(root common.Hash) bool {
+	if !f.isPayloadLocallyAvailable(root) {
+		return false
+	}
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	if !ok {
+		return false
+	}
+	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+}
+
+func (f *ForkChoiceStore) isPayloadLocallyAvailable(root common.Hash) bool {
+	return f.HasEnvelope(root) && !f.forkGraph.IsBlockInvalid(root) && !f.forkGraph.IsPayloadUnavailable(root)
+}
+
+func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, requireEngineAcceptance bool) error {
 	currentBid := block.Body.GetSignedExecutionPayloadBid()
 	if currentBid == nil || currentBid.Message == nil {
 		return errors.New("current block missing execution payload bid")
 	}
 
-	// Check if parent execution payload has been invalidated
 	parentBlockHash := currentBid.Message.ParentBlockHash
 	if status, ok := f.executionPayloadStatus.Get(parentBlockHash); ok {
 		if status == execution_client.PayloadStatusInvalidated {
@@ -420,12 +452,8 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 	}
 
 	if f.isParentNodeFull(block) {
-		// Parent is FULL - verify execution payload envelope exists on disk.
-		// Return ErrParentEnvelopePending (not a hard error) when the envelope is
-		// missing.  During forward sync the envelope may not yet be persisted (it
-		// arrives in the same batch or in a later batch), so a hard error would
-		// permanently reject the block and ban the peer.
-		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
+		// Missing local data is retryable because sync may persist the envelope later.
+		if !f.isPayloadLocallyAvailable(block.ParentRoot) || requireEngineAcceptance && !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
 	} else {

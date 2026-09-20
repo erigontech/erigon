@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
@@ -73,12 +74,12 @@ type Cfg struct {
 	gloasPayloadRetryOffset      atomic.Uint32
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
+	gloasEnvelopeRecoveryPending []common.Hash
+	gloasEnvelopeRecoveryReplace int
 	gloasHeadEnvelopeRequestMu   sync.Mutex
 	gloasHeadEnvelopeRequestID   uint64
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64
 	gloasHeadEnvelopeRequestHead common.Hash
-	gloasHeadEnvelopeAttempted   bool
-	gloasHeadEnvelopeRetryUsed   bool
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
@@ -116,6 +117,7 @@ func ClStagesCfg(
 	blobDownloader := network2.NewBlobHistoryDownloader(
 		ctx,
 		beaconCfg,
+		ethClock,
 		rpc,
 		indiciesDB,
 		blobStore,
@@ -314,8 +316,12 @@ func ConsensusClStages(ctx context.Context,
 						"blockRoot", common.Hash(startingRoot),
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
-					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
-						downloader.SetHTTPFallbackURL(urls[0])
+					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
+					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
+						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
+							downloader.SetHTTPFallbackURL(urls[0])
+						}
 					}
 
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), ctx, logger); err != nil {
@@ -440,6 +446,11 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
 		if version >= clparams.CapellaVersion {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
+		}
+	}
+	if version >= clparams.GloasVersion {
+		if bid := cfg.state.GetLatestExecutionPayloadBid(); bid != nil {
+			body.SignedExecutionPayloadBid.Message = bid
 		}
 	}
 

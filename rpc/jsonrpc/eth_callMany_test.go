@@ -107,7 +107,6 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &types.Genesis{
-			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -139,8 +138,10 @@ func TestCallMany(t *testing.T) {
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
-	tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
-	tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
+	_, err := tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+	require.NoError(t, err)
+	_, err = tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
+	require.NoError(t, err)
 	contractBackend.Commit()
 
 	// set up the callargs
@@ -256,7 +257,6 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	gspec := &types.Genesis{
-		Config:   chain.TestChainBerlinConfig,
 		Alloc:    types.GenesisAlloc{address: {Balance: big.NewInt(9000000000000000000)}},
 		GasLimit: 10000000,
 	}

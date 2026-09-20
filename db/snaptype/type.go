@@ -83,6 +83,18 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		return nil, err
 	}
 
+	var saltBytes []byte
+	if exists {
+		if saltBytes, err = os.ReadFile(fpath); err != nil {
+			return nil, err
+		}
+		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
+		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
+		if exists = len(saltBytes) == 4; !exists {
+			logger.Warn("discarding malformed snaptype salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
+	}
+
 	if !exists {
 		if !autoCreate {
 			logger.Debug("snaptype salt file not found + autocreate disabled")
@@ -90,20 +102,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		}
 		dir.MustExist(baseDir)
 
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
-	if len(saltBytes) != 4 {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
+		saltBytes = make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
@@ -112,7 +111,6 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 
 	salt := binary.BigEndian.Uint32(saltBytes)
 	return &salt, nil
-
 }
 
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -540,7 +538,9 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -598,7 +598,9 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err

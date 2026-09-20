@@ -215,32 +215,72 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 }
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
-func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
-	headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
-	previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for previous_duty_dependent_root: %w", err)
-	}
-	current_duty_dependent_root, err := headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for current_duty_dependent_root: %w", err)
-	}
-
+func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	stateRoot, err := headState.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("failed to hash ssz: %w", err)
 	}
-	// emit the head event
-	cfg.emitter.State().SendHead(&beaconevents.HeadData{
-		Slot:                      headSlot,
-		Block:                     headRoot,
-		State:                     stateRoot,
-		EpochTransition:           true,
-		PreviousDutyDependentRoot: previous_duty_dependent_root,
-		CurrentDutyDependentRoot:  current_duty_dependent_root,
-		ExecutionOptimistic:       false,
+	currentHead, currentHeadSlot, err := store.GetHeadNode()
+	if err != nil {
+		return fmt.Errorf("failed to revalidate head event: %w", err)
+	}
+	if currentHead.Root != headRoot || currentHeadSlot != headSlot {
+		return nil
+	}
+	isGloas := headState.Version() >= clparams.GloasVersion
+	payloadStatus := "full"
+	if isGloas {
+		payloadStatus = beaconevents.PayloadStatusName(currentHead.PayloadStatus)
+	}
+	executionOptimistic := store.IsRootOptimistic(headRoot)
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		beaconCfg,
+		headState,
+		headSlot,
+		headRoot,
+		stateRoot,
+		payloadStatus,
+		executionOptimistic,
+	)
+	if err != nil {
+		return err
+	}
+	return emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
+		head, slot, err := store.GetHeadNode()
+		currentPayloadStatus := "full"
+		if isGloas {
+			currentPayloadStatus = beaconevents.PayloadStatusName(head.PayloadStatus)
+		}
+		return head.Root, slot, currentPayloadStatus, store.IsRootOptimistic(head.Root), err
 	})
-	return nil
+}
+
+func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
+	var validationErr error
+	current := func() bool {
+		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
+		if err != nil {
+			validationErr = fmt.Errorf("failed to revalidate head event: %w", err)
+			return false
+		}
+		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
+	}
+	emitter.WithHeadEventLock(func() {
+		if !current() {
+			return
+		}
+		emitter.State().TrySendHead(&beaconevents.HeadData{
+			Slot:                      headSlot,
+			Block:                     headRoot,
+			State:                     stateRoot,
+			EpochTransition:           headEvent.Data.EpochTransition,
+			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+		})
+		emitter.State().SendHeadV2(headEvent)
+	})
+	return validationErr
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
@@ -406,7 +446,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	if err := emitHeadEvent(cfg, headSlot, headRoot, headState); err != nil {
+	if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
 		logger.Warn("failed to emit head event", "err", err)
 	}
 	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
