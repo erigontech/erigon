@@ -233,4 +233,12 @@ func TestWriterStorageKeyIsReused(t *testing.T) {
 	// Writing slot1 again must address slot1, not whatever the buffer last held.
 	require.NoError(t, w.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(3)))
 	require.Equal(t, put.keys[0], put.keys[2])
+
+	// One allocation remains and it is not the key: uint256.Int.Bytes() allocates the
+	// trimmed value, which escapes into DomainPut. Reinstating a per-call key makes it two.
+	quiet := NewWriter(&stubPutDel{}, nil, 1)
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = quiet.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(1))
+	})
+	require.Equal(t, float64(1), allocs, "the composite key must not allocate")
 }
