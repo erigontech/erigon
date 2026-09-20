@@ -18,13 +18,9 @@ package jsonstream
 
 import "encoding"
 
-// Hex writes b as a hex string field, or null when b is nil.
+// Hex writes b as a hex string field. A field that can be absent writes its own null.
 func Hex(s *StackStream, name string, b []byte) {
 	s.WriteObjectField(name)
-	if b == nil {
-		s.WriteNil()
-		return
-	}
 	s.WriteHex(b)
 }
 
@@ -41,18 +37,6 @@ func Text[T any, P textPtr[T]](s *StackStream, name string, v P) {
 		return
 	}
 	s.WriteQuotedText(v)
-}
-
-// Array writes a JSON array field exactly as the reflection encoder would: the pointer
-// decides whether the field appears, the slice decides its shape. A nil pointer omits the
-// field, a nil slice is null, an empty slice is []. So a field declared without omitempty
-// passes &field and is always present, and a *[]T with omitempty passes itself.
-func Array[S ~[]E, E any](s *StackStream, name string, items *S, elem func(*StackStream, *E)) {
-	if items == nil {
-		return
-	}
-	s.WriteObjectField(name)
-	ArrayValue(s, *items, elem)
 }
 
 // ArrayValue writes the array itself, with no field name, for a result that is a bare

@@ -48,14 +48,34 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 	} else {
 		s.WriteQuotedText(h.Number)
 	}
-	jsonstream.Hex(s, "hash", hashOrNull(h.Hash))
+	s.WriteObjectField("hash")
+	if h.Hash == nil {
+		s.WriteNil()
+	} else {
+		s.WriteHex(h.Hash[:])
+	}
 	jsonstream.Hex(s, "parentHash", h.ParentHash[:])
-	jsonstream.Hex(s, "nonce", nonceOrNull(h.Nonce))
+	s.WriteObjectField("nonce")
+	if h.Nonce == nil {
+		s.WriteNil()
+	} else {
+		s.WriteHex(h.Nonce[:])
+	}
 	jsonstream.Hex(s, "mixHash", h.MixHash[:])
 	jsonstream.Hex(s, "sha3Uncles", h.Sha3Uncles[:])
-	jsonstream.Hex(s, "logsBloom", bloomOrNull(h.LogsBloom))
+	s.WriteObjectField("logsBloom")
+	if h.LogsBloom == nil {
+		s.WriteNil()
+	} else {
+		s.WriteHex(h.LogsBloom[:])
+	}
 	jsonstream.Hex(s, "stateRoot", h.StateRoot[:])
-	jsonstream.Hex(s, "miner", addrOrNull(h.Miner))
+	s.WriteObjectField("miner")
+	if h.Miner == nil {
+		s.WriteNil()
+	} else {
+		s.WriteHex(h.Miner[:])
+	}
 	jsonstream.Text(s, "difficulty", h.Difficulty)
 	s.WriteObjectField("extraData").WriteHex(h.ExtraData)
 	jsonstream.Text(s, "gasLimit", &h.GasLimit)
@@ -97,35 +117,6 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 	}
 }
 
-// The OrNull helpers turn a nil pointer into the nil slice jsonw.Hex renders as null.
-func hashOrNull(h *common.Hash) []byte {
-	if h == nil {
-		return nil
-	}
-	return h[:]
-}
-
-func nonceOrNull(n *types.BlockNonce) []byte {
-	if n == nil {
-		return nil
-	}
-	return n[:]
-}
-
-func bloomOrNull(b *types.Bloom) []byte {
-	if b == nil {
-		return nil
-	}
-	return b[:]
-}
-
-func addrOrNull(a *common.Address) []byte {
-	if a == nil {
-		return nil
-	}
-	return a[:]
-}
-
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
@@ -161,14 +152,19 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		jsonstream.Array(s, "transactions", &hashes, writeHashElem)
+		s.WriteObjectField("transactions")
+		jsonstream.ArrayValue(s, hashes, writeHashElem)
 	case fullTxs != nil:
 		s.WriteObjectField("transactions").WriteRawBytes(fullTxs)
 	}
 
-	jsonstream.Array(s, "uncles", &b.Uncles, writeHashElem)
+	s.WriteObjectField("uncles")
+	jsonstream.ArrayValue(s, b.Uncles, writeHashElem)
 
-	jsonstream.Array(s, "withdrawals", b.Withdrawals, writeWithdrawalElem)
+	if b.Withdrawals != nil {
+		s.WriteObjectField("withdrawals")
+		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
+	}
 	if txCount != nil {
 		s.WriteObjectField("transactionCount").WriteRawBytes(txCount)
 	}
