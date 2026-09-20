@@ -205,6 +205,8 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 // is reused and reset rather than rebuilt: Reset returns its objects to their pools,
 // which is what building a new one would have to allocate again.
 // The precompiles come with it because a MovePrecompileTo override changes them.
+// The state stays owned by the EVM, so Close must not run until the last probe: it
+// nils the journal Reset would then rewind.
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
 	ibs := r.evm.IntraBlockState()
 	if ibs == nil {
