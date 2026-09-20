@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -97,6 +98,39 @@ func TestCallManyEmptyBundles(t *testing.T) {
 
 // test 2 bundles
 // check balance of addr1 and addr 2 at the end of block and interblock
+
+// eth_getCode answers "0x" for an account that does not exist and for one that holds no
+// code, and the deployed bytecode for a contract.
+func TestGetCodeShapes(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Alloc:    types.GenesisAlloc{address: {Balance: big.NewInt(9000000000000000000)}},
+		GasLimit: 10000000,
+	}
+	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1337))
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
+	defer contractBackend.Close()
+	tokenAddr, _, _, err := contracts.DeployToken(transactOpts, contractBackend, address)
+	require.NoError(t, err)
+	contractBackend.Commit()
+
+	api := newEthApiForTest(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), contractBackend.BlockReader(),
+		contractBackend.Engine(), &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), contractBackend.DB(), nil, nil)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	code, err := api.GetCode(context.Background(), tokenAddr, &latest)
+	require.NoError(t, err)
+	require.NotEmpty(t, code, "a deployed contract answers with its bytecode")
+
+	eoa, err := api.GetCode(context.Background(), address, &latest)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Bytes(""), eoa, "an account with no code answers 0x")
+
+	absent, err := api.GetCode(context.Background(), common.HexToAddress("0xdead000000000000000000000000000000000000"), &latest)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Bytes(""), absent, "an account that does not exist answers 0x")
+}
 
 func TestCallMany(t *testing.T) {
 	var (

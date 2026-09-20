@@ -542,6 +542,24 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	a.Equal(svLatest, svNil)
 }
 
+// eth_getCode answers "0x" for an account that does not exist and for one that
+// holds no code, and the code itself otherwise.
+func TestGetCode(t *testing.T) {
+	a := assert.New(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	absent, err := api.GetCode(ctx, common.HexToAddress("0xdead000000000000000000000000000000000000"), &latest)
+	a.NoError(err)
+	a.Equal(hexutil.Bytes(""), absent)
+
+	eoa, err := api.GetCode(ctx, common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7"), &latest)
+	a.NoError(err)
+	a.Equal(hexutil.Bytes(""), eoa)
+}
+
 func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
