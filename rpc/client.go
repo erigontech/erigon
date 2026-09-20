@@ -245,7 +245,7 @@ func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this client provides to the server.
 func (c *Client) RegisterName(name string, receiver any) error {
-	return c.services.registerName(name, receiver)
+	return c.services.registerName(name, receiver, nil)
 }
 
 func (c *Client) nextID() json.RawMessage {
