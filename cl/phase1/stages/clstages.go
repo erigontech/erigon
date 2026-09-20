@@ -117,6 +117,7 @@ func ClStagesCfg(
 	blobDownloader := network2.NewBlobHistoryDownloader(
 		ctx,
 		beaconCfg,
+		ethClock,
 		rpc,
 		indiciesDB,
 		blobStore,
