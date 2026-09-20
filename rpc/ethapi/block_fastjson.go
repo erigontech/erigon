@@ -48,28 +48,28 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 	} else {
 		s.WriteQuotedText(h.Number)
 	}
-	jsonstream.Hex(s, "hash", hashOrNull(h.Hash))
-	jsonstream.Hex(s, "parentHash", h.ParentHash[:])
-	jsonstream.Hex(s, "nonce", nonceOrNull(h.Nonce))
-	jsonstream.Hex(s, "mixHash", h.MixHash[:])
-	jsonstream.Hex(s, "sha3Uncles", h.Sha3Uncles[:])
-	jsonstream.Hex(s, "logsBloom", bloomOrNull(h.LogsBloom))
-	jsonstream.Hex(s, "stateRoot", h.StateRoot[:])
-	jsonstream.Hex(s, "miner", addrOrNull(h.Miner))
+	s.Hex("hash", hashOrNull(h.Hash))
+	s.Hex("parentHash", h.ParentHash[:])
+	s.Hex("nonce", nonceOrNull(h.Nonce))
+	s.Hex("mixHash", h.MixHash[:])
+	s.Hex("sha3Uncles", h.Sha3Uncles[:])
+	s.Hex("logsBloom", bloomOrNull(h.LogsBloom))
+	s.Hex("stateRoot", h.StateRoot[:])
+	s.Hex("miner", addrOrNull(h.Miner))
 	jsonstream.Text(s, "difficulty", h.Difficulty)
-	jsonstream.Field(s, "extraData").WriteHex(h.ExtraData)
+	s.Field("extraData").WriteHex(h.ExtraData)
 	jsonstream.Text(s, "gasLimit", &h.GasLimit)
 	jsonstream.Text(s, "gasUsed", &h.GasUsed)
 	jsonstream.Text(s, "timestamp", &h.Timestamp)
-	jsonstream.Hex(s, "transactionsRoot", h.TransactionsRoot[:])
-	jsonstream.Hex(s, "receiptsRoot", h.ReceiptsRoot[:])
+	s.Hex("transactionsRoot", h.TransactionsRoot[:])
+	s.Hex("receiptsRoot", h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
 		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		jsonstream.Hex(s, "withdrawalsRoot", h.WithdrawalsRoot[:])
+		s.Hex("withdrawalsRoot", h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
 		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
@@ -78,19 +78,19 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		jsonstream.Hex(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
+		s.Hex("parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
-		jsonstream.Hex(s, "requestsHash", h.RequestsHash[:])
+		s.Hex("requestsHash", h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
-		jsonstream.Hex(s, "blockAccessListHash", h.BlockAccessListHash[:])
+		s.Hex("blockAccessListHash", h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
 		jsonstream.Text(s, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
-		jsonstream.Field(s, "auraSeal").WriteHex(*h.AuraSeal)
+		s.Field("auraSeal").WriteHex(*h.AuraSeal)
 	}
 	if h.AuraStep != nil {
 		jsonstream.Text(s, "auraStep", h.AuraStep)
@@ -163,20 +163,20 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	case hashesOK:
 		jsonstream.Array(s, "transactions", &hashes, writeHashElem)
 	case fullTxs != nil:
-		jsonstream.Field(s, "transactions").WriteRawBytes(fullTxs)
+		s.Field("transactions").WriteRawBytes(fullTxs)
 	}
 
 	jsonstream.Array(s, "uncles", &b.Uncles, writeHashElem)
 
 	jsonstream.Array(s, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
-		jsonstream.Field(s, "transactionCount").WriteRawBytes(txCount)
+		s.Field("transactionCount").WriteRawBytes(txCount)
 	}
 	if b.TotalDifficulty != nil {
 		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
 	}
 	if calls != nil {
-		jsonstream.Field(s, "calls").WriteRawBytes(calls)
+		s.Field("calls").WriteRawBytes(calls)
 	}
 	s.WriteObjectEnd()
 	return nil
