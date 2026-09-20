@@ -43,6 +43,7 @@ type LazyFieldStream struct {
 	mark             int
 	markDepth        int
 	openLen          int
+	openSent         uint64
 	openDepth        uint
 	field            string
 	prependSeparator bool
@@ -76,16 +77,16 @@ func (s *LazyFieldStream) ensure() {
 			s.inner.WriteMore()
 		}
 		s.owner = s.inner.WriteObjectField(s.field)
-		s.openLen = len(s.owner.Buffer())
+		s.openLen, s.openSent = len(s.owner.Buffer()), s.owner.sent
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
 }
 
 // RewindIfEmpty unwrites the field name when no value followed it, so the caller can put
-// something else in the enclosing object. Bytes that already left for the writer cannot
-// come back, so a field whose value reached the buffer stays and this reports false.
+// something else in the enclosing object. Bytes that already left for the writer cannot come
+// back, and a flush can leave the buffer at any length, so a value that wrote at all stays.
 func (s *LazyFieldStream) RewindIfEmpty() bool {
-	if !s.written || len(s.owner.Buffer()) != s.openLen {
+	if !s.written || s.owner.sent != s.openSent || len(s.owner.Buffer()) != s.openLen {
 		return false
 	}
 	s.owner.rewindField(s.mark, s.markDepth)

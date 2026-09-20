@@ -25,7 +25,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -51,6 +51,9 @@ type StackStream struct {
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
+	// sent counts handovers to the writer. Bytes that left cannot be taken back, so a
+	// rewind is only safe while this has not moved.
+	sent uint64
 }
 
 // newStackStream creates a new StackStream writing to out. Building the
@@ -151,23 +154,39 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
-	assertNoEscapes(buf[start+1:])
+	if !hexText(v) && indexEscapable(buf[start+1:]) >= 0 {
+		// Not hex after all: hand the text to the escaping writer rather than emit it raw.
+		text := string(buf[start+1:])
+		s.stream.SetBuffer(buf[:start])
+		s.WriteString(text)
+		return
+	}
 	buf = append(buf, '"')
 	s.commit(buf, start)
 	s.popCommaOrField()
 }
 
-// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes
-// out unscanned, so a byte that JSON would escape would leave the response malformed.
-func assertNoEscapes(text []byte) {
-	if !dbg.AssertEnabled {
-		return
+// hexText reports whether v's text is a hex quantity, which never needs escaping. Anything
+// else is scanned, so a result type from outside these packages still comes out valid JSON.
+func hexText(v encoding.TextAppender) bool {
+	switch v.(type) {
+	case hexutil.Bytes, *hexutil.Bytes,
+		hexutil.Uint, *hexutil.Uint, hexutil.Uint64, *hexutil.Uint64,
+		hexutil.U256, *hexutil.U256, hexutil.Big, *hexutil.Big,
+		common.Hash, *common.Hash, common.Address, *common.Address:
+		return true
 	}
-	for _, c := range text {
+	return false
+}
+
+// indexEscapable reports the first byte JSON would have to escape, or -1.
+func indexEscapable(text []byte) int {
+	for i, c := range text {
 		if c == '"' || c == '\\' || c < 0x20 {
-			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
+			return i
 		}
 	}
+	return -1
 }
 
 // commit takes the buffer a value was appended to, handing anything past FlushThreshold
@@ -185,6 +204,7 @@ func (s *StackStream) commit(buf []byte, start int) {
 // empty-buffer check only skips a pointless zero-length Write; content is large
 // by the time we get here, so it is written either way.
 func (s *StackStream) writeThrough(content []byte) {
+	s.sent++
 	if len(s.stream.Buffer()) > 0 && s.stream.Flush() != nil {
 		// Same as flushIfFull: jsoniter latches the error, so these bytes can never
 		// reach the client and holding them only pins memory.
@@ -363,6 +383,9 @@ func (s *StackStream) rewindField(buf, depth int) {
 
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
+	if len(s.stream.Buffer()) > 0 {
+		s.sent++
+	}
 	return s.stream.Flush()
 }
 

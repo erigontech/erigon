@@ -1181,17 +1181,16 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
 }
 
-// WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
-// where it is produced rather than reaching a client as malformed JSON.
-func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = true
+// The hex appenders this path exists for need no escaping, but RegisterName takes any
+// result type, so text that JSON would have to escape must still come out valid.
+func TestWriteQuotedTextEscapesWhenItMust(t *testing.T) {
 	s := newStackStream(nil, 64)
+	s.WriteQuotedText(appenderFunc(`say "hi"` + "\n"))
+	require.Equal(t, `"say \"hi\"\n"`, string(s.Buffer()))
 
-	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
-		s.WriteQuotedText(appenderFunc(`say "hi"`))
-	})
-	require.NotPanics(t, func() { s.WriteQuotedText(appenderFunc("0xdeadbeef")) })
+	clean := newStackStream(nil, 64)
+	clean.WriteQuotedText(appenderFunc("0xdeadbeef"))
+	require.Equal(t, `"0xdeadbeef"`, string(clean.Buffer()))
 }
 
 type appenderFunc string
