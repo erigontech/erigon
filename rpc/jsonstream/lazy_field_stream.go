@@ -38,7 +38,11 @@ var (
 // added to the interface.
 type LazyFieldStream struct {
 	inner            Stream
+	owner            *StackStream
 	written          bool
+	mark             int
+	markDepth        int
+	openLen          int
 	openDepth        uint
 	field            string
 	prependSeparator bool
@@ -67,12 +71,26 @@ func (s *LazyFieldStream) CloseIfOpen() {
 func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
+		s.mark, s.markDepth = len(s.inner.Buffer()), s.inner.Depth()
 		if s.prependSeparator {
 			s.inner.WriteMore()
 		}
-		s.inner.WriteObjectField(s.field)
+		s.owner = s.inner.WriteObjectField(s.field)
+		s.openLen = len(s.owner.Buffer())
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
+}
+
+// RewindIfEmpty unwrites the field name when no value followed it, so the caller can put
+// something else in the enclosing object. Bytes that already left for the writer cannot
+// come back, so a field whose value reached the buffer stays and this reports false.
+func (s *LazyFieldStream) RewindIfEmpty() bool {
+	if !s.written || len(s.owner.Buffer()) != s.openLen {
+		return false
+	}
+	s.owner.rewindField(s.mark, s.markDepth)
+	s.written = false
+	return true
 }
 
 func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.inner.WriteNil() }
@@ -103,7 +121,7 @@ func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmp
 // Open writes the field this stream is holding and returns the stream that owns the buffer.
 func (s *LazyFieldStream) Open() *StackStream {
 	s.ensure()
-	return s.inner.(*StackStream)
+	return s.owner
 }
 
 func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {

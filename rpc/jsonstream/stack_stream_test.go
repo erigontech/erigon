@@ -1181,6 +1181,20 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
 }
 
+// Open must reach the stream that owns the buffer, however many wrappers sit above it.
+func TestLazyFieldStreamNestedOpenReturnsTheOwner(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	outer := NewLazyFieldStream(inner, "outer", false)
+	nested := NewLazyFieldStream(outer, "inner", false)
+
+	require.Same(t, inner, nested.Open())
+	nested.Open().WriteString("v")
+	require.Equal(t, `{"inner":"v"`, string(inner.Buffer()))
+}
+
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {

@@ -22,13 +22,13 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestNewID(t *testing.T) {

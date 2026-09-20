@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
-
 )
 
 var bytesT = reflect.TypeFor[Bytes]()

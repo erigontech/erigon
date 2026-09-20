@@ -22,6 +22,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,9 +111,10 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. An
-// implementation reports an error before its first call to w: once it writes, the stream already
-// holds part of the result and the response carries both result and error.
+// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. Only a
+// type above rpc/jsonstream can name the stream; a type below it implements encoding.TextAppender
+// instead and the stream quotes the text. An implementation that fails after its first write
+// leaves part of the result behind, so that response carries both result and error.
 type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
@@ -150,6 +152,12 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			}
 			return err
 		}
+		// The hex quantities in common and common/hexutil cannot carry a marshaller: the
+		// package that owns the stream type imports them. They append their own text.
+		if ta, ok := result.(encoding.TextAppender); ok {
+			rs.Open().WriteQuotedText(ta)
+			return rs.Err()
+		}
 		return json.NewEncoder(encoderWriter{rs}).Encode(result)
 	})
 }
@@ -170,7 +178,9 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
 	err := write(rs)
 	if err != nil {
-		if rs.Written() {
+		// A marshaller that failed before writing leaves an empty field: unwrite it, or the
+		// response would carry result and error both.
+		if rs.Written() && !rs.RewindIfEmpty() {
 			rs.CloseIfOpen()
 			stream.WriteMore()
 		}

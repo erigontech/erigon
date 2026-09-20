@@ -146,6 +146,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	start := len(s.stream.Buffer())
 	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
 	if err != nil {
 		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
@@ -154,7 +155,13 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
-	s.stream.SetBuffer(append(buf, '"'))
+	buf = append(buf, '"')
+	if s.out != nil && len(buf)-start >= FlushThreshold {
+		s.stream.SetBuffer(buf[:start])
+		s.writeThrough(buf[start:])
+	} else {
+		s.stream.SetBuffer(buf)
+	}
 	s.popCommaOrField()
 }
 
@@ -324,6 +331,18 @@ func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	s.pop(ItemComma)
 	s.push(ItemField)
 	return s
+}
+
+// rewindField drops a field name whose value never arrived, putting back the comma it
+// consumed. Only bytes still in the buffer can go back, so the caller checks that nothing
+// was written after the field name.
+func (s *StackStream) rewindField(buf, depth int) {
+	s.stream.SetBuffer(s.stream.Buffer()[:buf])
+	if len(s.stack) == depth { // WriteObjectField replaced a comma with its field
+		s.stack[depth-1] = ItemComma
+		return
+	}
+	s.stack = s.stack[:depth]
 }
 
 // Flush flushes the underlying stream
