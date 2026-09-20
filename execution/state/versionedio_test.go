@@ -1851,3 +1851,18 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
 }
+
+func (r *minimalStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
+func (r *countingStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
+func (r *accountStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}

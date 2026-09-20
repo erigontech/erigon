@@ -1470,6 +1470,12 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 	return acc, err
 }
 
+func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
+	return len(enc) > 0, err
+}
+
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
 	r.addr = address.Value()
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
@@ -1781,4 +1787,9 @@ func returnReadList(v ReadLists) {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	readListPool.Put(v)
+}
+
+func (r *bufferedReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
 }

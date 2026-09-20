@@ -38,6 +38,9 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
+	// HasAccount answers whether the account exists without decoding it, for callers that
+	// only need the existence and would throw the rest away.
+	HasAccount(address accounts.Address) (bool, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -125,6 +128,9 @@ func NewNoopReader() *NoopReader {
 func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
+}
+func (*NoopReader) HasAccount(address accounts.Address) (bool, error) {
+	return false, nil
 }
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil

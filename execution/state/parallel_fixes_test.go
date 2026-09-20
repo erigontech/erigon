@@ -483,3 +483,8 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 		}
 	}
 }
+
+func (r *emptyReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}

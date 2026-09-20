@@ -1094,3 +1094,13 @@ func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
 	require.Contains(t, got, plainKeyOf(b))
 	require.Len(t, cs.dirtyAccounts, 2, "a mid-block flush must not list an account twice")
 }
+
+func (r *everyAddrReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
+func (r *preBlockReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}

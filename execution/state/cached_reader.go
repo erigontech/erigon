@@ -117,3 +117,8 @@ func (cr *CachedReader) ReadAccountIncarnation(address accounts.Address) (uint64
 	}
 	return cr.r.ReadAccountIncarnation(address)
 }
+
+func (cr *CachedReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := cr.ReadAccountData(address)
+	return acc != nil, err
+}

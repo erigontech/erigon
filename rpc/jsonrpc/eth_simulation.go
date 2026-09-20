@@ -1148,3 +1148,8 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	}
 	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
 }
+
+func (r *simulationIntraBlockStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}

@@ -2084,3 +2084,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 	return newStateRoot, stateless, nil
 }
+
+func (s *witnessStateless) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := s.ReadAccountData(address)
+	return acc != nil, err
+}
+
+func (s *RecordingState) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := s.ReadAccountData(address)
+	return acc != nil, err
+}

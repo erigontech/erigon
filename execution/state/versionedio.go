@@ -3083,3 +3083,8 @@ func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, hasCodeSize := s.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
 }
+
+func (vr *versionedStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := vr.ReadAccountData(address)
+	return acc != nil, err
+}

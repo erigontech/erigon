@@ -238,3 +238,8 @@ func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
 	}, true, false, false, "")
 	require.Equal(t, VersionInvalid, validity)
 }
+
+func (r *codeReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
