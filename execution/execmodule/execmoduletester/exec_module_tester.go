@@ -280,6 +280,12 @@ func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typespr
 
 type Option func(*options)
 
+func WithParallelStateFlushing(enabled bool) Option {
+	return func(opts *options) {
+		opts.parallelStateFlushing = enabled
+	}
+}
+
 func WithStepSize(stepSize uint64) Option {
 	return func(opts *options) {
 		opts.stepSize = &stepSize
@@ -411,6 +417,7 @@ type options struct {
 	withTxPool                    bool
 	enableDomains                 []kv.Domain
 	fcuBackgroundPrune            bool
+	parallelStateFlushing         bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
 	slowBlockThreshold            *time.Duration
@@ -511,7 +518,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// claim the whole shared envelope.
 	cfg.StateCacheBudget = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
-	cfg.Sync.ParallelStateFlushing = false
+	cfg.Sync.ParallelStateFlushing = opt.parallelStateFlushing
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
