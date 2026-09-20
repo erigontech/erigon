@@ -4616,7 +4616,7 @@ If the components run on different devices, `localhost` is no longer the right a
 
 On the Erigon host, bind the internal gRPC endpoint to an interface the other components can reach — `--private.api.addr=<erigon_lan_ip>:9090` — since it defaults to `127.0.0.1:9090`. Bind it to a private interface, never `0.0.0.0`: the endpoint serves the remote database interface and is not authenticated by default, so it must not be reachable from a public network.
 
-On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` follow the same rule for whichever host runs those components.
+On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` point in whichever direction the binary reading them needs: the `sentry` command binds `--sentry.api.addr` and `txpool` dials it, and the `txpool` command binds `--txpool.api.addr` and `rpcdaemon` dials it. Bind each one to a reachable private address on the host that serves it, and give the hosts that connect that same address.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
@@ -5865,7 +5865,7 @@ For API usage refer to the below official resources:
 
 ### Network Information Usage
 
-* `net_version` is commonly used by applications to verify they're connected to the correct .Ethereum network.
+* `net_version` is commonly used by applications to verify they're connected to the correct Ethereum network.
 * `net_peerCount` helps monitor node connectivity and network health.
 * `net_listening` provides a basic connectivity check for the node's network interface.
 
