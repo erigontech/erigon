@@ -262,15 +262,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 
 func (s *GrpcServer) OnAdd(req *txpoolproto.OnAddRequest, stream txpoolproto.Txpool_OnAddServer) error {
 	s.logger.Info("New txns subscriber joined")
-	//txpool.Loop does send messages to this streams
-	remove := s.newSlotsStreams.Add(stream)
-	defer remove()
-	select {
-	case <-stream.Context().Done():
-		return stream.Context().Err()
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	}
+	return s.newSlotsStreams.Subscribe(s.ctx, stream)
 }
 
 func (s *GrpcServer) Transactions(ctx context.Context, in *txpoolproto.TransactionsRequest) (*txpoolproto.TransactionsReply, error) {

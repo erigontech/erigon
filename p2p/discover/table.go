@@ -698,11 +698,15 @@ func (tab *Table) handleTrackRequest(op trackRequestOp) {
 	var fails int
 	if op.success {
 		// Reset failure counter because it counts _consecutive_ failures.
-		tab.db.UpdateFindFails(op.node.ID(), op.node.IPAddr(), 0)
+		if err := tab.db.UpdateFindFails(op.node.ID(), op.node.IPAddr(), 0); err != nil {
+			tab.log.Trace("[p2p] Failed to update find fails", "id", op.node.ID(), "err", err)
+		}
 	} else {
 		fails = tab.db.FindFails(op.node.ID(), op.node.IPAddr())
 		fails++
-		tab.db.UpdateFindFails(op.node.ID(), op.node.IPAddr(), fails)
+		if err := tab.db.UpdateFindFails(op.node.ID(), op.node.IPAddr(), fails); err != nil {
+			tab.log.Trace("[p2p] Failed to update find fails", "id", op.node.ID(), "err", err)
+		}
 	}
 
 	tab.mutex.Lock()

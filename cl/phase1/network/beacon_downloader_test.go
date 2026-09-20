@@ -554,14 +554,11 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 
 func TestForwardRequestMoreEmptyP2PDoesNotInvalidateHTTPFallback(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
-	previousTimeout := forwardBeaconRequestTimeout
 	previousFallbackDelay := forwardBeaconFallbackDelay
 	forwardBeaconRequestInterval = time.Millisecond
-	forwardBeaconRequestTimeout = 100 * time.Millisecond
 	forwardBeaconFallbackDelay = 5 * time.Millisecond
 	t.Cleanup(func() {
 		forwardBeaconRequestInterval = previousInterval
-		forwardBeaconRequestTimeout = previousTimeout
 		forwardBeaconFallbackDelay = previousFallbackDelay
 	})
 

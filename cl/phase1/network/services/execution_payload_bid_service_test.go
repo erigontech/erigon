@@ -640,9 +640,9 @@ func TestExecutionPayloadBidServiceUsesCoherentHeadNodeSnapshot(t *testing.T) {
 	defer ctrl.Finish()
 	service, _, _, fc, _ := setupExecutionPayloadBidService(t, ctrl)
 	headRoot := fc.HeadVal
-	fc.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
+	fc.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 		fc.HeadVal = common.HexToHash("0xdead")
-		return forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, nil
+		return forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, fc.HeadSlotVal, nil
 	}
 	compatible, err := service.isBidCompatibleWithHead(&cltypes.ExecutionPayloadBid{
 		Slot: 100, ParentBlockRoot: headRoot, ParentBlockHash: common.HexToHash("0xdddd"),
@@ -716,8 +716,8 @@ func TestExecutionPayloadBidServiceHeadUnavailableDoesNotFetchValidationState(t 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	addPreferencesToPool(epbsPool, 100)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
-	fcMock.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
-		return forkchoice.ForkChoiceNode{}, errors.New("head unavailable")
+	fcMock.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{}, 0, errors.New("head unavailable")
 	}
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
@@ -1131,14 +1131,24 @@ func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	encoded, err := original.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	decoded, err := service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
-	require.NoError(t, err)
-	require.NotNil(t, decoded)
-	require.Equal(t, original.Message.Slot, decoded.Message.Slot)
-	require.Equal(t, original.Message.BuilderIndex, decoded.Message.BuilderIndex)
-	require.Equal(t, original.Message.Value, decoded.Message.Value)
-	require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
-	require.Equal(t, original.Message.ParentBlockHash, decoded.Message.ParentBlockHash)
+	for _, test := range []struct {
+		name    string
+		version clparams.StateVersion
+	}{
+		{name: "pre-Gloas", version: clparams.ElectraVersion},
+		{name: "Gloas", version: clparams.GloasVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, err := service.DecodeGossipMessage("peer123", encoded, test.version)
+			require.NoError(t, err)
+			require.NotNil(t, decoded)
+			require.Equal(t, original.Message.Slot, decoded.Message.Slot)
+			require.Equal(t, original.Message.BuilderIndex, decoded.Message.BuilderIndex)
+			require.Equal(t, original.Message.Value, decoded.Message.Value)
+			require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
+			require.Equal(t, original.Message.ParentBlockHash, decoded.Message.ParentBlockHash)
+		})
+	}
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
@@ -1166,6 +1176,28 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageRejectsNonCanonicalOffsets
 	binary.LittleEndian.PutUint32(nonCanonical[offset:], binary.LittleEndian.Uint32(encoded[offset:])+4)
 
 	_, err = service.DecodeGossipMessage("peer123", nonCanonical, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestExecutionPayloadBidServiceDecodeGossipMessageRejectsNonCanonicalOffset(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	original := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	encoded, err := original.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const signedBidFixedSize = 4 + 96
+	binary.LittleEndian.PutUint32(encoded, signedBidFixedSize+1)
+	encoded = append(encoded, 0)
+	copy(encoded[signedBidFixedSize+1:], encoded[signedBidFixedSize:])
+	encoded[signedBidFixedSize] = 0
+
+	var lax cltypes.SignedExecutionPayloadBid
+	require.NoError(t, lax.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+
+	_, err = service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
 	require.Error(t, err)
 }
 

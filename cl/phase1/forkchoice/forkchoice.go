@@ -88,25 +88,31 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time            atomic.Uint64
-	highestSeen     atomic.Uint64
-	highestSeenRoot atomic.Value // common.Hash
+	time             atomic.Uint64
+	highestSeen      atomic.Uint64
+	highestSeenRoot  atomic.Value // common.Hash
+	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot        atomic.Value
-	headHash                 common.Hash
-	headSlot                 uint64
-	headPayloadStatus        cltypes.PayloadStatus
-	genesisTime              uint64
-	genesisValidatorsRoot    common.Hash
-	weights                  map[common.Hash]uint64
-	headSet                  map[common.Hash]struct{}
-	hotSidecars              map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload *lru.Cache[common.Hash, struct{}]
+	proposerBoostRoot                  atomic.Value
+	headHash                           common.Hash
+	headSlot                           uint64
+	headPayloadStatus                  cltypes.PayloadStatus
+	genesisTime                        uint64
+	genesisValidatorsRoot              common.Hash
+	anchorExecutionPayloadBuilderIndex uint64
+	anchorHasExecutionPayloadBid       bool
+	weights                            map[common.Hash]uint64
+	headSet                            map[common.Hash]struct{}
+	hotSidecars                        map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload           *lru.Cache[common.Hash, struct{}]
+	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
+	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
+	invalidatedExecutionPayloads       *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -164,21 +170,20 @@ type ForkChoiceStore struct {
 
 	emitters *beaconevents.EventEmitter
 	// event sends queued under f.mu, emitted after release (see queueEmit)
-	queuedEmits           []func()
-	queuedPrunes          []uint64
-	queuedOperationPrunes []solid.Checkpoint
-	operationPruneMu      sync.Mutex
-	operationPruneTarget  solid.Checkpoint
-	operationPrunePending bool
-	operationPruneRunning bool
-	synced                atomic.Bool
-
+	queuedEmits             []func()
+	queuedPrunes            []uint64
+	queuedOperationPrunes   []solid.Checkpoint
+	operationPruneMu        sync.Mutex
+	operationPruneTarget    solid.Checkpoint
+	operationPrunePending   bool
+	operationPruneRunning   bool
+	synced                  atomic.Bool
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects payload vote updates and first-valid gossip tracking
+	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadAttestationSeenSlot  uint64
@@ -196,7 +201,8 @@ type ForkChoiceStore struct {
 	// Due to network timing, the envelope may arrive before its corresponding block.
 	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
-	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -212,6 +218,7 @@ type ForkChoiceStore struct {
 	payloadValidationOnce       sync.Once
 	payloadValidationAdmission  chan struct{}
 	envelopeIndexWrites         sync.Map
+	envelopeIndexRepairs        envelopeIndexRepairTracker
 	executionPayloadFirstSeenMu sync.Mutex
 	executionPayloadFirstSeen   map[common.Hash]executionPayloadArrival
 	pendingEnvelopeArrivalOnce  sync.Once
@@ -277,6 +284,20 @@ func NewForkChoiceStore(
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
+	if err != nil {
+		return nil, err
+	}
+	executionPayloadRoots := make(map[common.Hash]map[common.Hash]struct{})
+	invalidatedExecutionPayloads := &sync.Map{}
+	verifiedExecutionPayloadHashes, err := lru.NewWithEvict[common.Hash, common.Hash](65536, func(blockRoot, executionBlockHash common.Hash) {
+		verifiedExecutionPayload.Remove(blockRoot)
+		roots := executionPayloadRoots[executionBlockHash]
+		delete(roots, blockRoot)
+		if len(roots) == 0 {
+			delete(executionPayloadRoots, executionBlockHash)
+			invalidatedExecutionPayloads.Delete(executionBlockHash)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -381,12 +402,17 @@ func NewForkChoiceStore(
 	randaoMixesLists.Add(anchorRoot, r)
 	// Seed the eth2Root→eth1Hash mapping for the anchor block so that
 	// fork choice can resolve the EL genesis hash at startup.
-	anchorExecHeader := anchorState.LatestExecutionPayloadHeader()
-	if anchorExecHeader != nil && anchorExecHeader.BlockHash != (common.Hash{}) {
-		eth2Roots.Add(anchorRoot, anchorExecHeader.BlockHash)
+	var anchorExecutionHash common.Hash
+	if anchorState.Version().AfterOrEqual(clparams.GloasVersion) {
+		anchorExecutionHash = anchorState.GetLatestBlockHash()
+	} else if header := anchorState.LatestExecutionPayloadHeader(); header != nil {
+		anchorExecutionHash = header.BlockHash
+	}
+	if anchorExecutionHash != (common.Hash{}) {
+		eth2Roots.Add(anchorRoot, anchorExecutionHash)
 		// Also map the zero hash → EL genesis for the finalized checkpoint
 		// which starts as zero at genesis.
-		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
+		eth2Roots.Add(common.Hash{}, anchorExecutionHash)
 	}
 
 	headSet := make(map[common.Hash]struct{})
@@ -418,6 +444,9 @@ func NewForkChoiceStore(
 		probabilisticHeadGetter:        probabilisticHeadGetter,
 		publicKeysRegistry:             publicKeysRegistry,
 		verifiedExecutionPayload:       verifiedExecutionPayload,
+		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
+		executionPayloadRoots:          executionPayloadRoots,
+		invalidatedExecutionPayloads:   invalidatedExecutionPayloads,
 		localValidators:                localValidators,
 		pendingConsolidations:          pendingConsolidations,
 		pendingDeposits:                pendingDeposits,
@@ -430,6 +459,12 @@ func NewForkChoiceStore(
 		executionPayloadGasLimit:       executionPayloadGasLimit,
 		payloadAttestationContexts:     payloadAttestationContexts,
 		db:                             db,
+	}
+	if anchorState.Version() >= clparams.GloasVersion {
+		if bid := anchorState.GetLatestExecutionPayloadBid(); bid != nil {
+			f.anchorExecutionPayloadBuilderIndex = bid.BuilderIndex
+			f.anchorHasExecutionPayloadBid = true
+		}
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -478,6 +513,9 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash com
 }
 
 func (f *ForkChoiceStore) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	if f.payloadExecutionHashInvalidated(blockRoot) {
+		return execution_client.PayloadStatusInvalidated, true
+	}
 	return f.payloadStatusAuthority(blockRoot)
 }
 
@@ -529,6 +567,12 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
+// Blocks parked between network-service retries have not entered OnBlock and are not counted.
+func (f *ForkChoiceStore) BlockProcessing() bool {
+	return f.blocksProcessing.Load() > 0
 }
 
 // HighestSeenRoot returns the block root of the highest seen slot.
@@ -644,6 +688,10 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.AnchorRoot()
+}
+
+func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
+	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
@@ -837,7 +885,61 @@ func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
 	if !accepted || !verified {
 		return false
 	}
-	return f.forkGraph.HasEnvelope(blockRoot)
+	return f.forkGraph.HasEnvelope(blockRoot) && !f.payloadExecutionHashInvalidated(blockRoot)
+}
+
+func (f *ForkChoiceStore) payloadExecutionHashInvalidated(blockRoot common.Hash) bool {
+	var executionBlockHash common.Hash
+	var ok bool
+	if f.verifiedExecutionPayloadHashes != nil {
+		executionBlockHash, ok = f.verifiedExecutionPayloadHashes.Get(blockRoot)
+	}
+	if !ok && f.eth2Roots != nil {
+		executionBlockHash, ok = f.eth2Roots.Get(blockRoot)
+	}
+	if !ok {
+		return false
+	}
+	if f.invalidatedExecutionPayloads != nil {
+		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
+	if f.executionPayloadStatus == nil {
+		return false
+	}
+	status, ok := f.executionPayloadStatus.Get(executionBlockHash)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
+func (f *ForkChoiceStore) trackExecutionPayloadRootLocked(blockRoot, executionBlockHash common.Hash) {
+	if f.executionPayloadRoots == nil {
+		f.executionPayloadRoots = make(map[common.Hash]map[common.Hash]struct{})
+	}
+	if f.verifiedExecutionPayloadHashes != nil {
+		if previousHash, ok := f.verifiedExecutionPayloadHashes.Get(blockRoot); ok && previousHash != executionBlockHash {
+			previousRoots := f.executionPayloadRoots[previousHash]
+			delete(previousRoots, blockRoot)
+			if len(previousRoots) == 0 {
+				delete(f.executionPayloadRoots, previousHash)
+				if f.invalidatedExecutionPayloads != nil {
+					f.invalidatedExecutionPayloads.Delete(previousHash)
+				}
+			}
+		}
+	}
+	roots := f.executionPayloadRoots[executionBlockHash]
+	if roots == nil {
+		roots = make(map[common.Hash]struct{})
+		f.executionPayloadRoots[executionBlockHash] = roots
+	}
+	roots[blockRoot] = struct{}{}
+	if f.verifiedExecutionPayloadHashes != nil {
+		f.verifiedExecutionPayloadHashes.Add(blockRoot, executionBlockHash)
+	}
+	if f.eth2Roots != nil {
+		f.eth2Roots.Add(blockRoot, executionBlockHash)
+	}
 }
 
 func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {
@@ -886,19 +988,59 @@ func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(blockRoot common.Hash,
 }
 
 func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus, retained bool) execution_client.PayloadStatus {
-	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
+	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
+	if f.invalidatedExecutionPayloads != nil {
+		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
+			effective = execution_client.PayloadStatusInvalidated
+		}
+	}
+	if f.executionPayloadStatus != nil {
+		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && executionStatus == execution_client.PayloadStatusInvalidated {
+			effective = execution_client.PayloadStatusInvalidated
+		}
+	}
+	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
 	if known {
 		switch current {
 		case execution_client.PayloadStatusInvalidated:
 			effective = execution_client.PayloadStatusInvalidated
 		case execution_client.PayloadStatusValidated:
-			if status != execution_client.PayloadStatusInvalidated {
+			if effective != execution_client.PayloadStatusInvalidated {
 				effective = execution_client.PayloadStatusValidated
 			}
 		case execution_client.PayloadStatusNotValidated:
-			if status == execution_client.PayloadStatusNone {
+			if effective == execution_client.PayloadStatusNone {
 				effective = execution_client.PayloadStatusNotValidated
+			}
+		}
+	}
+	if effective == execution_client.PayloadStatusInvalidated {
+		if f.invalidatedExecutionPayloads == nil {
+			f.invalidatedExecutionPayloads = &sync.Map{}
+		}
+		f.invalidatedExecutionPayloads.Store(executionBlockHash, struct{}{})
+		for root := range f.executionPayloadRoots[executionBlockHash] {
+			if root == blockRoot {
+				continue
+			}
+			invalidate := func() {
+				if f.verifiedExecutionPayload != nil {
+					f.verifiedExecutionPayload.Remove(root)
+				}
+				if f.payloadStatusByRoot != nil {
+					f.payloadStatusByRoot.Add(root, execution_client.PayloadStatusInvalidated)
+				}
+				if f.forkGraph != nil {
+					f.forkGraph.MarkPayloadAvailable(root)
+					f.forkGraph.ClearPayloadAccepted(root)
+					f.forkGraph.MarkHeaderAsInvalid(root)
+				}
+			}
+			if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
+				guard.WithRetainedBlock(root, invalidate)
+			} else {
+				invalidate()
 			}
 		}
 	}
@@ -908,6 +1050,12 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 		} else {
 			f.verifiedExecutionPayload.Remove(blockRoot)
 		}
+	}
+	if f.eth2Roots != nil {
+		f.eth2Roots.Add(blockRoot, executionBlockHash)
+	}
+	if f.verifiedExecutionPayloadHashes != nil {
+		f.verifiedExecutionPayloadHashes.Add(blockRoot, executionBlockHash)
 	}
 	if f.executionPayloadStatus != nil {
 		f.executionPayloadStatus.Add(executionBlockHash, effective)

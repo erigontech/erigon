@@ -242,6 +242,64 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
 }
 
+func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{{"synchronous", false}, {"parallel", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, field := range []string{"safe", "finalized"} {
+				t.Run(field, func(t *testing.T) {
+					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
+					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x81})
+					})
+					require.NoError(t, err)
+					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x82})
+					})
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), a.Blocks)
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), b.Blocks)
+					require.NoError(t, err)
+					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
+					require.NoError(t, err)
+					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+					var safe, finalized common.Hash
+					if field == "safe" {
+						safe = b.Blocks[0].Hash()
+					} else {
+						finalized = b.Blocks[0].Hash()
+					}
+					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
+					require.NoError(t, err)
+					m.ExecModule.WaitIdle(t.Context())
+					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+				})
+			}
+		})
+	}
+}
+
+func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(true))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	head := chainPack.Blocks[1]
+	validation, err := m.ValidateChain(t.Context(), head.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Equal(t, head.Hash(), result.LatestValidHash)
+}
+
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
 	// This was caught by some of the gas-benchmark tests which run a series of new payloads and FCUs
 	// for forks with different lengths, and they jump from one fork to another.
@@ -2392,8 +2450,8 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	block := chainPack.Blocks[0]
 	header := block.Header()
 	invalidBAL := types.BlockAccessList{
-		{Address: accounts.InternAddress(common.Address{2})},
-		{Address: accounts.InternAddress(common.Address{1})},
+		{Address: common.Address{2}},
+		{Address: common.Address{1}},
 	}
 	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
 	require.NoError(t, err)
@@ -2413,7 +2471,7 @@ func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 
 	block := chainPack.Blocks[0]
 	header := block.Header()
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := types.BlockAccessList{{Address: common.Address{1}}}
 	wrongHash := common.Hash{1}
 	header.BlockAccessListHash = &wrongHash
 	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))

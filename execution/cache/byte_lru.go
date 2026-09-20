@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,18 +25,21 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/length"
 )
 
-// byteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
+// ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
 // caller's weigher, instead of by an entry count over an assumed average size.
-// The ceiling rises one chunk at a time out of the shared cachebudget envelope
-// and stops for good once the envelope refuses a chunk.
+// A budgeted cache (newByteLRU) raises its limit one chunk at a time out of the shared
+// cachebudget envelope, up to maxBytes, and stops asking once the envelope refuses a chunk,
+// until Purge or Close; an unbudgeted one (NewByteLRU) holds maxBytes from the start.
 //
 // The synchronous executor orders InvalidateAll but not eviction against Add,
 // so a layer can sit over its ceiling until the next write; CleanUp forces a
 // drain. Eviction is W-TinyLFU, so a newcomer can be rejected outright.
-type byteLRU[V any] struct {
+type ByteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64
 	maxBytes int64
@@ -45,12 +49,22 @@ type byteLRU[V any] struct {
 	onEvict atomic.Pointer[func(uint64, V)]
 
 	resident atomic.Int64
-	limit    atomic.Int64 // bytes reserved from the envelope; also otter's maximum
+	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
 	closed bool
+	// unbudgeted holds maxBytes from the start and never touches the envelope.
+	unbudgeted bool
 }
+
+// otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
+// value. Omitting it undercounts a cache of small entries ~1.6x.
+const otterEntryOverheadBytes = 64
+
+// ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:
+// the uint64 key and otter's bookkeeping. Weighers add it to every entry.
+const ByteLRUEntryOverheadBytes = 8 + otterEntryOverheadBytes
 
 const (
 	// Taken unconditionally, so it must stay small: every short-lived cache pays
@@ -59,8 +73,8 @@ const (
 	byteLRUChunkBytes = int64(32 * datasize.MB)
 )
 
-func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *byteLRU[V] {
-	b := &byteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
+func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -68,26 +82,40 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = otter.Must(&otter.Options[uint64, V]{
-		MaximumWeight: uint64(floor),
-		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
-		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
-			b.resident.Add(-weigh(e.Key, e.Value))
-			if fn := b.onEvict.Load(); fn != nil {
-				(*fn)(e.Key, e.Value)
-			}
-		},
-		Executor: func(fn func()) { fn() },
+	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
+		b.resident.Add(-weigh(e.Key, e.Value))
+		if fn := b.onEvict.Load(); fn != nil {
+			(*fn)(e.Key, e.Value)
+		}
 	})
 	return b
 }
 
-func (b *byteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
+// NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
+// from the start and needs no Close, for owners that have no teardown.
+func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
+	b.limit.Store(b.maxBytes)
+	b.ceiling.Store(b.maxBytes)
+	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
+	return b
+}
+
+func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion func(otter.DeletionEvent[uint64, V])) *otter.Cache[uint64, V] {
+	return otter.Must(&otter.Options[uint64, V]{
+		MaximumWeight: uint64(maxWeight),
+		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
+		OnDeletion:    onDeletion,
+		Executor:      func(fn func()) { fn() },
+	})
+}
+
+func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it exceeds the whole
 // budget, and onEvict never fires for it, so the caller must refund its charge.
-func (b *byteLRU[V]) Add(key uint64, value V) bool {
+func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
 		return false
@@ -102,7 +130,7 @@ func (b *byteLRU[V]) Add(key uint64, value V) bool {
 
 // grow re-tests the caller's condition under the lock: without it every writer
 // piled up at a full limit reserves its own chunk, draining the envelope at once.
-func (b *byteLRU[V]) grow(w int64) {
+func (b *ByteLRU[V]) grow(w int64) {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	lim, ceil := b.limit.Load(), b.ceiling.Load()
@@ -118,17 +146,17 @@ func (b *byteLRU[V]) grow(w int64) {
 	b.c.SetMaximum(uint64(lim + chunk))
 }
 
-func (b *byteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
-func (b *byteLRU[V]) Len() int          { return b.c.EstimatedSize() }
+func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
+func (b *ByteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
-// Purge empties the cache and returns the grown reservation, keeping the floor
-// so the cache is never left disabled.
-func (b *byteLRU[V]) Purge() {
+// Purge empties the cache. A budgeted cache also returns its grown reservation, keeping
+// the floor so it is never left disabled.
+func (b *ByteLRU[V]) Purge() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	b.c.InvalidateAll()
 	b.resident.Store(0)
-	if b.closed {
+	if b.closed || b.unbudgeted {
 		return
 	}
 	floor := min(byteLRUFloorBytes, b.maxBytes)
@@ -138,8 +166,8 @@ func (b *byteLRU[V]) Purge() {
 	b.c.SetMaximum(uint64(floor))
 }
 
-// Close returns this cache's envelope reservation. Idempotent.
-func (b *byteLRU[V]) Close() {
+// Close empties the cache and returns a budgeted cache's envelope reservation. Idempotent.
+func (b *ByteLRU[V]) Close() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
 	if b.closed {
@@ -150,7 +178,37 @@ func (b *byteLRU[V]) Close() {
 	b.c.InvalidateAll()
 	b.onEvict.Store(nil)
 	b.resident.Store(0)
-	cachebudget.Global.Release(b.limit.Load())
+	if !b.unbudgeted {
+		cachebudget.Global.Release(b.limit.Load())
+	}
 	b.limit.Store(0)
 	b.ceiling.Store(0)
+}
+
+// HashByteLRU is an unbudgeted ByteLRU keyed by a hash: the first 8 bytes pick the slot, Get compares the whole hash.
+type HashByteLRU[V any] struct {
+	c     *ByteLRU[hashEntry[V]]
+	weigh func(V) int64
+}
+
+type hashEntry[V any] struct {
+	hash   common.Hash
+	value  V
+	weight int64 // weighed once in Add: ByteLRU asks for the weight on Add, on insert and on eviction
+}
+
+func NewHashByteLRU[V any](maxBytes datasize.ByteSize, weigh func(V) int64) *HashByteLRU[V] {
+	return &HashByteLRU[V]{weigh: weigh, c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 { return e.weight })}
+}
+
+func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
+	e, ok := l.c.Get(binary.BigEndian.Uint64(hash[:]))
+	if !ok || e.hash != hash {
+		return value, false
+	}
+	return e.value, true
+}
+
+func (l *HashByteLRU[V]) Add(hash common.Hash, value V) {
+	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value, weight: l.weigh(value) + length.Hash + ByteLRUEntryOverheadBytes})
 }

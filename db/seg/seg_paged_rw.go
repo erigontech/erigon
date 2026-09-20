@@ -33,39 +33,10 @@ import (
 var be = binary.BigEndian
 
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
-	var err error
-	var page []byte
-	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
-	if err != nil {
-		panic(err)
-	}
-
-	cnt := int(page[0])
-	if cnt == 0 {
-		return nil, compressionBuf
-	}
-	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
-	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
-	var kOffset, vOffset uint32
-	for i := 0; i < cnt*4; i += 4 {
-		vOffset += be.Uint32(kLens[i:])
-	}
-	keys := data[:vOffset]
-	vals := data[vOffset:]
-	vOffset = 0
-
-	for i := 0; i < cnt*4; i += 4 {
-		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
-		foundKey := keys[kOffset : kOffset+kLen]
-		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen], compressionBuf
-		} else {
-			_ = data
-		}
-		kOffset += kLen
-		vOffset += vLen
-	}
-	return nil, compressionBuf
+	p := Page{compressionBuf: compressionBuf}
+	p.Reset(compressedPage, compressionEnabled)
+	v, _ = p.Get(key)
+	return v, p.compressionBuf
 }
 
 type Page struct {
@@ -100,6 +71,24 @@ func (r *Page) clear() {
 	r.i, r.limit = 0, 0
 	r.kOffset, r.vOffset = 0, 0
 	r.kLens, r.vLens, r.data = nil, nil, nil
+}
+
+// Get returns the value stored under k on this page. It scans from the start of the page and leaves the
+// iteration cursor alone, so a page kept across seeks stays usable for both.
+func (r *Page) Get(k []byte) ([]byte, bool) {
+	var kOffset, vOffset uint32
+	for i := 0; i < r.limit*4; i += 4 {
+		vOffset += be.Uint32(r.kLens[i:])
+	}
+	for i := 0; i < r.limit*4; i += 4 {
+		kLen, vLen := be.Uint32(r.kLens[i:]), be.Uint32(r.vLens[i:])
+		if bytes.Equal(k, r.data[kOffset:kOffset+kLen]) {
+			return r.data[vOffset : vOffset+vLen], true
+		}
+		kOffset += kLen
+		vOffset += vLen
+	}
+	return nil, false
 }
 
 func (r *Page) HasNext() bool { return r.limit > r.i }
@@ -160,7 +149,8 @@ func (g *PagedReader) Reset(offset uint64) {
 		g.file.Reset(offset)
 		return
 	}
-	if g.currentPageOffset == offset { // don't reset internal state in this case: likely user just iterating over all values
+	hasPage := g.page.limit > 0
+	if g.currentPageOffset == offset && hasPage { // don't reset internal state in this case: likely user just iterating over all values
 		return
 	}
 
@@ -203,6 +193,21 @@ func (g *PagedReader) Count() int          { return g.file.Count() }
 func (g *PagedReader) Size() int           { return g.file.Size() }
 func (g *PagedReader) PageSize() int       { return g.pageSize }
 func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
+
+// GetFromPage returns the value for k at the offset the reader was last Reset to. A file written without
+// pages holds one value per offset, so k is not used there. A missing value is nil; an error means the offset
+// is not a page start, because a written page always holds at least one pair.
+func (g *PagedReader) GetFromPage(k []byte) ([]byte, error) {
+	if g.pageSize <= 1 {
+		v, _ := g.file.Next(nil)
+		return v, nil
+	}
+	if g.page.limit == 0 {
+		return nil, fmt.Errorf("%s: no page at offset %d", g.FileName(), g.currentPageOffset)
+	}
+	v, _ := g.page.Get(k)
+	return v, nil
+}
 func (g *PagedReader) HasNextPage() bool   { return g.file.HasNext() }
 func (g *PagedReader) HasNext() bool       { return g.HasNextOnPage() || g.HasNextPage() }
 func (g *PagedReader) GetMetadata() []byte { return g.file.GetMetadata() }

@@ -23,9 +23,13 @@ type ptcVoteForkGraph struct {
 	envelopes        map[common.Hash]bool
 	blocks           map[common.Hash]*cltypes.SignedBeaconBlock
 	acceptedPayloads map[common.Hash]bool
+	onHasEnvelope    func()
 }
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.onHasEnvelope != nil {
+		g.onHasEnvelope()
+	}
 	return g.envelopes[root]
 }
 
@@ -62,6 +66,7 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope        bool
 	dumpedEnvelope     *common.Hash
+	dumpEnvelopeErr    error
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
@@ -337,6 +342,49 @@ func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
 	}, f.Slot()))
 }
 
+func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
+	root := common.HexToHash("0x09")
+	f := newPtcVoteTestStore(root)
+	head := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+	threshold := ptcVoteThreshold()
+	f.payloadTimelinessVote.Store(root, ptcVotes(0, threshold+1))
+	availability := ptcVotes(0, threshold)
+	availability[threshold] = 1
+	f.payloadDataAvailabilityVote.Store(root, availability)
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
+
+	// Replacing this vote switches the EMPTY reason from lateness to unavailable data.
+	// Combining old availability with new timeliness must not allow FULL.
+	replaceVote := func() {
+		f.applyPayloadAttestationVotes([]int{threshold}, &cltypes.PayloadAttestationData{
+			PayloadPresent:    true,
+			BlobDataAvailable: false,
+		}, root)
+	}
+	graph := f.forkGraph.(ptcVoteForkGraph)
+	lockedReads := make([]bool, 0, 2)
+	graph.onHasEnvelope = func() {
+		// Each vote-array read reaches this callback. TryLock detects an unprotected
+		// read without blocking when the reader correctly holds the mutex.
+		acquired := f.ptcVoteMu.TryLock()
+		lockedReads = append(lockedReads, !acquired)
+		if acquired {
+			f.ptcVoteMu.Unlock()
+			replaceVote()
+		}
+	}
+	f.forkGraph = graph
+
+	buildOnFull := f.ShouldBuildOnFull(head, f.Slot())
+
+	require.Equal(t, []bool{true, true}, lockedReads, "both vote reads must exclude concurrent updates")
+	require.False(t, buildOnFull, "both complete vote snapshots require EMPTY")
+	graph.onHasEnvelope = nil
+	f.forkGraph = graph
+	replaceVote()
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
+}
+
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	root := common.HexToHash("0x05")
 	f := newPtcVoteTestStore(root)
@@ -372,21 +420,20 @@ func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
+	}, 1))
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
-	}))
+	}, 1))
 
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 2))
 }
 
 func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
