@@ -210,8 +210,3 @@ func TestCrossTxIncarnationBump_CodeReadsEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, accounts.EmptyCodeHash, ch, "code hash must be empty, consistent with the code")
 }
-
-func (r *fieldReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

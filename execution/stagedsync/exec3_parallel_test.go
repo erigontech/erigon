@@ -1943,13 +1943,3 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
 	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
 }
-
-func (r failingAccountStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}
-
-func (r panickingAccountStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

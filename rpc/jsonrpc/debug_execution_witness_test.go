@@ -776,13 +776,3 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
 }
-
-func (r *countingStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}
-
-func (r *fakeStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

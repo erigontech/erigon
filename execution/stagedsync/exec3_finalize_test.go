@@ -2127,8 +2127,3 @@ func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
 	require.False(t, pruned, "a funded coinbase must not be deleted on an in-flight zero balance")
 	require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
 }
-
-func (r *mapStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

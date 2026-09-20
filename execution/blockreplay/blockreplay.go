@@ -276,13 +276,3 @@ var (
 	_ state.StateReader = (*recordingReader)(nil)
 	_ state.StateReader = (*inMemReader)(nil)
 )
-
-func (r *inMemReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}
-
-func (r *recordingReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

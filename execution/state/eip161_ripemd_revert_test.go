@@ -109,8 +109,3 @@ func TestEIP161RipemdTouchSurvivesRevertOnVersionedPath(t *testing.T) {
 			"a reverted touch must not remove an ordinary empty account")
 	})
 }
-
-func (r *emptyAccountReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}

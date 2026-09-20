@@ -1182,8 +1182,3 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 		})
 	}
 }
-
-func (r *erroringReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}
