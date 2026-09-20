@@ -170,7 +170,9 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
 	err := write(rs)
 	if err != nil {
-		if rs.Written() {
+		// A marshaller that failed before writing leaves an empty field: unwrite it, or the
+		// response would carry result and error both.
+		if rs.Written() && !rs.RewindIfEmpty() {
 			rs.CloseIfOpen()
 			stream.WriteMore()
 		}

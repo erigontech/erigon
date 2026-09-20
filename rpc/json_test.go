@@ -586,6 +586,7 @@ func testResponseEncodeFailure(t *testing.T, result any) {
 		var got jsonrpcMessage
 		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
 		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Nil(t, got.Result, "a response carries error or result, never both: %s", raw)
 		require.Equal(t, `7`, string(got.ID))
 	}
 

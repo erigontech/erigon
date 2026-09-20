@@ -326,6 +326,18 @@ func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	return s
 }
 
+// rewindField drops a field name whose value never arrived, putting back the comma it
+// consumed. Only bytes still in the buffer can go back, so the caller checks that nothing
+// was written after the field name.
+func (s *StackStream) rewindField(buf, depth int) {
+	s.stream.SetBuffer(s.stream.Buffer()[:buf])
+	if len(s.stack) == depth { // WriteObjectField replaced a comma with its field
+		s.stack[depth-1] = ItemComma
+		return
+	}
+	s.stack = s.stack[:depth]
+}
+
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
 	return s.stream.Flush()
