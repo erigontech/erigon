@@ -19,14 +19,14 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
 
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -122,18 +122,38 @@ func Concrete(w jsonw.JSONWriter) *StackStream {
 	}
 }
 
-// WriteHexes writes hashes as an array of hex strings. The whole array is one value, so the
-// buffer grows once and the stack is touched once, where a write per element does both per
-// hash.
-func (s *StackStream) WriteHexes(hashes []common.Hash) {
-	buf := s.stream.Buffer()
-	buf = slices.Grow(buf, 2+len(hashes)*(hexutil.QuotedLen(length.Hash)+1))
+// WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
+// value, so the buffer grows once and the stack is touched once, where a write per element
+// does both per item. These are functions rather than methods: the element types live in
+// packages jsonw cannot import, and one generic per core type covers every named type
+// built on it.
+func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
+	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
 	buf = append(buf, '[')
-	for i := range hashes {
+	for i := range items {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = hexutil.AppendQuoted(buf, hashes[i][:])
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
+	s.popCommaOrField()
+}
+
+// WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
+// and so are summed before the single growth.
+func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+	size := 2 + len(items)
+	for i := range items {
+		size += hexutil.QuotedLen(len(items[i]))
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
 	}
 	s.stream.SetBuffer(append(buf, ']'))
 	s.popCommaOrField()
