@@ -19,7 +19,7 @@ package jsonstream
 import "encoding"
 
 // Hex writes b as a hex string field. A field that can be absent writes its own null.
-func Hex(s *StackStream, name string, b []byte) {
+func (s *StackStream) Hex(name string, b []byte) {
 	s.WriteObjectField(name)
 	s.WriteHex(b)
 }
