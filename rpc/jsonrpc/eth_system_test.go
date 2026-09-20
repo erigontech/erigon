@@ -688,3 +688,52 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 
 	return m
 }
+
+// feeHistoryResult must keep the hexutil.Big wire format: 0x-prefixed hex without leading zeros.
+func TestFeeHistoryResultJSON(t *testing.T) {
+	res := feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(big.NewInt(16)),
+		Reward:       [][]hexutil.U256{{hexutil.U256(*uint256.NewInt(0)), hexutil.U256(*uint256.NewInt(1_000_000_000))}},
+		BaseFee:      []hexutil.U256{hexutil.U256(*uint256.NewInt(1)), hexutil.U256(*new(uint256.Int).Lsh(uint256.NewInt(1), 255))},
+		GasUsedRatio: []float64{0.5},
+	}
+	got, err := json.Marshal(res)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"oldestBlock":"0x10","reward":[["0x0","0x3b9aca00"]],"baseFeePerGas":["0x1","0x8000000000000000000000000000000000000000000000000000000000000000"],"gasUsedRatio":[0.5]}`, string(got))
+}
+
+func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
+	u := func(v uint64) hexutil.U256 { return hexutil.U256(*uint256.NewInt(v)) }
+	maxU256 := hexutil.U256(*new(uint256.Int).SetAllOne())
+	cases := map[string]*feeHistoryResult{
+		"rewards and blobs": {
+			OldestBlock:      (*hexutil.Big)(big.NewInt(25_981_495)),
+			Reward:           [][]hexutil.U256{{u(0), u(0xb), maxU256}, {}, nil},
+			BaseFee:          []hexutil.U256{u(1), u(83_553_224), maxU256, u(0)},
+			GasUsedRatio:     []float64{0, 0.5, 0.9996815666666666, 1e-7, 2.5e-10, 1e21, 123456789.125, math.Copysign(0, -1)},
+			BlobBaseFee:      []hexutil.U256{u(1), u(0x71301e)},
+			BlobGasUsedRatio: []float64{0.2857142857142857, 1},
+		},
+		"headers only":   {OldestBlock: (*hexutil.Big)(big.NewInt(16)), BaseFee: []hexutil.U256{u(7)}, GasUsedRatio: []float64{0.25}, BlobGasUsedRatio: []float64{}},
+		"no blocks":      {OldestBlock: (*hexutil.Big)(big.NewInt(0))},
+		"empty slices":   {OldestBlock: (*hexutil.Big)(big.NewInt(1)), Reward: [][]hexutil.U256{}, BaseFee: []hexutil.U256{}, GasUsedRatio: []float64{}},
+		"nil oldest":     {GasUsedRatio: []float64{1}},
+		"negative float": {OldestBlock: (*hexutil.Big)(big.NewInt(1)), GasUsedRatio: []float64{-0.75, -3e-9}},
+		"nil result":     nil,
+	}
+	for name, res := range cases {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(res)
+			require.NoError(t, err)
+			got, err := res.MarshalFastJSON()
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+	for _, bad := range []float64{math.NaN(), math.Inf(1)} {
+		_, wantErr := json.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
+		_, gotErr := (&feeHistoryResult{GasUsedRatio: []float64{bad}}).MarshalFastJSON()
+		require.Error(t, wantErr)
+		require.EqualError(t, gotErr, wantErr.Error())
+	}
+}

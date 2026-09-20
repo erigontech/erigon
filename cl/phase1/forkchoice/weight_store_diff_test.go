@@ -122,16 +122,16 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	full := NewWeightStore(f)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
-	blocks := f.getFilteredBlockTree(justified.Root, justified)
+	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
 	require.NotEmpty(t, blocks)
 
 	sawNonZero := false
 	for root := range blocks {
 		node := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
 		wantScore := full.GetAttestationScore(node)
-		wantWeight := full.GetWeight(node)
+		wantWeight := full.GetWeight(node, f.Slot())
 		require.Equalf(t, wantScore, tree.GetAttestationScore(node), "attestation score mismatch at %x", root)
-		require.Equalf(t, wantWeight, tree.GetWeight(node), "weight mismatch at %x", root)
+		require.Equalf(t, wantWeight, tree.GetWeight(node, f.Slot()), "weight mismatch at %x", root)
 		if wantWeight > 0 {
 			sawNonZero = true
 		}
@@ -163,7 +163,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, len(voters), 2, "fixture must seed multiple voters to exercise reassignment")
 
-	blocks := f.getFilteredBlockTree(justified.Root, justified)
+	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
 	roots := make([]common.Hash, 0, len(blocks))
 	for r := range blocks {
 		roots = append(roots, r)
@@ -194,7 +194,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 			want := full.GetAttestationScore(node)
 			require.Equalf(t, want, tree.GetAttestationScore(node),
 				"attestation score mismatch at %x (payload status %d)", root, ps)
-			require.Equalf(t, full.GetWeight(node), tree.GetWeight(node),
+			require.Equalf(t, full.GetWeight(node, f.Slot()), tree.GetWeight(node, f.Slot()),
 				"weight mismatch at %x (payload status %d)", root, ps)
 			if want > 0 {
 				sawNonZero = true

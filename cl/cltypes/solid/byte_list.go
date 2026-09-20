@@ -149,3 +149,11 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 func (b *ByteListSSZ) Len() int {
 	return len(b.data)
 }
+
+// ValidateBounds checks that the byte list does not exceed the configured limit.
+func (b *ByteListSSZ) ValidateBounds(limit uint64) error {
+	if uint64(len(b.data)) > limit {
+		return fmt.Errorf("data length %d exceeds limit %d", len(b.data), limit)
+	}
+	return nil
+}

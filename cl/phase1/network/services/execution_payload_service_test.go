@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,7 +42,8 @@ import (
 func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service.(*executionPayloadService).pending.stopAndWait()
 	return service, forkchoiceMock
 }
 
@@ -55,11 +57,28 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 		envelope.Payload.Extra = solid.NewExtraData()
 		envelope.Payload.Transactions = &solid.TransactionsSSZ{}
 		envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+		envelope.Payload.BlockAccessList = solid.NewByteListSSZ(clparams.MainnetBeaconConfig.MaxBytesPerTransaction)
 	}
 	return &cltypes.SignedExecutionPayloadEnvelope{
 		Message:   envelope,
 		Signature: common.Bytes96{},
 	}
+}
+
+func newTestGloasBlock(slot, builderIndex uint64, stateRoot ...common.Hash) *cltypes.SignedBeaconBlock {
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
+		Slot: slot,
+		Body: &cltypes.BeaconBody{
+			Version: clparams.GloasVersion,
+			SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{
+				Message: &cltypes.ExecutionPayloadBid{BuilderIndex: builderIndex},
+			},
+		},
+	}}
+	if len(stateRoot) != 0 {
+		block.Block.StateRoot = stateRoot[0]
+	}
+	return block
 }
 
 func TestExecutionPayloadServiceDecodeRejectsNonCanonicalOffsets(t *testing.T) {
@@ -77,6 +96,71 @@ func TestExecutionPayloadServiceDecodeRejectsNonCanonicalOffsets(t *testing.T) {
 
 	_, err = service.DecodeGossipMessage("peer123", nonCanonical, clparams.GloasVersion)
 	require.Error(t, err)
+}
+
+func oversizedExtraDataEnvelopeSSZ(t *testing.T, envelope *cltypes.SignedExecutionPayloadEnvelope) []byte {
+	t.Helper()
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const (
+		signedMessageOffsetPosition          = 0
+		messageRequestsOffsetPosition        = 4
+		payloadExtraOffsetPosition           = 436
+		payloadTransactionsOffsetPosition    = 504
+		payloadWithdrawalsOffsetPosition     = 508
+		payloadBlockAccessListOffsetPosition = 528
+	)
+	messageStart := int(binary.LittleEndian.Uint32(encoded[signedMessageOffsetPosition:]))
+	payloadStart := messageStart + int(binary.LittleEndian.Uint32(encoded[messageStart:]))
+	extraStart := payloadStart + int(binary.LittleEndian.Uint32(encoded[payloadStart+payloadExtraOffsetPosition:]))
+	malformed := append([]byte{}, encoded[:extraStart]...)
+	malformed = append(malformed, make([]byte, 33)...)
+	malformed = append(malformed, encoded[extraStart:]...)
+
+	for _, position := range []int{
+		messageStart + messageRequestsOffsetPosition,
+		payloadStart + payloadTransactionsOffsetPosition,
+		payloadStart + payloadWithdrawalsOffsetPosition,
+		payloadStart + payloadBlockAccessListOffsetPosition,
+	} {
+		offset := binary.LittleEndian.Uint32(malformed[position:])
+		binary.LittleEndian.PutUint32(malformed[position:], offset+33)
+	}
+	return malformed
+}
+
+func TestExecutionPayloadServiceRejectsOversizedExtraDataSSZ(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+
+	_, err := service.DecodeGossipMessage("", oversizedExtraDataEnvelopeSSZ(t, envelope), clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestExecutionPayloadServiceRejectsUnsupportedEnvelopeVersions(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	encoded, err := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.StateVersion(255)} {
+		_, err := service.DecodeGossipMessage("", encoded, version)
+		require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")
+	}
+	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	require.NotNil(t, decoded)
+}
+
+func TestExecutionPayloadServiceRejectsMalformedEnvelopeBeforePendingHash(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+	envelope.Message.Payload.Withdrawals.Append(nil)
+
+	require.NotPanics(t, func() {
+		err := service.ProcessMessage(context.Background(), nil, envelope)
+		require.ErrorContains(t, err, "nil withdrawal at index 0")
+	})
 }
 
 func TestExecutionPayloadServiceNilEnvelope(t *testing.T) {
@@ -106,13 +190,10 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Verify envelope was queued (check internal state)
 	impl := service.(*executionPayloadService)
 	require.Equal(t, int32(1), impl.pending.count.Load())
+	fcu.DeleteEnvelope(blockRoot)
 
 	// Now add block to forkchoice
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
-	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 
 	// Process same envelope again - should succeed now (block found)
 	// Note: OnExecutionPayload mock returns nil by default
@@ -120,10 +201,34 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestExecutionPayloadServiceDoesNotReportQueuedWhenPendingQueueFull(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	impl.pending.capacity = 1
+
+	queuedRoot := common.HexToHash("0x1111")
+	queued, err := impl.queuePendingEnvelope(queuedRoot, newTestSignedEnvelope(100, queuedRoot, 1), time.Now())
+	require.NoError(t, err)
+	require.True(t, queued)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	ownedBytes := impl.pendingBytes.Load()
+
+	blockRoot := common.HexToHash("0x2222")
+	output := captureServiceLogs(t)
+	err = service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 2))
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "pending job queue full")
+	require.NotContains(t, output.String(), "Queued execution payload envelope for later processing")
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	require.Equal(t, ownedBytes, impl.pendingBytes.Load())
+}
+
 func TestExecutionPayloadServicePreservesIngressTimeWhileWaitingForBlock(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service.(*executionPayloadService).pending.stopAndWait()
 	impl := service.(*executionPayloadService)
 	early := time.Unix(1_700_000_000, 250_000_000)
 	late := early.Add(10 * time.Second)
@@ -141,7 +246,7 @@ func TestExecutionPayloadServicePreservesIngressTimeWhileWaitingForBlock(t *test
 		return nil
 	}
 	impl.now = func() time.Time { return late }
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	impl.pending.processPending(t.Context())
 
 	require.Equal(t, early, <-receivedAt)
@@ -162,7 +267,7 @@ func TestExecutionPayloadServiceIgnoresMalformedEnvelopeForUnknownBlockWithoutQu
 func TestExecutionPayloadServiceRejectsMalformedEnvelopeForKnownBlock(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 	envelope.Message.Payload.Withdrawals = nil
 
@@ -171,18 +276,40 @@ func TestExecutionPayloadServiceRejectsMalformedEnvelopeForKnownBlock(t *testing
 	require.NotErrorIs(t, err, ErrIgnore)
 }
 
+func TestExecutionPayloadServiceRejectsMismatchedBuilderBeforePersistedEnvelopeRead(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	persisted := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.SetEnvelope(blockRoot, persisted)
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return persisted, nil
+	}
+
+	err := service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 2))
+
+	require.ErrorContains(t, err, "does not match bid builder index")
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, reads.Load())
+	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.False(t, service.(*executionPayloadService).seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
+}
+
 func TestExecutionPayloadServiceEmitsGossipEvent(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 
 	blockRoot := common.Hash{1}
 	stateRoot := common.Hash{2}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: stateRoot}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7, stateRoot)
 	var stateCopies atomic.Int32
 	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
 		stateCopies.Add(1)
@@ -201,13 +328,14 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 
 	blockRoot := common.Hash{1}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
 	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
 	envelope := newTestSignedEnvelope(100, blockRoot, 7)
 
@@ -225,14 +353,15 @@ func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	stateEvents := make(chan *beaconevents.EventStream, 1)
 	stateSubscription := emitter.State().Subscribe(stateEvents)
 	defer stateSubscription.Unsubscribe()
 
 	blockRoot := common.Hash{1}
 	reorgRoot := common.Hash{9}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: common.Hash{2}}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7, common.Hash{2})
 	headState := state.New(cfg)
 	headState.SetVersion(clparams.GloasVersion)
 	require.NoError(t, headState.SetSlot(100))
@@ -258,13 +387,14 @@ func TestExecutionPayloadServiceDoesNotEmitFullHeadV2AfterStatusChanges(t *testi
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	stateEvents := make(chan *beaconevents.EventStream, 1)
 	stateSubscription := emitter.State().Subscribe(stateEvents)
 	defer stateSubscription.Unsubscribe()
 
 	blockRoot := common.Hash{1}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: common.Hash{2}}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7, common.Hash{2})
 	headState := state.New(cfg)
 	headState.SetVersion(clparams.GloasVersion)
 	require.NoError(t, headState.SetSlot(100))
@@ -291,13 +421,14 @@ func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 
 	blockRoot := common.Hash{1}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
 	forkchoiceMock.OnExecutionPayloadErr = errors.New("invalid envelope signature")
 
 	require.Error(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
@@ -312,7 +443,8 @@ func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) 
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
 	slow := make(chan *beaconevents.EventStream)
 	slowSubscription := emitter.Operation().Subscribe(slow)
 	defer slowSubscription.Unsubscribe()
@@ -327,7 +459,7 @@ func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) 
 	<-ready
 
 	blockRoot := common.Hash{1}
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
 	processDone := make(chan error, 1)
 	ctx := t.Context()
 	go func() { processDone <- service.ProcessMessage(ctx, nil, newTestSignedEnvelope(100, blockRoot, 7)) }()
@@ -353,11 +485,7 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 
 	// Add block to forkchoice
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
-	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 
 	// First call should succeed
 	err := service.ProcessMessage(context.Background(), nil, envelope)
@@ -370,6 +498,373 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	require.Contains(t, err.Error(), "already seen envelope")
 }
 
+func TestExecutionPayloadServiceSharesSeenEnvelopeAdmissionWithREST(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, true)
+
+	err = service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "already seen")
+	require.False(t, fcu.OnExecutionPayloadCalled)
+}
+
+func TestExecutionPayloadServiceRollsBackOnlyLookupRequiredAlreadySeen(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		claimError    error
+		persisted     bool
+		forgotten     bool
+		expectedReads int32
+	}{
+		{name: "plain", claimError: forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen},
+		{name: "lookup unavailable", claimError: forkchoice.ErrExecutionPayloadEnvelopeLookupRequired, forgotten: true, expectedReads: 1},
+		{name: "lookup persisted", claimError: forkchoice.ErrExecutionPayloadEnvelopeLookupRequired, persisted: true, expectedReads: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+			owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			require.NoError(t, err)
+			fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+			var reads atomic.Int32
+			fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				reads.Add(1)
+				if tc.persisted {
+					return envelope, nil
+				}
+				return nil, errors.New("persisted envelope unavailable")
+			}
+			fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+				return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, tc.claimError
+			}
+
+			err = service.ProcessMessage(t.Context(), nil, envelope)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.Equal(t, tc.expectedReads, reads.Load())
+			require.False(t, service.(*executionPayloadService).seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			require.False(t, fcu.OnExecutionPayloadCalled)
+			token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			if tc.forgotten {
+				require.NoError(t, claimErr)
+				fcu.EnvelopeGossipAdmissions.Finish(token, false)
+			} else {
+				require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+			}
+		})
+	}
+}
+
+func TestExecutionPayloadServiceQueuesEnvelopeWhileAdmissionIsBusy(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
+	for i := range 1024 {
+		token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	require.False(t, fcu.OnExecutionPayloadCalled)
+
+	for _, token := range tokens {
+		fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+	}
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+	require.True(t, fcu.OnExecutionPayloadCalled)
+	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 7}))
+}
+
+func TestExecutionPayloadServiceDropsPersistedPendingEnvelopeWhenAdmissionIsSaturated(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+	duplicate := newTestSignedEnvelope(100, blockRoot, 7)
+	duplicate.Signature[0] = 1
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, duplicate), ErrIgnore)
+	require.Equal(t, int32(2), impl.pending.count.Load())
+	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
+	for i := range 1024 {
+		token, err := fcu.EnvelopeGossipAdmissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	fcu.SetEnvelope(blockRoot, envelope)
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return envelope, nil
+	}
+
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.Equal(t, int32(1), reads.Load())
+	for _, token := range tokens {
+		fcu.EnvelopeGossipAdmissions.Finish(token, false)
+	}
+	token, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 7)
+	require.NoError(t, err)
+	fcu.EnvelopeGossipAdmissions.Finish(token, false)
+}
+
+func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlreadySeen(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		claimError        error
+		staleFirstCheck   bool
+		persistedEnvelope bool
+		wantKept          bool
+		wantForgotten     bool
+		wantReads         int32
+		wantLocalSeen     bool
+	}{
+		{name: "lookup required from stale first check", staleFirstCheck: true, wantKept: true, wantForgotten: true, wantReads: 1},
+		{name: "lookup required from persisted TOCTOU", wantKept: true, wantForgotten: true, wantReads: 1},
+		{name: "plain", claimError: forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen},
+		{
+			name:              "lookup required with persisted envelope",
+			claimError:        forkchoice.ErrExecutionPayloadEnvelopeLookupRequired,
+			persistedEnvelope: true,
+			wantReads:         1,
+			wantLocalSeen:     true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			impl := service.(*executionPayloadService)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+			require.Equal(t, int32(1), impl.pending.count.Load())
+			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+			var reads atomic.Int32
+			fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				reads.Add(1)
+				if tc.persistedEnvelope {
+					return envelope, nil
+				}
+				return nil, errors.New("unexpected persisted envelope read")
+			}
+			if tc.claimError == nil {
+				if tc.staleFirstCheck {
+					fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+				} else {
+					var hasEnvelopeCalls atomic.Int32
+					fcu.HasEnvelopeFunc = func(common.Hash) bool { return hasEnvelopeCalls.Add(1) > 1 }
+				}
+			} else {
+				owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				require.NoError(t, err)
+				fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+				fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, tc.claimError
+				}
+			}
+
+			impl.pending.processPending(t.Context())
+
+			if tc.wantKept {
+				require.Equal(t, int32(1), impl.pending.count.Load())
+				owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				require.NoError(t, err)
+				fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+				impl.pending.processPending(t.Context())
+				require.Equal(t, tc.wantReads, reads.Load())
+				_, err = fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+				fcu.ForgetExecutionPayloadEnvelopeForGossip(blockRoot, 1)
+			} else {
+				require.Zero(t, impl.pending.count.Load())
+			}
+			require.False(t, fcu.OnExecutionPayloadCalled)
+			require.Equal(t, tc.wantReads, reads.Load())
+			require.Equal(t, tc.wantLocalSeen, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			fcu.HasEnvelopeFunc = func(common.Hash) bool { return false }
+			token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			if tc.wantForgotten || tc.wantKept {
+				require.NoError(t, claimErr)
+				fcu.EnvelopeGossipAdmissions.Finish(token, false)
+			} else {
+				require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+			}
+			if tc.wantKept {
+				impl.pending.processPending(t.Context())
+				require.Zero(t, impl.pending.count.Load())
+				require.True(t, fcu.OnExecutionPayloadCalled)
+				require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			}
+		})
+	}
+}
+
+func TestExecutionPayloadServicePacesPendingLookupPerIdentity(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	first := newTestSignedEnvelope(100, blockRoot, 1)
+	second := newTestSignedEnvelope(100, blockRoot, 1)
+	second.Signature[0] = 1
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, first), ErrIgnore)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, second), ErrIgnore)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return nil, errors.New("persisted envelope unavailable")
+	}
+
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(2), impl.pending.count.Load())
+	require.Equal(t, int32(1), reads.Load())
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(1), reads.Load())
+}
+
+func TestExecutionPayloadServiceLookupOwnerExpiryPreservesSiblingPacing(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	older := newTestSignedEnvelope(100, blockRoot, 1)
+	younger := newTestSignedEnvelope(100, blockRoot, 1)
+	younger.Signature[0] = 1
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+	var reads atomic.Int32
+	fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads.Add(1)
+		return nil, errors.New("persisted envelope unavailable")
+	}
+	olderHash, err := older.HashSSZ()
+	require.NoError(t, err)
+	olderJob := &pendingEnvelopeJob{envelope: older}
+	require.Equal(t, pendingJobKeep, impl.tryProcessPendingEnvelope(t.Context(), pendingEnvelopeKey{blockRoot, olderHash}, olderJob))
+	require.Equal(t, int32(1), reads.Load())
+
+	youngerHash, err := younger.HashSSZ()
+	require.NoError(t, err)
+	youngerJob := &pendingEnvelopeJob{envelope: younger}
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, youngerHash}, youngerJob, time.Now())
+	impl.pending.onExpired(pendingEnvelopeKey{blockRoot, olderHash}, olderJob)
+	require.Equal(t, pendingJobKeep, impl.tryProcessPendingEnvelope(t.Context(), pendingEnvelopeKey{blockRoot, youngerHash}, youngerJob))
+	require.Equal(t, int32(1), reads.Load())
+}
+
+func TestExecutionPayloadServicePendingBusyIdentityDoesNotBlockOtherJobs(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	rootA := common.Hash{1}
+	rootB := common.Hash{2}
+	envelopeA := newTestSignedEnvelope(100, rootA, 1)
+	envelopeB := newTestSignedEnvelope(100, rootB, 2)
+	fcu.Blocks[rootA] = newTestGloasBlock(100, 1)
+	fcu.Blocks[rootB] = newTestGloasBlock(100, 2)
+	owner, err := fcu.EnvelopeGossipAdmissions.Claim(t.Context(), rootA, 1)
+	require.NoError(t, err)
+	defer fcu.EnvelopeGossipAdmissions.Finish(owner, false)
+	fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+		return fcu.EnvelopeGossipAdmissions.TryClaim(root, builderIndex)
+	}
+	queued, err := impl.queuePendingEnvelope(rootA, envelopeA, time.Now())
+	require.NoError(t, err)
+	require.True(t, queued)
+	queued, err = impl.queuePendingEnvelope(rootB, envelopeB, time.Now())
+	require.NoError(t, err)
+	require.True(t, queued)
+	processed := make([]common.Hash, 0, 2)
+	fcu.OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		processed = append(processed, envelope.Message.BeaconBlockRoot)
+		return nil
+	}
+
+	impl.pending.processPending(t.Context())
+
+	require.Equal(t, []common.Hash{rootB}, processed)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	hashA, err := envelopeA.HashSSZ()
+	require.NoError(t, err)
+	_, queuedA := impl.pending.jobs.Load(pendingEnvelopeKey{blockRoot: rootA, envelopeHash: hashA})
+	require.True(t, queuedA)
+
+	fcu.EnvelopeGossipAdmissions.Finish(owner, false)
+	impl.pending.processPending(t.Context())
+	require.Equal(t, []common.Hash{rootB, rootA}, processed)
+	require.Zero(t, impl.pending.count.Load())
+}
+
+func TestExecutionPayloadServicePendingRejectsBuilderMismatchBeforeAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block func() *cltypes.SignedBeaconBlock
+	}{
+		{name: "builder mismatch", block: func() *cltypes.SignedBeaconBlock { return newTestGloasBlock(100, 2) }},
+		{name: "missing bid", block: func() *cltypes.SignedBeaconBlock {
+			block := newTestGloasBlock(100, 1)
+			block.Block.Body.SignedExecutionPayloadBid = nil
+			return block
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			impl := service.(*executionPayloadService)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+			require.Equal(t, int32(1), impl.pending.count.Load())
+			fcu.Blocks[blockRoot] = tc.block()
+			var tryClaims atomic.Int32
+			fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+				tryClaims.Add(1)
+				return fcu.EnvelopeGossipAdmissions.TryClaim(root, builderIndex)
+			}
+
+			impl.pending.processPending(t.Context())
+
+			require.Zero(t, impl.pending.count.Load())
+			require.Zero(t, tryClaims.Load())
+			require.False(t, fcu.OnExecutionPayloadCalled)
+			require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+			token, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+			require.NoError(t, err)
+			fcu.EnvelopeGossipAdmissions.Finish(token, false)
+		})
+	}
+}
+
+func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	service.(*executionPayloadService).seenEnvelopesCache.Add(seenEnvelopeKey{blockRoot, 1}, struct{}{})
+
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, envelope), ErrIgnore)
+}
+
 func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 
@@ -377,14 +872,8 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	envelope := newTestSignedEnvelope(50, blockRoot, 1) // slot 50
 
 	// Add block to forkchoice
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 51,
-		},
-	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(51, 1)
 
-	// Set finalized slot higher than envelope slot
-	fcu.FinalizedSlotVal = 100
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 
 	err := service.ProcessMessage(context.Background(), nil, envelope)
@@ -409,7 +898,7 @@ func TestExecutionPayloadServiceRejectsFinalizedUnknownBlockBeforeQueue(t *testi
 func TestExecutionPayloadServiceRejectsKnownFinalizedBlockWithForgedEnvelopeSlot(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 63}}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(63, 1)
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 	validationCalled := false
@@ -431,11 +920,9 @@ func TestExecutionPayloadServiceRejectsKnownFinalizedBlockWithForgedEnvelopeSlot
 
 func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		slot    uint64
-		ignored bool
+		name string
+		slot uint64
 	}{
-		{name: "below", slot: 63, ignored: true},
 		{name: "exact", slot: 64},
 		{name: "above", slot: 65},
 	} {
@@ -444,14 +931,52 @@ func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
 			root := common.Hash{byte(tc.slot)}
 			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 			fcu.FinalizedSlotVal = 95
-			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: tc.slot}}
+			fcu.Blocks[root] = newTestGloasBlock(tc.slot, 1)
 
 			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(tc.slot, root, 1))
-			if tc.ignored {
-				require.ErrorIs(t, err, ErrIgnore)
-				return
-			}
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestExecutionPayloadServiceRechecksFinalizedBoundaryAfterApply(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		processErr error
+	}{
+		{name: "success"},
+		{name: "indices pending", processErr: forkchoice.ErrExecutionPayloadEnvelopeIndicesPending},
+		{name: "persistence failed", processErr: forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			impl := service.(*executionPayloadService)
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := impl.emitters.Operation().Subscribe(events)
+			defer subscription.Unsubscribe()
+			blockRoot := common.HexToHash("0x1234")
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
+			fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+				fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+				return tc.processErr
+			}
+
+			err := service.ProcessMessage(context.Background(), nil, envelope)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorContains(t, err, "envelope slot 100 < finalized slot 128")
+			seenKey := seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}
+			require.False(t, impl.seenEnvelopesCache.Contains(seenKey))
+			select {
+			case event := <-events:
+				t.Fatalf("finalized envelope emitted event %s", event.Event)
+			default:
+			}
+			token, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+			require.NoError(t, claimErr)
+			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
 		})
 	}
 }
@@ -463,11 +988,7 @@ func TestExecutionPayloadServiceSuccess(t *testing.T) {
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 
 	// Add block to forkchoice
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
-	}
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	fcu.FinalizedSlotVal = 50
 
 	// Process should succeed
@@ -488,7 +1009,7 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 		t.Run(processErr.Error(), func(t *testing.T) {
 			service, fcu := setupExecutionPayloadService(t)
 			blockRoot := common.HexToHash("0x1234")
-			fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 			fcu.FinalizedSlotVal = 50
 			fcu.OnExecutionPayloadErr = processErr
 
@@ -498,32 +1019,147 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 	}
 }
 
-func TestExecutionPayloadServiceDifferentBuildersSameBlock(t *testing.T) {
-	service, fcu := setupExecutionPayloadService(t)
+func TestExecutionPayloadServiceAcceptsValidatedEnvelopeWithIndicesPending(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
 
 	blockRoot := common.HexToHash("0x1234")
-	envelope1 := newTestSignedEnvelope(100, blockRoot, 1) // builder 1
-	envelope2 := newTestSignedEnvelope(100, blockRoot, 2) // builder 2
-
-	// Add block to forkchoice
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	var calls atomic.Int32
+	var validations atomic.Int32
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		calls.Add(1)
+		return forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
 	}
-	fcu.FinalizedSlotVal = 50
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		validations.Add(1)
+		return nil
+	}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 
-	// Both envelopes should be accepted (different builders)
-	err := service.ProcessMessage(context.Background(), nil, envelope1)
-	require.NoError(t, err)
-
-	err = service.ProcessMessage(context.Background(), nil, envelope2)
-	require.NoError(t, err)
-
-	// Verify both are marked as seen
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
 	impl := service.(*executionPayloadService)
-	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
-	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
+	seenKey := seenEnvelopeKey{blockRoot, 1}
+	require.True(t, impl.seenEnvelopesCache.Contains(seenKey))
+	impl.seenEnvelopesCache.Remove(seenKey)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, int32(1), validations.Load())
+}
+
+func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.OnExecutionPayloadErr = forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		return errors.New("forged signature")
+	}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+
+	require.ErrorContains(t, err, "forged signature")
+	impl := service.(*executionPayloadService)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+	select {
+	case event := <-events:
+		t.Fatalf("unvalidated envelope emitted event %s", event.Event)
+	default:
+	}
+	token, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, claimErr)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+}
+
+func TestExecutionPayloadServiceIgnoresIndicesPendingWhenRevalidationCrossesFinality(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
+	validationStarted := make(chan struct{})
+	releaseValidation := make(chan struct{})
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		close(validationStarted)
+		<-releaseValidation
+		finalizedSlot := fcu.FinalizedCheckpointVal.Epoch * cfg.SlotsPerEpoch
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", forkchoice.ErrIgnore, envelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	done := make(chan error, 1)
+	go func() { done <- service.ProcessMessage(t.Context(), nil, envelope) }()
+	<-validationStarted
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+	close(releaseValidation)
+
+	err := <-done
+	require.ErrorIs(t, err, ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+	select {
+	case event := <-events:
+		t.Fatalf("finalized envelope emitted event %s", event.Event)
+	default:
+	}
+	token, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, claimErr)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+}
+
+func TestExecutionPayloadServiceAcceptsPersistenceFailureWithoutMarkingSeen(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service.(*executionPayloadService).pending.stopAndWait()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	var calls atomic.Int32
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		calls.Add(1)
+		return forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed
+	}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	impl := service.(*executionPayloadService)
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+	seenKey := seenEnvelopeKey{blockRoot, 1}
+	require.False(t, impl.seenEnvelopesCache.Contains(seenKey))
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenKey))
+	require.Equal(t, int32(2), calls.Load())
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
 func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
@@ -531,13 +1167,14 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals; the background loop is not started
+	// Use a stopped queue so expiry is processed explicitly.
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -553,11 +1190,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		envelopeHash: envelopeHash,
 	}
 	ownedBytes := uint64(envelope.EncodingSizeSSZ())
-	impl.pending.jobs.Store(key, &pendingJob[*pendingEnvelopeJob]{
-		msg:          &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes},
-		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second), // expired
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes}, time.Now().Add(-(pendingEnvelopeExpiry + time.Second)))
 	impl.pendingBytes.Store(ownedBytes)
 
 	// Process pending - should remove expired
@@ -574,13 +1207,14 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals; the background loop is not started
+	// Use a stopped queue so pending jobs are processed explicitly.
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -596,11 +1230,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		envelopeHash: envelopeHash,
 	}
 	ownedBytes := uint64(envelope.EncodingSizeSSZ())
-	impl.pending.jobs.Store(key, &pendingJob[*pendingEnvelopeJob]{
-		msg:          &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes},
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes}, time.Now())
 	impl.pendingBytes.Store(ownedBytes)
 
 	// Block not yet available - should keep pending
@@ -608,11 +1238,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	require.Equal(t, int32(1), impl.pending.count.Load())
 
 	// Now add block
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
-	}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 
 	// Process again - should process and remove
 	impl.pending.processPending(ctx)
@@ -635,7 +1261,8 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -652,23 +1279,11 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	// Add both as pending
 	ownedBytes1 := uint64(envelope1.EncodingSizeSSZ())
 	ownedBytes2 := uint64(envelope2.EncodingSizeSSZ())
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*pendingEnvelopeJob]{
-		msg:          &pendingEnvelopeJob{envelope: envelope1, ownedBytes: ownedBytes1},
-		creationTime: time.Now(),
-	})
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*pendingEnvelopeJob]{
-		msg:          &pendingEnvelopeJob{envelope: envelope2, ownedBytes: ownedBytes2},
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(2)
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash1}, &pendingEnvelopeJob{envelope: envelope1, ownedBytes: ownedBytes1}, time.Now())
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash2}, &pendingEnvelopeJob{envelope: envelope2, ownedBytes: ownedBytes2}, time.Now())
 	impl.pendingBytes.Store(ownedBytes1 + ownedBytes2)
 
-	// Add block
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot: 100,
-		},
-	}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 
 	// Process - both should be processed
 	impl.pending.processPending(ctx)
@@ -676,7 +1291,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.Equal(t, int32(0), impl.pending.count.Load())
 	require.Zero(t, impl.pendingBytes.Load())
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
-	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
 func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
@@ -691,7 +1306,8 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 
 	impl.pending.count.Store(maxPendingEnvelopes)
 
@@ -699,7 +1315,7 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	envelope := newTestSignedEnvelope(100, blockRoot, 999)
 
 	queued, err := impl.queuePendingEnvelope(blockRoot, envelope, time.Now())
-	require.Error(t, err)
+	require.ErrorIs(t, err, errPendingJobQueueFull)
 	require.False(t, queued)
 
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
@@ -721,7 +1337,8 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 
 	impl.pending.count.Store(maxPendingEnvelopes - 5)
 
@@ -786,7 +1403,7 @@ func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesAfterAdmission(
 
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
 	require.Empty(t, calls)
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	service.(*executionPayloadService).pending.processPending(t.Context())
 
 	require.Equal(t, call{checkBlobData: true, validatePayload: true}, <-calls)
@@ -799,7 +1416,7 @@ func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesBeforeAdmission
 	service, forkchoiceMock := setupExecutionPayloadService(t)
 	blockRoot := common.Hash{1}
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	var calls atomic.Int32
 	forkchoiceMock.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 		require.Same(t, envelope, got)
@@ -823,7 +1440,8 @@ func TestExecutionPayloadServicePendingByteAdmissionConcurrent(t *testing.T) {
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
+	impl.pending.stopAndWait()
 	envelopeSize := uint64(newTestSignedEnvelope(100, common.Hash{1}, 1).EncodingSizeSSZ())
 	impl.pendingBytes.Store(maxPendingEnvelopeBytes - 5*envelopeSize)
 
@@ -885,7 +1503,7 @@ func TestExecutionPayloadServiceConcurrentDuplicateRemovalConservesOwnership(t *
 	queued, err := impl.queuePendingEnvelope(blockRoot, envelope, time.Now())
 	require.NoError(t, err)
 	require.True(t, queued)
-	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 
 	results := make(chan error, 50)
 	var wg sync.WaitGroup

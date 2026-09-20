@@ -19,7 +19,9 @@ package rpc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,7 +29,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -476,6 +480,10 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
+func respond(s jsonstream.Stream, id json.RawMessage, result any) {
+	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
+}
+
 func blockResultFixture(n int) map[string]any {
 	txs := make([]any, n)
 	for i := range txs {
@@ -495,33 +503,6 @@ func blockResultFixture(n int) map[string]any {
 	}
 }
 
-// the two paths must be byte-identical
-func TestResponsePathsIdentical(t *testing.T) {
-	for _, n := range []int{0, 1, 150} {
-		res := blockResultFixture(n)
-		id := json.RawMessage(`1`)
-
-		enc, err := json.Marshal(res)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var oldBuf bytes.Buffer
-		s1 := jsonstream.Get(&oldBuf)
-		(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s1)
-		_ = s1.Flush()
-
-		var newBuf bytes.Buffer
-		s2 := jsonstream.Get(&newBuf)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
-		_ = s2.Flush()
-
-		if oldBuf.String() != newBuf.String() {
-			t.Fatalf("n=%d differ:\n old: %.200s\n new: %.200s", n, oldBuf.String(), newBuf.String())
-		}
-	}
-	t.Log("byte-identical across 0/1/150 transactions")
-}
-
 // An unencodable result must come back as an error carrying the request id,
 // never as a success with a null result and never as a dropped reply.
 func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
@@ -530,8 +511,7 @@ func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
 	defer jsonstream.Put(s)
 
 	// a channel has no JSON representation
-	msg := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
-	msg.writeTo(s)
+	respond(s, json.RawMessage(`7`), make(chan int))
 	require.NoError(t, s.Flush())
 
 	var got jsonrpcMessage
@@ -547,17 +527,60 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	req := &jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}
-	req.response(nil).writeTo(s)
+	respond(s, json.RawMessage(`7`), nil)
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+type emptyFastJSON struct{}
+
+func (emptyFastJSON) MarshalFastJSON() ([]byte, error) { return nil, nil }
+
+func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	respond(s, json.RawMessage(`7`), emptyFastJSON{})
+	require.NoError(t, s.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+func TestResponseWritesJSONToStream(t *testing.T) {
+	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
+	for _, result := range []any{hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil)} {
+		want, err := json.Marshal(result)
+		require.NoError(t, err)
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			s := jsonstream.Get(out)
+			respond(s, json.RawMessage(`7`), result)
+			require.NoError(t, s.Flush())
+			got := s.Buffer()
+			if b, ok := out.(*bytes.Buffer); ok {
+				got = b.Bytes()
+			}
+			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
+			jsonstream.Put(s)
+		}
+	}
 }
 
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
 // signalled only through Flush would be invisible there.
 func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
-	bad := func() *jsonrpcMessage {
-		return (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
+	t.Run("json", func(t *testing.T) { testResponseEncodeFailure(t, make(chan int)) })
+	t.Run("fast", func(t *testing.T) { testResponseEncodeFailure(t, failingFastJSON{}) })
+}
+
+type failingFastJSON struct{}
+
+func (failingFastJSON) MarshalFastJSONTo(jsonw.JSONWriter) error {
+	return errors.New("encode failed")
+}
+
+func testResponseEncodeFailure(t *testing.T, result any) {
+	bad := func(s jsonstream.Stream) {
+		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
 		t.Helper()
@@ -571,7 +594,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		// answerBuffered: no writer, the caller reads Buffer() directly
 		s := jsonstream.Get(nil)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NotEmpty(t, s.Buffer(), "a dropped reply leaves the client waiting forever")
 		assertErrorResponse(t, s.Buffer())
 	})
@@ -581,7 +604,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		var buf bytes.Buffer
 		s := jsonstream.Get(&buf)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NoError(t, s.Flush())
 		require.NotZero(t, buf.Len(), "an empty buffer drops this entry from the batch array")
 		assertErrorResponse(t, buf.Bytes())
@@ -591,7 +614,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		var out bytes.Buffer
 		s := jsonstream.Get(&out)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NoError(t, s.Flush())
 		assertErrorResponse(t, out.Bytes())
 	})
@@ -616,7 +639,7 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 	_ = s1.Flush()
 
 	s2 := jsonstream.Get(&got)
-	(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
+	respond(s2, id, res)
 	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
@@ -635,7 +658,7 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 
 		var out bytes.Buffer
 		s := jsonstream.Get(&out)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(map[string]int{"n": 1}).writeTo(s)
+		respond(s, id, map[string]int{"n": 1})
 		_ = s.Flush()
 		jsonstream.Put(s)
 
@@ -647,7 +670,7 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		// The same id with a result that cannot encode must yield one error object.
 		out.Reset()
 		s = jsonstream.Get(&out)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(make(chan int)).writeTo(s)
+		respond(s, id, make(chan int))
 		_ = s.Flush()
 		jsonstream.Put(s)
 
@@ -657,4 +680,31 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.NotContains(t, back, "result")
 	}
 
+}
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.New("append failed") }
+
+type failingMidWrite struct{}
+
+func (failingMidWrite) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteObjectStart()
+	w.WriteObjectField("balance")
+	w.WriteQuotedText(failingAppender{})
+	w.WriteObjectEnd()
+	return nil
+}
+
+// A write that fails after the result opened keeps the response valid JSON: the partial result
+// stays, the error follows it, and the caller learns about it for its metrics and log.
+func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+
+	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
+
+	require.Error(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
+	require.True(t, json.Valid(s.Buffer()))
 }

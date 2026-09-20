@@ -150,8 +150,9 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists  sync.Map // common.Hash -> struct{}
-	envelopeMissing sync.Map // common.Hash -> struct{}
+	envelopeExists   sync.Map // common.Hash -> struct{}
+	envelopeMissing  sync.Map // common.Hash -> struct{}
+	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
 	sszBuffer []byte
@@ -212,7 +213,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
-
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
 		return nil, err
 	}
@@ -826,6 +826,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.blockRewards.Delete(root)
 			f.envelopeExists.Delete(root)
 			f.envelopeMissing.Delete(root)
+			f.invalidEnvelopes.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)
@@ -841,11 +842,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.removeValidatedChildren(validatedRootsByParent)
 
 	for _, root := range oldRoots {
-		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
 		}
-		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
+		}
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
 		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)

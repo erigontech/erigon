@@ -558,7 +558,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
-			// Send forkchoice early (We already know the fork is valid)
+			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if !valid {
+				sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					Status: ExecutionStatusInvalidForkchoice,
+				}, false)
+				return nil
+			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: blockHash,
 				Status:          ExecutionStatusSuccess,
@@ -876,7 +885,10 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		roTxToCloseBeforeCommit.Rollback()
 	}
 	flushStart := time.Now()
-	if err := sd.Commit(e.backgroundCtx, rwTx); err != nil {
+	if err := sd.Commit(e.backgroundCtx, rwTx, func(kv.RwTx) error {
+		e.observeStateTransition(e.backgroundCtx, StateTransitionCommitReady)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))

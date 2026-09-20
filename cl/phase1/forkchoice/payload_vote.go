@@ -284,7 +284,7 @@ func (f *ForkChoiceStore) isAncestor(node ForkChoiceNode, ancestor ForkChoiceNod
 // isPreviousSlotPayloadDecision identifies the special GLOAS fork-choice case
 // where EMPTY/FULL variants of a previous-slot block are decided by the payload
 // tiebreaker rather than by weight.
-func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) bool {
+func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode, proposalSlot uint64) bool {
 	if node.PayloadStatus != cltypes.PayloadStatusEmpty && node.PayloadStatus != cltypes.PayloadStatusFull {
 		return false
 	}
@@ -292,7 +292,7 @@ func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) boo
 	if !has || block == nil {
 		return false
 	}
-	return block.Block.Slot+1 == f.Slot()
+	return block.Block.Slot+1 == proposalSlot
 }
 
 // ShouldExtendPayload returns whether the payload for the given root should be extended.
@@ -336,9 +336,10 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 	return f.isParentNodeFull(proposerBlock.Block)
 }
 
-// ShouldBuildOnFull returns whether the proposer should build on the full payload
-// for the given head node. Returns false for EMPTY heads. For FULL heads, returns
-// true unless the PTC voted the payload as late or blob data as unavailable.
+// ShouldBuildOnFull requires a known FULL head. Only a head from the slot immediately before the
+// proposal is rechecked for payload timeliness and blob availability; older FULL heads keep their
+// resolved status. The proposal slot is explicit because preparation can run before the store
+// advances.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool {
 	header, has := f.forkGraph.GetHeader(head.Root)
@@ -354,6 +355,9 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 	if head.PayloadStatus == cltypes.PayloadStatusPending {
 		return false
 	}
+	// The vote arrays form one decision; separate sync.Map loads are not a snapshot.
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 	if f.payloadDataAvailability(head.Root, false) {
 		return false
 	}
@@ -366,8 +370,8 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
 // Used to decide between chains with different payload statuses.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 {
-	if !f.isPreviousSlotPayloadDecision(node) {
+func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode, currentSlot uint64) uint8 {
+	if !f.isPreviousSlotPayloadDecision(node, currentSlot) {
 		return uint8(node.PayloadStatus)
 	}
 

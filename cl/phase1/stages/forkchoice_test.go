@@ -10,7 +10,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -256,6 +260,68 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		default:
 			return nil
 		}
+	}
+}
+
+type invalidatingEventHeadStore struct {
+	*mock_services.ForkChoiceStorageMock
+	reads           int
+	invalidateAfter int
+}
+
+func (s *invalidatingEventHeadStore) readHead() (forkchoice.ForkChoiceNode, uint64, error) {
+	s.reads++
+	s.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	head := forkchoice.ForkChoiceNode{Root: s.HeadVal, PayloadStatus: s.HeadPayloadStatusVal}
+	// Invalidation after a head read must not change the status returned with that root.
+	if s.reads == s.invalidateAfter {
+		s.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	}
+	return head, s.HeadSlotVal, nil
+}
+
+func (s *invalidatingEventHeadStore) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
+	head, slot, err := s.readHead()
+	return head.Root, slot, err
+}
+
+func (s *invalidatingEventHeadStore) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	return s.readHead()
+}
+
+func TestEmitHeadEventKeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		invalidateAfter int
+	}{
+		{name: "initial snapshot", invalidateAfter: 1},
+		{name: "publication recheck", invalidateAfter: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			beaconCfg := clparams.MainnetBeaconConfig
+			headState := state.New(&beaconCfg)
+			headState.SetVersion(clparams.GloasVersion)
+			require.NoError(t, headState.SetSlot(1))
+			require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+			store := &invalidatingEventHeadStore{
+				ForkChoiceStorageMock: &mock_services.ForkChoiceStorageMock{
+					HeadVal: common.Hash{2}, HeadSlotVal: 1,
+				},
+				invalidateAfter: test.invalidateAfter,
+			}
+			emitter := beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 2)
+			subscription := emitter.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+
+			require.Equal(t, 2, store.reads)
+			require.Len(t, events, 2, "cache invalidation must not drop a matching FULL head event")
+			require.Equal(t, beaconevents.StateHead, (<-events).Event)
+			v2 := <-events
+			require.Equal(t, beaconevents.StateHeadV2, v2.Event)
+			require.Equal(t, "full", v2.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+		})
 	}
 }
 
