@@ -95,9 +95,8 @@ func DoCall(
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// The callback is deregistered on return, before cancel() runs (LIFO), so it can never
-	// fire for a later call. This EVM is not reused, so a callback already running is
-	// harmless and stop() need not be joined.
+	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
+	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool
 	stop := context.AfterFunc(ctx, func() {
 		timedOut.Store(true)

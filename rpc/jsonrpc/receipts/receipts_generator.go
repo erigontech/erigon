@@ -617,8 +617,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
 			// On context cancellation evm.Cancel() aborts the EVM mid-opcode, so even a
-			// gas-heavy transaction answers an RPC timeout promptly. Deregistered once the
-			// transaction finishes, or a later one would be cancelled by this one's context.
+			// gas-heavy transaction answers an RPC timeout promptly. Deregistered per
+			// transaction: they share one ctx, so callbacks would otherwise pile up on it.
 			stop := context.AfterFunc(ctx, evm.Cancel)
 
 			genEnv.ibs.SetTxContext(blockNum, i)
