@@ -73,8 +73,9 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 		Gas:        txn.GetGasLimit(),
 		AccessList: txn.GetAccessList(),
 	}
-	txType := txn.Type()
-	if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
+	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
+	// package is fee-capped too.
+	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
 		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
 	}
@@ -250,17 +251,20 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 	return response, nil
 }
 
-// marshalWithdrawals renders withdrawals for the graphql_ block responses. The
-// three integers are hexutil.Uint64, so they encode as 0x-quantities.
-func marshalWithdrawals(withdrawals types.Withdrawals) []map[string]any {
-	out := make([]map[string]any, 0, len(withdrawals))
+// GraphQLWithdrawal is a withdrawal as the graphql_ block responses render it.
+// Its validator index keeps the `validator` key the GraphQL schema asks for,
+// not the `validatorIndex` of eth_getBlockByNumber.
+type GraphQLWithdrawal struct {
+	Index     hexutil.Uint64 `json:"index"`
+	Validator hexutil.Uint64 `json:"validator"`
+	Address   common.Address `json:"address"`
+	Amount    hexutil.Uint64 `json:"amount"`
+}
+
+func marshalWithdrawals(withdrawals types.Withdrawals) []GraphQLWithdrawal {
+	out := make([]GraphQLWithdrawal, 0, len(withdrawals))
 	for _, withdrawal := range withdrawals {
-		out = append(out, map[string]any{
-			"index":     withdrawal.Index,
-			"validator": withdrawal.Validator,
-			"address":   withdrawal.Address,
-			"amount":    withdrawal.Amount,
-		})
+		out = append(out, GraphQLWithdrawal(*withdrawal))
 	}
 	return out
 }

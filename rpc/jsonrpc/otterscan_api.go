@@ -415,23 +415,6 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
-	for _, receipt := range receipts {
-		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
-		marshalledRcpt.Logs = nil
-		marshalledRcpt.LogsBloom = nil
-		result = append(result, marshalledRcpt)
-	}
-
-	// Crop txn input to 4bytes
-	txs := getBlockRes.Transactions.([]*ethapi.RPCTransaction)
-	for _, rpcTx := range txs {
-		if len(rpcTx.Input) >= 4 {
-			rpcTx.Input = rpcTx.Input[:4]
-		}
-	}
-
 	// Crop page
 	pageEnd := b.Transactions().Len() - int(pageNumber)*int(pageSize)
 	pageStart := pageEnd - int(pageSize)
@@ -442,12 +425,30 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		pageStart = 0
 	}
 
-	if pageEnd > len(result) {
-		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(result), pageEnd)
+	if pageEnd > len(receipts) {
+		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
+
+	result := make([]*ethutils.RPCReceipt, 0, pageEnd-pageStart)
+	for _, receipt := range receipts[pageStart:pageEnd] {
+		txn := b.Transactions()[receipt.TransactionIndex]
+		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
+		marshalledRcpt.Logs = nil
+		marshalledRcpt.LogsBloom = nil
+		result = append(result, marshalledRcpt)
+	}
+
+	// Crop txn input to 4bytes
+	txs := getBlockRes.Transactions.([]*ethapi.RPCTransaction)[pageStart:pageEnd]
+	for _, rpcTx := range txs {
+		if len(rpcTx.Input) >= 4 {
+			rpcTx.Input = rpcTx.Input[:4]
+		}
+	}
+
 	response := map[string]any{}
-	getBlockRes.Transactions = txs[pageStart:pageEnd]
+	getBlockRes.Transactions = txs
 	response["fullblock"] = getBlockRes
-	response["receipts"] = result[pageStart:pageEnd]
+	response["receipts"] = result
 	return response, nil
 }
