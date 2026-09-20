@@ -1468,3 +1468,15 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
 	require.Error(t, s.Err(), "the latched appender error must stay reachable")
 }
+
+// Closing to the root ends the last value's container, so the next top-level value is not a
+// member of anything and takes no separator.
+func TestClosePendingToRootClearsSeparator(t *testing.T) {
+	s := newStackStream(nil, InitialBufferSize)
+	s.WriteArrayStart()
+	s.WriteInt(1)
+	require.NoError(t, s.ClosePending(0))
+	s.WriteInt(2)
+
+	require.Equal(t, `[1]2`, string(s.Buffer()))
+}
