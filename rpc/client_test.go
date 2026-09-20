@@ -418,7 +418,7 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 				t.Error(dbg.Stack())
 			}
 		}()
-		client.EthSubscribe(context.Background(), arg, "foo_bar")
+		_, _ = client.EthSubscribe(context.Background(), arg, "foo_bar")
 	}
 	check(true, nil)
 	check(true, 1)
@@ -531,59 +531,71 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // This test checks that Client doesn't lock up when a single subscriber
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
+	for _, test := range []struct {
+		name         string
+		count        int
+		wantOverflow bool
+	}{
+		{name: "full", count: maxClientSubscriptionBuffer},
+		{name: "overflow", count: maxClientSubscriptionBuffer + 1, wantOverflow: true},
+		// Delivery must also unblock after the forwarding goroutine exits.
+		{name: "notification_after_overflow", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				logger := log.New()
+				server := newTestServer(logger)
+				defer server.Stop()
+				client := DialInProc(server, logger)
+				defer client.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				nc := make(chan int)
+				sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", test.count, 0)
+				if err != nil {
+					t.Fatal("can't subscribe:", err)
+				}
+
+				// Keep the subscriber unread until the notification burst has finished.
+				// Overflow then depends on queue capacity, not producer/consumer scheduling.
+				synctest.Wait()
+
+				var result int
+				if err := client.CallContext(ctx, &result, "nftest_echo", 42); err != nil {
+					t.Fatal("call with an unread subscriber:", err)
+				}
+				if result != 42 {
+					t.Fatalf("unexpected call result %d, want 42", result)
+				}
+
+				if test.wantOverflow {
+					select {
+					case err := <-sub.Err():
+						if !errors.Is(err, ErrSubscriptionQueueOverflow) {
+							t.Fatalf("got error %v, want %v", err, ErrSubscriptionQueueOverflow)
+						}
+					default:
+						t.Fatal("didn't get expected overflow error")
+					}
+					return
+				}
+
+				for i := range test.count {
+					select {
+					case val := <-nc:
+						if val != i {
+							t.Fatalf("(%d/%d) unexpected value %d", i, test.count, val)
+						}
+					case err := <-sub.Err():
+						t.Fatalf("(%d/%d) unexpected subscription error: %v", i, test.count, err)
+					case <-ctx.Done():
+						t.Fatalf("(%d/%d) waiting for notification: %v", i, test.count, ctx.Err())
+					}
+				}
+			})
+		})
 	}
-	logger := log.New()
-	server := newTestServer(logger)
-	defer server.Stop()
-
-	doTest := func(count int, wantError bool) {
-		client := DialInProc(server, logger)
-		defer client.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Subscribe on the server. It will start sending many notifications
-		// very quickly.
-		nc := make(chan int)
-		sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", count, 0)
-		if err != nil {
-			t.Fatal("can't subscribe:", err)
-		}
-		defer sub.Unsubscribe()
-
-		// Process each notification, try to run a call in between each of them.
-		for i := range count {
-			select {
-			case val := <-nc:
-				if val != i {
-					t.Fatalf("(%d/%d) unexpected value %d", i, count, val)
-				}
-			case err := <-sub.Err():
-				if wantError && !errors.Is(err, ErrSubscriptionQueueOverflow) {
-					t.Fatalf("(%d/%d) got error %q, want %q", i, count, err, ErrSubscriptionQueueOverflow)
-				} else if !wantError {
-					t.Fatalf("(%d/%d) got unexpected error %q", i, count, err)
-				}
-				return
-			}
-			var r int
-			err := client.CallContext(ctx, &r, "nftest_echo", i)
-			if err != nil {
-				if !wantError {
-					t.Fatalf("(%d/%d) call error: %v", i, count, err)
-				}
-				return
-			}
-		}
-		if wantError {
-			t.Fatalf("didn't get expected error")
-		}
-	}
-
-	doTest(8000, false)
-	doTest(30000, true)
 }
 
 func TestClientSetHeader(t *testing.T) {
@@ -679,7 +691,7 @@ func TestClientReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+		go func() { _ = http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger)) }()
 		return srv, l
 	}
 
@@ -898,7 +910,7 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 	}
 
 	hs := &http.Server{Handler: srv}
-	go hs.Serve(listener)
+	go func() { _ = hs.Serve(listener) }()
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{

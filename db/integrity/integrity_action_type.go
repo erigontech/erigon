@@ -127,6 +127,9 @@ const (
 	// belong to its .v as well as a corrupt one.
 	HistoryVi Check = "HistoryVi"
 
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
+
 	// TorrentPieces re-hashes data files against their .torrent piece hashes. It runs as a
 	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
 	// it, but it is named so --skip-check can turn it off like any other check.
@@ -141,7 +144,7 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, HistoryVi, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
+var SlowChecks = []Check{CaplinBlobSidecars, StateVerify}
 var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 	StateProgress,

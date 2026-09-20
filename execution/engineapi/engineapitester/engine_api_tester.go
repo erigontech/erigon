@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/state"
@@ -249,7 +250,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
-	httpAPIs := []string{"eth"}
+	httpAPIs := []string{"eth", "txpool"}
 	if args.EnableTestingAPI {
 		httpAPIs = append(httpAPIs, "testing")
 	}
@@ -443,6 +444,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
 		StateAgg:             stateAgg,
+		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -479,6 +481,7 @@ type EngineApiTester struct {
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
+	ChainDB              kv.TemporalRoDB
 	cleanup              *cleanupHandle
 }
 

@@ -46,7 +46,7 @@ type ExecutionPayload struct {
 	GasUsed         hexutil.Uint64        `json:"gasUsed"`
 	Timestamp       hexutil.Uint64        `json:"timestamp"`
 	ExtraData       hexutil.Bytes         `json:"extraData"`
-	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas"`
+	BaseFeePerGas   *hexutil.U256         `json:"baseFeePerGas"`
 	BlockHash       common.Hash           `json:"blockHash"`
 	Transactions    []hexutil.Bytes       `json:"transactions"`
 	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
@@ -57,7 +57,7 @@ type ExecutionPayload struct {
 	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
-// PayloadAttributes represent the attributes required to start assembling a payload
+// ForkChoiceState is the head/safe/finalized triple of engine_forkchoiceUpdated.
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"`
 	SafeBlockHash      common.Hash `json:"safeBlockHash"`
@@ -74,13 +74,6 @@ type PayloadAttributes struct {
 	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
 	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
 	SSZVersion            clparams.StateVersion `json:"-"`
-}
-
-// TransitionConfiguration represents the correct configurations of the CL and the EL
-type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty"`
-	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"`
-	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"`
 }
 
 // BlobsBundle holds the blobs of an execution payload.
@@ -141,6 +134,11 @@ type BlobAndProofV2 struct {
 	CellProofs []hexutil.Bytes `json:"proofs"`
 }
 
+type BlobCellsAndProofsV1 struct {
+	BlobCells []*hexutil.Bytes `json:"blob_cells"`
+	Proofs    []*hexutil.Bytes `json:"proofs"`
+}
+
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
@@ -166,7 +164,7 @@ type ForkChoiceUpdatedResponse struct {
 
 type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlockValue            *hexutil.U256     `json:"blockValue"`
 	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
@@ -264,7 +262,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -306,7 +304,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
@@ -361,10 +359,10 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	out := make([]*typesproto.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &typesproto.Withdrawal{
-			Index:          w.Index,
-			ValidatorIndex: w.Validator,
+			Index:          uint64(w.Index),
+			ValidatorIndex: uint64(w.Validator),
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         w.Amount,
+			Amount:         uint64(w.Amount),
 		})
 	}
 	return out
@@ -377,10 +375,10 @@ func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal 
 	out := make([]*types.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types.Withdrawal{
-			Index:     w.Index,
-			Validator: w.ValidatorIndex,
+			Index:     hexutil.Uint64(w.Index),
+			Validator: hexutil.Uint64(w.ValidatorIndex),
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    w.Amount,
+			Amount:    hexutil.Uint64(w.Amount),
 		})
 	}
 	return out

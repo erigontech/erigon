@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -433,48 +432,6 @@ func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
 	})
 }
 
-// TestStructLog_ErrorOmitempty verifies that the 'error' field is omitted from
-// MarshalJSON output when there is no error, and present when there is.
-func TestStructLog_ErrorOmitempty(t *testing.T) {
-	t.Run("no error omitted", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		if _, found := obj["error"]; found {
-			t.Errorf("expected 'error' field to be absent, but it was present: %s", obj["error"])
-		}
-	})
-
-	t.Run("error included when present", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1, Err: errors.New("out of gas")}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		raw, found := obj["error"]
-		if !found {
-			t.Fatal("expected 'error' field but it was absent")
-		}
-		var msg string
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			t.Fatalf("cannot parse error field: %v", err)
-		}
-		if msg != "out of gas" {
-			t.Errorf("error message: got %q, want %q", msg, "out of gas")
-		}
-	})
-}
-
 // TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
 // more than one slot is emitted; a single-entry object never writes one.
 func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
@@ -611,7 +568,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 // TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
 // for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
 // flushes inside a transaction, so the stream has to do it. Memory tracing used
-// to bound it by accident, because writeMemoryWordRaw went through Write, which
+// to bound it by accident, because memory words went through Write, which
 // flushed per 32-byte word; with memory off nothing drained at all.
 func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 	for name, cfg := range map[string]*LogConfig{
@@ -645,19 +602,5 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 	} {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
 		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
-	}
-}
-
-// TestHexQuotedHashMatchesHexWithPrefix pins the pre-quoted form against the
-// one WriteString produced, which the RPC output has to stay identical to.
-func TestHexQuotedHashMatchesHexWithPrefix(t *testing.T) {
-	l := &JsonStreamLogger{}
-	for _, seed := range []int{0, 1, 7, 255} {
-		var h common.Hash
-		for i := range h {
-			h[i] = byte(i*seed + 1)
-		}
-		want := `"` + l.hexWithPrefix(&h) + `"`
-		require.Equal(t, want, l.hexQuotedHash(&h), "seed=%d", seed)
 	}
 }

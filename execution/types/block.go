@@ -534,13 +534,13 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty    *hexutil.Big
-	Number        *hexutil.Big
+	Difficulty    *hexutil.U256
+	Number        *hexutil.U256
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
 	Extra         hexutil.Bytes
-	BaseFee       *hexutil.Big
+	BaseFee       *hexutil.U256
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
@@ -1667,48 +1667,33 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var u Header
-		if err = u.DecodeRLP(s); err != nil {
-			break
+		if err := u.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &u)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var w Withdrawal
-		if err = w.DecodeRLP(s); err != nil {
-			break
+		if err := w.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &w)
 	}
-	return checkErrListEnd(s, err)
-}
-
-func checkErrListEnd(s *rlp.Stream, err error) error {
-	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
-	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
-	// error and must propagate, not be treated as a clean end-of-list.
-	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
-		return err
-	}
-	if err := s.ListEnd(); err != nil {
-		return err
-	}
-	return nil
+	return s.ListEnd()
 }

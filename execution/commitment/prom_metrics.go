@@ -39,7 +39,6 @@ var (
 
 	mxKeys       = metrics.GetOrCreateCounter("commitment_keys_total")
 	mxFolds      = metrics.GetOrCreateCounter("commitment_folds_total")
-	mxUnfolds    = metrics.GetOrCreateCounter("commitment_unfolds_total")
 	mxBranchPuts = metrics.GetOrCreateCounter("commitment_branch_writes_total")
 	mxReadBytes  = metrics.GetOrCreateCounter("commitment_branch_read_bytes_total")
 	mxWriteBytes = metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
@@ -94,7 +93,6 @@ func observeRound(m *Metrics, start time.Time) {
 	v := m.AsValues()
 	addU64(mxKeys, v.RoundKeys)
 	addU64(mxFolds, v.Folds)
-	addU64(mxUnfolds, v.Unfolds)
 	addU64(mxReadBytes, v.BranchReadBytes)
 	addVec(mxTraversals, "address", v.AddressKeys)
 	addVec(mxTraversals, "storage", v.StorageKeys)

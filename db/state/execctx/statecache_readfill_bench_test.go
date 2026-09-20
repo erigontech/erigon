@@ -140,3 +140,70 @@ func BenchmarkGetLatestColdNegativeMeteredNoCache(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkValidationCache(b *testing.B) {
+	for _, local := range []bool{false, true} {
+		name := "shared-unwind"
+		if local {
+			name = "local-unwind"
+		}
+		b.Run(name, func(b *testing.B) {
+			for _, tc := range []struct {
+				name         string
+				unwind, read bool
+			}{
+				{name: "extend"}, {name: "discard-fork", unwind: true}, {name: "read-discard-fork", unwind: true, read: true},
+			} {
+				b.Run(tc.name, func(b *testing.B) {
+					db := benchSeedDb(b)
+					tx, err := db.BeginTemporalRo(b.Context())
+					require.NoError(b, err)
+					defer tx.Rollback()
+					sc := newSmallStateCache()
+					b.Cleanup(sc.Close)
+					canonical, err := execctx.NewSharedDomains(b.Context(), tx, log.New())
+					require.NoError(b, err)
+					defer canonical.Close()
+					canonical.BindStateCache(sc)
+					keys := make([][]byte, 256)
+					for i := range keys {
+						keys[i] = make([]byte, 20)
+						binary.BigEndian.PutUint64(keys[i][12:], uint64(i)+1)
+						_, _, err := canonical.GetLatest(kv.AccountsDomain, tx, keys[i])
+						require.NoError(b, err)
+					}
+					var opts []execctx.SharedDomainOption
+					if local {
+						opts = append(opts, execctx.WithLocalCacheUnwind())
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						candidate, err := execctx.NewSharedDomains(b.Context(), tx, log.New(), opts...)
+						if err != nil {
+							b.Fatal(err)
+						}
+						candidate.BindStateCache(sc)
+						if tc.unwind {
+							candidate.Unwind(16, nil)
+						}
+						if tc.read {
+							for _, key := range keys {
+								if _, _, err := candidate.GetLatest(kv.AccountsDomain, tx, key); err != nil {
+									b.Fatal(err)
+								}
+							}
+						}
+						candidate.Close()
+						for _, key := range keys {
+							_, _, err := canonical.GetLatest(kv.AccountsDomain, tx, key)
+							if err != nil {
+								b.Fatal(err)
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}

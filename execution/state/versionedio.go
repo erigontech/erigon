@@ -1317,6 +1317,9 @@ func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+	if len(m) == 0 {
+		return true
+	}
 	for _, vw := range m {
 		if !yield(vw.WriteHeader) {
 			return false
@@ -2542,7 +2545,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
 		// reads (Empty() in statefulGasCall). Keep it when it has actual state
 		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
 		bal = append(bal, *account.changes)
@@ -2692,7 +2695,7 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{
-		changes: &types.AccountChanges{Address: addr},
+		changes: &types.AccountChanges{Address: addr.Value()},
 		balance: newBalanceTracker(),
 		nonce:   newNonceTracker(),
 		code:    newCodeTracker(),

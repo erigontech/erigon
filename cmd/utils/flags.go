@@ -449,7 +449,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -831,6 +831,12 @@ var (
 		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
+
+	DisableTCP = cli.BoolFlag{
+		Name:  "downloader.disable.tcp",
+		Usage: "Turns off TCP for the downloader, leaving uTP as the only BitTorrent transport",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -953,6 +959,11 @@ var (
 		Name:  "caplin.mev-relay-url",
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
+	}
+	CaplinAllowPrivateBuilderURLs = cli.BoolFlag{
+		Name:  "caplin.builder.allow-private-urls",
+		Usage: "Allow validator-configured builder URLs to resolve to private or loopback addresses",
+		Value: false,
 	}
 	CaplinValidatorMonitorFlag = cli.BoolFlag{
 		Name:  "caplin.validator-monitor",
@@ -1160,6 +1171,11 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
+	}
+	SlowBlockThresholdFlag = cli.DurationFlag{
+		Name:  "debug.slow-block-threshold",
+		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables). Enabling it also times every state domain read process-wide, RPC included",
+		Value: -1,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -1846,6 +1862,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
@@ -2147,6 +2164,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
 				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				DisableTCP:               boolFlagOpt(ctx, &DisableTCP),
 				Verify:                   ctx.Bool(DownloaderVerifyFlag.Name),
 				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
 				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),

@@ -833,7 +833,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
 	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
-		require.NotEqual(t, systemAddr, accountChanges.Address,
+		require.NotEqual(t, systemAddr.Value(), accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
 	}
 
@@ -859,4 +859,72 @@ func TestLogBlockNumberFromEVMContext(t *testing.T) {
 	logs := ibs.GetRawLogs(0)
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
+}
+
+// TestOpcodeMaskFiltersDelivery pins that the interpreter honours a tracer's opcode
+// mask: without this, dropping the check in interpreter.go breaks nothing a test sees.
+func TestOpcodeMaskFiltersDelivery(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.PUSH1), 0x00,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.POP),
+		byte(vm.STOP),
+	}
+
+	run := func(mask *tracing.OpcodeMask) []byte {
+		var seen []byte
+		cfg := &Config{EVMConfig: vm.Config{Tracer: &tracing.Hooks{
+			OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				seen = append(seen, op)
+			},
+			OnOpcodeMask: mask,
+		}}}
+		if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		return seen
+	}
+
+	unmasked := run(nil)
+	require.Equal(t, []byte{
+		byte(vm.PUSH1), byte(vm.SLOAD),
+		byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
+		byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
+	}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
+
+	masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
+	require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
+		"a mask must deliver exactly the opcodes it names, in execution order")
+}
+
+// TestOpcodeMaskStillReportsFaults pins that filtering which opcodes a tracer sees
+// does not cost it the fault: an excluded opcode that fails still reaches OnFault.
+func TestOpcodeMaskStillReportsFaults(t *testing.T) {
+	t.Parallel()
+	code := []byte{byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x02, byte(vm.ADD), byte(vm.STOP)}
+
+	var opcodes, faults []byte
+	cfg := &Config{
+		GasLimit: 5, // too little to finish, so an excluded opcode faults
+		EVMConfig: vm.Config{Tracer: &tracing.Hooks{
+			OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				opcodes = append(opcodes, op)
+			},
+			OnFault: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+				faults = append(faults, op)
+			},
+			OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD)), // PUSH1/ADD excluded
+		}},
+	}
+	if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
+		t.Fatal("expected the run to fail on gas")
+	}
+	require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
+	require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 }
