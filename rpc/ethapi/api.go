@@ -478,8 +478,8 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
-// ots_getBlockTransactions type-asserts this field, so each mode keeps the element type its
-// populated form has.
+// Each mode keeps the element type its populated form has, for callers that type-assert
+// Transactions.
 var (
 	noTxHashes any = []common.Hash{}
 	noFullTxs  any = []*RPCTransaction{}
