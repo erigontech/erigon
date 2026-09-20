@@ -224,14 +224,10 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	addr := accounts.InternAddress(address)
-	acc, err := reader.ReadAccountData(addr)
-	if acc == nil || err != nil {
-		return common.Hash{}, err
-	}
-
-	location := accounts.InternKey(common.HexToHash(index))
-	res, _, err := reader.ReadAccountStorage(addr, location)
+	// The storage domain is keyed by address and slot, so the account read an existence
+	// check would need is a second state read for the zero this one already answers with.
+	location := accounts.InternKey(common.BytesToHash(indexBytes))
+	res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), location)
 	if err != nil {
 		return common.Hash{}, err
 	}
