@@ -96,12 +96,7 @@ func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
+	s.commit(buf, start)
 	s.popCommaOrField()
 }
 
@@ -158,12 +153,7 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 	}
 	assertNoEscapes(buf[start+1:])
 	buf = append(buf, '"')
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
+	s.commit(buf, start)
 	s.popCommaOrField()
 }
 
@@ -178,6 +168,17 @@ func assertNoEscapes(text []byte) {
 			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
 		}
 	}
+}
+
+// commit takes the buffer a value was appended to, handing anything past FlushThreshold
+// straight to the writer rather than holding a whole large value in memory.
+func (s *StackStream) commit(buf []byte, start int) {
+	if s.out != nil && len(buf)-start >= FlushThreshold {
+		s.stream.SetBuffer(buf[:start])
+		s.writeThrough(buf[start:])
+		return
+	}
+	s.stream.SetBuffer(buf)
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
