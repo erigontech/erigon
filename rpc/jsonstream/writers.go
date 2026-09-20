@@ -18,19 +18,14 @@ package jsonstream
 
 import "encoding"
 
-// Field writes the comma a following field needs, then the field name. The first field of
-// an object uses WriteObjectField directly.
-func Field(s *StackStream, name string) *StackStream {
-	return s.WriteObjectField(name)
-}
-
 // Hex writes b as a hex string field, or null when b is nil.
 func Hex(s *StackStream, name string, b []byte) {
+	s.WriteObjectField(name)
 	if b == nil {
-		Field(s, name).WriteNil()
+		s.WriteNil()
 		return
 	}
-	Field(s, name).WriteHex(b)
+	s.WriteHex(b)
 }
 
 type textPtr[T any] interface {
@@ -40,11 +35,12 @@ type textPtr[T any] interface {
 
 // Text writes v's text as a JSON string field, or null when v is nil.
 func Text[T any, P textPtr[T]](s *StackStream, name string, v P) {
+	s.WriteObjectField(name)
 	if v == nil {
-		Field(s, name).WriteNil()
+		s.WriteNil()
 		return
 	}
-	Field(s, name).WriteQuotedText(v)
+	s.WriteQuotedText(v)
 }
 
 // Array writes a JSON array field exactly as the reflection encoder would: the pointer
@@ -55,7 +51,7 @@ func Array[S ~[]E, E any](s *StackStream, name string, items *S, elem func(*Stac
 	if items == nil {
 		return
 	}
-	Field(s, name)
+	s.WriteObjectField(name)
 	ArrayValue(s, *items, elem)
 }
 

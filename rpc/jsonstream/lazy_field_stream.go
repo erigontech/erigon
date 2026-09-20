@@ -138,21 +138,12 @@ func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.written = false
 }
 
-// Open resolves a stream to the one that owns the buffer, opening any field a wrapper is
-// still holding. It is for the dispatch site: a marshaller takes the concrete stream and so
-// must write a value, since the field is open by the time this returns.
-func Open(s Stream) *StackStream {
-	for {
-		switch t := s.(type) {
-		case *StackStream:
-			return t
-		case *LazyFieldStream:
-			t.ensure()
-			s = t.inner
-		default:
-			return nil
-		}
-	}
+// Open writes the field this stream is holding and returns the stream that owns the buffer,
+// for a marshaller that takes the stream itself. The field is open when it returns, so the
+// caller must write a value.
+func (s *LazyFieldStream) Open() *StackStream {
+	s.ensure()
+	return s.inner.(*StackStream)
 }
 
 func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
