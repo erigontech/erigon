@@ -394,20 +394,22 @@ const (
 
 // OpcodeMask is the set of opcodes a tracer asks to see, one bit per opcode so the
 // whole set is 32 bytes and the interpreter's test stays inside one cache line.
-type OpcodeMask [4]uint64
+// The words are unexported so a mask shared by several tracers cannot be narrowed
+// through one of them.
+type OpcodeMask struct{ words [4]uint64 }
 
 // NewOpcodeMask returns a mask holding exactly ops.
 func NewOpcodeMask(ops ...byte) *OpcodeMask {
 	var m OpcodeMask
 	for _, op := range ops {
-		m[op>>6] |= 1 << (op & 63)
+		m.words[op>>6] |= 1 << (op & 63)
 	}
 	return &m
 }
 
 // wants reports whether op is in the mask. A nil mask wants everything.
 func (m *OpcodeMask) wants(op byte) bool {
-	return m == nil || m[op>>6]&(1<<(op&63)) != 0
+	return m == nil || m.words[op>>6]&(1<<(op&63)) != 0
 }
 
 // WantsOpcode reports whether the hooks ask to see op.

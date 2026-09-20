@@ -892,8 +892,11 @@ func TestOpcodeMaskFiltersDelivery(t *testing.T) {
 	}
 
 	unmasked := run(nil)
-	require.Greater(t, len(unmasked), 4, "a nil mask must deliver every executed opcode")
-	require.Contains(t, unmasked, byte(vm.PUSH1))
+	require.Equal(t, []byte{
+		byte(vm.PUSH1), byte(vm.SLOAD),
+		byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
+		byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
+	}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
 
 	masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
 	require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
