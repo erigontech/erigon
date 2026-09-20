@@ -362,6 +362,7 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, root, rootRO)
 	require.Equal(t, writes, ms.putBranches, "a read-only fold writes no branch")
+	require.Empty(t, hph.branchEncoder.deferred, "a read-only fold queues no deferred update")
 	require.Less(t, len(byHash), len(full), "nodes off the proven paths are referenced by hash")
 
 	for _, a := range proven {
