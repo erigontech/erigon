@@ -111,9 +111,10 @@ type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
 
-// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. An
-// implementation reports an error before its first call to w: once it writes, the stream already
-// holds part of the result and the response carries both result and error.
+// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. Only a
+// type above rpc/jsonstream can name the stream; a type below it implements encoding.TextAppender
+// instead and the stream quotes the text. An implementation that fails after its first write
+// leaves part of the result behind, so that response carries both result and error.
 type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
