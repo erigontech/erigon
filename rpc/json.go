@@ -152,8 +152,8 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			}
 			return err
 		}
-		// The hex quantities in common and common/hexutil cannot carry a marshaller: the
-		// package that owns the stream type imports them. They append their own text.
+		// Erigon return: `hexutil.Bytes/Uint/Uint64/U256, common.Hash,common.Address
+		// such low-level types are json-safe, but can't carry marshaler method
 		if ta, ok := result.(encoding.TextAppender); ok {
 			rs.Open().WriteQuotedText(ta)
 			return rs.Err()
