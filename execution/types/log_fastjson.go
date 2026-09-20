@@ -146,31 +146,22 @@ func (l *RPCLog) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("address")
-	s.WriteHex(l.Address[:])
-	s.WriteObjectField("topics")
+	s.WriteHexField("address", l.Address[:])
 	if l.Topics == nil {
+		s.WriteObjectField("topics")
 		s.WriteNil()
 	} else {
-		s.WriteHexes(l.Topics)
+		jsonstream.WriteHexesField(s, "topics", l.Topics)
 	}
 	// A nil Data is "0x", not null, so it is written rather than skipped.
-	s.WriteObjectField("data")
-	s.WriteHex(l.Data)
-	s.WriteObjectField("blockNumber")
-	s.WriteHexUint(uint64(l.BlockNumber))
-	s.WriteObjectField("transactionHash")
-	s.WriteHex(l.TxHash[:])
-	s.WriteObjectField("transactionIndex")
-	s.WriteHexUint(uint64(l.TxIndex))
-	s.WriteObjectField("blockHash")
-	s.WriteHex(l.BlockHash[:])
-	s.WriteObjectField("logIndex")
-	s.WriteHexUint(uint64(l.Index))
-	s.WriteObjectField("removed")
-	s.WriteBool(l.Removed)
-	s.WriteObjectField("blockTimestamp")
-	s.WriteHexUint(uint64(l.BlockTimestamp))
+	s.WriteHexField("data", l.Data)
+	s.WriteHexUintField("blockNumber", uint64(l.BlockNumber))
+	s.WriteHexField("transactionHash", l.TxHash[:])
+	s.WriteHexUintField("transactionIndex", uint64(l.TxIndex))
+	s.WriteHexField("blockHash", l.BlockHash[:])
+	s.WriteHexUintField("logIndex", uint64(l.Index))
+	s.WriteBoolField("removed", l.Removed)
+	s.WriteHexUintField("blockTimestamp", uint64(l.BlockTimestamp))
 	s.WriteObjectEnd()
 }
 

@@ -110,6 +110,60 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.afterValue()
 }
 
+// maxQuotedUintLen is the widest a quoted hex quantity gets: 16 digits, "0x" and quotes.
+const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
+
+// fieldPrefix appends the separator and field name a fused field write starts with. The
+// field never reaches the stack: its value is written in the same call.
+func (s *StackStream) fieldPrefix(buf []byte, name string) []byte {
+	if s.separatorPending {
+		buf = append(buf, ',')
+	}
+	buf = append(buf, '"')
+	buf = append(buf, name...)
+	return append(buf, '"', ':')
+}
+
+// fieldWritten records the member and hands the buffer over if it is full.
+func (s *StackStream) fieldWritten(buf []byte) {
+	s.stream.SetBuffer(buf)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+// WriteHexField writes a field and its hex value in one go: one growth, one buffer update,
+// and the field name never has to sit on the stack waiting for a value.
+func (s *StackStream) WriteHexField(name string, b []byte) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+5+hexutil.QuotedLen(len(b)))
+	s.fieldWritten(hexutil.AppendQuoted(s.fieldPrefix(buf, name), b))
+}
+
+// WriteHexUintField writes a field whose value is a hex quantity.
+func (s *StackStream) WriteHexUintField(name string, v uint64) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+5+maxQuotedUintLen)
+	buf = append(s.fieldPrefix(buf, name), '"', '0', 'x')
+	s.fieldWritten(append(strconv.AppendUint(buf, v, 16), '"'))
+}
+
+// WriteBoolField writes a field whose value is true or false.
+func (s *StackStream) WriteBoolField(name string, v bool) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+10)
+	s.fieldWritten(strconv.AppendBool(s.fieldPrefix(buf, name), v))
+}
+
+// WriteHexesField writes a field whose value is an array of fixed-size hex values.
+func WriteHexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+7+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(s.fieldPrefix(buf, name), '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+	}
+	s.fieldWritten(append(buf, ']'))
+}
+
 // WriteHexUint writes v as a quoted hex quantity. It is WriteQuotedText without the
 // interface: a quantity is four fields of every log, and boxing each one to call AppendText
 // costs more than the digits do.
