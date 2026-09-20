@@ -35,30 +35,28 @@ type TxPoolContent map[string]map[string]map[string]*ethapi.RPCTransaction
 type TxPoolContentFrom map[string]map[string]*ethapi.RPCTransaction
 
 func (c TxPoolContent) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	writeSortedMap(w, c, func(w jsonw.JSONWriter, senders map[string]map[string]*ethapi.RPCTransaction) {
-		writeSortedMap(w, senders, writeNonceMap)
+	return writeSortedMap(w, c, func(w jsonw.JSONWriter, senders map[string]map[string]*ethapi.RPCTransaction) error {
+		return writeSortedMap(w, senders, writeNonceMap)
 	})
-	return nil
 }
 
 func (c TxPoolContentFrom) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	writeSortedMap(w, c, writeNonceMap)
-	return nil
+	return writeSortedMap(w, c, writeNonceMap)
 }
 
 // A nil transaction writes itself as null, so the map's values go straight to the marshaller.
-func writeNonceMap(w jsonw.JSONWriter, byNonce map[string]*ethapi.RPCTransaction) {
-	writeSortedMap(w, byNonce, func(w jsonw.JSONWriter, txn *ethapi.RPCTransaction) {
-		_ = txn.MarshalFastJSONTo(w)
+func writeNonceMap(w jsonw.JSONWriter, byNonce map[string]*ethapi.RPCTransaction) error {
+	return writeSortedMap(w, byNonce, func(w jsonw.JSONWriter, txn *ethapi.RPCTransaction) error {
+		return txn.MarshalFastJSONTo(w)
 	})
 }
 
 // writeSortedMap writes a map as a JSON object with its keys in the order encoding/json
 // emits them, which is what keeps the answer byte-identical to the reflected one.
-func writeSortedMap[V any](w jsonw.JSONWriter, m map[string]V, value func(jsonw.JSONWriter, V)) {
+func writeSortedMap[V any](w jsonw.JSONWriter, m map[string]V, value func(jsonw.JSONWriter, V) error) error {
 	if m == nil {
 		w.WriteNil()
-		return
+		return nil
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -72,9 +70,12 @@ func writeSortedMap[V any](w jsonw.JSONWriter, m map[string]V, value func(jsonw.
 			w.WriteMore()
 		}
 		w.WriteObjectField(k)
-		value(w, m[k])
+		if err := value(w, m[k]); err != nil {
+			return err
+		}
 	}
 	w.WriteObjectEnd()
+	return nil
 }
 
 // StorageValues is eth_getStorageValues' answer: the slots asked for, per account.

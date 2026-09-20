@@ -197,6 +197,9 @@ func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
 			a2: {hexutil.Bytes{0xff, 0x00}},
 		},
 		"emptyContent":  TxPoolContent{"pending": {}, "queued": {}},
+		"nilSubPool":    TxPoolContent{"pending": nil, "queued": {a1.Hex(): nil}},
+		"nilNonceMap":   TxPoolContentFrom{"pending": nil},
+		"emptySlotList": StorageValues{a1: {}},
 		"nilStorage":    StorageValues(nil),
 		"nilSlotValues": StorageValues{a1: nil},
 	} {
