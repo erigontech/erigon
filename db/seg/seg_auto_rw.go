@@ -153,10 +153,26 @@ func (c *Writer) Write(word []byte) (n int, err error) {
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
-	var v []byte
+	// Keep the two buffers apart and only keep the one Next decoded into: for
+	// the half the domain does not compress, Next returns a slice of the
+	// read-only mapping, and feeding that back would decode into the file.
+	var k, v []byte
 	for r.HasNext() {
-		v, _ = r.Next(v[:0])
-		if _, err := c.Write(v); err != nil {
+		key, _ := r.Next(k[:0])
+		if r.c.Has(CompressKeys) {
+			k = key
+		}
+		if _, err := c.Write(key); err != nil {
+			return err
+		}
+		if !r.HasNext() {
+			return nil
+		}
+		val, _ := r.Next(v[:0])
+		if r.c.Has(CompressVals) {
+			v = val
+		}
+		if _, err := c.Write(val); err != nil {
 			return err
 		}
 	}
@@ -252,8 +268,8 @@ func Decompressor2bufio(d *Decompressor) (*bufio.Reader, func()) {
 func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFunc func(word []byte) ([]byte, error)) error {
 	word := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
-	var err error
-	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
+	var readErr error
+	for l, readErr = binary.ReadUvarint(src); readErr == nil; l, readErr = binary.ReadUvarint(src) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -265,10 +281,11 @@ func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFun
 		} else {
 			word = word[:l]
 		}
-		if _, err = io.ReadFull(src, word); err != nil {
+		if _, err := io.ReadFull(src, word); err != nil {
 			return err
 		}
 		if wordFunc != nil {
+			var err error
 			word, err = wordFunc(word)
 			if err != nil {
 				return err
@@ -281,8 +298,8 @@ func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFun
 			return err
 		}
 	}
-	if !errors.Is(err, io.EOF) {
-		return err
+	if !errors.Is(readErr, io.EOF) {
+		return readErr
 	}
 	return nil
 }

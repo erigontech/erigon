@@ -1036,6 +1036,14 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	return buf, postLoopPos
 }
 
+// PeekSize returns the next word's uncompressed length without advancing the getter.
+func (g *Getter) PeekSize() int {
+	dataP, dataBit := g.dataP, g.dataBit
+	wordLen := g.nextPosClean() - 1
+	g.dataP, g.dataBit = dataP, dataBit
+	return int(wordLen)
+}
+
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -1044,7 +1052,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
-		return g.data[g.dataP:g.dataP], g.dataP
+		return g.data[g.dataP:g.dataP:g.dataP], g.dataP
 	}
 	g.nextPos()
 	if g.dataBit > 0 {
@@ -1053,7 +1061,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	}
 	pos := g.dataP
 	g.dataP += wordLen
-	return g.data[pos:g.dataP], g.dataP
+	return g.data[pos:g.dataP:g.dataP], g.dataP
 }
 
 // Skip moves offset to the next word and returns the new offset and the length of the word.

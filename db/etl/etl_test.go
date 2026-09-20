@@ -194,8 +194,7 @@ func TestFileDataProviders(t *testing.T) {
 
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 
-	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
-	require.NoError(t, err)
+	require.NoError(t, extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger))
 
 	assert.Len(t, collector.dataProviders, 10)
 
@@ -213,7 +212,7 @@ func TestFileDataProviders(t *testing.T) {
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
 		assert.True(t, ok)
-		_, err = os.Stat(fp.file.Name())
+		_, err := os.Stat(fp.file.Name())
 		assert.True(t, os.IsNotExist(err))
 	}
 }
@@ -1085,7 +1084,7 @@ func TestVmtouchMmap(t *testing.T) {
 		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Run()
+		_ = cmd.Run()
 	}
 
 	vmtouch("BEFORE first Next()")
@@ -1099,19 +1098,19 @@ func TestVmtouchMmap(t *testing.T) {
 
 	// Read 25%
 	for range n/4 - 1 {
-		provider.Next()
+		_, _, _ = provider.Next()
 	}
 	vmtouch("AFTER 25%")
 
 	// Read to 50%
 	for range n / 4 {
-		provider.Next()
+		_, _, _ = provider.Next()
 	}
 	vmtouch("AFTER 50%")
 
 	// Read to 75%
 	for range n / 4 {
-		provider.Next()
+		_, _, _ = provider.Next()
 	}
 	vmtouch("AFTER 75%")
 

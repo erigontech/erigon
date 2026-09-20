@@ -229,55 +229,6 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 	return
 }
 
-// ApplyMigrations - can get flock.
-func ApplyMigrations(dirs Dirs) error { //nolint
-	need, err := downloaderV2MigrationNeeded(&dirs)
-	if err != nil {
-		return err
-	}
-	if !need {
-		return nil
-	}
-
-	lock, locked, err := TryFlock(dirs)
-	if err != nil {
-		return err
-	}
-	if !locked {
-		return nil
-	}
-	defer lock.Unlock()
-
-	// add your migration here
-
-	if err := downloaderV2Migration(&dirs); err != nil {
-		return err
-	}
-	return nil
-}
-
-func downloaderV2MigrationNeeded(dirs *Dirs) (bool, error) {
-	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
-}
-func downloaderV2Migration(dirs *Dirs) error {
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	exists, err := downloaderV2MigrationNeeded(dirs)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
-	if err := os.Rename(from, to); err != nil {
-		//fall back to copy-file if folders are on different disks
-		if err := CopyFile(from, to); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func CopyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {

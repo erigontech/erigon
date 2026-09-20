@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -119,6 +120,7 @@ type overlayAheadHarness struct {
 	base          *BaseAPI
 	m             *execmoduletester.ExecModuleTester
 	overlayHeader *types.Header
+	overlayBody   *types.Body
 	events        *shards.Events
 	doms          *execctx.SharedDomains
 }
@@ -170,8 +172,9 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 		BaseFee:    uint256.NewInt(overlayRaceBaseFee),
 	}
 	hash := overlayHeader.Hash()
+	overlayBody := &types.Body{Transactions: overlayTxs}
 	overlay := doms.BlockOverlay()
-	writeHeadBlockMarkers(t, overlay, overlayHeader, &types.Body{Transactions: overlayTxs})
+	writeHeadBlockMarkers(t, overlay, overlayHeader, overlayBody)
 
 	if withOverlayTxs {
 		senders := slices.Repeat([]common.Address{m.Address}, len(overlayTxs))
@@ -188,7 +191,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 		}
 	}
 
-	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, events: events, doms: doms}
+	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, overlayBody: overlayBody, events: events, doms: doms}
 }
 
 // newOverlayAheadTestAPI and newOverlayAheadTestAPIWithEvents expose the
@@ -457,7 +460,7 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	resp, err := api.GetBlockByTimestamp(h.m.Ctx, rpc.Timestamp(h.overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, h.overlayHeader.Number.ToBig(), resp["number"].(*hexutil.U256).ToInt(),
+	require.Equal(t, h.overlayHeader.Number.ToBig(), resp.Number.ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 
@@ -497,11 +500,10 @@ func TestResolveWitnessBlockUsesCommittedView(t *testing.T) {
 	require.NotEqual(t, overlayHeader.Hash(), info.Block.Hash())
 }
 
-// TestGetTransactionByHash_PendingTx_UsesOverlayHead pins that the pending-tx
-// fallback in GetTransactionByHash reads the current header through the block
-// overlay: the returned tx's gas price (derived from that header's base fee)
-// must reflect the overlay head, not the stale MDBX-committed head.
-func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
+// TestGetTransactionByHash_PendingTxGasPriceIsFeeCap pins that the pending-tx
+// fallback in GetTransactionByHash prices the transaction at its fee cap: no
+// head, committed or in the overlay, may feed a projected base fee into it.
+func TestGetTransactionByHash_PendingTxGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 
@@ -514,8 +516,8 @@ func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
 	got, err := api.GetTransactionByHash(h.m.Ctx, pendingTxn.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, pendingTxn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 func TestTransactionByHashMethodsPinOverlayView(t *testing.T) {
@@ -548,7 +550,7 @@ func TestGetTransactionReceiptPinsOverlayView(t *testing.T) {
 	receipt, err := api.GetTransactionReceipt(m.Ctx, txn.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, receipt)
-	require.Equal(t, txn.Hash(), receipt["transactionHash"])
+	require.Equal(t, txn.Hash(), receipt.TransactionHash)
 }
 
 func TestGetTransactionReceiptRejectsMismatchedTransaction(t *testing.T) {
@@ -606,20 +608,20 @@ func newOverlayRacePendingPool(t *testing.T, m *execmoduletester.ExecModuleTeste
 	return pool, txn
 }
 
-// TestTxPoolContent_UsesOverlayHead pins that txpool_content reads the current
-// header through the block overlay, matching TestGetTransactionByHash_PendingTx_UsesOverlayHead.
-func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
+// TestTxPoolContent_PendingGasPriceIsFeeCap pins the pooled representation for
+// txpool_content, matching TestGetTransactionByHash_PendingTxGasPriceIsFeeCap.
+func TestTxPoolContent_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
-	api := NewTxPoolAPI(h.base, h.m.DB, pool)
+	api := NewTxPoolAPI(h.base, pool)
 
 	content, err := api.Content(h.m.Ctx)
 	require.NoError(t, err)
 	got := content["pending"][h.m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 // TestGetBlockTransactionCountByHash_SeesOverlayHead pins that the by-hash
@@ -675,6 +677,59 @@ func TestGetBlockTransactionCountByHash_PinsOverlayView(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, count)
 	require.Equal(t, hexutil.Uint(1), *count)
+}
+
+// TestGetBlockByNumber_SiblingPublishDuringTxAcquisition covers the canonical
+// change the publish/commit cycle does not: a same-height sibling published
+// while the tx is acquired means the capture never stabilizes, so the request
+// must answer on the committed head rather than layer a sibling generation
+// over a snapshot it was never matched against.
+func TestGetBlockByNumber_SiblingPublishDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	db := &beginHookDB{TemporalRoDB: h.m.DB, t: h.t, hook: func() error {
+		return publishOverlayHeadE(h, siblingOfOverlayHead(h))
+	}}
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	var committed *types.Header
+	require.NoError(t, h.m.DB.View(h.m.Ctx, func(tx kv.Tx) error {
+		committed = rawdb.ReadHeaderByNumber(tx, overlayRaceChainSize)
+		return nil
+	}))
+	require.NotNil(t, committed)
+
+	got, err := api.GetBlockByNumber(h.m.Ctx, rpc.LatestBlockNumber, false)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, committed.Hash(), *got.Hash,
+		"an unstable capture must fall back to the committed head, not serve the sibling generation")
+}
+
+// newRemoteModeTestAPI builds the rpcdaemon shape that never sees an overlay:
+// filters without an events source, where every acquisition pins nil.
+func newRemoteModeTestAPI(t *testing.T) (*BaseAPI, *execmoduletester.ExecModuleTester, *types.Header) {
+	t.Helper()
+	m := execmoduletester.New(t)
+	c := insertOverlayRaceChain(t, m)
+	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	base := newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m)
+	return base, m, c.TopBlock.Header()
+}
+
+// TestGetBlockByNumber_RemoteModeServesCommittedHead covers the remote/no-overlay
+// mode of the acquisition helper: with no events source the pin is always nil,
+// and the handler must keep serving the committed head unchanged.
+func TestGetBlockByNumber_RemoteModeServesCommittedHead(t *testing.T) {
+	t.Parallel()
+	base, m, head := newRemoteModeTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	got, err := api.GetBlockByNumber(m.Ctx, rpc.LatestBlockNumber, false)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, head.Hash(), *got.Hash,
+		"a nil pin must read committed data exactly as an unwrapped tx does")
 }
 
 func TestGetBlockTransactionCountByHashReturnsNullWithoutBody(t *testing.T) {
@@ -966,7 +1021,7 @@ func TestOtterscanSearchUsesCommittedView(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, results.Txs)
 	require.Equal(t, committedHash, *results.Txs[0].BlockHash)
-	require.Equal(t, committedHash, results.Receipts[0]["blockHash"])
+	require.Equal(t, committedHash, results.Receipts[0].BlockHash)
 }
 
 func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
@@ -1068,7 +1123,7 @@ func TestGetTransactionReceiptHandlesMissingHeader(t *testing.T) {
 	base._blockReader = hideHeaderBlockReader{FullBlockReader: base._blockReader, blockNumber: 1}
 	api := newEthApiForTest(base, m.DB, nil, nil)
 
-	var receipt map[string]any
+	var receipt *ethutils.RPCReceipt
 	require.NotPanics(t, func() {
 		receipt, err = api.GetTransactionReceipt(m.Ctx, common.Hash{1})
 	})
@@ -1118,6 +1173,24 @@ func TestErigonGetLogsByHashPinsOverlayView(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, logs)
 	require.Empty(t, logs)
+}
+
+// TestErigonGetBlockByTimestamp_PublishCycleDuringTxAcquisition pins the
+// timestamp search, which bounds itself on the head read through the overlay:
+// a cycle landing during the open silently answers from the stale head.
+func TestErigonGetBlockByTimestamp_PublishCycleDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	h.events.PublishOverlay(nil)
+	h.doms.Close()
+
+	api := NewErigonAPI(h.base, newCycleHookDB(h, true), nil)
+
+	got, err := api.GetBlockByTimestamp(h.m.Ctx, rpc.Timestamp(h.overlayHeader.Time), false)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, h.overlayHeader.Hash(), *got.Hash,
+		"a publish/commit/unpublish cycle during tx acquisition must not bound the search on the stale head")
 }
 
 // TestGetLogs_UsesCommittedFromTag pins that eth_getLogs resolves a "latest"
@@ -1487,20 +1560,20 @@ func TestGetModifiedAccountsByHash_FutureStartBlockErrors(t *testing.T) {
 	require.ErrorContains(t, err, "later than the latest block")
 }
 
-// TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the
-// current header through the block overlay, matching TestTxPoolContent_UsesOverlayHead.
-func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
+// TestTxPoolContentFrom_PendingGasPriceIsFeeCap pins the pooled representation
+// for txpool_contentFrom, matching TestTxPoolContent_PendingGasPriceIsFeeCap.
+func TestTxPoolContentFrom_PendingGasPriceIsFeeCap(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	pool, txn := newOverlayRacePendingPool(t, h.m)
-	api := NewTxPoolAPI(h.base, h.m.DB, pool)
+	api := NewTxPoolAPI(h.base, pool)
 
 	content, err := api.ContentFrom(h.m.Ctx, h.m.Address)
 	require.NoError(t, err)
 	got := content["pending"][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
-		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+	require.Equal(t, txn.GetFeeCap().ToBig(), got.GasPrice.ToInt(),
+		"a pending tx has no effective gas price yet, so gasPrice must be its fee cap")
 }
 
 // TestFeeHistory_SeesOverlayHead pins that eth_feeHistory resolves "latest" through the
@@ -1888,10 +1961,16 @@ func commitOverlayBlockE(h *overlayAheadHarness) error {
 		return err
 	}
 	defer rwTx.Rollback()
-	if err := writeHeadBlockMarkersE(rwTx, h.overlayHeader, &types.Body{}); err != nil {
+	if err := writeHeadBlockMarkersE(rwTx, h.overlayHeader, h.overlayBody); err != nil {
 		return err
 	}
 	num := h.overlayHeader.Number.Uint64()
+	if txs := h.overlayBody.Transactions; len(txs) > 0 {
+		senders := slices.Repeat([]common.Address{h.m.Address}, len(txs))
+		if err := rawdb.WriteSenders(rwTx, h.overlayHeader.Hash(), num, senders); err != nil {
+			return err
+		}
+	}
 	if err := stages.SaveStageProgress(rwTx, stages.Execution, num); err != nil {
 		return err
 	}
@@ -1939,6 +2018,133 @@ func newCycleHookDB(h *overlayAheadHarness, publishFirst bool) *beginHookDB {
 		h.events.PublishOverlay(nil)
 		return nil
 	})}
+}
+
+// TestPublishCycleDuringTxAcquisition pins atomic acquisition for every
+// migrated handler family: a full publish/commit/unpublish cycle landing while
+// the tx is opened must not leave the head block in neither layer, absent from
+// the frozen tx snapshot and from an overlay that no longer exists. None of
+// these handlers names the overlay itself, so an unpinned tx can also answer
+// block identity and block fetch from different generations. Where the answer
+// carries the head hash the case asserts it, so serving the committed head is
+// not enough to pass.
+func TestPublishCycleDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+
+	head := func(h *overlayAheadHarness) rpc.BlockNumber {
+		return rpc.BlockNumber(h.overlayHeader.Number.Uint64())
+	}
+	blockHash := func(v any) common.Hash {
+		return *v.(*ethapi.RPCBlock).Hash
+	}
+	detailsHash := func(v any) common.Hash {
+		return blockHash(v.(map[string]any)["block"])
+	}
+	headerHash := func(v any) common.Hash {
+		return *v.(*ethapi.RPCHeader).Hash
+	}
+
+	cases := []struct {
+		name       string
+		overlayTxs bool
+		call       func(*testing.T, *overlayAheadHarness, kv.TemporalRoDB) (any, error)
+		hashOf     func(any) common.Hash
+	}{
+		{
+			name: "eth_getBlockByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetBlockByNumber(h.m.Ctx, head(h), false)
+			},
+			hashOf: blockHash,
+		},
+		{
+			name:       "eth_getTransactionByBlockNumberAndIndex",
+			overlayTxs: true,
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetTransactionByBlockNumberAndIndex(h.m.Ctx, head(h), 0)
+			},
+			hashOf: func(v any) common.Hash { return *v.(*ethapi.RPCTransaction).BlockHash },
+		},
+		{
+			name: "eth_getBlockReceipts",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetBlockReceipts(h.m.Ctx, rpc.BlockNumberOrHashWithNumber(head(h)))
+			},
+		},
+		{
+			name: "eth_getBlockTransactionCountByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetBlockTransactionCountByNumber(h.m.Ctx, head(h))
+			},
+		},
+		{
+			name: "eth_getUncleCountByBlockNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetUncleCountByBlockNumber(h.m.Ctx, head(h))
+			},
+		},
+		{
+			name: "debug_getRawHeader",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				api := NewPrivateDebugAPI(h.base, db, nil, &rpccfg.DebugApiConfig{})
+				return api.GetRawHeader(h.m.Ctx, rpc.BlockNumberOrHashWithNumber(head(h)))
+			},
+		},
+		{
+			name: "eth_getHeaderByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByNumber(h.m.Ctx, head(h))
+			},
+			hashOf: headerHash,
+		},
+		{
+			name: "eth_getHeaderByHash",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return newEthApiForTest(h.base, db, nil, nil).GetHeaderByHash(h.m.Ctx, h.overlayHeader.Hash())
+			},
+			hashOf: headerHash,
+		},
+		{
+			name: "erigon_getHeaderByNumber",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return NewErigonAPI(h.base, db, nil).GetHeaderByNumber(h.m.Ctx, head(h))
+			},
+			hashOf: func(v any) common.Hash { return v.(*types.Header).Hash() },
+		},
+		{
+			name: "ots_getBlockDetails",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				return NewOtterscanAPI(h.base, db, 25).GetBlockDetails(h.m.Ctx, head(h))
+			},
+			hashOf: detailsHash,
+		},
+		{
+			name: "graphql_getBlockDetails",
+			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
+				api := NewGraphQLAPI(h.base, db, newEthApiForTest(h.base, db, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
+				return api.GetBlockDetails(h.m.Ctx, head(h))
+			},
+			hashOf: detailsHash,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newOverlayAheadHarness(t, tc.overlayTxs)
+			h.events.PublishOverlay(nil)
+			h.doms.Close()
+
+			got, err := tc.call(t, h, newCycleHookDB(h, true))
+			require.NoError(t, err)
+			require.NotNil(t, got,
+				"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+			if tc.hashOf != nil {
+				require.Equal(t, h.overlayHeader.Hash(), tc.hashOf(got),
+					"the head block must be served, not the committed one it was published over")
+			}
+		})
+	}
 }
 
 // TestFeeHistory_PublishCycleDuringTxAcquisition pins that overlay-capture

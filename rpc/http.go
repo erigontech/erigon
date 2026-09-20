@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,19 +359,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
 	var stream jsonstream.Stream
+	var sent *sentWriter
 	if !s.disableStreaming {
-		stream = jsonstream.Get(w)
-		defer jsonstream.Put(stream)
+		sent = &sentWriter{w: w}
+		ss := jsonstream.Get(sent)
+		defer jsonstream.Put(ss)
+		stream = ss // a nil *StackStream in the interface would not read as nil
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		codec.WriteJSON(ctx, errorMsg)
+		if err := codec.WriteJSON(ctx, errorMsg); err != nil {
+			s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+		}
 		return
 	}
 
 	if !s.disableStreaming {
+		// Codec writes (batches) never share a request with a buffered answer, so a non-empty buffer is the whole response.
+		if !sent.sent && len(stream.Buffer()) > 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
+		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already
 		// buffered in the stream. Set 503 before flushing so the status is correct.
 		if *overloaded {
@@ -456,4 +466,14 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	return false
+}
+
+type sentWriter struct {
+	w    io.Writer
+	sent bool
+}
+
+func (s *sentWriter) Write(p []byte) (int, error) {
+	s.sent = true
+	return s.w.Write(p)
 }

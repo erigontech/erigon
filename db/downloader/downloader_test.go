@@ -69,7 +69,7 @@ func TestConcurrentDownload(t *testing.T) {
 	test.downloader.Close()
 	for w := range waits {
 		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
-		w(t.Context())
+		_ = w(t.Context())
 	}
 }
 
@@ -214,7 +214,7 @@ func TestVerifyData(t *testing.T) {
 	}
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644))
 	err := test.downloader.AddNewSeedableFile(t.Context(), "a")
 	require.NoError(err)
 	err = test.downloader.VerifyData(test.downloader.ctx, nil, false)
@@ -1173,8 +1173,8 @@ func TestEndIsIdempotent(t *testing.T) {
 	_, batch.cancel = context.WithCancelCause(d.ctx)
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
-	batch.end(t.Context(), errors.New("first end"))
-	batch.end(t.Context(), errors.New("second end"))
+	_ = batch.end(t.Context(), errors.New("first end"))
+	_ = batch.end(t.Context(), errors.New("second end"))
 
 	d.activeDownloadRequestsLock.Lock()
 	defer d.activeDownloadRequestsLock.Unlock()
@@ -1405,4 +1405,27 @@ func TestVerifyDataFailFastClosesFiles(t *testing.T) {
 		require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
 	}
 	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
+}
+
+func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	d := test.downloader
+
+	corruptName := "0-corrupt.seg.torrent"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, corruptName), []byte("not a torrent"), 0o644))
+
+	segName := "v1-000000-001000-headers.seg"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, segName), []byte("headers data"), 0o644))
+	ok, err := BuildTorrentIfNeed(t.Context(), segName, test.dirs.Snap, d.torrentFS)
+	require.NoError(err)
+	require.True(ok)
+
+	incomplete, err := d.AddTorrentsFromDisk(t.Context())
+	require.NoError(err)
+	require.Zero(incomplete)
+
+	torrents := d.torrentClient.Torrents()
+	require.Len(torrents, 1)
+	require.Equal(segName, torrents[0].Name())
 }

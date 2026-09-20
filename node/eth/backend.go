@@ -299,9 +299,6 @@ func New(
 	}
 
 	// Assemble the Ethereum object
-	if config.ExperimentalParallelCommitment {
-		statecfg.ExperimentalParallelCommitment = true
-	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
@@ -924,6 +921,7 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
