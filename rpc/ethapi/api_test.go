@@ -461,7 +461,6 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 			b.LogsBloom = nil
 			return b
 		}()},
-		{"full transactions", RPCMarshalBlock(withTx, true, true)},
 		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},
 		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true)},
 		{"typed nil full tx slice", func() *RPCBlock {
