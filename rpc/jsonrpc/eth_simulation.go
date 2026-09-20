@@ -135,11 +135,15 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
+	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByHashAndNumber(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, errors.New("header not found")
 	}
 
@@ -152,7 +156,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 
 	// Create a simulator instance to help with input sanitisation and execution of the simulated blocks.
-	sim := newSimulator(&req, block.Header(), chainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
+	sim := newSimulator(&req, header, chainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
 	simulatedBlocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
 	if err != nil {
 		return nil, err

@@ -121,6 +121,20 @@ type blockingValidationForkGraph struct {
 	once        sync.Once
 }
 
+type boundedGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+	stateCopies  atomic.Int32
+	activeCopies atomic.Int32
+	peakCopies   atomic.Int32
+	firstEntered chan struct{}
+	releaseFirst chan struct{}
+}
+
+type panickingGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+	panicIn string
+}
+
 type concurrentPayloadValidationForkGraph struct {
 	dataAvailabilityForkGraph
 	stateReads  atomic.Int32
@@ -278,6 +292,36 @@ func (g *blockingValidationForkGraph) GetState(root common.Hash, alwaysCopy bool
 	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
 }
 
+func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	active := g.activeCopies.Add(1)
+	defer g.activeCopies.Add(-1)
+	for {
+		peak := g.peakCopies.Load()
+		if active <= peak || g.peakCopies.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	if g.stateCopies.Add(1) == 1 {
+		close(g.firstEntered)
+		<-g.releaseFirst
+	}
+	return g.state.Copy()
+}
+
+func (g *panickingGossipValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	if g.panicIn == "state" {
+		panic("injected state panic")
+	}
+	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+}
+
+func (g *panickingGossipValidationForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if g.panicIn == "block" {
+		panic("injected block panic")
+	}
+	return g.dataAvailabilityForkGraph.GetBlock(root)
+}
+
 func (g dumpFailingForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope) error {
 	return g.err
 }
@@ -414,28 +458,10 @@ type countingEnvelopeReadForkGraph struct {
 type admissionEnvelopeReadForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope atomic.Bool
-	envelope    *cltypes.SignedExecutionPayloadEnvelope
-	readEntered chan struct{}
-	releaseRead chan struct{}
-	readErr     error
-	clearOnRead bool
 }
 
 func (g *admissionEnvelopeReadForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope.Load()
-}
-
-func (g *admissionEnvelopeReadForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	if g.readEntered != nil {
-		close(g.readEntered)
-	}
-	if g.releaseRead != nil {
-		<-g.releaseRead
-	}
-	if g.clearOnRead {
-		g.hasEnvelope.Store(false)
-	}
-	return g.envelope, g.readErr
 }
 
 type replacingPendingForkGraph struct {
@@ -446,6 +472,44 @@ type replacingPendingForkGraph struct {
 type missingBlockForkGraph struct {
 	pendingRetryForkGraph
 	state *state2.CachingBeaconState
+}
+
+func TestEnvelopeGossipClaimTreatsPersistedPresenceAsSeenWithoutReading(t *testing.T) {
+	graph := &admissionEnvelopeReadForkGraph{}
+	graph.hasEnvelope.Store(true)
+	store := &ForkChoiceStore{forkGraph: graph}
+	root := common.HexToHash("0x1234")
+
+	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), root, 42)
+
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeLookupRequired)
+	_, err = store.envelopeGossipAdmissions.TryClaim(root, 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+}
+
+func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *testing.T) {
+	graph := &admissionEnvelopeReadForkGraph{}
+	graph.hasEnvelope.Store(true)
+	store := &ForkChoiceStore{forkGraph: graph}
+	tokens := make([]ExecutionPayloadEnvelopeAdmissionToken, 0, maxInflightExecutionPayloadEnvelopes)
+	for i := range maxInflightExecutionPayloadEnvelopes {
+		token, err := store.envelopeGossipAdmissions.TryClaim(common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+	root := common.HexToHash("0xffff")
+
+	_, err := store.TryClaimExecutionPayloadEnvelopeForGossip(root, 42)
+
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
+	require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
+	for _, token := range tokens {
+		store.envelopeGossipAdmissions.Finish(token, false)
+	}
+	token, err := store.envelopeGossipAdmissions.TryClaim(root, 42)
+	require.NoError(t, err)
+	store.envelopeGossipAdmissions.Finish(token, false)
 }
 
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
@@ -480,68 +544,6 @@ func (g *transientPersistingEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root com
 func (g *countingEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	g.reads.Add(1)
 	return g.pendingRetryForkGraph.ReadEnvelopeFromDisk(root)
-}
-
-func TestEnvelopeGossipClaimStopsAfterCancellationDuringPersistedRead(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{
-		readEntered: make(chan struct{}),
-		releaseRead: make(chan struct{}),
-		readErr:     errors.New("injected envelope read failure"),
-	}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-	ctx, cancel := context.WithCancel(t.Context())
-	result := make(chan error, 1)
-	go func() {
-		_, err := store.ClaimExecutionPayloadEnvelopeForGossip(ctx, common.HexToHash("0x1234"), 42)
-		result <- err
-	}()
-	<-graph.readEntered
-	cancel()
-	close(graph.releaseRead)
-	require.ErrorIs(t, <-result, context.Canceled)
-
-	graph.hasEnvelope.Store(false)
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
-}
-
-func TestEnvelopeGossipClaimTreatsPersistedReadFailureAsBusy(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{readErr: errors.New("injected envelope read failure")}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
-
-	graph.hasEnvelope.Store(false)
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
-}
-
-func TestEnvelopeGossipClaimDescribesIncompletePersistedEnvelope(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
-	require.ErrorContains(t, err, "persisted execution payload envelope is incomplete")
-}
-
-func TestEnvelopeGossipClaimRepairsPersistedEnvelopeClearedByRead(t *testing.T) {
-	graph := &admissionEnvelopeReadForkGraph{
-		readErr:     errors.New("corrupt envelope"),
-		clearOnRead: true,
-	}
-	graph.hasEnvelope.Store(true)
-	store := &ForkChoiceStore{forkGraph: graph}
-
-	token, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
-	require.NoError(t, err)
-	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
 func TestApplyLocalSelfBuildEnvelopeRejectsNilPayloadAtIngress(t *testing.T) {
@@ -1844,13 +1846,12 @@ func TestExecutionPayloadIndexWriteHasSingleNotificationOwner(t *testing.T) {
 		results <- result{notify: notify, err: err}
 	}()
 	<-db.started
-	secondStarted := make(chan struct{})
+	waiterCtx := &observedContext{Context: t.Context(), doneObserved: make(chan struct{})}
 	go func() {
-		close(secondStarted)
-		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(t.Context(), blockRoot, envelope, true)
+		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, true)
 		results <- result{notify: notify, err: err}
 	}()
-	<-secondStarted
+	<-waiterCtx.doneObserved
 	close(db.release)
 
 	first := <-results
@@ -2183,7 +2184,173 @@ func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.
 	require.Equal(t, int32(2), db.calls.Load())
 }
 
-// TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
+func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockRelease(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	releaseState := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseState:
+		default:
+			close(releaseState)
+		}
+	})
+	graph := &blockingValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		blockedRoot:               envelope.Message.BeaconBlockRoot,
+		stateRead:                 make(chan struct{}),
+		release:                   releaseState,
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	validationDone := make(chan error, 1)
+	go func() { validationDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+	<-graph.stateRead
+
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		store.mu.Lock()
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: envelope.Message.Payload.SlotNumber/cfg.SlotsPerEpoch + 1})
+		store.mu.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	for store.mu.TryRLock() {
+		store.mu.RUnlock()
+	}
+	close(releaseState)
+	<-writerDone
+	err := <-validationDone
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "before finalized slot")
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraphPanic(t *testing.T) {
+	for _, panicIn := range []string{"state", "block"} {
+		t.Run(panicIn, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			graph := &panickingGossipValidationForkGraph{
+				dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+				panicIn:                   panicIn,
+			}
+			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_ = store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+			}()
+
+			require.NotNil(t, recovered)
+			require.True(t, store.mu.TryLock())
+			store.mu.Unlock()
+			select {
+			case store.executionPayloadValidation <- struct{}{}:
+				<-store.executionPayloadValidation
+			default:
+				t.Fatal("validation capacity leaked after panic")
+			}
+		})
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	for _, tc := range []struct {
+		name      string
+		graph     dataAvailabilityForkGraph
+		wantError string
+	}{
+		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state"},
+		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: tc.graph}
+			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+			err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorContains(t, err, tc.wantError)
+			require.True(t, store.mu.TryLock())
+			store.mu.Unlock()
+		})
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	secondEnvelope := *envelope
+	secondMessage := *envelope.Message
+	secondEnvelope.Message = &secondMessage
+	secondEnvelope.Message.BeaconBlockRoot[0]++
+	resignAdmissionEnvelope(t, cfg, blockState, &secondEnvelope)
+	releaseFirst := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseFirst:
+		default:
+			close(releaseFirst)
+		}
+		select {
+		case <-releaseWriter:
+		default:
+			close(releaseWriter)
+		}
+	})
+	graph := &boundedGossipValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		firstEntered:              make(chan struct{}),
+		releaseFirst:              releaseFirst,
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.executionPayloadValidationOnce.Do(func() {
+		store.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+	<-graph.firstEntered
+
+	limiterHeld := true
+	select {
+	case store.executionPayloadValidation <- struct{}{}:
+		<-store.executionPayloadValidation
+		limiterHeld = false
+	default:
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- store.ValidateExecutionPayloadEnvelopeForGossip(&secondEnvelope) }()
+
+	writerStarted := make(chan struct{})
+	writerAcquired := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		store.mu.Lock()
+		close(writerAcquired)
+		<-releaseWriter
+		store.mu.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	for store.mu.TryRLock() {
+		store.mu.RUnlock()
+	}
+	close(releaseFirst)
+	<-writerAcquired
+	close(releaseWriter)
+	<-writerDone
+
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	require.True(t, limiterHeld)
+	require.Equal(t, int32(2), graph.stateCopies.Load())
+	require.Equal(t, int32(1), graph.peakCopies.Load())
+}
+
 func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) {
 	blockedRoot := common.Hash{1}
 	otherRoot := common.Hash{2}
@@ -4224,6 +4391,9 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 				}
 				if tc.wantErr {
 					require.ErrorContains(t, err, "before finalized slot 64")
+					if validator == "gossip" {
+						require.ErrorIs(t, err, ErrIgnore)
+					}
 				} else {
 					require.NoError(t, err)
 				}
