@@ -62,7 +62,7 @@ func (l *RPCLog) fastJSONLen() int {
 
 // appendFastJSON writes the log in the field order encoding/json uses for the
 // struct, so the output is byte-identical to reflection-based marshalling.
-func (l *RPCLog) AppendJSON(dst []byte) []byte {
+func (l *RPCLog) appendFastJSON(dst []byte) []byte {
 	if l == nil {
 		return append(dst, "null"...)
 	}
@@ -103,7 +103,7 @@ func (l *RPCLog) AppendJSON(dst []byte) []byte {
 
 // MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON.
 func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.AppendJSON(make([]byte, 0, l.fastJSONLen())), nil
+	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
 }
 
 // MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
@@ -120,7 +120,7 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 		if i > 0 {
 			out = append(out, ',')
 		}
-		out = l.AppendJSON(out)
+		out = l.appendFastJSON(out)
 	}
 	return append(out, ']'), nil
 }
@@ -157,4 +157,4 @@ func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	return nil
 }
 
-func writeLogElem(w jsonw.JSONWriter, l **RPCLog) { w.AppendJSON(*l) }
+func writeLogElem(w jsonw.JSONWriter, l **RPCLog) { _ = (*l).MarshalFastJSONTo(w) }

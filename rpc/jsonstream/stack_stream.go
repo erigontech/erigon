@@ -93,14 +93,6 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
-// AppendJSON lets a value write itself straight into the buffer, so the whole value costs
-// one call rather than one per field.
-func (s *StackStream) AppendJSON(v jsonw.JSONAppender) {
-	s.beforeValue()
-	s.stream.SetBuffer(v.AppendJSON(s.stream.Buffer()))
-	s.afterValue()
-}
-
 func (s *StackStream) WriteHex(b []byte) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
