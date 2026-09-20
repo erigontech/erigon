@@ -114,8 +114,6 @@ func TestDecodeLogsForStorageBothPaths(t *testing.T) {
 	}
 }
 
-// Logs share one backing block, so writing through one pointer must not reach
-// its neighbour.
 // The block is sized from attacker-controlled bytes: a payload of one-byte items
 // must not allocate a Log for each, since a stored log needs at least 24 bytes.
 func TestDecodeLogsForStorageBlockBounded(t *testing.T) {
@@ -137,7 +135,6 @@ func TestDecodeLogsForStorageBlockBounded(t *testing.T) {
 	grew := after.TotalAlloc - before.TotalAlloc
 	// The cap holds this near 300KB and its absence pushes it past 6MB, so the
 	// limit sits between them with room for background allocation.
-	t.Logf("decoding %d bytes allocated %d", len(logList), grew)
 	require.Less(t, grew, uint64(32*len(logList)),
 		"decoding %d bytes allocated %d", len(logList), grew)
 }

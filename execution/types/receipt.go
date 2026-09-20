@@ -478,16 +478,12 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	}
 	// One block backs every Log, so a log costs no allocation of its own. A
 	// stored log is at least 24 bytes (header, 21-byte address, empty topic list,
-	// empty data), which bounds the count by the payload. A stream that can't be
-	// looked ahead keeps the old estimate and refills the block one at a time.
-	const typicalLogSize = 128 // estimate only, append grows past it
-	n := int(min(maxDecodePreAlloc, l/typicalLogSize+1))
+	// empty data), which bounds the count by the payload.
 	var block []Log
 	if raw := s.Peek(); uint64(len(raw)) >= l {
-		n = min(rlp.CountItems(raw[:l]), int(l/24))
-		block = make([]Log, n)
+		block = make([]Log, min(rlp.CountItems(raw[:l]), int(l/24)))
 	}
-	logs := make(Logs, 0, n)
+	logs := make(Logs, 0, len(block))
 	for s.MoreDataInList() {
 		if len(block) == 0 {
 			block = make([]Log, 1)
