@@ -100,23 +100,23 @@ func encodeStorageReceiptWithLogs(t *testing.T, nLogs int) []byte {
 	return enc
 }
 
-// One block backs every Log, but only on a slice-backed stream. Both paths must
+// One arena backs every Log, but only on a slice-backed stream. Both paths must
 // decode to the same thing.
 func TestDecodeLogsForStorageBothPaths(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{0, 1, 2, 5, 130} {
 		enc := encodeStorageReceiptWithLogs(t, n)
-		var blocked, grown ReceiptForStorage
-		require.NoError(t, rlp.DecodeBytes(enc, &blocked))
+		var arenaed, grown ReceiptForStorage
+		require.NoError(t, rlp.DecodeBytes(enc, &arenaed))
 		require.NoError(t, rlp.Decode(bytes.NewReader(enc), &grown))
-		require.Equal(t, &blocked, &grown, "%d logs", n)
-		require.Len(t, blocked.Logs, n)
+		require.Equal(t, &arenaed, &grown, "%d logs", n)
+		require.Len(t, arenaed.Logs, n)
 	}
 }
 
-// The block is sized from attacker-controlled bytes: a payload of one-byte items
+// The arena is sized from attacker-controlled bytes: a payload of one-byte items
 // must not allocate a Log for each, since a stored log needs at least 24 bytes.
-func TestDecodeLogsForStorageBlockBounded(t *testing.T) {
+func TestDecodeLogsForStorageArenaBounded(t *testing.T) {
 	// No t.Parallel: TotalAlloc is process-wide, so a parallel sibling's
 	// allocations would land inside the measured window.
 	items := 40000
