@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
@@ -161,12 +162,12 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		jsonw.Array(w, "transactions", &hashes, writeHashElem)
+		writeHashes(w, "transactions", hashes)
 	case fullTxs != nil:
 		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	jsonw.Array(w, "uncles", &b.Uncles, writeHashElem)
+	writeHashes(w, "uncles", b.Uncles)
 
 	jsonw.Array(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
 	if txCount != nil {
@@ -183,6 +184,22 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 }
 
 func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+
+// writeHashes writes a hash array as one value when the stream allows it, which costs one
+// buffer growth instead of one per hash.
+func writeHashes(w jsonw.JSONWriter, name string, hashes []common.Hash) {
+	s := jsonstream.Concrete(w)
+	if s == nil {
+		jsonw.Array(w, name, &hashes, writeHashElem)
+		return
+	}
+	if hashes == nil {
+		jsonw.Field(w, name).WriteNil()
+		return
+	}
+	jsonw.Field(w, name)
+	jsonstream.WriteHexes(s, hashes)
+}
 
 func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
 	if *wd == nil {
