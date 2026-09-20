@@ -139,10 +139,11 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	// the reflection encoder. That is done up front: the contract is that a marshaller
 	// reports failure before its first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
-	var fullTxs, txCount, calls []byte
+	full, fullOK := b.Transactions.([]*RPCTransaction)
+	var rawTxs, txCount, calls []byte
 	var err error
-	if !hashesOK {
-		if fullTxs, err = marshalIfSet(b.Transactions); err != nil {
+	if !hashesOK && !fullOK {
+		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
@@ -162,8 +163,10 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	switch {
 	case hashesOK:
 		jsonw.Array(w, "transactions", &hashes, writeHashElem)
-	case fullTxs != nil:
-		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
+	case fullOK:
+		jsonw.Array(w, "transactions", &full, writeTxElem)
+	case rawTxs != nil:
+		jsonw.Field(w, "transactions").WriteRawBytes(rawTxs)
 	}
 
 	jsonw.Array(w, "uncles", &b.Uncles, writeHashElem)
@@ -183,6 +186,9 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 }
 
 func writeHashElem(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+
+// writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
+func writeTxElem(w jsonw.JSONWriter, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(w) }
 
 func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
 	if *wd == nil {
