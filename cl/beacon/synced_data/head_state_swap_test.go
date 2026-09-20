@@ -76,7 +76,10 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 			require.NoError(t, writeErr)
 			require.GreaterOrEqual(t, readCount, 100,
 				"too few ViewHeadState calls overlapped the writer for this assertion to be meaningful")
-			require.Less(t, maxReadLatency, 5*time.Millisecond,
+			// The threshold is well above ordinary scheduling/GC noise (observed
+			// up to ~19ms under -race) and well below the copy this is guarding
+			// against (~36ms without -race, ~370-420ms with it, per calibration).
+			require.Less(t, maxReadLatency, 50*time.Millisecond,
 				"a ViewHeadState call blocked for close to the full head-state copy duration")
 			return
 		default:
@@ -134,38 +137,129 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 
 // TestOnHeadStateWithBlockRootSerializesConcurrentWriters verifies that a
 // writer copying a large state cannot be overtaken and overwritten by a
-// writer that starts later but copies a smaller, faster state. Copying
-// outside the reader lock must not let arrival order at the swap depend on
-// copy duration.
+// writer that starts later but copies a smaller, faster state. Ordering is
+// proven deterministically by holding writeLock directly to represent a
+// writer already inside its critical section, rather than by racing on
+// relative timing.
 func TestOnHeadStateWithBlockRootSerializesConcurrentWriters(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
 
-	slow := bigValidatorState(t, 500_000)
-	require.NoError(t, slow.SetSlot(100))
+	manager.writeLock.Lock() // represents a writer already inside publishHeadState
+
+	second := bigValidatorState(t, 1)
+	require.NoError(t, second.SetSlot(200))
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- manager.OnHeadStateWithBlockRoot(second, common.Hash{0xbb})
+	}()
+
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second writer completed (err=%v) while writeLock was still held", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	first := bigValidatorState(t, 500_000)
+	require.NoError(t, first.SetSlot(100))
+	firstCopy, err := first.Copy()
+	require.NoError(t, err)
+	manager.mu.Lock()
+	manager.previousHeadState = manager.headState
+	manager.headState = firstCopy
+	manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: first.Slot()})
+	manager.mu.Unlock()
+	manager.writeLock.Unlock()
+
+	require.NoError(t, <-secondDone)
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(200), headState.Slot(), "the writer that started later must not be overwritten by the writer that released writeLock first")
+		return nil
+	}))
+}
+
+// TestOnHeadStateResolvesRootUnderWriteLock verifies that OnHeadState's own
+// BlockRoot() computation is serialized against other writers the same way
+// OnHeadStateWithBlockRoot's copy is: a competing writer with nothing to
+// compute must not be able to publish and then get overwritten once the
+// slower root resolution finishes.
+//
+// slowRoot is sized so BlockRoot() alone takes ~40ms (calibrated). It is
+// launched first and confirmed started before fast launches, then given a
+// 10ms head start - a quarter of its ~40ms operation - before fast is
+// created, so fast can only run ahead of it if root resolution is not
+// serialized under writeLock (the bug): with the fix, slowRoot has already
+// acquired writeLock by the time fast is created, so fast is deterministically
+// blocked behind it regardless of scheduling.
+func TestOnHeadStateResolvesRootUnderWriteLock(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
+
+	slowRoot := bigValidatorState(t, 100_000)
+	require.NoError(t, slowRoot.SetSlot(100))
 	fast := bigValidatorState(t, 1)
 	require.NoError(t, fast.SetSlot(200))
 
-	var wg sync.WaitGroup
-	var slowErr, fastErr error
 	slowStarted := make(chan struct{})
-	wg.Go(func() {
+	slowDone := make(chan error, 1)
+	go func() {
 		close(slowStarted)
-		slowErr = manager.OnHeadStateWithBlockRoot(slow, common.Hash{0xaa})
-	})
+		slowDone <- manager.OnHeadState(slowRoot)
+	}()
 	<-slowStarted
-	time.Sleep(time.Millisecond) // let the slow writer start its copy first
-	wg.Go(func() {
-		fastErr = manager.OnHeadStateWithBlockRoot(fast, common.Hash{0xbb})
-	})
-	wg.Wait()
-	require.NoError(t, slowErr)
-	require.NoError(t, fastErr)
+	time.Sleep(10 * time.Millisecond)
+
+	fastDone := make(chan error, 1)
+	go func() { fastDone <- manager.OnHeadStateWithBlockRoot(fast, common.Hash{0xbb}) }()
+
+	require.NoError(t, <-slowDone)
+	require.NoError(t, <-fastDone)
 
 	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		require.Equal(t, uint64(200), headState.Slot(), "the writer that started later must not be overwritten by the slower writer that started first")
+		require.Equal(t, uint64(200), headState.Slot(),
+			"OnHeadState's root resolution must not run outside writeLock, letting a concurrent writer publish and then be overwritten once it finishes")
 		return nil
 	}))
+}
+
+// TestUnsetHeadStateSerializesWithPublish verifies that UnsetHeadState cannot
+// run while a publish is already inside its critical section and then let
+// that in-flight publish resurrect a head UnsetHeadState is meant to clear:
+// once UnsetHeadState is called, it must either fully precede or fully
+// follow any given publish, never land in between the publish's copy and its
+// swap.
+func TestUnsetHeadStateSerializesWithPublish(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
+
+	manager.writeLock.Lock() // represents a publish already inside its critical section
+
+	unsetDone := make(chan struct{})
+	go func() {
+		defer close(unsetDone)
+		manager.UnsetHeadState()
+	}()
+
+	select {
+	case <-unsetDone:
+		t.Fatal("UnsetHeadState completed while writeLock was still held by an in-flight publish")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	published := bigValidatorState(t, 1)
+	require.NoError(t, published.SetSlot(100))
+	copied, err := published.Copy()
+	require.NoError(t, err)
+	manager.mu.Lock()
+	manager.previousHeadState = manager.headState
+	manager.headState = copied
+	manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: published.Slot()})
+	manager.mu.Unlock()
+	manager.writeLock.Unlock()
+
+	<-unsetDone
+	require.True(t, manager.Syncing(),
+		"UnsetHeadState must not be resurrected by a publish that was already in flight when it was called")
 }
 
 // TestOnHeadStateWithBlockRootConcurrentReadWrite races real writers against

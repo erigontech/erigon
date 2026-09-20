@@ -87,11 +87,10 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) erro
 	if !s.enabled {
 		return nil
 	}
-	blkRoot, err := newState.BlockRoot()
-	if err != nil {
-		return err
-	}
-	return s.publishHeadState(newState, blkRoot)
+	return s.publishHeadState(newState, func() (common.Hash, error) {
+		root, err := newState.BlockRoot()
+		return common.Hash(root), err
+	})
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
@@ -102,19 +101,25 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	if !s.enabled {
 		return nil
 	}
-	return s.publishHeadState(newState, blockRoot)
+	return s.publishHeadState(newState, func() (common.Hash, error) { return blockRoot, nil })
 }
 
 // publishHeadState materializes newState into a standalone copy and swaps it
-// in as the head state, demoting the current head state to previous. The
-// copy runs under writeLock rather than mu/accessLock, so concurrent callers
-// are still serialized in arrival order - a writer copying a large state
-// cannot be overtaken and overwritten by a writer that started later but
-// copies a smaller state faster - while ViewHeadState, ViewPreviousHeadState,
-// and the single-field accessors below only ever wait for the pointer swap.
-func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+// in as the head state, demoting the current head state to previous. Root
+// resolution and the copy both run under writeLock rather than mu/accessLock,
+// so concurrent callers - including OnHeadState's own BlockRoot() computation -
+// are still serialized in arrival order; a writer copying a large state cannot
+// be overtaken and overwritten by a writer that started later but copies a
+// smaller state faster. ViewHeadState, ViewPreviousHeadState, and the
+// single-field accessors below only ever wait for the pointer swap.
+func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, resolveRoot func() (common.Hash, error)) error {
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+
+	blockRoot, err := resolveRoot()
+	if err != nil {
+		return err
+	}
 
 	copied, err := newState.Copy()
 	if err != nil {
@@ -222,6 +227,9 @@ func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 }
 
 func (s *SyncedDataManager) UnsetHeadState() {
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.accessLock.Lock()
