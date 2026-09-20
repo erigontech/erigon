@@ -1290,7 +1290,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// the preload sees the just-flushed bytes.
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			provider := func(contractHash []byte) map[string][]byte {
+			provider := func(contractHash []byte, budget int) map[string][]byte {
 				m := map[string][]byte{}
 				c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
 				if cerr != nil {
@@ -1298,11 +1298,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				}
 				defer c.Close()
 				evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
-				// Bound the scan by the per-contract pin ceiling — the preload can't
-				// pin more than that, so gathering further is pure waste on the
-				// Commit path. A nil `to` (all-0xff prefix) means scan to the range's
-				// natural end, not stop immediately.
-				budget := sd.adaptivePinController.PerContractBudgetBytes()
+				// Bound the scan by what this step can pin — gathering further is
+				// pure waste on the Commit path, and a key left out of the hint
+				// still resolves authoritatively through pinBranchResolver. A nil
+				// `to` (all-0xff prefix) means scan to the range's natural end, not
+				// stop immediately.
 				scanned := 0
 				scan := func(from, to []byte) {
 					for k, v, err := c.Seek(from); k != nil; k, v, err = c.NextNoDup() {
