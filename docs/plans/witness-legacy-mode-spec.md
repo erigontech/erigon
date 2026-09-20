@@ -129,8 +129,9 @@ the same block-hash-keyed LRU the durable path uses. The commitment parent state
 RO snapshot* (a temporal tx lagging the tip by one committed block, whose commitment-latest equals the parent's
 commitment); the account/storage/code parent and block-end state come from the history a minimal node still
 retains. Each built witness passes the same checks as the durable path before it is cached. By default that is
-only the parent state-root check; stateless re-execution, which also catches a missing node, code or key, runs
-only with `ERIGON_ASSERT=true`.
+the parent state-root check, plus the block-end commitment check every non-empty build runs through
+`detectCollapseSiblings`. Stateless re-execution, which also catches a missing node, code or key, runs only
+with `ERIGON_ASSERT=true`.
 
 Flags (embedded RPC only):
 

@@ -1429,8 +1429,9 @@ func (api *BaseAPI) collectAccessedHeaders(
 }
 
 // verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
-// result.Keys. It runs only under ERIGON_ASSERT; without it a witness is checked only against the parent
-// state root, which proves neither its codes and keys nor that re-execution resolves every node.
+// result.Keys. It runs only under ERIGON_ASSERT. Without it a build still checks the parent state root, and
+// for a non-empty accessed set the block-end commitment as well; what the gate removes is the stateless
+// replay, which is what covers Codes, Keys and node sufficiency.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
