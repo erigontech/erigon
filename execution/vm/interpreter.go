@@ -40,7 +40,7 @@ import (
 type Config struct {
 	Tracer        *tracing.Hooks
 	NoRecursion   bool // Disables call, callcode, delegate call and create
-	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	NoBaseFee     bool // Skips the EIP-1559 fee cap checks (needed for 0 price calls)
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool // Do not calculate receipts
 	ReadOnly      bool // Do no perform any block finalisation

@@ -1098,6 +1098,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		tracer := prevTracer.SeedNew(ibs)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
+		vm.ZeroUnpricedBaseFee(&blockCtx, &txCtx, config)
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
