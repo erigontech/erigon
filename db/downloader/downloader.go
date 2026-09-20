@@ -111,6 +111,10 @@ type Downloader struct {
 	lock           sync.RWMutex
 	torrentClient  *torrent.Client
 	torrentStorage storage.ClientImplCloser
+
+	// sweepOrphansEvery paces the running-node orphan sidecar sweep.
+	// Zero means defaultSweepOrphansEvery.
+	sweepOrphansEvery time.Duration
 	// Tasks with lifetimes attached to Downloader.
 	wg                     sync.WaitGroup
 	initedBackgroundLogger bool
@@ -488,7 +492,45 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		}
 	}
 
+	d.startOrphanSidecarSweeper()
+
 	return d, nil
+}
+
+// defaultSweepOrphansEvery paces the running-node orphan sweep. It is a
+// whole-snapDir walk, so it runs rarely; the window it closes is a peer
+// asking for a payload the node no longer has, which costs that peer a
+// stalled request rather than anything worse.
+const defaultSweepOrphansEvery = 5 * time.Minute
+
+// startOrphanSidecarSweeper keeps the orphan-free invariant true while
+// the node runs. Close and boot already sweep, which leaves the datadir
+// clean at rest but says nothing about the hours in between: a merge or
+// unwind that drops a payload without its sidecar leaves the node
+// advertising bytes it cannot serve until it next stops.
+func (d *Downloader) startOrphanSidecarSweeper() {
+	every := d.sweepOrphansEvery
+	if every <= 0 {
+		every = defaultSweepOrphansEvery
+	}
+	go d.spawn(func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ticker.C:
+				removed, err := sweepOrphanTorrentSidecars(d.snapDir())
+				if err != nil {
+					d.log(log.LvlDebug, "orphan torrent sidecar sweep", "err", err)
+				}
+				if removed > 0 {
+					d.log(log.LvlInfo, "removed orphan torrent sidecars", "count", removed)
+				}
+			}
+		}
+	})
 }
 
 const cleanShutdownMarkerName = ".downloader-clean-shutdown"

@@ -532,3 +532,31 @@ func TestDeleteSupersedesWhenMergedCopyPresent(t *testing.T) {
 		})
 	}
 }
+
+// TestOrphanSidecarsSweptWhileRunning pins that the orphan-free
+// invariant holds for a running node, not only for a stopped one. A
+// .torrent whose payload is gone advertises bytes the node cannot
+// deliver; sweeping it only at Close left one live for most of an hour
+// on hoodi, which is exactly the window a peer would ask in.
+func TestOrphanSidecarsSweptWhileRunning(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	d.sweepOrphansEvery = 50 * time.Millisecond
+	d.startOrphanSidecarSweeper()
+
+	orphan := filepath.Join(test.dirs.Snap, "v1-000000-000001-headers.seg.torrent")
+	require.NoError(t, os.WriteFile(orphan, []byte("meta"), 0o644))
+
+	paired := filepath.Join(test.dirs.Snap, "v1-000001-000002-headers.seg")
+	require.NoError(t, os.WriteFile(paired, []byte("payload"), 0o644))
+	require.NoError(t, os.WriteFile(paired+".torrent", []byte("meta"), 0o644))
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(orphan)
+		return os.IsNotExist(err)
+	}, 10*time.Second, 50*time.Millisecond,
+		"a running node must not keep a sidecar whose payload is gone")
+
+	_, err := os.Stat(paired + ".torrent")
+	require.NoError(t, err, "a sidecar with its payload present must be left alone")
+}

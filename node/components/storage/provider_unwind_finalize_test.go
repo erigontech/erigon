@@ -749,3 +749,57 @@ func TestProvider_FinalizeUnwind_RegistersRegenUnderKindSubdir(t *testing.T) {
 	_, prefixed := inv.LifecycleState("domain/" + base)
 	require.True(t, prefixed, "the regen output must be registered under its kind subdir")
 }
+
+// TestProvider_FinalizeUnwind_SplitStubLeavesNoOrphanSidecar pins the
+// invariant a stranded .torrent breaks: the node must never hold
+// metadata advertising bytes it cannot deliver.
+//
+// mode-C emits only the stub pair, which carries no oldBroadPath — the
+// retire belongs to a peer pair that mode-C never produces. Whatever
+// removes the superseded .kv, its sidecar has to go with it.
+func TestProvider_FinalizeUnwind_SplitStubLeavesNoOrphanSidecar(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// The stub the regen is about to land.
+	stubName := "v4.0-commitment.121875000-121942012.kv"
+	stubPath := filepath.Join(tmpDir, stubName)
+	regenPath := stubPath + ".regen"
+	require.NoError(t, os.WriteFile(regenPath, []byte("regen"), 0o600))
+
+	// A previous unwind already published this stub, so a sidecar
+	// exists for it from that round's seeding.
+	require.NoError(t, os.WriteFile(stubPath, []byte("pre-regen"), 0o600))
+	require.NoError(t, os.WriteFile(stubPath+".torrent", []byte("stale"), 0o600))
+
+	p := &Provider{snapDir: tmpDir, downloaderClient: &recordingDownloaderClient{}}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{{
+			regenPath: regenPath,
+			finalPath: stubPath,
+			// mode-C: no broad to retire.
+			oldBroadPath: "",
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	requireNoOrphanSidecars(t, tmpDir)
+}
+
+// requireNoOrphanSidecars fails if any .torrent in dir has no primary
+// file beside it.
+func requireNoOrphanSidecars(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".torrent") {
+			continue
+		}
+		primary := filepath.Join(dir, strings.TrimSuffix(e.Name(), ".torrent"))
+		_, err := os.Stat(primary)
+		require.NoError(t, err,
+			"orphaned sidecar %s advertises bytes that are not on disk", e.Name())
+	}
+}
