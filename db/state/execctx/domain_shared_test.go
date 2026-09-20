@@ -2049,10 +2049,6 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 // zero-update commitment advances the persisted execution position without
 // changing the state root or serialized trie state.
 func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-
 	const (
 		stepSize = uint64(100)
 		block1   = uint64(1)
