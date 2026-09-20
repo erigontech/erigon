@@ -143,13 +143,14 @@ func TestMemoReaderKeepsCodeAfterTheInnerBufferIsReused(t *testing.T) {
 
 	want, err := m.ReadAccountCode(first)
 	require.NoError(t, err)
-	want = bytes.Clone(want)
+	snapshot := bytes.Clone(want)
 
 	_, err = m.ReadAccountCode(second)
 	require.NoError(t, err)
+	require.Equal(t, snapshot, want, "the inner reader reusing its buffer must not rewrite a slice already returned")
 
 	got, err := m.ReadAccountCode(first)
 	require.NoError(t, err)
 	require.Equal(t, 2, inner.codeReads, "a repeated code read must not reach the inner reader")
-	require.Equal(t, want, got, "the inner reader reusing its buffer must not rewrite a cached entry")
+	require.Equal(t, snapshot, got, "the inner reader reusing its buffer must not rewrite a cached entry")
 }

@@ -403,10 +403,11 @@ func (m *memoReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Cloned before caching: a reader is free to hand back a buffer it reuses for the
-	// next address, which would rewrite an entry already in the map.
-	m.code[addr] = bytes.Clone(c)
-	return c, nil
+	// A reader is free to hand back a buffer it reuses for the next address, so the
+	// clone is what both the map and the caller keep.
+	cloned := bytes.Clone(c)
+	m.code[addr] = cloned
+	return cloned, nil
 }
 
 func (m *memoReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
