@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -88,8 +89,6 @@ type EVM struct {
 	// Pointers before counters: interleaving them adds a word of padding.
 	internCache *storageKeyCache
 	addrCache   *addressCache
-	internOps   uint32
-	addrOps     uint32
 }
 
 // evmSizeClass is the Go allocation size class EVM fills. One more word moves
@@ -104,11 +103,6 @@ const evmSizeClass = 448
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
 const storageKeyCacheSize = 1024
-
-// storageKeyCacheMinOps delays the table until interning has cost more than
-// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
-// cannot win the allocation back however well the keys repeat.
-const storageKeyCacheMinOps = 128
 
 // slotIndex masks rather than divides, so the size has to be a power of two.
 var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
@@ -136,19 +130,35 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 	return h
 }
 
+// Interning is pure and a live handle keeps its entry alive, so a table stays valid for
+// whatever runs next: the pools hand one EVM's table to the following one rather than
+// zeroing 40KB per EVM. A short call could never win that back on its own, which is why
+// the per-EVM table needed a warmup threshold before it was allowed to exist.
+var (
+	storageKeyCachePool = sync.Pool{New: func() any { return new(storageKeyCache) }}
+	addressCachePool    = sync.Pool{New: func() any { return new(addressCache) }}
+)
+
+// ReleaseInternCaches hands this EVM's intern tables back for the next one to use. The EVM
+// must not be used afterwards.
+func (evm *EVM) ReleaseInternCaches() {
+	if evm.internCache != nil {
+		storageKeyCachePool.Put(evm.internCache)
+		evm.internCache = nil
+	}
+	if evm.addrCache != nil {
+		addressCachePool.Put(evm.addrCache)
+		evm.addrCache = nil
+	}
+}
+
 // internStorageKey returns word interned as a StorageKey, skipping unique.Make
-// for words seen before. Short-lived EVMs intern uncached: the table only earns
-// back its allocation over a few hundred storage ops.
+// for words seen before.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	c := evm.internCache
 	if c == nil {
-		if evm.internOps < storageKeyCacheMinOps {
-			evm.internOps++
-			return accounts.InternKey(word.Bytes32())
-		}
-		c = new(storageKeyCache)
+		c = storageKeyCachePool.Get().(*storageKeyCache)
 		evm.internCache = c
-		return c.fill(slotIndex(word), word)
 	}
 	i := slotIndex(word)
 	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
@@ -161,8 +171,7 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 // routers and tokens dominate — so the address table is a quarter of the size
 // and pays its zeroing back sooner.
 const (
-	addressCacheSize   = 256
-	addressCacheMinOps = 32
+	addressCacheSize = 256
 )
 
 // AddressCacheSize lets benchmarks outside this package pin the bucket count
@@ -196,18 +205,12 @@ func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
 }
 
 // internAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for addresses seen before. Short-lived EVMs intern
-// uncached: the table only earns back its allocation over a few dozen ops.
+// skipping unique.Make for addresses seen before.
 func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 	c := evm.addrCache
 	if c == nil {
-		if evm.addrOps < addressCacheMinOps {
-			evm.addrOps++
-			return accounts.InternAddress(word.Bytes20())
-		}
-		c = new(addressCache)
+		c = addressCachePool.Get().(*addressCache)
 		evm.addrCache = c
-		return c.fill(addrIndex(word), word)
 	}
 	i := addrIndex(word)
 	if h := c.handles[i]; h != accounts.NilAddress && c.words[i][0] == word[0] &&

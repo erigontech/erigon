@@ -95,6 +95,8 @@ func DoCall(
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
+	// The intern tables outlive this EVM in their pools, warm for the next call.
+	defer evm.ReleaseInternCaches()
 	// done is closed on return to stop the watcher goroutine before it can
 	// cancel the EVM for a subsequent call.
 	done := make(chan struct{})
@@ -196,6 +198,7 @@ func (r *ReusableCaller) Close() {
 	if ibs := r.evm.IntraBlockState(); ibs != nil {
 		ibs.Close()
 	}
+	r.evm.ReleaseInternCaches()
 }
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
