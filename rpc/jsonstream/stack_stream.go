@@ -51,9 +51,6 @@ type StackStream struct {
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
-	// sent counts handovers to the writer. Bytes that left cannot be taken back, so a
-	// rewind is only safe while this has not moved.
-	sent uint64
 }
 
 // newStackStream creates a new StackStream writing to out. Building the
@@ -189,7 +186,6 @@ func (s *StackStream) commit(buf []byte, start int) {
 // empty-buffer check only skips a pointless zero-length Write; content is large
 // by the time we get here, so it is written either way.
 func (s *StackStream) writeThrough(content []byte) {
-	s.sent++
 	if len(s.stream.Buffer()) > 0 && s.stream.Flush() != nil {
 		// Same as flushIfFull: jsoniter latches the error, so these bytes can never
 		// reach the client and holding them only pins memory.
@@ -368,9 +364,6 @@ func (s *StackStream) rewindField(buf, depth int) {
 
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
-	if len(s.stream.Buffer()) > 0 {
-		s.sent++
-	}
 	return s.stream.Flush()
 }
 
