@@ -30,6 +30,7 @@ type JSONWriter interface {
 	WriteRawBytes(content []byte)
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
+	WriteBool(v bool)
 	WriteNil()
 	WriteObjectStart()
 	// WriteObjectField returns the writer, so a field and its value can be chained.
@@ -43,7 +44,6 @@ type JSONWriter interface {
 // Field writes the comma a following field needs, then the field name. The first field of
 // an object uses WriteObjectField directly.
 func Field(w JSONWriter, name string) JSONWriter {
-	w.WriteMore()
 	return w.WriteObjectField(name)
 }
 
@@ -78,17 +78,20 @@ func Array[S ~[]E, E any](w JSONWriter, name string, items *S, elem func(JSONWri
 	if items == nil {
 		return
 	}
-	if *items == nil {
-		Field(w, name).WriteNil()
+	Field(w, name)
+	ArrayValue(w, *items, elem)
+}
+
+// ArrayValue writes the array itself, with no field name, for a result that is a bare
+// array. A nil slice is null and an empty one is [].
+func ArrayValue[S ~[]E, E any](w JSONWriter, items S, elem func(JSONWriter, *E)) {
+	if items == nil {
+		w.WriteNil()
 		return
 	}
-	s := *items
-	Field(w, name).WriteArrayStart()
-	for i := range s {
-		if i > 0 {
-			w.WriteMore()
-		}
-		elem(w, &s[i])
+	w.WriteArrayStart()
+	for i := range items {
+		elem(w, &items[i])
 	}
 	w.WriteArrayEnd()
 }

@@ -19,11 +19,11 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
-
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -109,28 +109,76 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.afterValue()
 }
 
-// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
-// holding, so a marshaller can write values without an interface call each time.
-func Concrete(w jsonw.JSONWriter) *StackStream {
-	for {
-		switch t := w.(type) {
-		case *StackStream:
-			return t
-		case *LazyFieldStream:
-			t.ensure()
-			w = t.inner
-		default:
-			return nil
-		}
+// maxQuotedUintLen is the widest a quoted hex quantity gets: 16 digits, "0x" and quotes.
+const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
+
+// fieldPrefix appends the separator and field name a fused field write starts with. The
+// field never reaches the stack: its value is written in the same call.
+func (s *StackStream) fieldPrefix(buf []byte, name string) []byte {
+	if s.separatorPending {
+		buf = append(buf, ',')
 	}
+	buf = append(buf, '"')
+	buf = append(buf, name...)
+	return append(buf, '"', ':')
+}
+
+// fieldWritten records the member. It does not test the flush bound: a field is small and
+// the object it belongs to tests the bound when it closes, so one value cannot outrun the
+// buffer by more than the object it sits in.
+func (s *StackStream) fieldWritten(buf []byte) {
+	s.stream.SetBuffer(buf)
+	s.separatorPending = true
+}
+
+// WriteHexField writes a field and its hex value in one go: one growth, one buffer update,
+// and the field name never has to sit on the stack waiting for a value.
+func (s *StackStream) WriteHexField(name string, b []byte) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+5+hexutil.QuotedLen(len(b)))
+	s.fieldWritten(hexutil.AppendQuoted(s.fieldPrefix(buf, name), b))
+}
+
+// WriteHexUintField writes a field whose value is a hex quantity.
+func (s *StackStream) WriteHexUintField(name string, v uint64) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+5+maxQuotedUintLen)
+	buf = append(s.fieldPrefix(buf, name), '"', '0', 'x')
+	s.fieldWritten(append(strconv.AppendUint(buf, v, 16), '"'))
+}
+
+// WriteBoolField writes a field whose value is true or false.
+func (s *StackStream) WriteBoolField(name string, v bool) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+10)
+	s.fieldWritten(strconv.AppendBool(s.fieldPrefix(buf, name), v))
+}
+
+// WriteHexesField writes a field whose value is an array of fixed-size hex values.
+func WriteHexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
+	buf := slices.Grow(s.stream.Buffer(), len(name)+7+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(s.fieldPrefix(buf, name), '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+	}
+	s.fieldWritten(append(buf, ']'))
+}
+
+// WriteHexUint writes v as a quoted hex quantity. It is WriteQuotedText without the
+// interface: a quantity is four fields of every log, and boxing each one to call AppendText
+// costs more than the digits do.
+func (s *StackStream) WriteHexUint(v uint64) {
+	s.beforeValue()
+	buf := append(s.stream.Buffer(), '"', '0', 'x')
+	s.stream.SetBuffer(append(strconv.AppendUint(buf, v, 16), '"'))
+	s.afterValue()
 }
 
 // WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
 // value, so the buffer grows once and the stack is touched once, where a write per element
-// does both per item. These are functions rather than methods: the element types live in
-// packages jsonw cannot import, and one generic per core type covers every named type
-// built on it.
+// does both per item. One generic per core type covers every named type built on it.
 func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
+	s.beforeValue()
 	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
 	buf = append(buf, '[')
 	for i := range items {
@@ -140,12 +188,13 @@ func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
 		buf = hexutil.AppendQuoted(buf, items[i][:])
 	}
 	s.stream.SetBuffer(append(buf, ']'))
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
 // and so are summed before the single growth.
 func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+	s.beforeValue()
 	size := 2 + len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
@@ -159,7 +208,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 		buf = hexutil.AppendQuoted(buf, items[i])
 	}
 	s.stream.SetBuffer(append(buf, ']'))
-	s.popCommaOrField()
+	s.afterValue()
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
@@ -358,10 +407,26 @@ func (s *StackStream) WriteArrayEnd() {
 // caller written against the manual API still produces valid JSON.
 func (s *StackStream) WriteMore() {}
 
+// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
+// holding. A marshaller takes it to write its fields without an interface call each time,
+// so it must write a value: the field is open by the time it returns.
+func Concrete(w jsonw.JSONWriter) *StackStream {
+	for {
+		switch t := w.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			w = t.inner
+		default:
+			return nil
+		}
+	}
+}
+
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
-	s.beforeValue()
-	writeObjectFieldFast(s.stream, fieldName)
+	writeObjectFieldFast(s.stream, fieldName, s.separatorPending)
 	s.separatorPending = false
 	s.push(ItemField)
 	return s

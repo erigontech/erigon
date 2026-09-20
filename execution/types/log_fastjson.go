@@ -17,10 +17,14 @@
 package types
 
 import (
+	"errors"
 	"strconv"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
@@ -121,4 +125,63 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 		out = l.appendFastJSON(out)
 	}
 	return append(out, ']'), nil
+}
+
+// MarshalFastJSONTo writes the same bytes as appendFastJSON straight into the response
+// stream, so a result never needs a buffer of its own.
+func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	if s := jsonstream.Concrete(w); s != nil {
+		l.writeTo(s)
+		return nil
+	}
+	return errors.New("RPCLog needs a stream it can write fields into")
+}
+
+// writeTo writes the fields in the order the struct declares them, the embedded Log first,
+// so the bytes match reflection exactly. It takes the stream itself rather than the writer
+// interface: a log is ten field writes, and none of them should dispatch.
+func (l *RPCLog) writeTo(s *jsonstream.StackStream) {
+	if l == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.WriteHexField("address", l.Address[:])
+	if l.Topics == nil {
+		s.WriteObjectField("topics")
+		s.WriteNil()
+	} else {
+		jsonstream.WriteHexesField(s, "topics", l.Topics)
+	}
+	// A nil Data is "0x", not null, so it is written rather than skipped.
+	s.WriteHexField("data", l.Data)
+	s.WriteHexUintField("blockNumber", uint64(l.BlockNumber))
+	s.WriteHexField("transactionHash", l.TxHash[:])
+	s.WriteHexUintField("transactionIndex", uint64(l.TxIndex))
+	s.WriteHexField("blockHash", l.BlockHash[:])
+	s.WriteHexUintField("logIndex", uint64(l.Index))
+	s.WriteBoolField("removed", l.Removed)
+	s.WriteHexUintField("blockTimestamp", uint64(l.BlockTimestamp))
+	s.WriteObjectEnd()
+}
+
+func writeTopic(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+
+// MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
+// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
+func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	s := jsonstream.Concrete(w)
+	if s == nil {
+		return errors.New("RPCLogs needs a stream it can write fields into")
+	}
+	if logs == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteArrayStart()
+	for _, l := range logs {
+		l.writeTo(s)
+	}
+	s.WriteArrayEnd()
+	return nil
 }
