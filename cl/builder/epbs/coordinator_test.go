@@ -22,6 +22,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -294,6 +295,106 @@ func TestCoordinatorRunSlotBuildsPublishesAndRetainsBid(t *testing.T) {
 	require.NotSame(t, assembled, retained.Assembled)
 	require.True(t, coordinator.DropPayload(identity))
 	_, ok, err = coordinator.Payload(identity)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestCoordinatorPublishedPayloadSurvivesRestart(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_234_567_890_999))
+	assembled.BlobsBundle = validCoordinatorBlobsBundle(t, config, 1)
+	directory := filepath.Join(t.TempDir(), "pending")
+	store, err := OpenPendingPayloadStore(directory, &config, 2)
+	require.NoError(t, err)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 7, payload: assembled}, new(coordinatorPublisher), 2)
+	coordinator.pendingStore = store
+	signedBid, err := coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	require.NotNil(t, signedBid)
+
+	reopenedStore, err := OpenPendingPayloadStore(directory, &config, 2)
+	require.NoError(t, err)
+	restarted := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{}, new(coordinatorPublisher), 2)
+	restarted.pendingStore = reopenedStore
+	require.NoError(t, restarted.RecoverPending(input.Slot))
+	identity := PayloadIdentity{
+		Slot: input.Slot, ParentBlockHash: input.ParentBlockHash,
+		ParentBlockRoot: input.ParentBlockRoot, BlockHash: assembled.Eth1Block.BlockHash,
+	}
+	bidRoot, err := signedBid.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, restarted.MatchesPayload(identity, input.BuilderIndex, common.Hash(bidRoot)))
+	wrongParent := identity
+	wrongParent.ParentBlockRoot[0] ^= 1
+	require.False(t, restarted.MatchesPayload(wrongParent, input.BuilderIndex, common.Hash(bidRoot)))
+	wrongBidRoot := common.Hash(bidRoot)
+	wrongBidRoot[0] ^= 1
+	require.False(t, restarted.MatchesPayload(identity, input.BuilderIndex, wrongBidRoot))
+	recovered, ok, err := restarted.Payload(identity)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, assembled.Eth1Block.BlockHash, recovered.Assembled.Eth1Block.BlockHash)
+	require.Equal(t, assembled.BlobsBundle, recovered.Assembled.BlobsBundle)
+}
+
+func TestCoordinatorPersistenceFailurePreventsBidPublication(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_234_567_890_999))
+	store, err := OpenPendingPayloadStore(filepath.Join(t.TempDir(), "pending"), &config, 2)
+	require.NoError(t, err)
+	store.directory = filepath.Join(t.TempDir(), "missing")
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 7, payload: assembled}, publisher, 2)
+	coordinator.pendingStore = store
+	_, err = coordinator.RunSlot(t.Context(), input)
+	require.ErrorContains(t, err, "persist bid payload")
+	require.Zero(t, publisher.calls)
+}
+
+func TestCoordinatorRejectsStaleInputAfterPersistingBid(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_234_567_890_999))
+	store, err := OpenPendingPayloadStore(filepath.Join(t.TempDir(), "pending"), &config, 2)
+	require.NoError(t, err)
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 7, payload: assembled}, publisher, 2)
+	coordinator.pendingStore = store
+	freshness := &countingSlotInputFreshness{failAt: 4, err: ErrSlotInputStale}
+	_, err = coordinator.runSlotGuarded(t.Context(), input, freshness)
+	require.ErrorIs(t, err, ErrSlotInputStale)
+	require.Zero(t, publisher.calls)
+	loaded, err := store.Load(input.Slot)
+	require.NoError(t, err)
+	require.Empty(t, loaded)
+}
+
+func TestCoordinatorDroppedPayloadStaysDroppedAfterRestart(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_234_567_890_999))
+	directory := filepath.Join(t.TempDir(), "pending")
+	store, err := OpenPendingPayloadStore(directory, &config, 2)
+	require.NoError(t, err)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payloadID: 7, payload: assembled}, new(coordinatorPublisher), 2)
+	coordinator.pendingStore = store
+	_, err = coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	identity := payloadIdentity(input, assembled)
+	require.True(t, coordinator.DropPayload(identity))
+	restarted := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		new(coordinatorAssembler), new(coordinatorPublisher), 2)
+	restarted.pendingStore, err = OpenPendingPayloadStore(directory, &config, 2)
+	require.NoError(t, err)
+	require.NoError(t, restarted.RecoverPending(input.Slot))
+	_, ok, err := restarted.Payload(identity)
 	require.NoError(t, err)
 	require.False(t, ok)
 }

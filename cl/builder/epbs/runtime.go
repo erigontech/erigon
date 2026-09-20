@@ -22,8 +22,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+var ErrPendingPayloadStore = errors.New("epbs/runtime: pending payload storage unavailable")
+
 type RuntimeDependencies struct {
 	BeaconConfig     *clparams.BeaconChainConfig
+	PendingDirectory string
 	Clock            LiveSlotClock
 	Head             LiveHeadStateSource
 	Forkchoice       LiveForkchoiceSource
@@ -67,6 +70,14 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		bidPublisher,
 		cfg.MaxRetained,
 	)
+	store, err := OpenPendingPayloadStore(deps.PendingDirectory, deps.BeaconConfig, cfg.MaxRetained)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open: %w", ErrPendingPayloadStore, err)
+	}
+	coordinator.pendingStore = store
+	if err := coordinator.RecoverPending(deps.Clock.GetCurrentSlot()); err != nil {
+		return nil, fmt.Errorf("%w: recover: %w", ErrPendingPayloadStore, err)
+	}
 	coordinator.privateOrderflowWindow = cfg.PrivateOrderflowWindow
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
 	live := NewLiveCoordinator(coordinator, resolver, resolver)

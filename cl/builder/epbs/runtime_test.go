@@ -203,6 +203,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
 		Clock:            clock,
 		Head:             head,
@@ -269,6 +270,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.RetryInterval = minValidatedPreferencesRetryInterval
 	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
 		Clock:            clock,
 		Head:             head,
@@ -295,14 +297,22 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 }
 
 func TestRuntimeRevealsRetainedPayloadSelectedByAcceptedBlock(t *testing.T) {
-	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false)
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false, 0)
 }
 
 func TestRuntimeRevealsRetainedPayloadSelectedByGossipValidatedBlock(t *testing.T) {
-	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, true)
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, true, 0)
 }
 
-func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipValidated bool) {
+func TestRuntimeRevealsPendingPayloadAfterRestartBeforeSelection(t *testing.T) {
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false, 1)
+}
+
+func TestRuntimeReconcilesSelectedPayloadAfterRestart(t *testing.T) {
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false, 2)
+}
+
+func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipValidated bool, restartPhase int) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
 	cfg.NumberOfColumns = peerdasutils.CELLS_PER_EXT_BLOB
 	privateKey, err := bls.GenerateKey()
@@ -349,7 +359,8 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.RetryInterval = minValidatedPreferencesRetryInterval
-	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+	deps := RuntimeDependencies{
+		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
 		Clock:            clock,
 		Head:             head,
@@ -361,7 +372,8 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 		PayloadProcessor: payloadProcessor,
 		AcceptedBlocks:   acceptedBlocks,
 		Events:           emitters,
-	})
+	}
+	runtime, err := NewRuntime(runtimeCfg, deps)
 	require.NoError(t, err)
 
 	runCtx, cancel := context.WithCancel(t.Context())
@@ -378,7 +390,21 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 	block.Block.Body.SignedExecutionPayloadBid = selectedBid
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	if gossipValidated {
+	if restartPhase != 0 {
+		if restartPhase == 2 {
+			acceptedBlocks.setBlock(common.Hash(blockRoot), block)
+			fc.headNode.Root = common.Hash(blockRoot)
+		}
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+		runtime, err = NewRuntime(runtimeCfg, deps)
+		require.NoError(t, err)
+		runCtx, cancel = context.WithCancel(t.Context())
+		done = make(chan error, 1)
+		go func() { done <- runtime.Run(runCtx) }()
+	}
+	switch {
+	case restartPhase != 2 && gossipValidated:
 		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
 			Slot: block.Block.Slot, Block: common.Hash(blockRoot),
 		})
@@ -393,7 +419,10 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 		emitters.State().SendBlockGossip(&beaconevents.BlockGossipData{
 			Slot: block.Block.Slot, Block: common.Hash(blockRoot), SignedBlock: block,
 		})
-	} else {
+	case restartPhase == 1:
+		acceptedBlocks.setBlock(common.Hash(blockRoot), block)
+		require.True(t, runtime.reveals.SubmitAcceptedBlock(common.Hash(blockRoot)))
+	case restartPhase != 2:
 		acceptedBlocks.setBlock(common.Hash(blockRoot), block)
 		emitters.State().SendBlock(&beaconevents.BlockData{Slot: block.Block.Slot, Block: common.Hash(blockRoot)})
 	}
@@ -470,6 +499,7 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 	valid.Enabled = true
 	valid.KeyPath = keyPath
 	deps := RuntimeDependencies{
+		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
 		Clock:            eth_clock.NewMockEthereumClock(gomock.NewController(t)),
 		Head:             new(resolverHeadSource),
@@ -622,9 +652,12 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.BidDelay = 1200 * time.Millisecond
 	runtimeCfg.PrivateOrderflowWindow = 350 * time.Millisecond
 	runtimeCfg.ShadowValueCurve = true
-	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	deps := RuntimeDependencies{
+		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
-		Clock:            eth_clock.NewMockEthereumClock(gomock.NewController(t)),
+		Clock:            clock,
 		Head:             new(resolverHeadSource),
 		Forkchoice:       new(resolverForkchoice),
 		Assembler:        new(coordinatorAssembler),
@@ -634,11 +667,18 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
 		Events:           beaconevents.NewEventEmitter(),
-	})
+	}
+	runtime, err := NewRuntime(runtimeCfg, deps)
 	require.NoError(t, err)
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
 	require.Equal(t, runtimeCfg.PrivateOrderflowWindow, runtime.coordinator.privateOrderflowWindow)
 	require.NotNil(t, runtime.shadow)
 	require.Equal(t, []time.Duration{3200 * time.Millisecond, 5200 * time.Millisecond}, runtime.shadow.delays)
+
+	blockedPath := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(blockedPath, nil, 0o600))
+	deps.PendingDirectory = blockedPath
+	_, err = NewRuntime(runtimeCfg, deps)
+	require.ErrorIs(t, err, ErrPendingPayloadStore)
 }

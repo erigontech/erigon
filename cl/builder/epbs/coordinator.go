@@ -123,6 +123,7 @@ type RetainedPayload struct {
 	ExecutionRequests *cltypes.ExecutionRequests
 	BidValue          uint64
 	BuilderIndex      uint64
+	BuilderPubkey     common.Bytes48
 	SignedBidRoot     common.Hash
 	GenesisRoot       common.Hash
 }
@@ -146,6 +147,7 @@ type Coordinator struct {
 	strategy                BidStrategy
 	assembler               PayloadAssembler
 	publisher               GossipPublisher
+	pendingStore            *PendingPayloadStore
 	maxRetained             int
 	privateOrderflowWindow  time.Duration
 	waitForPrivateOrderflow func(context.Context, time.Duration) error
@@ -456,7 +458,8 @@ func (c *Coordinator) runSlotGuarded(
 	}
 	retained := &RetainedPayload{
 		PayloadID: payloadID, Assembled: assembled, ExecutionRequests: executionRequests, BidValue: bidValue,
-		BuilderIndex: input.BuilderIndex, SignedBidRoot: common.Hash(signedBidRoot), GenesisRoot: input.GenesisValidatorsRoot,
+		BuilderIndex: input.BuilderIndex, BuilderPubkey: input.BuilderPubkey,
+		SignedBidRoot: common.Hash(signedBidRoot), GenesisRoot: input.GenesisValidatorsRoot,
 	}
 	owned, err := cloneRetainedPayload(c.beaconCfg, retained)
 	if err != nil {
@@ -465,13 +468,27 @@ func (c *Coordinator) runSlotGuarded(
 	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
 		return nil, err
 	}
+	if c.pendingStore != nil {
+		if err := c.pendingStore.Save(identity, owned); err != nil {
+			return nil, fmt.Errorf("epbs/coordinator: persist bid payload: %w", err)
+		}
+		if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+			return nil, errors.Join(err, c.pendingStore.Delete(identity))
+		}
+	}
 	if err := c.retainForPublish(auction, identity, owned); err != nil {
+		if c.pendingStore != nil {
+			err = errors.Join(err, c.pendingStore.Delete(identity))
+		}
 		return nil, err
 	}
 	keepAuction = true
 	publishErr := c.publisher.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encoded)
 	if errors.Is(publishErr, errLocalBidNotAccepted) {
 		c.rollbackPublish(auction)
+		if c.pendingStore != nil {
+			publishErr = errors.Join(publishErr, c.pendingStore.Delete(identity))
+		}
 		return nil, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
 	c.finishPublish(auction)
@@ -547,8 +564,56 @@ func (c *Coordinator) DropPayload(identity PayloadIdentity) bool {
 	if entry == nil || entry.owner.phase == auctionPhasePublishing {
 		return false
 	}
+	if c.pendingStore != nil {
+		if err := c.pendingStore.Delete(identity); err != nil {
+			log.Warn("Embedded builder could not drop pending payload", "slot", identity.Slot, "err", err)
+			return false
+		}
+	}
 	delete(c.retained, identity)
 	return true
+}
+
+func (c *Coordinator) RecoverPending(currentSlot uint64) error {
+	if c == nil || c.pendingStore == nil || isNilDependency(c.signer) {
+		return errors.New("epbs/coordinator: pending payload recovery is unavailable")
+	}
+	if err := c.pendingStore.PruneBeforeSlot(currentSlot); err != nil {
+		return fmt.Errorf("epbs/coordinator: prune pending payloads: %w", err)
+	}
+	loaded, err := c.pendingStore.Load(currentSlot)
+	if err != nil {
+		return fmt.Errorf("epbs/coordinator: load pending payloads: %w", err)
+	}
+	if len(loaded) > c.maxRetained {
+		return ErrRetainedPayloadCapacity
+	}
+	theseAuctions := make(map[auctionKey]*auctionEntry, len(loaded))
+	thesePayloads := make(map[PayloadIdentity]*retainedPayloadEntry, len(loaded))
+	for identity, payload := range loaded {
+		if payload.BuilderPubkey != c.signer.Pubkey() {
+			return errors.New("epbs/coordinator: recovered builder key mismatch")
+		}
+		key := auctionKey{
+			slot: identity.Slot, parentBlockHash: identity.ParentBlockHash,
+			parentBlockRoot: identity.ParentBlockRoot, builderIndex: payload.BuilderIndex,
+		}
+		if _, exists := theseAuctions[key]; exists {
+			return errors.New("epbs/coordinator: duplicate recovered auction")
+		}
+		entry := &auctionEntry{key: key, bidValue: payload.BidValue, phase: auctionPhaseRetained, identity: identity}
+		theseAuctions[key] = entry
+		thesePayloads[identity] = &retainedPayloadEntry{payload: payload, owner: entry}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.auctions) != 0 || len(c.retained) != 0 {
+		return errors.New("epbs/coordinator: recovery requires an empty coordinator")
+	}
+	c.auctions = theseAuctions
+	c.retained = thesePayloads
+	c.slotFloor = currentSlot
+	return nil
 }
 
 // PruneExpiredBeforeSlot removes slots whose bid acceptance and payload reveal windows are known to have closed.
@@ -557,7 +622,6 @@ func (c *Coordinator) PruneExpiredBeforeSlot(slot uint64) int {
 		return 0
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if slot > c.slotFloor {
 		c.slotFloor = slot
 	}
@@ -571,6 +635,12 @@ func (c *Coordinator) PruneExpiredBeforeSlot(slot uint64) int {
 			pruned++
 		}
 		delete(c.auctions, key)
+	}
+	c.mu.Unlock()
+	if c.pendingStore != nil {
+		if err := c.pendingStore.PruneBeforeSlot(slot); err != nil {
+			log.Warn("Embedded builder could not prune pending payloads", "beforeSlot", slot, "err", err)
+		}
 	}
 	return pruned
 }
@@ -806,6 +876,7 @@ func cloneRetainedPayload(beaconCfg *clparams.BeaconChainConfig, source *Retaine
 		ExecutionRequests: source.ExecutionRequests.Clone().(*cltypes.ExecutionRequests),
 		BidValue:          source.BidValue,
 		BuilderIndex:      source.BuilderIndex,
+		BuilderPubkey:     source.BuilderPubkey,
 		SignedBidRoot:     source.SignedBidRoot,
 		GenesisRoot:       source.GenesisRoot,
 	}, nil

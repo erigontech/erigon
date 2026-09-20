@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -532,6 +533,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		embeddedBuilder, err = epbs.NewRuntime(config.EpbsBuilder, epbs.RuntimeDependencies{
 			BeaconConfig:     beaconConfig,
+			PendingDirectory: filepath.Join(dirs.DataDir, "builder", "pending"),
 			Clock:            ethClock,
 			Head:             syncedDataManager,
 			Forkchoice:       forkChoice,
@@ -544,7 +546,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			Events:           emitters,
 		})
 		if err != nil {
-			return fmt.Errorf("initialize embedded ePBS builder: %w", err)
+			if !errors.Is(err, epbs.ErrPendingPayloadStore) {
+				return fmt.Errorf("initialize embedded ePBS builder: %w", err)
+			}
+			logger.Error("Embedded ePBS builder disabled; pending payload recovery unavailable", "err", err)
 		}
 	}
 	proposerPreferencesService := services.NewProposerPreferencesServiceWithSink(
