@@ -54,22 +54,22 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 	} else {
 		s.WriteHex(h.Hash[:])
 	}
-	s.Hex("parentHash", h.ParentHash[:])
+	jsonstream.Field(s, "parentHash").WriteHex(h.ParentHash[:])
 	jsonstream.Field(s, "nonce")
 	if h.Nonce == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.Nonce[:])
 	}
-	s.Hex("mixHash", h.MixHash[:])
-	s.Hex("sha3Uncles", h.Sha3Uncles[:])
+	jsonstream.Field(s, "mixHash").WriteHex(h.MixHash[:])
+	jsonstream.Field(s, "sha3Uncles").WriteHex(h.Sha3Uncles[:])
 	jsonstream.Field(s, "logsBloom")
 	if h.LogsBloom == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.LogsBloom[:])
 	}
-	s.Hex("stateRoot", h.StateRoot[:])
+	jsonstream.Field(s, "stateRoot").WriteHex(h.StateRoot[:])
 	jsonstream.Field(s, "miner")
 	if h.Miner == nil {
 		s.WriteNil()
@@ -81,15 +81,15 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 	jsonstream.Text(s, "gasLimit", &h.GasLimit)
 	jsonstream.Text(s, "gasUsed", &h.GasUsed)
 	jsonstream.Text(s, "timestamp", &h.Timestamp)
-	s.Hex("transactionsRoot", h.TransactionsRoot[:])
-	s.Hex("receiptsRoot", h.ReceiptsRoot[:])
+	jsonstream.Field(s, "transactionsRoot").WriteHex(h.TransactionsRoot[:])
+	jsonstream.Field(s, "receiptsRoot").WriteHex(h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
 		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		s.Hex("withdrawalsRoot", h.WithdrawalsRoot[:])
+		jsonstream.Field(s, "withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
 		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
@@ -98,13 +98,13 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		s.Hex("parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
+		jsonstream.Field(s, "parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
-		s.Hex("requestsHash", h.RequestsHash[:])
+		jsonstream.Field(s, "requestsHash").WriteHex(h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
-		s.Hex("blockAccessListHash", h.BlockAccessListHash[:])
+		jsonstream.Field(s, "blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
 		jsonstream.Text(s, "slotNumber", h.SlotNumber)

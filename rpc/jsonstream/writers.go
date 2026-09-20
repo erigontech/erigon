@@ -25,12 +25,6 @@ func Field(s *StackStream, name string) *StackStream {
 	return s.WriteObjectField(name)
 }
 
-// Hex writes b as a hex string field. A field that can be absent writes its own null.
-func (s *StackStream) Hex(name string, b []byte) {
-	Field(s, name)
-	s.WriteHex(b)
-}
-
 type textPtr[T any] interface {
 	*T
 	encoding.TextAppender

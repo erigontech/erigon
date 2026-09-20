@@ -25,7 +25,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -105,23 +104,14 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.popCommaOrField()
 }
 
-// HexesField writes a hash array as one field: one buffer growth for the whole array,
-// where a value write per element grows once per hash.
-func HexesField(s *StackStream, name string, hashes []common.Hash) {
+// HexesField writes fixed-size values as one array field: one buffer growth for the whole
+// array, where a value write per element grows once per element. A nil slice is null.
+func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
 	Field(s, name)
-	if hashes == nil {
+	if items == nil {
 		s.WriteNil()
 		return
 	}
-	WriteHexes(s, hashes)
-}
-
-// WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
-// value, so the buffer grows once and the stack is touched once, where a write per element
-// does both per item. These are functions rather than methods: the element types live in
-// packages jsonw cannot import, and one generic per core type covers every named type
-// built on it.
-func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
 	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
 	buf = append(buf, '[')
 	for i := range items {
