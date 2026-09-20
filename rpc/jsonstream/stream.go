@@ -68,6 +68,9 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
+	// markSeparatorPending states that a sibling value precedes what is written next, for a
+	// fragment written into a container this stream did not open.
+	markSeparatorPending()
 	WriteObjectField(fieldName string) jsonw.JSONWriter
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
