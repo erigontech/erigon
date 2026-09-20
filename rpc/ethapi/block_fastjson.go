@@ -126,14 +126,15 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 
-	// The `any` fields carry whatever concrete type their caller set, so they go through
-	// the reflection encoder. That is done up front: the contract is that a marshaller
-	// reports failure before its first write, never with half a result already streamed.
+	// An `any` field holding a type with no fast path falls back to the reflection encoder.
+	// That is done up front: the contract is that a marshaller reports failure before its
+	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
-	var fullTxs, txCount, calls []byte
+	full, fullOK := b.Transactions.([]*RPCTransaction)
+	var rawTxs, txCount, calls []byte
 	var err error
-	if !hashesOK {
-		if fullTxs, err = marshalIfSet(b.Transactions); err != nil {
+	if !hashesOK && !fullOK {
+		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
@@ -153,8 +154,11 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	switch {
 	case hashesOK:
 		jsonstream.HexesField(s, "transactions", hashes)
-	case fullTxs != nil:
-		jsonstream.Field(s, "transactions").WriteRawBytes(fullTxs)
+	case fullOK:
+		jsonstream.Field(s, "transactions")
+		jsonstream.ArrayValue(s, full, writeTxElem)
+	case rawTxs != nil:
+		jsonstream.Field(s, "transactions").WriteRawBytes(rawTxs)
 	}
 
 	jsonstream.HexesField(s, "uncles", b.Uncles)
