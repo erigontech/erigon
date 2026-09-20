@@ -386,8 +386,8 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 	}
 }
 
-func (t *gloasWeightTree) GetWeight(node ForkChoiceNode) uint64 {
-	return getWeight(t, t.f, node)
+func (t *gloasWeightTree) GetWeight(node ForkChoiceNode, currentSlot uint64) uint64 {
+	return getWeight(t, t.f, node, currentSlot)
 }
 
 func (t *gloasWeightTree) GetAttestationScore(node ForkChoiceNode) uint64 {

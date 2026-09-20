@@ -443,7 +443,7 @@ func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutio
 }
 
 func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
-	headNode, err := s.forkchoiceStore.GetHeadNode()
+	headNode, _, err := s.forkchoiceStore.GetHeadNode()
 	if err != nil {
 		return false, fmt.Errorf("%w: head unavailable: %w", errBidDependencyUnavailable, err)
 	}

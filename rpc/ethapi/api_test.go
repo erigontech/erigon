@@ -231,7 +231,7 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
-// rpcMarshalHeader aliases the header it is given: the U256 quantities, the
+// RPCMarshalHeader aliases the header it is given: the U256 quantities, the
 // extraData slice and the fields callers may null out all point straight at it.
 // RPCMarshalBlock must therefore hand it a copy — the result is mutable and
 // exported, and the block keeps its memoized hash, so a caller writing through
@@ -266,4 +266,55 @@ func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	require.Equal(t, types.BlockNonce{}, block.HeaderNoCopy().Nonce)
 	require.Equal(t, types.Bloom{}, block.HeaderNoCopy().Bloom)
 	require.Equal(t, wantHash, block.Hash())
+}
+
+// TestRPCMarshalBlockTransactionsJSON pins the wire shape of the transactions field
+// in each of its three forms, since the field is typed `any` and the element type
+// decides both the JSON and the per-transaction allocation count.
+func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	signer := types.LatestSignerForChainID(nil)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+
+	field := func(inclTx, fullTx bool) string {
+		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx))
+		require.NoError(t, err)
+		var m map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &m))
+		return string(m["transactions"])
+	}
+
+	require.Equal(t, `["`+txn.Hash().Hex()+`"]`, field(true, false),
+		"fullTx=false must emit a flat array of transaction hashes")
+
+	full := field(true, true)
+	require.Contains(t, full, `"hash":"`+txn.Hash().Hex()+`"`,
+		"fullTx=true must emit transaction objects")
+	require.Contains(t, full, `"nonce":"0x1"`)
+
+	require.Equal(t, `[]`, field(false, false),
+		"inclTx=false must still emit an empty array, not null and not an absent field")
+}
+
+// TestRPCMarshalBlockEmptyKeepsElementType pins the element type an empty block
+// carries: ots_getBlockTransactions type-asserts this field, so an empty block must
+// hold the same slice type a populated one does.
+func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+
+	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
+	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
+
+	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
+	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
 }
