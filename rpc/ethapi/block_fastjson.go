@@ -135,9 +135,9 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		return nil
 	}
 
-	// The `any` fields carry whatever concrete type their caller set, so they go through
-	// the reflection encoder. That is done up front: the contract is that a marshaller
-	// reports failure before its first write, never with half a result already streamed.
+	// An `any` field holding a type with no fast path falls back to the reflection encoder.
+	// That is done up front: the contract is that a marshaller reports failure before its
+	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
 	full, fullOK := b.Transactions.([]*RPCTransaction)
 	var rawTxs, txCount, calls []byte
