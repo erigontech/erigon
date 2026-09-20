@@ -342,10 +342,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
-		}()
+		defer context.AfterFunc(ctx, evm.Cancel)()
 
 		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
 		if err != nil {
@@ -391,10 +388,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 			defer cancel()
-			go func() {
-				<-ctx.Done()
-				evm.Cancel()
-			}()
+			defer context.AfterFunc(ctx, evm.Cancel)()
 
 			// re-run previous txs of the blocks
 			for txnIndex := range index {
@@ -426,10 +420,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
-		}()
+		defer context.AfterFunc(ctx, evm.Cancel)()
 
 		receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
 		if err != nil {
@@ -625,27 +616,14 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-			// txDone is a cancellation bridge: a goroutine watches for context
-			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
-			// EVM mid-execution. Closing txDone signals that the transaction
-			// completed normally, so the goroutine can exit without cancelling.
-			// txDone signals the cancel-watcher goroutine to exit once the
-			// transaction finishes normally. Without it, the goroutine would
-			// leak (blocked on ctx.Done) for every successfully executed tx.
-			// On context cancellation, evm.Cancel() aborts the EVM mid-opcode
-			// so even gas-heavy transactions respond to RPC timeouts promptly.
-			txDone := make(chan struct{})
-			go func() {
-				select {
-				case <-ctx.Done():
-					evm.Cancel()
-				case <-txDone:
-				}
-			}()
+			// On context cancellation evm.Cancel() aborts the EVM mid-opcode, so even a
+			// gas-heavy transaction answers an RPC timeout promptly. Deregistered once the
+			// transaction finishes, or a later one would be cancelled by this one's context.
+			stop := context.AfterFunc(ctx, evm.Cancel)
 
 			genEnv.ibs.SetTxContext(blockNum, i)
 			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
-			close(txDone)
+			stop()
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 			}
