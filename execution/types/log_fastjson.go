@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
@@ -122,3 +123,35 @@ func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
 	}
 	return append(out, ']'), nil
 }
+
+// MarshalFastJSONTo writes the same bytes as appendFastJSON straight into the response
+// stream, so a result never needs a buffer of its own.
+func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if l == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	s.WriteObjectField("address").WriteHex(l.Address[:])
+	jsonstream.HexesField(s, "topics", l.Topics)
+	// A nil Data is "0x", not null, so it bypasses jsonw.Hex.
+	jsonstream.Field(s, "data").WriteHex(l.Data)
+	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
+	jsonstream.Field(s, "transactionHash").WriteHex(l.TxHash[:])
+	jsonstream.Text(s, "transactionIndex", &l.TxIndex)
+	jsonstream.Field(s, "blockHash").WriteHex(l.BlockHash[:])
+	jsonstream.Text(s, "logIndex", &l.Index)
+	jsonstream.Field(s, "removed").WriteBool(l.Removed)
+	jsonstream.Text(s, "blockTimestamp", &l.BlockTimestamp)
+	s.WriteObjectEnd()
+	return nil
+}
+
+// MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
+// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
+func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, logs, writeLogElem)
+	return nil
+}
+
+func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
