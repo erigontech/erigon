@@ -25,6 +25,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -155,6 +156,7 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
+	assertNoEscapes(buf[start+1:])
 	buf = append(buf, '"')
 	if s.out != nil && len(buf)-start >= FlushThreshold {
 		s.stream.SetBuffer(buf[:start])
@@ -163,6 +165,19 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 		s.stream.SetBuffer(buf)
 	}
 	s.popCommaOrField()
+}
+
+// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes
+// out unscanned, so a byte that JSON would escape would leave the response malformed.
+func assertNoEscapes(text []byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	for _, c := range text {
+		if c == '"' || c == '\\' || c < 0x20 {
+			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
+		}
+	}
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The

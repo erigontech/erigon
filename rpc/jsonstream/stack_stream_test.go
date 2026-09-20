@@ -1181,6 +1181,23 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
 }
 
+// WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
+// where it is produced rather than reaching a client as malformed JSON.
+func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	s := newStackStream(nil, 64)
+
+	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
+		s.WriteQuotedText(appenderFunc(`say "hi"`))
+	})
+	require.NotPanics(t, func() { s.WriteQuotedText(appenderFunc("0xdeadbeef")) })
+}
+
+type appenderFunc string
+
+func (a appenderFunc) AppendText(dst []byte) ([]byte, error) { return append(dst, a...), nil }
+
 // Open must reach the stream that owns the buffer, however many wrappers sit above it.
 func TestLazyFieldStreamNestedOpenReturnsTheOwner(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
