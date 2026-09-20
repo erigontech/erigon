@@ -681,3 +681,30 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 	}
 
 }
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.New("append failed") }
+
+type failingMidWrite struct{}
+
+func (failingMidWrite) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteObjectStart()
+	w.WriteObjectField("balance")
+	w.WriteQuotedText(failingAppender{})
+	w.WriteObjectEnd()
+	return nil
+}
+
+// A write that fails after the result opened keeps the response valid JSON: the partial result
+// stays, the error follows it, and the caller learns about it for its metrics and log.
+func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+
+	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
+
+	require.Error(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
+	require.True(t, json.Valid(s.Buffer()))
+}
