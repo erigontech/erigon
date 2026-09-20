@@ -56,26 +56,26 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 	jsonw.Hex(w, "logsBloom", bloomOrNull(h.LogsBloom))
 	jsonw.Hex(w, "stateRoot", h.StateRoot[:])
 	jsonw.Hex(w, "miner", addrOrNull(h.Miner))
-	jsonw.Quoted(w, "difficulty", h.Difficulty)
+	jsonw.Text(w, "difficulty", h.Difficulty)
 	jsonw.Field(w, "extraData").WriteHex(h.ExtraData)
-	jsonw.Quoted(w, "gasLimit", &h.GasLimit)
-	jsonw.Quoted(w, "gasUsed", &h.GasUsed)
-	jsonw.Quoted(w, "timestamp", &h.Timestamp)
+	jsonw.Text(w, "gasLimit", &h.GasLimit)
+	jsonw.Text(w, "gasUsed", &h.GasUsed)
+	jsonw.Text(w, "timestamp", &h.Timestamp)
 	jsonw.Hex(w, "transactionsRoot", h.TransactionsRoot[:])
 	jsonw.Hex(w, "receiptsRoot", h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
-		jsonw.Quoted(w, "baseFeePerGas", h.BaseFeePerGas)
+		jsonw.Text(w, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
 		jsonw.Hex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
-		jsonw.Quoted(w, "blobGasUsed", h.BlobGasUsed)
+		jsonw.Text(w, "blobGasUsed", h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		jsonw.Quoted(w, "excessBlobGas", h.ExcessBlobGas)
+		jsonw.Text(w, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
 		jsonw.Hex(w, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
@@ -87,13 +87,13 @@ func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
 		jsonw.Hex(w, "blockAccessListHash", h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
-		jsonw.Quoted(w, "slotNumber", h.SlotNumber)
+		jsonw.Text(w, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
 		jsonw.Field(w, "auraSeal").WriteHex(*h.AuraSeal)
 	}
 	if h.AuraStep != nil {
-		jsonw.Quoted(w, "auraStep", h.AuraStep)
+		jsonw.Text(w, "auraStep", h.AuraStep)
 	}
 }
 
@@ -156,7 +156,7 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	w.WriteObjectStart()
 	b.RPCHeader.WriteFieldsTo(w)
 
-	jsonw.Quoted(w, "size", &b.Size)
+	jsonw.Text(w, "size", &b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
@@ -173,7 +173,7 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		jsonw.Field(w, "transactionCount").WriteRawBytes(txCount)
 	}
 	if b.TotalDifficulty != nil {
-		jsonw.Quoted(w, "totalDifficulty", b.TotalDifficulty)
+		jsonw.Text(w, "totalDifficulty", b.TotalDifficulty)
 	}
 	if calls != nil {
 		jsonw.Field(w, "calls").WriteRawBytes(calls)

@@ -61,8 +61,8 @@ type textPtr[T any] interface {
 	encoding.TextAppender
 }
 
-// Quoted writes *v as a quoted hex quantity, or null when v is nil.
-func Quoted[T any, P textPtr[T]](w JSONWriter, name string, v P) {
+// Text writes v's text as a JSON string field, or null when v is nil.
+func Text[T any, P textPtr[T]](w JSONWriter, name string, v P) {
 	if v == nil {
 		Field(w, name).WriteNil()
 		return
