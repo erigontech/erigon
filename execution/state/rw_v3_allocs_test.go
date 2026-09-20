@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -142,13 +143,13 @@ type addrTemporalTx struct {
 }
 
 func (g addrTemporalTx) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	if string(k) == string(g.present[:]) {
+	if bytes.Equal(k, g.present[:]) {
 		return g.val, 0, nil
 	}
 	return nil, 0, nil
 }
 func (g addrTemporalTx) GetLatestValSize(_ kv.Domain, k []byte) (int, bool, error) {
-	if string(k) == string(g.present[:]) {
+	if bytes.Equal(k, g.present[:]) {
 		return len(g.val), true, nil
 	}
 	return 0, false, nil
@@ -162,7 +163,7 @@ type addrHistTx struct {
 }
 
 func (m addrHistTx) GetAsOf(_ kv.Domain, key []byte, _ uint64) ([]byte, bool, error) {
-	if string(key) == string(m.present[:]) {
+	if bytes.Equal(key, m.present[:]) {
 		return m.val, true, nil
 	}
 	return nil, false, nil
