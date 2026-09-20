@@ -63,8 +63,8 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
-	defer state.Close()
+	ibs := state.GetPooled(stateReader)
+	defer state.PutPooled(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -94,7 +94,7 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 	// done is closed on return to stop the watcher goroutine before it can
 	// cancel the EVM for a subsequent call.
 	done := make(chan struct{})
@@ -114,7 +114,7 @@ func DoCall(
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
