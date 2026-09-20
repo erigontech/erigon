@@ -36,10 +36,11 @@ const (
 )
 
 type PendingPayloadStore struct {
-	mu          sync.Mutex
-	directory   string
-	beaconCfg   *clparams.BeaconChainConfig
-	maxRetained int
+	mu            sync.Mutex
+	directory     string
+	beaconCfg     *clparams.BeaconChainConfig
+	maxRetained   int
+	syncDirectory func(string) error
 }
 
 type pendingPayloadRecord struct {
@@ -87,7 +88,7 @@ func OpenPendingPayloadStore(directory string, beaconCfg *clparams.BeaconChainCo
 	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("epbs/pending store: directory must be private")
 	}
-	return &PendingPayloadStore{directory: directory, beaconCfg: beaconCfg, maxRetained: maxRetained}, nil
+	return &PendingPayloadStore{directory: directory, beaconCfg: beaconCfg, maxRetained: maxRetained, syncDirectory: dir.FsyncDir}, nil
 }
 
 func (s *PendingPayloadStore) Save(identity PayloadIdentity, payload *RetainedPayload) error {
@@ -133,7 +134,7 @@ func (s *PendingPayloadStore) Save(identity PayloadIdentity, payload *RetainedPa
 	if err := dir.RemoveFile(file.Name()); err != nil {
 		return errors.Join(fmt.Errorf("epbs/pending store: remove temporary record: %w", err), s.removeRecord(identity))
 	}
-	if err := dir.FsyncDir(s.directory); err != nil {
+	if err := s.syncDirectory(s.directory); err != nil {
 		return errors.Join(fmt.Errorf("epbs/pending store: sync published record: %w", err), s.removeRecord(identity))
 	}
 	return nil
@@ -208,7 +209,7 @@ func (s *PendingPayloadStore) removeRecord(identity PayloadIdentity) error {
 	if err := dir.RemoveFile(s.recordPath(identity)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("epbs/pending store: remove record: %w", err)
 	}
-	return dir.FsyncDir(s.directory)
+	return s.syncDirectory(s.directory)
 }
 
 func (s *PendingPayloadStore) PruneBeforeSlot(slot uint64) error {
@@ -244,7 +245,7 @@ func (s *PendingPayloadStore) PruneBeforeSlot(slot uint64) error {
 	if !changed {
 		return nil
 	}
-	return dir.FsyncDir(s.directory)
+	return s.syncDirectory(s.directory)
 }
 
 func (s *PendingPayloadStore) makeRecord(identity PayloadIdentity, payload *RetainedPayload) (pendingPayloadRecord, error) {

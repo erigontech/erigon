@@ -90,12 +90,13 @@ func (p *runtimePayloadProcessor) ProcessMessage(_ context.Context, _ *uint64, e
 type runtimeLifecyclePublisher struct {
 	payloadProcessed <-chan *cltypes.SignedExecutionPayloadEnvelope
 	publications     chan runtimePublication
+	payloadGate      <-chan struct{}
 	localPayload     []byte
 	payloadAttempts  int
 	payloadFailures  int
 }
 
-func (p *runtimeLifecyclePublisher) Publish(_ context.Context, topic string, data []byte) error {
+func (p *runtimeLifecyclePublisher) Publish(ctx context.Context, topic string, data []byte) error {
 	if topic == gossip.TopicNameExecutionPayload {
 		if p.localPayload == nil {
 			select {
@@ -115,6 +116,13 @@ func (p *runtimeLifecyclePublisher) Publish(_ context.Context, topic string, dat
 		p.payloadAttempts++
 	}
 	p.publications <- runtimePublication{topic: topic, data: bytes.Clone(data)}
+	if topic == gossip.TopicNameExecutionPayload && p.payloadGate != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p.payloadGate:
+		}
+	}
 	if topic == gossip.TopicNameExecutionPayload && p.payloadAttempts <= p.payloadFailures {
 		return errors.New("payload publication outcome unknown")
 	}
@@ -312,6 +320,10 @@ func TestRuntimeReconcilesSelectedPayloadAfterRestart(t *testing.T) {
 	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false, 2)
 }
 
+func TestRuntimeResumesPayloadRevealAfterRestart(t *testing.T) {
+	testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t, false, 3)
+}
+
 func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipValidated bool, restartPhase int) {
 	cfg, headState, preferences, headRoot, parentHash, _ := liveResolverFixture(t)
 	cfg.NumberOfColumns = peerdasutils.CELLS_PER_EXT_BLOB
@@ -352,6 +364,9 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 		publications:     make(chan runtimePublication, int(cfg.NumberOfColumns)+3),
 		payloadFailures:  1,
 	}
+	if restartPhase == 3 {
+		publisher.payloadGate = make(chan struct{})
+	}
 	columnWriter := new(recordingColumnWriter)
 	acceptedBlocks := &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)}
 	emitters := beaconevents.NewEventEmitter()
@@ -390,7 +405,7 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 	block.Block.Body.SignedExecutionPayloadBid = selectedBid
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	if restartPhase != 0 {
+	if restartPhase == 1 || restartPhase == 2 {
 		if restartPhase == 2 {
 			acceptedBlocks.setBlock(common.Hash(blockRoot), block)
 			fc.headNode.Root = common.Hash(blockRoot)
@@ -434,6 +449,32 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 		t.Fatal("gossip-validated selected block did not trigger payload reveal")
 	}
 	require.Equal(t, gossip.TopicNameExecutionPayload, firstEnvelopePublication.topic)
+	if restartPhase == 3 {
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+		fc.headNode.Root = common.Hash(blockRoot)
+		payloadProcessor = &runtimePayloadProcessor{processed: make(chan *cltypes.SignedExecutionPayloadEnvelope, 1)}
+		publisher = &runtimeLifecyclePublisher{
+			payloadProcessed: payloadProcessor.processed,
+			publications:     make(chan runtimePublication, int(cfg.NumberOfColumns)+3),
+			payloadFailures:  1,
+		}
+		columnWriter = new(recordingColumnWriter)
+		deps.PayloadProcessor = payloadProcessor
+		deps.Publisher = publisher
+		deps.ColumnStorage = columnWriter
+		runtime, err = NewRuntime(runtimeCfg, deps)
+		require.NoError(t, err)
+		runCtx, cancel = context.WithCancel(t.Context())
+		done = make(chan error, 1)
+		go func() { done <- runtime.Run(runCtx) }()
+		select {
+		case firstEnvelopePublication = <-publisher.publications:
+		case <-time.After(time.Second):
+			t.Fatal("restarted runtime did not resume payload reveal")
+		}
+		require.Equal(t, gossip.TopicNameExecutionPayload, firstEnvelopePublication.topic)
+	}
 	for range cfg.NumberOfColumns {
 		publication := <-publisher.publications
 		require.True(t, gossip.IsTopicDataColumnSidecar(publication.topic))

@@ -9,6 +9,7 @@
 package epbs
 
 import (
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 )
 
 func TestPendingPayloadStoreDoesNotOverwritePublishedIdentity(t *testing.T) {
@@ -41,6 +43,35 @@ func TestPendingPayloadStoreDoesNotOverwritePublishedIdentity(t *testing.T) {
 	loaded, err := store.Load(input.Slot)
 	require.NoError(t, err)
 	require.Equal(t, first.SignedBidRoot, loaded[identity].SignedBidRoot)
+}
+
+func TestPendingPayloadStoreRemovesUnpublishedRecordAfterDirectorySyncFailure(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	store, err := OpenPendingPayloadStore(filepath.Join(t.TempDir(), "pending"), &config, 2)
+	require.NoError(t, err)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(1_000_000_000))
+	requests, _, err := decodeExecutionRequests(&config, assembled.RequestsBundle)
+	require.NoError(t, err)
+	payload := &RetainedPayload{
+		Assembled: assembled, ExecutionRequests: requests,
+		BidValue: 1, BuilderIndex: input.BuilderIndex, BuilderPubkey: input.BuilderPubkey,
+		SignedBidRoot: common.Hash{1}, GenesisRoot: input.GenesisValidatorsRoot,
+	}
+	calls := 0
+	store.syncDirectory = func(path string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("injected directory sync failure")
+		}
+		return dir.FsyncDir(path)
+	}
+	identity := payloadIdentity(input, assembled)
+	require.ErrorContains(t, store.Save(identity, payload), "injected directory sync failure")
+	require.Equal(t, 2, calls)
+	loaded, err := store.Load(input.Slot)
+	require.NoError(t, err)
+	require.Empty(t, loaded)
 }
 
 func TestPendingPayloadStorePruneWaitsForStoreLock(t *testing.T) {
