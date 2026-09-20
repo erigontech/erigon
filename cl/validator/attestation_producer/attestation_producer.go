@@ -52,7 +52,6 @@ type attestationProducer struct {
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
-	context.AfterFunc(ctx, attestationsCache.Close)
 	blockRootsUsedForSlotCache, err := lru.New[uint64, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
 		panic(err)

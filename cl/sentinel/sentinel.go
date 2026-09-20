@@ -143,8 +143,6 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
-	// The peers pool's sweeps live as long as the sentinel's ctx.
-	context.AfterFunc(s.ctx, s.peers.Close)
 
 	mux := chi.NewRouter()
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
@@ -227,7 +225,6 @@ func (s *Sentinel) Stop() {
 	//s.subManager.Close()
 	s.cancel()
 	s.p2p.Host().Close()
-	s.peers.Close()
 }
 
 func (s *Sentinel) String() string {

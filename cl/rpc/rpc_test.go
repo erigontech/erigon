@@ -729,10 +729,9 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 	require.Equal(t, "malicious-peer", pid)
 }
 
-// TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's two background
-// goroutines, the peer metadata cache's sweep and the peer refresh loop, stop once its ctx is
-// cancelled: four clients, none left. A genesis of now keeps the clock at Phase0, so the refresh
-// loop's first run returns before it asks the sentinel for anything.
+// TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's peer refresh loop
+// stops once its ctx is cancelled: four clients, none left. A genesis of now keeps the clock at
+// Phase0, so the loop's first run returns before it asks the sentinel for anything.
 func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 

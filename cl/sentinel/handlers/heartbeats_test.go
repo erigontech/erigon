@@ -199,7 +199,6 @@ func TestGoodbye(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -260,7 +259,6 @@ func TestMetadataV2(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -319,7 +317,6 @@ func TestMetadataV1(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	t.Cleanup(peersPool.Close)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)

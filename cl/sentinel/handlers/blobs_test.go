@@ -79,7 +79,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	t.Cleanup(peersPool.Close)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	_, indiciesDB := setupStore(t)
@@ -208,7 +207,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	t.Cleanup(peersPool.Close)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()

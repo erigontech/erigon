@@ -129,7 +129,7 @@ type executionPayloadBidService struct {
 // NewExecutionPayloadBidService creates a new execution payload bid gossip service.
 // [New in Gloas:EIP7732]
 func NewExecutionPayloadBidService(
-	ctx context.Context,
+	_ context.Context,
 	syncedDataManager synced_data.SyncedData,
 	forkchoiceStore forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
@@ -142,7 +142,6 @@ func NewExecutionPayloadBidService(
 		bidValidationStateCacheSize,
 		bidValidationStateCacheTTL(beaconCfg),
 	)
-	context.AfterFunc(ctx, validationStateCache.Close)
 	s := &executionPayloadBidService{
 		syncedDataManager:    syncedDataManager,
 		forkchoiceStore:      forkchoiceStore,

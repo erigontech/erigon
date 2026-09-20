@@ -471,14 +471,12 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	beaconCfg.FuluForkEpoch = fuluForkEpoch
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &beaconCfg, beaconevents.NewEventEmitter())
 
-	peersPool := peers.NewPool(server)
-	t.Cleanup(peersPool.Close)
 	c := NewConsensusHandlers(
 		ctx,
 		tests.NewMockBlockReader(),
 		indiciesDB,
 		server,
-		peersPool,
+		peers.NewPool(server),
 		&clparams.NetworkConfig{},
 		nil,
 		&beaconCfg,

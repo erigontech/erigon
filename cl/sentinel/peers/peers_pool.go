@@ -78,13 +78,6 @@ func NewPool(h host.Host) *Pool {
 	}
 }
 
-// Close stops the expiry sweeps of the pool's caches. Bans and failure counts can still be read and
-// recorded afterwards; they are just no longer reclaimed in the background.
-func (p *Pool) Close() {
-	p.bannedPeers.Close()
-	p.handshakeFailures.Close()
-}
-
 // RecordHandshakeFailure increments the failure count. After 3 failures within 10 minutes, the peer is banned.
 func (p *Pool) RecordHandshakeFailure(pid peer.ID) {
 	p.mu.Lock()

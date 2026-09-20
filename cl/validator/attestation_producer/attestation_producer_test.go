@@ -17,6 +17,7 @@
 package attestation_producer_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -27,7 +28,7 @@ import (
 )
 
 func TestAttestationProducer(t *testing.T) {
-	attProducer := attestation_producer.New(t.Context(), &clparams.MainnetBeaconConfig)
+	attProducer := attestation_producer.New(context.Background(), &clparams.MainnetBeaconConfig)
 
 	_, _, headState := tests.GetPhase0Random()
 	root, err := headState.BlockRoot()

@@ -14,12 +14,10 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -66,8 +64,6 @@ type p2pManager struct {
 	host     host.Host
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
-
-	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
 }
 
 func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
@@ -156,9 +152,6 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err := p.setupENR(); err != nil {
 		return nil, err
 	}
-	// The ban cache's sweep starts only once construction has succeeded, and stops with ctx.
-	p.bannedPeers = lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute)
-	context.AfterFunc(ctx, p.bannedPeers.Close)
 	go p.updateENR()
 	go p.peerMonitor(ctx)
 	return &p, nil

@@ -66,7 +66,6 @@ func NewAggregationPool(
 		aggregates:            make(map[common.Hash]*solid.Attestation),
 		aggregatesInCommittee: lru.NewWithTTL[keyAggrInCommittee, *solid.Attestation]("aggregation_in_committee", 100_000, 30*time.Minute),
 	}
-	context.AfterFunc(ctx, p.aggregatesInCommittee.Close)
 	go p.sweepStaleAtt(ctx)
 	return p
 }
