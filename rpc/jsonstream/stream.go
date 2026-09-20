@@ -68,9 +68,6 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
-	// markSeparatorPending states that a sibling value precedes what is written next, for a
-	// fragment written into a container this stream did not open.
-	markSeparatorPending()
 	WriteObjectField(fieldName string) jsonw.JSONWriter
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
@@ -87,8 +84,8 @@ type Stream interface {
 
 	ClosePending(targetDepth uint) error
 	// Depth counts the entries ClosePending would unwind, which is not the
-	// container nesting: a field name or a comma still waiting for its value
-	// counts too. Pass it back as targetDepth to return to this point.
+	// container nesting: a field name still waiting for its value counts too.
+	// Pass it back as targetDepth to return to this point.
 	Depth() int
 	// Err reports a write error the stream latched. Flush does not surface it on a writerless
 	// stream, so a caller that reads Buffer() instead of flushing must ask for it.

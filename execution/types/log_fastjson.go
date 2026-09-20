@@ -150,18 +150,11 @@ func (l *RPCLog) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 func writeTopic(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
 
-// MarshalFastJSONTo writes the logs as the bare array eth_getLogs returns.
+// MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
+// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
 func (logs RPCLogs) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	if logs == nil {
-		w.WriteNil()
-		return nil
-	}
-	w.WriteArrayStart()
-	for _, l := range logs {
-		if err := l.MarshalFastJSONTo(w); err != nil {
-			return err
-		}
-	}
-	w.WriteArrayEnd()
+	jsonw.ArrayValue(w, logs, writeLogElem)
 	return nil
 }
+
+func writeLogElem(w jsonw.JSONWriter, l **RPCLog) { _ = (*l).MarshalFastJSONTo(w) }

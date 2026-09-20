@@ -44,10 +44,9 @@ const (
 // StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
 // It implements the Stream interface
 type StackStream struct {
-	wroteValue     bool
-	forceSeparator bool
-	stream         *jsoniter.Stream
-	stack          []stackItem
+	separatorPending bool
+	stream           *jsoniter.Stream
+	stack            []stackItem
 	// out is the stream's own writer, kept because jsoniter does not expose it.
 	// Nil means the caller reads the response back out of Buffer instead.
 	out io.Writer
@@ -77,8 +76,7 @@ func (s *StackStream) Reset(out io.Writer) {
 	// later Flush without draining.
 	s.stream.Error = nil
 	s.stack = s.stack[:0]
-	s.wroteValue = false
-	s.forceSeparator = false
+	s.separatorPending = false
 }
 
 // WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
@@ -274,7 +272,6 @@ func (s *StackStream) WriteObjectStart() {
 	s.beforeValue()
 	s.stream.WriteObjectStart()
 	s.consumeField()
-	s.wroteValue = false
 	s.push(ItemObject)
 }
 
@@ -283,8 +280,7 @@ func (s *StackStream) WriteObjectEnd() {
 	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
-	s.wroteValue = true
-	flushIfFull(s.stream)
+	s.afterValue()
 }
 
 // WriteArrayStart writes the start of an array and adds it to the stack
@@ -292,7 +288,6 @@ func (s *StackStream) WriteArrayStart() {
 	s.beforeValue()
 	s.stream.WriteArrayStart()
 	s.consumeField()
-	s.wroteValue = false
 	s.push(ItemArray)
 }
 
@@ -301,8 +296,7 @@ func (s *StackStream) WriteArrayEnd() {
 	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
-	s.wroteValue = true
-	flushIfFull(s.stream)
+	s.afterValue()
 }
 
 // WriteMore is a no-op: the stream emits the separator each value needs. It stays so a
@@ -313,7 +307,7 @@ func (s *StackStream) WriteMore() {}
 func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
-	s.wroteValue = false
+	s.separatorPending = false
 	s.push(ItemField)
 	return s
 }
@@ -397,7 +391,7 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	// What was closed is a finished value in the surviving container, and these writes
 	// bypass afterValue, so record it here.
 	if targetDepth < uint(stackLen) && targetDepth > 0 {
-		s.wroteValue = true
+		s.separatorPending = true
 	}
 	return s.stream.Error
 }
@@ -433,18 +427,17 @@ func (s *StackStream) pop(item stackItem) {
 	}
 }
 
-// beforeValue writes the separator the next member needs. Only members of a container are
-// separated, so a stream carrying several responses gets no comma between them.
+// beforeValue writes the separator the next member needs.
 func (s *StackStream) beforeValue() {
-	if s.forceSeparator || (s.wroteValue && len(s.stack) > 0) {
+	if s.separatorPending {
 		s.stream.WriteMore()
-		s.forceSeparator = false
+		s.separatorPending = false
 	}
 }
 
 // markSeparatorPending states that a sibling value precedes what is written next. It is for
 // a fragment written into a container this stream did not open, where the stack cannot say.
-func (s *StackStream) markSeparatorPending() { s.forceSeparator = true }
+func (s *StackStream) markSeparatorPending() { s.separatorPending = true }
 
 // consumeField drops the pending field name once its value has been written. A container
 // consumes it when it opens, not when it closes: otherwise the field outlives its own
@@ -455,8 +448,10 @@ func (s *StackStream) consumeField() {
 	}
 }
 
+// afterValue separates the next member, but only inside a container: consecutive
+// top-level values in one stream get no comma between them.
 func (s *StackStream) afterValue() {
 	s.consumeField()
-	s.wroteValue = true
+	s.separatorPending = len(s.stack) > 0
 	flushIfFull(s.stream)
 }
