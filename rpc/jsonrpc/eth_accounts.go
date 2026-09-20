@@ -131,9 +131,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	}
 	defer tx.Rollback()
 
-	// The code domain is keyed by address, so the account read the empty-code check would
-	// need is a second state read for an answer this one already gives.
-	res, _ := reader.ReadAccountCode(accounts.InternAddress(address))
+	addr := accounts.InternAddress(address)
+	acc, err := reader.ReadAccountData(addr)
+	if acc == nil || err != nil || acc.IsEmptyCodeHash() {
+		return hexutil.Bytes(""), nil
+	}
+	res, _ := reader.ReadAccountCode(addr)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
