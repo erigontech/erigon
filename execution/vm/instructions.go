@@ -1015,19 +1015,28 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	forwarded := false
 	if suberr == nil {
-		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
 			return pc, nil, ErrOutOfGas
 		}
 		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Execution -= gas.Execution / 64
 		}
-		gasChangeReason := tracing.GasChangeCallContractCreation
-		if typ == CREATE2 {
-			gasChangeReason = tracing.GasChangeCallContractCreation2
+		tracer := evm.config.Tracer
+		gasTracing := tracer.HasGasChangeHook()
+		var old mdgas.MdGas
+		if gasTracing {
+			old = scope.Gas()
 		}
-		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
+		scope.gas -= gas.Execution
 		scope.stateGas = 0
+		if gasTracing {
+			gasChangeReason := tracing.GasChangeCallContractCreation
+			if typ == CREATE2 {
+				gasChangeReason = tracing.GasChangeCallContractCreation2
+			}
+			tracer.EmitGasChange(old, scope.Gas(), gasChangeReason)
+		}
 		returnGas = gas
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
@@ -1050,7 +1059,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		} else if suberr == nil {
 			scope.mergeChildStateGas(childGasUsed.StateSpill, evm.config.Tracer)
 		}
@@ -1116,7 +1125,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
 	res := stack.pushRef()
 	if err != nil {
@@ -1133,7 +1142,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if err == nil {
 			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 		} else if scope.newAccountCharged {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		}
 	}
 	scope.Contract.selfBalanceCached = false
@@ -1168,7 +1177,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, *value)
 	res := stack.pushRef()
@@ -1203,7 +1212,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	res := stack.pushRef()
@@ -1248,7 +1257,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	res := stack.pushRef()
