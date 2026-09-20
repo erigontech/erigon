@@ -481,7 +481,9 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	// Data, which is what bounds the chunk. CountItems is exact for a well-formed
 	// list but counts items, not logs, so minStoredLogSize caps a crafted payload.
 	const minStoredLogSize = 24 // list header, 21-byte address, empty topics, empty data
-	const arenaChunk = 32
+	// 48 Logs is 8064 bytes, inside the 8192 size class, so chunking rounds up no
+	// further than one whole-receipt arena does.
+	const arenaChunk = 48
 	n := 0
 	if raw := s.Peek(); uint64(len(raw)) >= l {
 		n = min(rlp.CountItems(raw[:l]), int(l/minStoredLogSize))
