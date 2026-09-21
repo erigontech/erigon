@@ -654,15 +654,40 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
 	}
 
-	for domain, otherEntries := range other.domains {
-		entries := sd.domains[domain]
-		maps.Copy(entries, otherEntries)
-	}
+	// UNDER THE SAME LOCK EVERY READER TAKES. `domains` and `storage` are guarded by
+	// latestStateLock — putLatest takes it for write, GetLatest/GetAsOf/IteratePrefix for read —
+	// and this merge wrote both with no lock at all.
+	//
+	// It is reachable from any eth_call on PENDING state: such a call executes against the live
+	// pre-execution SharedDomains through ReaderV3 → GetLatest, while the frontier run-ahead
+	// promotes a finished generation into that same batch here. A Go map read concurrent with a
+	// map write is not a data race the runtime tolerates — it is `fatal error: concurrent map read
+	// and map write`, which no recover() can catch, so THE NODE DIES.
+	//
+	// Observed: live111 died in exactly this stack (eth_call → DoCall → ApplyMessage → EVM →
+	// ReaderV3.readAccountData → GetLatest → getLatest). It was found by chasing a probe that
+	// intermittently returned an empty result, which is the same race read non-fatally — a torn
+	// read rather than a detected one.
+	//
+	// `other` is locked for read as well: it is a separate batch and nothing here may assume it is
+	// private. Merge is the only site that holds two of these locks, so there is no ordering cycle
+	// to deadlock on.
+	func() {
+		sd.latestStateLock.Lock()
+		defer sd.latestStateLock.Unlock()
+		other.latestStateLock.RLock()
+		defer other.latestStateLock.RUnlock()
 
-	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
-		sd.storage.Set(key, value)
-		return true
-	})
+		for domain, otherEntries := range other.domains {
+			entries := sd.domains[domain]
+			maps.Copy(entries, otherEntries)
+		}
+
+		other.storage.Scan(func(key string, value []dataWithTxNum) bool {
+			sd.storage.Set(key, value)
+			return true
+		})
+	}()
 
 	// pastDomainWriters is ordered NEWEST FIRST — flushWriters walks it backwards so the writers land
 	// oldest-to-newest and the newest write to a key is the one that survives. `other` is newer than
