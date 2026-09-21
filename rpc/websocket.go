@@ -356,7 +356,7 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
-		wc.pingTimer.Reset(wsPingInterval)
+		wc.resetPing()
 	}
 	return err
 }
@@ -366,9 +366,16 @@ func (wc *websocketCodec) ping() {
 	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
 	wc.conn.Ping(pingCtx) //nolint:errcheck
 	cancel()
+	wc.resetPing()
+}
+
+// resetPing checks closed after Reset: Close closes before its Stop, so a Reset
+// racing with Close is undone by one of the two Stops.
+func (wc *websocketCodec) resetPing() {
+	wc.pingTimer.Reset(wsPingInterval)
 	select {
 	case <-wc.closed():
+		wc.pingTimer.Stop()
 	default:
-		wc.pingTimer.Reset(wsPingInterval)
 	}
 }
