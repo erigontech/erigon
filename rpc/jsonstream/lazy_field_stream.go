@@ -72,7 +72,10 @@ func (s *LazyFieldStream) ensure() {
 		s.written = true
 		s.mark, s.markDepth = len(s.inner.Buffer()), s.inner.Depth()
 		if s.prependSeparator {
-			s.inner.WriteMore()
+			// This stream writes a fragment into an object someone else opened, so its
+			// stack is empty and it cannot know a sibling precedes this field. The
+			// separator is the caller's assertion, not something to infer.
+			markSeparator(s.inner)
 		}
 		s.owner = s.inner.WriteObjectField(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
@@ -93,11 +96,10 @@ func (s *LazyFieldStream) RewindIfEmpty() bool {
 
 func (s *LazyFieldStream) bufferEndsWithField() bool {
 	rest := s.owner.Buffer()[s.mark:]
-	if s.prependSeparator {
-		if len(rest) == 0 || rest[0] != ',' {
-			return false
-		}
+	if len(rest) > 0 && rest[0] == ',' {
 		rest = rest[1:]
+	} else if s.prependSeparator {
+		return false
 	}
 	return len(rest) == len(s.field)+3 && rest[0] == '"' &&
 		string(rest[1:len(rest)-2]) == s.field && rest[len(rest)-2] == '"' && rest[len(rest)-1] == ':'
@@ -167,4 +169,20 @@ func (s *LazyFieldStream) Err() error                     { return s.inner.Err()
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
+}
+
+func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
+
+// separatorMarker is the streams that write separators themselves. It stays off Stream so
+// an implementation outside this package still satisfies it.
+type separatorMarker interface{ markSeparatorPending() }
+
+// markSeparator asserts a sibling precedes the next value, falling back to the manual
+// comma for a stream that does not write separators itself.
+func markSeparator(s Stream) {
+	if m, ok := s.(separatorMarker); ok {
+		m.markSeparatorPending()
+		return
+	}
+	s.WriteMore()
 }
