@@ -29,9 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -548,7 +550,13 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 
 func TestResponseWritesJSONToStream(t *testing.T) {
 	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
-	for _, result := range []any{hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil)} {
+	results := []any{
+		hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil),
+		hexutil.Uint64(0x1234), hexutil.Uint(7), (*hexutil.Uint)(nil),
+		common.HexToHash("0xdead"), common.HexToAddress("0xbeef"),
+		(*hexutil.U256)(uint256.NewInt(255)),
+	}
+	for _, result := range results {
 		want, err := json.Marshal(result)
 		require.NoError(t, err)
 		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
@@ -574,7 +582,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(jsonw.JSONWriter) error {
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
 	return errors.New("encode failed")
 }
 
@@ -587,6 +595,7 @@ func testResponseEncodeFailure(t *testing.T, result any) {
 		var got jsonrpcMessage
 		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
 		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Nil(t, got.Result, "a response carries error or result, never both: %s", raw)
 		require.Equal(t, `7`, string(got.ID))
 	}
 
@@ -688,7 +697,7 @@ func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.N
 
 type failingMidWrite struct{}
 
-func (failingMidWrite) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
 	w.WriteObjectField("balance")
 	w.WriteQuotedText(failingAppender{})

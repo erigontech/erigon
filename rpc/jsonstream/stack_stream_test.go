@@ -1183,6 +1183,37 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
 }
 
+// WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
+// where it is produced rather than reaching a client as malformed JSON.
+func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	s := newStackStream(nil, 64)
+
+	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
+		s.WriteQuotedText(appenderFunc(`say "hi"`))
+	})
+	require.NotPanics(t, func() { s.WriteQuotedText(appenderFunc("0xdeadbeef")) })
+}
+
+type appenderFunc string
+
+func (a appenderFunc) AppendText(dst []byte) ([]byte, error) { return append(dst, a...), nil }
+
+// Open must reach the stream that owns the buffer, however many wrappers sit above it.
+func TestLazyFieldStreamNestedOpenReturnsTheOwner(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	outer := NewLazyFieldStream(inner, "outer", false)
+	nested := NewLazyFieldStream(outer, "inner", false)
+
+	require.Same(t, inner, nested.Open())
+	nested.Open().WriteString("v")
+	require.Equal(t, `{"inner":"v"`, string(inner.Buffer()))
+}
+
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {
@@ -1476,7 +1507,7 @@ func TestClosePendingToRootClearsSeparator(t *testing.T) {
 
 // A field name or separator written before the lazy field opened would put its value in the
 // enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
-// jsonw.Field instead of a value write.
+// jsonstream.Field instead of a value write.
 func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
