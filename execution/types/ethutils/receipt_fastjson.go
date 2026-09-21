@@ -123,8 +123,6 @@ func writeLogs(w *jsonstream.StackStream, logs any) error {
 		jsonstream.ArrayValue(w, v, writeLog)
 	case []*types.RPCLog:
 		jsonstream.ArrayValue(w, v, writeRPCLogElem)
-	case []SubscribeLog:
-		jsonstream.ArrayValue(w, v, writeSubscribeLog)
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -133,18 +131,6 @@ func writeLogs(w *jsonstream.StackStream, logs any) error {
 		w.WriteRawBytes(b)
 	}
 	return nil
-}
-
-func writeSubscribeLog(w *jsonstream.StackStream, l *SubscribeLog) {
-	w.WriteObjectStart()
-	if l.Address != nil {
-		w.WriteObjectField("address").WriteHex(l.Address[:])
-		w.WriteMore()
-	}
-	w.WriteObjectField("data").WriteHex(l.Data)
-	jsonstream.HexesField(w, "topics", l.Topics)
-	field(w, "transactionHash").WriteHex(l.TransactionHash[:])
-	w.WriteObjectEnd()
 }
 
 func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
