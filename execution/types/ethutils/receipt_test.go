@@ -90,7 +90,10 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := make(types.Logs, tc.logs)
 			for i := range logs {
-				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64)}
+				// Every derived field distinct, so a field written from the wrong source shows.
+				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64),
+					BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3, BlockHash: common.HexToHash("0xb10c"),
+					Index: hexutil.Uint(10 + i), Removed: i == 1}
 			}
 			if tc.nilLogs {
 				logs = nil
@@ -116,12 +119,15 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 // Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
 // direct construction reaches the typed-nil branches.
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	for name, logs := range map[string]any{
-		"nil types.Logs": types.Logs(nil),
-		"nil []*Log":     []*types.Log(nil),
-		"nil []*RPCLog":  []*types.RPCLog(nil),
-		"untyped nil":    nil,
-		"unknown shape":  []string{"a"},
+		"nil types.Logs":    types.Logs(nil),
+		"nil []*Log":        []*types.Log(nil),
+		"nil []*RPCLog":     []*types.RPCLog(nil),
+		"untyped nil":       nil,
+		"nil in types.Logs": types.Logs{nil, {Address: to}},
+		"nil in []*Log":     []*types.Log{{Address: to}, nil},
+		"unknown shape":     []string{"a"},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}

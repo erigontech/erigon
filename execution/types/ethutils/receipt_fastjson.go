@@ -34,23 +34,13 @@ func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 		return nil
 	}
 	w.WriteArrayStart()
-	for i, r := range rs {
-		if i > 0 {
-			w.WriteMore()
-		}
+	for _, r := range rs {
 		if err := r.MarshalFastJSONTo(w); err != nil {
 			return err
 		}
 	}
 	w.WriteArrayEnd()
 	return nil
-}
-
-// field writes the separator a following field needs, then its name, and returns the writer
-// so the value chains onto it. An object's first field must not go through it.
-func field(w *jsonstream.StackStream, name string) *jsonstream.StackStream {
-	w.WriteMore()
-	return w.WriteObjectField(name)
 }
 
 // MarshalFastJSONTo writes the receipt's fields in the order the struct declares them, so
@@ -63,30 +53,30 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
 
 	w.WriteObjectField("blockHash").WriteHex(r.BlockHash[:])
-	field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
-	field(w, "transactionHash").WriteHex(r.TransactionHash[:])
-	field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	field(w, "from").WriteHex(r.From[:])
-	field(w, "to")
+	jsonstream.Field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
+	jsonstream.Field(w, "transactionHash").WriteHex(r.TransactionHash[:])
+	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
+	jsonstream.Field(w, "from").WriteHex(r.From[:])
+	jsonstream.Field(w, "to")
 	if r.To == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.To[:])
 	}
-	field(w, "type").WriteQuotedText(&r.Type)
-	field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
-	field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
-	field(w, "contractAddress")
+	jsonstream.Field(w, "type").WriteQuotedText(&r.Type)
+	jsonstream.Field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
+	jsonstream.Field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
+	jsonstream.Field(w, "contractAddress")
 	if r.ContractAddress == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.ContractAddress[:])
 	}
-	field(w, "logs")
+	jsonstream.Field(w, "logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	field(w, "logsBloom")
+	jsonstream.Field(w, "logsBloom")
 	if r.LogsBloom == nil {
 		w.WriteNil()
 	} else {
@@ -94,19 +84,19 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 
 	if r.EffectiveGasPrice != nil {
-		field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
+		jsonstream.Field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
 	}
 	if r.Status != nil {
-		field(w, "status").WriteQuotedText(r.Status)
+		jsonstream.Field(w, "status").WriteQuotedText(r.Status)
 	}
 	if len(r.Root) > 0 {
-		field(w, "root").WriteHex(r.Root)
+		jsonstream.Field(w, "root").WriteHex(r.Root)
 	}
 	if r.BlobGasPrice != nil {
-		field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
+		jsonstream.Field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
 	}
 	if r.BlobGasUsed != nil {
-		field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
+		jsonstream.Field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
 	}
 
 	w.WriteObjectEnd()
@@ -145,12 +135,12 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 	w.WriteObjectStart()
 	w.WriteObjectField("address").WriteHex(l.Address[:])
 	jsonstream.HexesField(w, "topics", l.Topics)
-	field(w, "data").WriteHex(l.Data)
-	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
-	field(w, "transactionHash").WriteHex(l.TxHash[:])
-	field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
-	field(w, "blockHash").WriteHex(l.BlockHash[:])
-	field(w, "logIndex").WriteQuotedText(&l.Index)
-	field(w, "removed").WriteBool(l.Removed)
+	jsonstream.Field(w, "data").WriteHex(l.Data)
+	jsonstream.Field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
+	jsonstream.Field(w, "transactionHash").WriteHex(l.TxHash[:])
+	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
+	jsonstream.Field(w, "blockHash").WriteHex(l.BlockHash[:])
+	jsonstream.Field(w, "logIndex").WriteQuotedText(&l.Index)
+	jsonstream.Field(w, "removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

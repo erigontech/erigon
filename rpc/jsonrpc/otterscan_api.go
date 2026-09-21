@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -55,6 +57,21 @@ type TransactionsWithReceipts struct {
 type ReceiptWithTimestamp struct {
 	*ethutils.RPCReceipt
 	Timestamp uint64 `json:"timestamp"`
+}
+
+// MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop Timestamp.
+func (r ReceiptWithTimestamp) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	return writeReflected(s, r)
+}
+
+// writeReflected writes v with encoding/json.
+func writeReflected(s *jsonstream.StackStream, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(b)
+	return nil
 }
 
 type OtterscanAPI interface {
@@ -415,7 +432,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	result := make(ethutils.RPCReceipts, 0, len(receipts))
+	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
 		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
