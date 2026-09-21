@@ -796,7 +796,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -1099,7 +1099,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
