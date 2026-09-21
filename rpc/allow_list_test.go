@@ -18,10 +18,14 @@ package rpc
 
 import (
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestAllowListMarshaling(t *testing.T) {
@@ -37,4 +41,32 @@ func TestAllowListUnmarshaling(t *testing.T) {
 
 	m := map[string]struct{}{"one": {}, "two": {}, "three": {}}
 	assert.Equal(t, allowList, AllowList(m))
+}
+
+func TestAllowListAppliesToEveryTransport(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.SetAllowList(AllowList{"test_echo": {}})
+
+	httpsrv := httptest.NewServer(srv)
+	defer httpsrv.Close()
+	wssrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer wssrv.Close()
+
+	for name, url := range map[string]string{
+		"http": httpsrv.URL,
+		"ws":   "ws:" + strings.TrimPrefix(wssrv.URL, "http:"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, err := DialContext(t.Context(), url, logger)
+			require.NoError(t, err)
+			defer client.Close()
+
+			var res echoResult
+			require.NoError(t, client.Call(&res, "test_echo", "x", 1, &echoArgs{S: "y"}))
+			require.ErrorContains(t, client.Call(nil, "test_noArgsRets"), "does not exist/is not available")
+		})
+	}
 }
