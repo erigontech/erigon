@@ -713,6 +713,16 @@ func New(
 	}
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = rpcStateCache
+	// Probe: swap the SharedDomains overlay for the coherent cache the remote rpcdaemon
+	// uses, to measure what the embedded path gives up by reading the domain every time.
+	if dbg.EnvBool("RPC_COHERENT_CACHE", false) {
+		httpRpcCfg.StateCache.LocalCache = nil
+		if httpRpcCfg.StateCache.CacheSize == 0 {
+			httpRpcCfg.StateCache.CacheSize = kvcache.DefaultCoherentConfig.CacheSize
+			httpRpcCfg.StateCache.CodeCacheSize = kvcache.DefaultCoherentConfig.CodeCacheSize
+		}
+		logger.Warn("[experiment] RPC state cache: coherent kvcache instead of the SD overlay")
+	}
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
