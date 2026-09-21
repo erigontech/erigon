@@ -19,14 +19,17 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
 
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -104,6 +107,72 @@ func (s *StackStream) WriteHex(b []byte) {
 	} else {
 		s.stream.SetBuffer(buf)
 	}
+	s.afterValue()
+}
+
+// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
+// holding, so a marshaller can write values without an interface call each time.
+func Concrete(w jsonw.JSONWriter) *StackStream {
+	for {
+		switch t := w.(type) {
+		case *StackStream:
+			return t
+		case *LazyFieldStream:
+			t.ensure()
+			w = t.inner
+		default:
+			return nil
+		}
+	}
+}
+
+// HexesField writes a hash array as one field: one buffer growth for the whole array,
+// where a value write per element grows once per hash.
+func HexesField(w jsonw.JSONWriter, name string, hashes []common.Hash) {
+	jsonw.Field(w, name)
+	if hashes == nil {
+		w.WriteNil()
+		return
+	}
+	WriteHexes(Concrete(w), hashes)
+}
+
+// WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
+// value, so the buffer grows once and the stack is touched once, where a write per element
+// does both per item. These are functions rather than methods: the element types live in
+// packages jsonw cannot import, and one generic per core type covers every named type
+// built on it.
+func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
+	s.beforeValue()
+	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
+	s.afterValue()
+}
+
+// WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
+// and so are summed before the single growth.
+func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+	s.beforeValue()
+	size := 2 + len(items)
+	for i := range items {
+		size += hexutil.QuotedLen(len(items[i]))
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
 
