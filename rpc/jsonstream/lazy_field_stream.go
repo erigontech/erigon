@@ -69,9 +69,6 @@ func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
 		if s.prependSeparator {
-			// This stream writes a fragment into an object someone else opened, so its
-			// stack is empty and it cannot know a sibling precedes this field. The
-			// separator is the caller's assertion, not something to infer.
 			markSeparator(s.inner)
 		}
 		s.inner.WriteObjectField(s.field)

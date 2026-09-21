@@ -388,7 +388,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 			expected: `{"array":[{"field":null}]}`,
 		},
 		{
-			name: "array with multiple trailing commas",
+			name: "array with a redundant WriteMore after each element",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteArrayStart()
 				ss.WriteInt(1)
@@ -795,11 +795,11 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"field":null}`,
 		},
 		{
-			name: "array with trailing comma",
+			name: "array with a redundant WriteMore after its element",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteArrayStart()
 				ss.WriteInt(1)
-				ss.WriteMore() // Trailing comma
+				ss.WriteMore()
 			},
 			expected: `[1]`,
 		},
@@ -814,7 +814,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"outer":{"inner":null}}`,
 		},
 		{
-			name: "object with field and separator",
+			name: "object with a redundant WriteMore after each field",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
 				ss.WriteObjectField("first")
@@ -1059,7 +1059,7 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 		write func(s *StackStream)
 		want  string
 	}{
-		{"trailing comma in an array", func(s *StackStream) {
+		{"redundant WriteMore in an array", func(s *StackStream) {
 			s.WriteArrayStart()
 			s.WriteInt(1)
 			s.WriteMore()

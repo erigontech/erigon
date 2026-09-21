@@ -376,7 +376,6 @@ func (s *StackStream) WriteMore() {}
 func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
-	s.separatorPending = false
 	s.push(ItemField)
 	return s
 }
@@ -458,7 +457,8 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 
 	s.stack = s.stack[:targetDepth]
 	// What was closed is a finished value, and these writes bypass afterValue, so record it
-	// here: a separator for the container that survives, none once the root is reached.
+	// here: a separator for the container that survives, none once the root is reached. At
+	// depth 0 a fragment in someone else's container asserts its separator after this call.
 	if targetDepth < uint(stackLen) {
 		s.separatorPending = targetDepth > 0
 	}
