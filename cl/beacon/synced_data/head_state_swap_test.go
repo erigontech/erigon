@@ -185,6 +185,8 @@ func (v *blockingHashVector) HashSSZ() ([32]byte, error) {
 	return v.HashVectorSSZ.HashSSZ()
 }
 
+// Root resolution must hold writeLock so a known-root update cannot publish
+// first and then be overwritten when the earlier root resolution finishes.
 func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 
@@ -195,6 +197,8 @@ func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
 
 	rootStarted := make(chan struct{})
 	releaseRoot := make(chan struct{})
+	// BlockRoot hashes this vector. Pausing its HashSSZ call keeps root resolution
+	// in progress while we check the lock, regardless of state size or scheduling.
 	first.SetBlockRoots(&blockingHashVector{
 		HashVectorSSZ: first.BlockRoots(),
 		started:       rootStarted,
@@ -202,6 +206,7 @@ func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
 	})
 	resumeRoot := sync.OnceFunc(func() { close(releaseRoot) })
 	var writers sync.WaitGroup
+	// An assertion failure must release the paused hash before joining the writers.
 	t.Cleanup(func() {
 		resumeRoot()
 		writers.Wait()
@@ -210,6 +215,7 @@ func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
 	var firstErr, secondErr error
 	writers.Go(func() { firstErr = manager.OnHeadState(first) })
 	<-rootStarted
+	// The second writer has not started, so only OnHeadState can own writeLock.
 	if manager.writeLock.TryLock() {
 		manager.writeLock.Unlock()
 		t.Fatal("OnHeadState must hold writeLock while resolving BlockRoot")
