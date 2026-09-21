@@ -250,16 +250,21 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	params, err := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
-		Version: vsn,
-		Method:  n.namespace + notificationMethodSuffix,
-		Params:  params,
-	})
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(notification(n.namespace, sub.ID, data)))
+}
+
+// notification wraps result, which is already encoded, in the subscription message without
+// parsing it again: every subscriber would otherwise re-check the same payload.
+func notification(namespace string, id ID, result json.RawMessage) []byte {
+	quotedID, _ := json.Marshal(string(id))
+	buf := make([]byte, 0, len(namespace)+len(quotedID)+len(result)+80)
+	buf = append(buf, `{"jsonrpc":"`+vsn+`","method":"`...)
+	buf = append(buf, namespace...)
+	buf = append(buf, notificationMethodSuffix+`","params":{"subscription":`...)
+	buf = append(buf, quotedID...)
+	buf = append(buf, `,"result":`...)
+	buf = append(buf, result...)
+	return append(buf, "}}"...)
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use

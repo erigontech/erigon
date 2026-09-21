@@ -289,3 +289,20 @@ func TestLocalNotifierDeliversLocalValue(t *testing.T) {
 		t.Fatalf("delivered %#v, want 7", got)
 	}
 }
+
+// The notification is built around bytes that are already encoded, and must come out as the
+// message json.Marshal made of them.
+func TestNotificationMatchesMarshalledMessage(t *testing.T) {
+	result := json.RawMessage(`[{"blockHash":"0x01","logs":[]},{"blockHash":"0x02","logs":[]}]`)
+	params, err := json.Marshal(&subscriptionResult{ID: "0x9a", Result: result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: "eth" + notificationMethodSuffix, Params: params})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := notification("eth", "0x9a", result); string(got) != string(want) {
+		t.Fatalf("notification = %s, want %s", got, want)
+	}
+}
