@@ -1741,17 +1741,10 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			}
 			rawSend(r)
 		}
-		// A worker must never vanish on a fatal condition — the exec loop would wait
-		// forever for a result that never arrives. sendFatal condemns the block;
-		// sendOperational reports an infrastructure failure that fails the stage
-		// retryably (transient roTx/read error, worker panic) without a block verdict.
-		sendFatal := func(err error) {
-			if aborted {
-				return
-			}
-			aborted = true
-			rawSend(&exec.TxResult{Task: tv, Err: err})
-		}
+		// A worker must never vanish on a terminal condition — the exec loop would
+		// wait forever for a result that never arrives. sendOperational reports it as
+		// an infrastructure failure that fails the stage retryably (transient
+		// roTx/read error, worker panic, non-convergence) without a block verdict.
 		sendOperational := func(err error) {
 			if aborted {
 				return
@@ -1795,8 +1788,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		bumpInc := func() bool {
 			tv.version.Incarnation++
 			if tv.version.Incarnation > len(be.tasks)+8 {
-				sendFatal(fmt.Errorf("%w: block %d tx %d exceeded the self-loop incarnation limit (%d) without a settled verdict",
-					rules.ErrInvalidBlock, be.blockNum, tv.index, len(be.tasks)+8))
+				// Failing to converge is the executor giving up, not a block-validity
+				// verdict — route it operationally (like the panic handler above), never
+				// as ErrInvalidBlock, so a valid block is not reported INVALID to the CL.
+				sendOperational(fmt.Errorf("block %d tx %d exceeded the self-loop incarnation limit (%d) without a settled verdict",
+					be.blockNum, tv.index, len(be.tasks)+8))
 				return false
 			}
 			return true
