@@ -24,11 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
@@ -404,4 +407,36 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 	finalHashes := requestHashes(lastRequest)
 	require.True(t, finalHashes[hash1], "last delivered request lost hash1: %v", finalHashes)
 	require.True(t, finalHashes[hash2], "last delivered request lost hash2: %v", finalHashes)
+}
+
+// Every subscriber gets the same event object, so the RPC layer encodes it once for all of them.
+func TestNewHeadsSubscribersShareOneEvent(t *testing.T) {
+	f := newTestFilters(t)
+	a, idA := f.SubscribeNewHeads(8, ProtocolWS)
+	b, idB := f.SubscribeNewHeads(8, ProtocolWS)
+	defer f.UnsubscribeHeads(idA)
+	defer f.UnsubscribeHeads(idB)
+
+	payload, err := rlp.EncodeToBytes(&types.Header{Number: *uint256.NewInt(7)})
+	require.NoError(t, err)
+	f.OnNewEvent(&remoteproto.SubscribeReply{Type: remoteproto.Event_HEADER, Data: payload})
+
+	evA, evB := <-a, <-b
+	require.Same(t, evA, evB)
+	require.Equal(t, uint64(7), evA.Value.Number.Uint64())
+}
+
+func TestReceiptsSubscribersShareOneEvent(t *testing.T) {
+	f := newTestFilters(t)
+	a, idA, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	b, idB, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	defer f.UnsubscribeReceipts(idA)
+	defer f.UnsubscribeReceipts(idB)
+
+	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x01"))})
+
+	evA, evB := <-a, <-b
+	require.Same(t, evA, evB)
 }

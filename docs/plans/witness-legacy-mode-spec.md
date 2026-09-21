@@ -44,8 +44,8 @@ when empty.
 
 The set of RLP-encoded trie nodes proving every account and storage slot the block reads or writes, drawn from
 the account trie and from the storage tries of touched accounts. It is produced by an on-the-fly fold over the
-accessed hashed keys (`HexPatriciaHashed.Witnesses` captures the superset node set, `WitnessNodes` prunes it to
-the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
+accessed hashed keys (`HexPatriciaHashed.WitnessesByHash` captures the node set indexed by hash, read-only, so
+off-path cells keep their stored hashes; `WitnessNodes` prunes it to the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
 required to recompute every node hash up to the root.
 The accessed-key set is first augmented by a collapse-detection pass (`detectCollapseSiblings`, run against a
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
@@ -168,8 +168,8 @@ Serving semantics in head-capture mode:
   `collectAccessedState` (codes/keys), `collectAccessedHeaders`, `detectCollapseSiblings`, `buildWitnessTrie`,
   `verifyWitnessStateless`, the `{0x80}` append.
 - **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
-  `execution/commitment/hex_patricia_hashed.go` `Witnesses` (untouched storage root emitted as a bare
-  `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysFromNodes`.
+  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` (read-only fold, untouched storage root emitted
+  as a bare `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysByHash`.
 - **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
   `rpc/jsonrpc/witness_cache_builder.go` (`WitnessCacheMode`, rolling-pin lifecycle, `buildAndCacheHeadCapture`),
   `rpc/jsonrpc/debug_execution_witness.go` (`headCaptureSource`, `buildWitnessResultHeadCapture`,
